@@ -212,7 +212,7 @@ describe("G. second factor at password login", () => {
 		expect(own.status).toBe(200);
 	});
 
-	it("holds a user after repeated wrong codes even for the right one, and a recovery code still works", async () => {
+	it("holds a user after repeated wrong codes even for the right one, and a recovery code still works [rfc6749-10.10-d]", async () => {
 		const { secret, codes } = await s.enrol("carol");
 		const first = await s.held("carol");
 		const factor = (await first.b.factors(first.transaction)).find((f) => f.kind === "totp");
@@ -297,7 +297,7 @@ describe.runIf(areaTarget().can(auditEvents.need))("G. second factor: audit even
 	const subject = expect.stringMatching(/./);
 	const source = "198.51.100.30";
 
-	it("records a binding, a refused and a verified proof, never a code or a secret", async () => {
+	it("records a binding, a refused and a verified proof, never a code or a secret [guarantee-8-c]", async () => {
 		const bound = await during(() => s.enrol("mia"));
 		const { secret, codes, proved } = bound.result;
 		const binding = { kind: "account-email", purpose: "enroll", source };

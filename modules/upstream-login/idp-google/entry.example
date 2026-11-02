@@ -1,0 +1,5 @@
+{
+	"type": "google",
+	"client-id": "REPLACE-CLIENT-ID",
+	"client-secret": "REPLACE-CLIENT-SECRET"
+}

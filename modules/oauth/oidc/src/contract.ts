@@ -1,3 +1,4 @@
+import type { Target } from "@mod/claims-selection";
 import { contract } from "@mod/kernel";
 
 /** A released claim's value: a string, a boolean, or a list of strings. */
@@ -13,6 +14,8 @@ export interface ReleasedClaims {
 		subject: string,
 		scope: readonly string[],
 		handle?: string,
+		/** The claims a request names beyond its scope, and the constraints on all it releases. */
+		asked?: Target,
 	): Promise<Readonly<Record<string, Claim>>>;
 }
 

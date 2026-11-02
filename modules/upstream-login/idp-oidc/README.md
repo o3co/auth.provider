@@ -14,28 +14,27 @@
 
 ## Offers
 - Composition definition only (the IdP type `oidc`)
-- IdP settings (under `federation`'s `idps.<name>`): `issuer`, `client-id`, `client-secret` (both well-formed text), `token-auth` (`client_secret_basic` (default) or `client_secret_post`), `scopes` (must hold `openid`; default `openid`), `algorithms` (the asymmetric ones `external-jwt` knows; default RS256, PS256, ES256, EdDSA), `require-iss` (default false), `clock-skew` (0s–5m, default `30s`; times written with their unit, a bare number refused)
-- IdP endpoint settings (in the same place): `discovery` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (all three, only without discovery), `end-session-endpoint` (optional, only without discovery), `endpoint-hosts` (hosts besides the issuer's its endpoints may be on, read as `outbound` reads a host list: a host, or `.name` for the name and the names under it; default none)
+- IdP settings (under `federation`'s `idps.<name>`): `issuer`, `client-id`, `client-secret` (both well-formed text), `token-auth` (`client_secret_basic` (default) or `client_secret_post`), `scopes` (must hold `openid`; default `openid`), `algorithms` (`external-jwt`'s `algorithmsSetting`; default RS256, ES256, EdDSA, one for each kind of key), `accept-missing-iss` (default false), `clock-skew` (0s–5m, default `30s`; times written with their unit, a bare number refused)
+- IdP endpoint settings (in the same place): `discovery` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (all three, only without discovery), `end-session-endpoint` (optional, only without discovery), UserInfo's (`src/userinfo/`), `endpoint-hosts` (hosts besides the issuer's its endpoints may be on, read as `host-entries` reads a host list; default none)
 
 ## Invariants
-- Every request to the upstream goes through `outbound`, narrowed to the issuer's host, the `endpoint-hosts` and the hosts of endpoints the operator gives, and sent for an operator's URL (`internal`): the issuer for all its description names (an endpoint on another origin, another port too, reaches public addresses only), each given endpoint for itself; the client's secret goes to no other host.
+- Every request to the upstream goes through `outbound`, narrowed to the issuer's host, the `endpoint-hosts` and the hosts of endpoints the operator gives, and sent for an operator's URL (`internal`; `narrower`: `internal`): the issuer for all its description names (an endpoint on another origin, another port too, reaches public addresses only), each given endpoint for itself; the client's secret goes to no other host.
 - An issuer's description that names an endpoint (its end of session included) on another host, as `outbound` matches hosts, refuses boot.
 - An endpoint the browser goes to (authorization, end of session), described or given, holds only where `outbound.refusals`' `browsedRefusal` takes it for the issuer or the given endpoint: https, or plain http at a loopback name or a `plain-internal` origin; else boot is refused, at `issuer` or the key. Plain http there carries the user's password and the IdP's cookies in the clear between browser and IdP, outside any mesh.
-- Boot is refused, at its key, on a URL this server sends to that `outbound`'s destination policy refuses with that same narrowing: the description's own URL (at `issuer`), or `token-endpoint` and `jwks-uri` without discovery; it says which of `outbound`'s keys to set (`outbound.refusals`).
+- Boot is refused, at its key, on a URL this server sends to that `outbound`'s destination policy refuses with that same narrowing: the description's own URL (at `issuer`), or `token-endpoint`, `jwks-uri` and a given `userinfo-endpoint` without discovery; it says which of `outbound`'s keys to set (`outbound.refusals`).
 - A description whose token endpoint or key set that policy refuses also refuses boot.
-- A description's refusal, `outbound` refusing to fetch it included, is told at `issuer`, with its reason; one the policy gives names the endpoint and the policy's reason.
+- A description's refusal, `outbound` refusing to fetch it included, is told at `issuer`, with its reason; one the policy gives names the endpoint and the policy's reason. A description answered other than `200`, or that cannot be read as one (no JSON object, not its shape), refuses boot at the IdP, in `federation`'s words, not under `issuer`.
 - An answer naming another issuer in `iss` is refused before its code is used.
-- An answer without `iss` is refused where the issuer's description offers `iss` or the operator requires it.
-- Where neither requires `iss`, boot logs a warning naming the IdP (answers are then taken without `iss`).
-- The id_token is checked by `external-jwt` with the issuer's key set at its `jwks_uri`, under `algorithms` and `clock-skew`, expecting the issuer and the client among its audiences.
+- An answer without `iss` is refused, unless the IdP's `accept-missing-iss` is set and its description does not offer `iss`.
+- Where `iss` is not required so, boot logs a warning naming the IdP (answers are then taken without `iss`).
+- The id_token is checked by `external-jwt` with the issuer's key set at its `jwks_uri`, under `algorithms` and `clock-skew`, expecting the issuer and the client among its audiences. A key is read under one algorithm (`external-jwt`): with RS256 and PS256 both taken, one naming no `alg` is unused; an IdP signing with PS256 alone takes `["PS256"]`.
 - An id_token that gives `at_hash` must give the access token's, by its signature's digest; one that does not refuses the exchange.
-- Any reason `external-jwt` gives refuses the login.
-- The id_token must name the client as `azp` where it names other audiences, or wherever it gives `azp`.
+- The id_token must name no audience other than the client, and name the client as `azp` wherever it gives `azp`.
 - The id_token must carry the login's nonce, a subject and a numeric issue time.
 - The id_token must say no login time (`auth_time`) before 0 or past `kernel`'s clock by more than `clock-skew`.
 - Says when the upstream logged the user in from the id_token's `auth_time`.
 - Gives `federation` `clock-skew` as the upstream's clock allowance.
-- Gives `federation` the profile in the checked id_token: `email`, `name` and `picture` where they are text. No other claim, and nothing from userinfo.
+- Gives `federation` the profile in the checked id_token: `email`, `name` and `picture` where they are text. No other claim but UserInfo's, as `src/userinfo/` says.
 - The email is verified only where `email_verified` is the boolean `true`.
 - When `external-jwt` has no key set to give, a callback is unavailable.
 - The code goes with its PKCE verifier.
@@ -56,4 +55,4 @@
 - Without an end of session endpoint, the upstream offers no end of session.
 
 ## Depends on
-- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`, `external-jwt`
+- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`, `host-entries`, `external-jwt`, `url-setting`

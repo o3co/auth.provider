@@ -1,5 +1,10 @@
+import { algorithmsSetting, knownAlgorithms } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
 import { z } from "zod";
+
+/** The longest `max-age` and `clock-skew` any section may give, in seconds: records are kept by these, never by the section. */
+export const longestMaxAge = 3600;
+export const longestClockSkew = 300;
 
 /** The kinds of id_token taken, each with its issuer fixed. */
 export const kinds = ["apple", "google"] as const;
@@ -34,6 +39,9 @@ const upstream = (name: Kind) =>
 				.record(z.string().min(1), client)
 				.refine((map) => Object.keys(map).length > 0, "names at least one client")
 				.describe("This provider's client IDs, each with the id_tokens it may exchange."),
+			algorithms: algorithmsSetting(knownAlgorithms, ["RS256"]).describe(
+				`The algorithms ${name === "apple" ? "Apple's" : "Google's"} id_tokens may be signed with: asymmetric ones only, RS256 by default.`,
+			),
 		})
 		.optional()
 		.describe(`Takes ${name === "apple" ? "Apple's" : "Google's"} id_tokens when written.`);
@@ -50,14 +58,16 @@ export const section = z
 	.strictObject({
 		"max-age": setting
 			.duration("s")
-			.pipe(z.number().int().min(60).max(3600))
+			.pipe(z.number().int().min(60).max(longestMaxAge))
 			.prefault("10m")
 			.describe("The oldest an id_token may be, from its `iat`, from 1m to 1h."),
 		"clock-skew": setting
 			.duration("s")
-			.pipe(z.number().int().min(0).max(300))
+			.pipe(z.number().int().min(0).max(longestClockSkew))
 			.prefault("30s")
-			.describe("How far an id_token's times may be off this host's clock, from 0s to 5m."),
+			.describe(
+				"How far an id_token's times may be off this host's clock, from 0s to 5m. Set it no lower than your issuers' real clock drift: narrowing it can admit an id_token a wider skew refused at a revocation.",
+			),
 		apple: upstream("apple"),
 		google: upstream("google"),
 	})

@@ -19,6 +19,7 @@
 		"@mod/session": "workspace:*",
 		"@mod/upstream-handoff": "workspace:*",
 		"@mod/upstreams": "workspace:*",
+		"@mod/url-setting": "workspace:*",
 		"@mod/users": "workspace:*",
 		"zod": "4.6.7"
 	},

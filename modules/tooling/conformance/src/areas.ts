@@ -99,9 +99,18 @@ export function patternPartsOf(scene: AreaScene, modules: readonly string[]): Pa
 	});
 }
 
+/** What a start is given besides the scene: what runs the target, never what the target is. */
+export interface StartOptions {
+	/**
+	 * PEM files the new system's process trusts besides the system's certificates, for a party it
+	 * reaches over https under a certificate of its own; given to it as NODE_EXTRA_CA_CERTS alone.
+	 */
+	readonly trustedCertificates?: readonly string[];
+}
+
 /** A target the area scenes run against. */
 export interface AreaDriver {
-	start(scene: AreaScene): Promise<Started>;
+	start(scene: AreaScene, options?: StartOptions): Promise<Started>;
 	/** False when the target cannot be set up for this need at all. */
 	can(need: string): boolean;
 	/** True when the target answers this decided difference otherwise than the scenes expect. */

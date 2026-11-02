@@ -5,7 +5,7 @@ import { writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
-import { configFiles, kernel } from "@mod/app-output";
+import { configFiles, kernel } from "@mod/app-entries";
 import { parse } from "@o3co/ts.hocon";
 import { expect } from "vitest";
 import { packageDirs as dirs, leaves, read, type Tree } from "./full-app.ts";
@@ -20,6 +20,7 @@ export interface Manifest {
 	wires?: string;
 	joins?: string[];
 	exports?: Record<string, string>;
+	takesSamples?: { map: string; of: string }[];
 }
 export const manifest = (name: string): Manifest =>
 	JSON.parse(readFileSync(join(dirs.get(name) ?? "", "package.json"), "utf8"));
@@ -80,9 +81,8 @@ export async function readsScalarsFromEnv(target: string, modules: readonly stri
 			.map(([key, value]) => [envOf(key), String(value)]),
 	);
 	const readme = await read(target, "README.md");
-	for (const [key] of scalars) {
-		expect(readme).toContain(`| \`${key}\` | \`${envOf(key)}\` |`);
-	}
+	// Each scalar has its row; how a row of several lines reads is app-output's to test.
+	for (const [key] of scalars) expect(readme).toContain(`| \`${key}\` | \`${envOf(key)}\``);
 }
 
 /** The fragments' lists, and a value spanning sections, go to the local layer's example as comments only. */
@@ -101,7 +101,12 @@ export async function writesListsLocally(target: string, modules: readonly strin
 			value,
 		]),
 	);
-	expect([...uncommented].filter(([key]) => key !== spansSections)).toEqual(lists);
+	// Under a map a composed package takes entry samples for, the entries are the types' samples, app-output's to test.
+	const taken = [kernel, ...modules]
+		.flatMap((n) => manifest(n).takesSamples ?? [])
+		.map((t) => `${t.map}.`);
+	const own = [...uncommented].filter(([key]) => !taken.some((t) => key.startsWith(t)));
+	expect(own.filter(([key]) => key !== spansSections)).toEqual(lists);
 	expect(uncommented.get(spansSections)).toEqual([expect.stringMatching(/^REPLACE-[A-Z-]+$/)]);
 	expect(example).toMatch(/^# audit\.receivers = \[REPLACE-[A-Z-]+\]$/m);
 	const env = await read(target, ".env.example");

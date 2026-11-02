@@ -12,13 +12,17 @@ import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
 import { registrable } from "@mod/redirect-uris";
 import { determinedSource } from "@mod/request-source";
+import { challengeOf } from "@mod/sender-binding";
 import { type Upstreams, upstreams } from "@mod/upstreams";
 import { z } from "zod";
 import events from "../audit-events.ts";
-import { type CallerCheck, callerFrom } from "../caller/caller.ts";
+import { type CallerCheck, callerFrom, callerTakes } from "../caller/caller.ts";
 import { endSessionAt } from "../end-session.ts";
 import type { Current, Renewal } from "../renewal/renewal.ts";
 import type { Settings } from "../section.ts";
+
+/** The longest `retry-after` a renewal's limit is answered with: a day; a longer one, or none, is left unsaid. */
+const longestRetryAfterSeconds = 86_400;
 
 export const base = "/oauth/federation";
 
@@ -99,12 +103,21 @@ export async function federationTokens(flow: Flow, request: HttpRequest): Promis
 		if (step === "logout") return await logout(flow, request, idp, caller, record);
 		if (!receives(await flow.clients.find(caller.client))) {
 			record("federation.token.failed", { reason: "forbidden" });
-			return jsonAnswer(403, { error: "forbidden" });
+			// The token is valid but admits no upstream token: insufficient_scope, in its own scheme (RFC 6750 §3.1).
+			return jsonAnswer(
+				403,
+				{ error: "forbidden" },
+				{ headers: challengeOf(caller.tokenType, "insufficient_scope") },
+			);
 		}
 		const current = await flow.renewal.current(caller.session, idp);
 		if (current.kind === "limited") {
 			const after = current.retryAfterSeconds;
-			const said = after !== undefined && Number.isInteger(after) && after >= 1 && after <= 86_400;
+			const said =
+				after !== undefined &&
+				Number.isInteger(after) &&
+				after >= 1 &&
+				after <= longestRetryAfterSeconds;
 			return jsonAnswer(
 				429,
 				{ error: "rate_limited" },
@@ -175,6 +188,9 @@ async function logout(
 	return { status: 303, headers: { ...noStore, location } };
 }
 
+/** What `routesIn` takes from the build context, and its caller check's. */
+export const routesTakes = [clients, upstreams, audit, ...callerTakes] as const;
+
 /** The route over the build context, its caller check and its contracts taken here, answering with `renewal`. */
 export async function routesIn(c: BuildContext<Settings>, renewal: Renewal): Promise<Route> {
 	const flow: Flow = {
@@ -185,6 +201,10 @@ export async function routesIn(c: BuildContext<Settings>, renewal: Renewal): Pro
 		audit: await c.get(audit),
 		log: c.log,
 	};
+	// Told at every start by client: each is handed its sessions' upstream tokens.
+	for (const client of flow.clients.registered()) {
+		if (receives(client)) c.log.warn("federation-tokens.receives", { client: client.id });
+	}
 	const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 	return {
 		method: "POST",

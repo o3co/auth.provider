@@ -8,7 +8,12 @@ import { endpointOf } from "./endpoint.ts";
 import { section } from "./section.ts";
 
 export default defineModule(
-	{ name: "subject-revocation-http", section, replicaSafe: true },
+	{
+		name: "subject-revocation-http",
+		section,
+		replicaSafe: true,
+		takes: [audit, site, rateLimit, attemptLimit, revocations],
+	},
 	(m) => [
 		m.contribute(routes).by(async (c) => {
 			// With no proxy trusted, no request is ever told as https, so every one would be refused.

@@ -91,7 +91,7 @@ describe("RFC 8707: token exchange answers the same, the rule composed or not", 
 	});
 	const bases = () => started.map((s) => (s.kind === "running" ? s.baseUrl : ""));
 
-	it("narrows to a resource within the subject token's audience, and refuses one outside it", async () => {
+	it("narrows to a resource within the subject token's audience, and refuses one outside it [rfc8707-2-c] [rfc8693-2.2.2-a] [rfc8693-2.2.2-c] [rfc6749-5.2-a]", async () => {
 		for (const base of bases()) {
 			const own = await token(base, { grant_type: "client_credentials" });
 			const held = own.aud ?? [];

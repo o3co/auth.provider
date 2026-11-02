@@ -44,7 +44,7 @@ describe("H. the second-factor lockout's longest hold", () => {
 		return { status: res.status, wait: res.headers.get("retry-after") };
 	};
 
-	it("doubles each hold after a failure past it, but never names a wait longer than the longest hold", async () => {
+	it("doubles each hold after a failure past it, but never names a wait longer than the longest hold [rfc6749-10.10-d]", async () => {
 		await s.enrol("ola");
 		const waits: (string | null)[] = [];
 		for (const quiet of [1100, 2100, 0]) {

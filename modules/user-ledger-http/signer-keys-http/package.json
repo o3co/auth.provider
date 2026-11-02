@@ -4,6 +4,7 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
+	"narrower": "internal",
 	"optIn": true,
 	"exports": {
 		"./module": "./src/module.ts"
@@ -27,8 +28,9 @@
 		"@mod/secret-hash": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
+		"@mod/tls-options": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/tokens": "workspace:*",
-		"jose": "6.2.12"
+		"jose": "6.2.13"
 	}
 }

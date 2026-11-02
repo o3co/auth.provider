@@ -12,12 +12,15 @@ import {
 	type Store,
 } from "@mod/store";
 import { type Redis, ReplyError } from "ioredis";
-import { confirmationRounds } from "./round/round.ts";
+import { keysUnder } from "./keys.ts";
+import { confirmationPipeline, confirmationRounds } from "./round/round.ts";
 import * as scripts from "./scripts.ts";
+
+/** How many keys SCAN is asked for at a time. */
+const scanPage = 200;
 
 type Raw = { value: string; version: string; expiresAt: string | null };
 
-const enc = encodeURIComponent;
 /** A text matched literally by SCAN's pattern. */
 const literal = (text: string) => text.replace(/[*?[\]\\]/g, (c) => `\\${c}`);
 
@@ -78,7 +81,8 @@ export async function refusedCommands(
 ): Promise<string[]> {
 	const { prefix, replication } = options;
 	const problems = new Set<string>();
-	const storeKeys = `the store's keys (${prefix}:{…})`;
+	// The keys by the setting that names them, never its value: a refusal shows no setting's value.
+	const storeKeys = "the store's keys (<redis.prefix>:{…})";
 	const judge = (name: string, error: unknown, keys: string) => {
 		const message = error instanceof Error ? error.message : String(error);
 		if (keysRefused(message)) problems.add(`the server refuses this user ${keys}: allow them`);
@@ -86,12 +90,8 @@ export async function refusedCommands(
 			problems.add(`the server refuses ${name}: allow it`);
 		} else if (!noReplicas(message)) throw error;
 	};
-	const round = confirmer.pipeline().call("ROLE").info("server");
-	const sent = ["ROLE", "INFO"];
-	if (replication !== undefined) {
-		round.set(`${prefix}:#confirm`, "1", "PX", 60_000);
-		sent.push("SET");
-	}
+	const round = confirmationPipeline(confirmer, prefix, replication !== undefined);
+	const sent = ["ROLE", "INFO", ...(replication !== undefined ? ["SET"] : [])];
 	if (replication === "replicas") {
 		// Answers within its millisecond, once a confirmation's WAIT before it has.
 		round.call("WAIT", 0, 1);
@@ -100,7 +100,7 @@ export async function refusedCommands(
 	const replies = (await round.exec()) ?? [];
 	sent.forEach((name, at) => {
 		const error = replies[at]?.[0];
-		if (error) judge(name, error, `the confirmation key (${prefix}:#confirm)`);
+		if (error) judge(name, error, "the confirmation key (<redis.prefix>:#confirm)");
 	});
 	const check = `${prefix}:{#check}`;
 	try {
@@ -146,13 +146,45 @@ export async function roundProblems(
 			);
 		}
 	}
-	try {
-		await client.eval(scripts.read, 1, `${options.prefix}:{#check}:r`);
-	} catch (error) {
-		// The script's own failure, never a passing state of the server (BUSY, LOADING and the like).
-		if (!(error instanceof ReplyError) || !/^ERR\b.*script/i.test((error as Error).message))
-			throw error;
-		problems.push("the server fails a store script (read): it lacks what the store's scripts use");
+	// Each run on keys of the store's own, writing nothing: the batch across only checks a condition,
+	// over two partitions (hash tags), as a batch across spaces runs, so a server that splits keys
+	// across nodes refuses it here rather than on the first write across partitions.
+	const runs: readonly (readonly [string, string, readonly string[], readonly string[]])[] = [
+		["read", scripts.read, [`${options.prefix}:{#check}:r`], []],
+		[
+			"batchAcross",
+			scripts.batchAcross,
+			[`${options.prefix}:{#check}:a`, `${options.prefix}:{#check-2}:a`],
+			[
+				JSON.stringify({
+					conditions: [{ i: 1, absent: true }],
+					writes: [],
+					firstMark: 2,
+					marks: 0,
+				}),
+				"",
+				"",
+				"0",
+			],
+		],
+	];
+	for (const [name, script, keys, args] of runs) {
+		try {
+			await client.eval(script, keys.length, ...keys, ...args);
+		} catch (error) {
+			const message = error instanceof ReplyError ? (error as Error).message : "";
+			if (/^CROSSSLOT\b/.test(message)) {
+				problems.push(
+					`the server splits keys across nodes, refusing a store script (${name}) over two partitions: point the store at one server, not a cluster or a proxy that splits keys`,
+				);
+				continue;
+			}
+			// The script's own failure, never a passing state of the server (BUSY, LOADING and the like).
+			if (!/^ERR\b.*script/i.test(message)) throw error;
+			problems.push(
+				`the server fails a store script (${name}): it lacks what the store's scripts use`,
+			);
+		}
 	}
 	return problems;
 }
@@ -168,11 +200,7 @@ export function redisStore(
 	declared: readonly Space[],
 ): Store {
 	const { prefix } = options;
-	const slot = (key: Key) => `${prefix}:{${enc(key.space.name)}:${enc(key.partition)}}`;
-	const valueKey = (key: Key) => `${slot(key)}:v:${enc(key.name)}`;
-	const counterKey = (key: Key) => `${slot(key)}:c:${enc(key.name)}`;
-	const versionKey = (key: Key) => `${slot(key)}:#version`;
-	const markKey = (key: Key, mark: string | undefined) => `${slot(key)}:#mark:${enc(mark ?? "")}`;
+	const { slot, valueKey, counterKey, versionKey, markKey, spaceHead } = keysUnder(prefix);
 	/** Runs a script; every answer comes with the run id of the server that computed it. */
 	const run = async (script: string, keys: string[], args: (string | number)[]) => {
 		let reply: unknown;
@@ -293,7 +321,11 @@ export function redisStore(
 				const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
 				samePartition(keys);
 				const [first] = keys;
-				if (!first) return run(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
+				if (!first) {
+					// The script answers its own shape; an empty batch committed names no versions.
+					const empty = await run(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
+					return empty.kind === "committed" ? { kind: "committed", versions: [] } : empty;
+				}
 				const names = [...new Set(keys.map(valueKey))];
 				const index = (key: Key) => names.indexOf(valueKey(key)) + 1;
 				const spec = {
@@ -322,6 +354,47 @@ export function redisStore(
 					? { kind: "committed", versions: list<string | null>(answer.versions, answer.n) }
 					: answer;
 			},
+			batchAcross: async (conditions, writes, options) => {
+				const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
+				const [first] = keys;
+				if (!first) {
+					const empty = await run(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
+					return empty.kind === "committed" ? { kind: "committed", versions: [] } : empty;
+				}
+				const names = [...new Set(keys.map(valueKey))];
+				const index = (key: Key) => names.indexOf(valueKey(key)) + 1;
+				const versionKeys = [...new Set(writes.map((w) => versionKey(w.key)))];
+				const markKeys = [...new Set(keys.map((k) => markKey(k, options?.idempotency)))];
+				const spec = {
+					conditions: conditions.map((c) =>
+						"absent" in c
+							? { i: index(c.key), absent: true }
+							: { i: index(c.key), version: c.version },
+					),
+					writes: writes.map((w) => {
+						if ("remove" in w) return { i: index(w.key), remove: true };
+						const [kind, arg] = expiryArgs(w.expiry);
+						const v = names.length + versionKeys.indexOf(versionKey(w.key)) + 1;
+						return { i: index(w.key), v, put: canonicalJson(w.put), kind, arg };
+					}),
+					firstMark: names.length + versionKeys.length + 1,
+					marks: markKeys.length,
+				};
+				const request = idempotencyRequest("batchAcross", keys, [
+					conditions.map((c) => ("absent" in c ? { absent: true } : { version: c.version })),
+					writes.map((w) => ("remove" in w ? null : [w.put, w.expiry])),
+				]);
+				const answer = await run(
+					scripts.batchAcross,
+					[...names, ...versionKeys, ...markKeys],
+					[JSON.stringify(spec), options?.deadline ?? "", digest(request), marked(options)],
+				);
+				// The spaces share their guarantees, so the first key's tells how to confirm.
+				await confirm(first, answer);
+				return answer.kind === "committed"
+					? { kind: "committed", versions: list<string | null>(answer.versions, answer.n) }
+					: answer;
+			},
 			count: async (key, window, options) => {
 				const answer = await run(
 					scripts.count,
@@ -338,10 +411,16 @@ export function redisStore(
 			},
 			now: async () => (await run(scripts.now, [], [])).now as number,
 			scan: async (space, cursor) => {
-				const head = `${prefix}:{${enc(space.name)}:`;
+				const head = spaceHead(space);
 				let reply: [string, string[]];
 				try {
-					reply = await client.scan(cursor ?? "0", "MATCH", `${literal(head)}*}:v:*`, "COUNT", 200);
+					reply = await client.scan(
+						cursor ?? "0",
+						"MATCH",
+						`${literal(head)}*}:v:*`,
+						"COUNT",
+						scanPage,
+					);
 				} catch {
 					throw new Unavailable("store");
 				}

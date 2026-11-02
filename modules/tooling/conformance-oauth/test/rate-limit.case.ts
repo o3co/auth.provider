@@ -20,6 +20,8 @@ const scene = oauthScene({
 			kind: "confidential",
 			method: "client_secret_post",
 			secret: "app-secret-0123456789abcdef",
+			// Its requests fail authentication before any grant is read; the grant is the one the
+			// token endpoint asks to be composed at all.
 			grants: ["client_credentials"],
 			scopes: ["read"],
 		},
@@ -37,7 +39,7 @@ afterAll(async () => {
 	if (running?.kind === "running") await running.stop();
 });
 
-it("limits requests to the token endpoint per source, before the client is authenticated", async () => {
+it("limits requests to the token endpoint per source, before the client is authenticated [rfc6749-2.3.1-c] [guarantee-10-a]", async () => {
 	const post = () =>
 		fetch(`${base}/oauth/token`, {
 			method: "POST",

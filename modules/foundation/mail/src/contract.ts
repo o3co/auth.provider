@@ -53,3 +53,6 @@ export const mailTemplates = extensionPoint<MailTemplate>("mail.templates", {
 	multiplicity: "keyed",
 	keyOf: (t) => t.purpose,
 });
+
+/** What `preparer` takes from other modules: a sender's module names these in its takes. */
+export const preparerTakes = [mailTemplates, mailPurposes] as const;

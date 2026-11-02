@@ -8,7 +8,7 @@ import { keysArea } from "@mod/conformance-keys";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { oauthArea } from "@mod/conformance-oauth";
 import { totp } from "@mod/conformance-second-factor/testing";
-import { usersLedger } from "@mod/users-http/testing";
+import { usersLedger } from "@mod/ledger-fakes";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	commands,
@@ -55,7 +55,7 @@ describe("the recipe for a login page with a second factor", () => {
 	beforeAll(async () => {
 		const ledger = usersLedger([{ identifier: "alice", password, subject: "u-alice" }]);
 		fake = await fakeHttp((asked) => ledger.answer(asked) ?? { status: 404 });
-		const section = ledger.section(fake.base)["users-http"];
+		const urls = ledger.urls(fake.base);
 		const modules = await composedBy(commands["mfa-page"], workspace);
 		const running = await areaTarget().start(
 			sceneOf(
@@ -71,8 +71,8 @@ describe("the recipe for a login page with a second factor", () => {
 					origin: issuer,
 					users: [],
 					ledger: {
-						verifyUrl: section["verify-url"],
-						credential: section.credential,
+						verifyUrl: urls.verify,
+						credential: ledger.credential,
 					},
 				}),
 				oauthArea.part({ issuer, clients: [app] }),
@@ -88,7 +88,7 @@ describe("the recipe for a login page with a second factor", () => {
 		await fake?.stop();
 	});
 
-	it("binds TOTP at a first login, lets the next login in with it, and shows each step as the recipe does", async () => {
+	it("binds TOTP at a first login, lets the next login in with it, and shows each step as the recipe does [rfc6749-4.1.2-f]", async () => {
 		const base = started?.baseUrl ?? "";
 		const t = transcript(base, issuer);
 		t.mask("expires_in", "<seconds>");

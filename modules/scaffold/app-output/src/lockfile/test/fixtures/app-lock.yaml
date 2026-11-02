@@ -1,0 +1,72 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+overrides:
+  '@o3co/auth-provider-oauth': 0.19.0
+  zod: 4.6.7
+
+importers:
+
+  .:
+    dependencies:
+      '@o3co/auth-provider-oauth':
+        specifier: 0.19.0
+        version: 0.19.0(zod@4.6.7)
+      '@x/grant':
+        specifier: 1.2.0
+        version: 1.2.0(@o3co/auth-provider-oauth@0.19.0(zod@4.6.7))(zod@4.6.7)
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+
+packages:
+
+  '@o3co/auth-provider-oauth@0.19.0':
+    resolution: {integrity: sha512-SxgQTdihcRFkR6BLRTisoiRCxGt06uom4vd3xaIytrgFGMA9gZQBmXgf+4F4sUYEU3u7udtpVjthhU75TDqubQ==, tarball: http://127.0.0.1:4873/@o3co/auth-provider-oauth/-/@o3co-auth-provider-oauth-0.19.0.tgz}
+    peerDependencies:
+      zod: 4.6.7
+
+  '@x/grant@1.2.0':
+    resolution: {integrity: sha512-un/C3ysiongL9Np9wT6WKqqtgVzAaj6nM0zpR1JOPgXTS8rlPyENQIOfv52gXJvQSgY0yEmB5d0o0Zu3GADOtA==, tarball: http://127.0.0.1:4873/@x/grant/-/@x-grant-1.2.0.tgz}
+    peerDependencies:
+      '@o3co/auth-provider-oauth': 0.19.0
+      zod: 4.6.7
+
+  fast-path@2.1.0:
+    resolution: {integrity: sha512-IwawktXoLtSbUCFm5U1Bs6RWmR825L06t8n5YgSndeSx3j2LSuYOuC9dls3zDv5p8kdUpQg885PWhP7i74zjOA==}
+
+  jose-lite@1.4.0:
+    resolution: {integrity: sha512-KT4B1x2u80OpuQF0cTRoWUmbpKlIBdk1ZV/zZcI9heDK0IdK1g8PHPxGw7MgRjH22PTcKjO7wrcFm++foD7/6g==}
+
+  real-lib@1.1.0:
+    resolution: {integrity: sha512-jxdTokIttGhcBHQhKv6T29Bqcwr2HPyq0uLh57XITtNIls+f4SxEM5hnX1E5v1TyC6RJZCY+iteRR0i1gcDdNA==}
+
+  zod@4.6.7:
+    resolution: {integrity: sha512-PyXM1qD/84bTgp+89jWNKqBN3/9/+ALdFU4CJ9Nd3RfuB+11Wx8/g0KIsuJ/j/yfq8wvK6TiVnL39UwOUzQ/2w==}
+
+snapshots:
+
+  '@o3co/auth-provider-oauth@0.19.0(zod@4.6.7)':
+    dependencies:
+      zod: 4.6.7
+
+  '@x/grant@1.2.0(@o3co/auth-provider-oauth@0.19.0(zod@4.6.7))(zod@4.6.7)':
+    dependencies:
+      '@o3co/auth-provider-oauth': 0.19.0(zod@4.6.7)
+      jose-lite: 1.4.0
+      real-alias: real-lib@1.1.0
+      zod: 4.6.7
+    optionalDependencies:
+      fast-path: 2.1.0
+
+  fast-path@2.1.0:
+    optional: true
+
+  jose-lite@1.4.0: {}
+
+  real-lib@1.1.0: {}
+
+  zod@4.6.7: {}

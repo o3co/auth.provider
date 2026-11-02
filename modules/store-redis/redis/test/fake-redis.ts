@@ -30,7 +30,7 @@ const bulk = (text: string) => `$${text.length}\r\n${text}\r\n`;
  * settings may change; a command named in `refused` is refused for want of permission. The check's
  * script answers as the real one reports: each command in `scripts.refused` refused in the words of
  * `scripts.wording`'s Redis, each in `scripts.keysRefusedIn` refused its key in those words, and
- * each write NOREPLICAS while `writes.noReplicas`; with
+ * each write NOREPLICAS while `writes.noReplicas`, a SET refused its key while `writes.keysRefused`; with
  * `scripts.keysRefused`, the script is refused its keys before it runs.
  */
 export function fakeRedis() {
@@ -44,7 +44,7 @@ export function fakeRedis() {
 		keysRefused: false,
 		keysRefusedIn: [] as string[],
 	};
-	const writes = { noReplicas: false };
+	const writes = { noReplicas: false, keysRefused: false };
 	/** The run id each connection's server answers, by the order the connections came: the last for any after. */
 	const servers = {
 		runIds: ["abc"],
@@ -54,7 +54,14 @@ export function fakeRedis() {
 	const infos = new Map<number, number>();
 	/** Whether a store script fails, as on a server whose Lua lacks what the scripts use. */
 	/** A store script failing, or the error of a passing state of the server it is answered with. */
-	const storeScripts = { fail: false, transient: undefined as string | undefined };
+	const storeScripts = {
+		fail: false,
+		transient: undefined as string | undefined,
+		/** Fails only the store scripts whose text holds this, as a server that runs some and not others. */
+		failWhere: undefined as string | undefined,
+		/** Refuses a script over keys of two hash tags, as a proxy that splits keys across nodes does. */
+		splitsKeys: false,
+	};
 	const writing = new Set(["SET", "INCR", "HSET", "HINCRBY", "PEXPIRE", "PEXPIREAT", "DEL"]);
 	const refusal = (name: string) =>
 		scripts.wording === "7.0"
@@ -83,10 +90,19 @@ export function fakeRedis() {
 		if (name === "EVAL" && scripts.keysRefused) return "-NOPERM No permissions to access a key\r\n";
 		if (name === "EVAL" && (args[1] ?? "").includes("local failed = {}")) return report();
 		if (name === "EVAL" && storeScripts.transient) return `-${storeScripts.transient}\r\n`;
-		if (name === "EVAL" && storeScripts.fail) {
+		if (name === "EVAL" && storeScripts.splitsKeys) {
+			const keys = args.slice(3, 3 + Number(args[2] ?? 0));
+			const tags = new Set(keys.map((key) => /\{([^}]*)\}/.exec(key)?.[1] ?? key));
+			if (tags.size > 1) return "-CROSSSLOT Keys in request don't hash to the same slot\r\n";
+		}
+		const failing =
+			storeScripts.fail ||
+			(storeScripts.failWhere !== undefined && (args[1] ?? "").includes(storeScripts.failWhere));
+		if (name === "EVAL" && failing) {
 			return "-ERR user_script:1: Script attempted to access nonexistent global variable 'cjson'\r\n";
 		}
 		if (name === "EVAL") return bulk(`${runIdOf(connection)}\n{"now":"0","entries":[],"n":1}`);
+		if (name === "SET" && writes.keysRefused) return "-NOPERM No permissions to access a key\r\n";
 		if (name === "SET" && writes.noReplicas)
 			return "-NOREPLICAS Not enough good replicas to write.\r\n";
 		if (name === "PING") return "+PONG\r\n";

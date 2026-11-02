@@ -6,14 +6,15 @@
 
 ## Not here
 - A recipe's text, which is written by hand around its generated blocks; the module cards hold the facts it points to.
-- Generating and starting apps (`create-app`, `conformance`). The fake ledger's answers (`users-http`'s `./testing`).
+- Generating and starting apps (`create-app`, `conformance`). The fake ledger's answers (`ledger-fakes`).
 
 ## Offers
-- Area `recipes`: its part names the modules a recipe's command composes, set up on Redis where the command composes it and with a second factor required where it composes `mfa`, and `localConf`, the `config/local.conf` its reader writes, which the app boots as written, below the set-up's sections. It has no legacy set-up: recipes run on the new system only.
+- Area `recipes`: its part names the modules a recipe's command composes, set up on Redis where the command composes it, with a second factor required where it composes `mfa`, and with a seal key where it composes `seal`, and `localConf`, the `config/local.conf` its reader writes, which the app boots as written, below the set-up's sections. It has no legacy set-up: recipes run on the new system only.
 - `commands`: each recipe's generate command after the target, and `shownCommand`, the command as a reader types it. `scripts`: the scripts a reader runs with `node -e`, and `shownScript`, a script as typed.
 - `composedBy` (command, workspace → the modules the app it generates depends on), `transcript` (a recorder of a scene's exchanges, by block), `withBlocks` (a document and its blocks' text → the document rewritten).
 - `pnpm --filter @mod/conformance-recipes run examples`: rewrites each recipe's generated blocks from a run.
 - `pnpm --filter @mod/conformance-recipes run external`, with `RECIPES_TARBALLS` naming the packed release (`pnpm bundles`, then `.github/scripts/pack-published.sh <dir>`): the recipes written against the published packages, built and run from the tarballs alone; with `RECIPES_WRITE=1` it rewrites their blocks.
+- The script `evidence-runs`: that release run as the JSON run `spec-checklist` reads (kind `release`, only a release's), so a release whose recipes left no evidence fails its compliance.
 
 ## Invariants
 - A recipe's generate command, and each script it has its reader run, is one constant, shown in its document and run by its scene.
@@ -26,7 +27,7 @@
 - Touches only the HTTP interface and boot refusals.
 
 ## Depends on
-- `conformance`, `create-app`; in tests, the areas whose parts a recipe's scene composes, `users-http`'s fake ledger, and `trial`'s layer.
+- `conformance`, `create-app`; in tests, the areas whose parts a recipe's scene composes, `ledger-fakes`' fake ledger, and `trial`'s layer.
 
 ## Vocabulary
 - recipe: a document a user follows to build something with the provider, written by hand around generated blocks.

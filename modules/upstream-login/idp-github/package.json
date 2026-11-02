@@ -4,6 +4,8 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
+	"sampleOf": "@mod/upstreams",
+	"narrower": "internal",
 	"optIn": true,
 	"exports": {
 		"./module": "./src/module.ts"
@@ -18,6 +20,7 @@
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
+		"@mod/tls-options": "workspace:*",
 		"vitest": "5.0.5"
 	}
 }

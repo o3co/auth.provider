@@ -1,0 +1,28 @@
+{{subjects}}
+const candidates = app.get({{contract}});
+const counts = { named: 0, clear: 0, failed: 0 };
+// One subject a line, used as sent; only an empty line is skipped. A subject is written out, one a
+// line on standard output, only where a counting factor of it is written and stands for nothing: the
+// operator gave it, to find whom to mend. The counts go to standard error.
+for await (const subject of lines(process.stdin)) {
+	if (subject === "") continue;
+	if (subject === undefined) {
+		counts.failed += 1;
+		continue;
+	}
+	try {
+		if ((await candidates.unclaimed(subject)) > 0) {
+			tell(1, `${subject}\n`);
+			counts.named += 1;
+		} else counts.clear += 1;
+	} catch (error) {
+		counts.failed += 1;
+		// Anything but an outage may come again for every subject, and may carry one: stop, telling none of it.
+		if (!isUnavailable(error)) break;
+	}
+}
+tell(2, `named ${counts.named} clear ${counts.clear} failed ${counts.failed}\n`);
+// Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
+await app.stop().catch(() => undefined);
+// A subject that could not be read is 1: run it again until it is 0.
+end(undefined, counts.failed === 0 ? 0 : 1);

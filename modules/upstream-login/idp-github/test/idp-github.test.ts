@@ -2,6 +2,7 @@ import { isUnavailable, Unavailable } from "@mod/kernel";
 import type { Narrower, Outbound, OutboundRequest, OutboundResponse } from "@mod/outbound";
 import { outboundOver, section as outboundSection } from "@mod/outbound/module";
 import type { OutboundRefusals } from "@mod/outbound-policy";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import { type AuthorizationStart, type CodeExchange, UpstreamRefused } from "@mod/upstreams";
 import { describe, expect, it } from "vitest";
 import { settingsOf } from "../src/settings.ts";
@@ -87,7 +88,7 @@ describe("idp-github", () => {
 		);
 	});
 
-	it("asks GitHub to authorize with PKCE, and its own endpoints unless told others", () => {
+	it("asks GitHub to authorize with PKCE, and its own endpoints unless told others [rfc9700-2.1.1-f] [rfc9700-2.1.1-h] [rfc9700-2.1.2-a]", () => {
 		const { upstream } = open({});
 		const url = new URL(upstream.authorizationUrl(start));
 		expect(`${url.origin}${url.pathname}`).toBe("https://github.com/login/oauth/authorize");
@@ -107,7 +108,7 @@ describe("idp-github", () => {
 		expect(enterprise.upstream.authorizationUrl(start)).toMatch(/^https:\/\/ghe\.example\//);
 	});
 
-	it("exchanges the code with its verifier and the client's secret, and answers the user's numeric id", async () => {
+	it("exchanges the code with its verifier and the client's secret, and answers the user's numeric id, asking for the user with the token as a credential alone, in no body [rfc6750-2.3-d] [rfc9700-4.3.2-a] [rfc6750-2.2-c]", async () => {
 		const { upstream, asked } = open({});
 		expect(await upstream.exchange(exchange())).toEqual({ subject: "583231", amr: [] });
 		const [token, user] = asked;
@@ -128,6 +129,7 @@ describe("idp-github", () => {
 			"x-github-api-version": "2022-11-28",
 		});
 		expect(user?.request.credential).toBe("Bearer gho_x");
+		expect([user?.request.method ?? "GET", user?.request.body]).toEqual(["GET", undefined]);
 	});
 
 	it("gives the user's public profile, its email never verified, as GitHub's user answer cannot say so", async () => {
@@ -153,7 +155,7 @@ describe("idp-github", () => {
 		expect(await profileOf({ login: "octocat" })).toBeUndefined();
 	});
 
-	it("sends the code and the access token only to the hosts of the endpoints the operator set", async () => {
+	it("sends the code and the access token only to the hosts of the endpoints the operator set [rfc6750-5.3-f]", async () => {
 		const { upstream, asked } = open({});
 		await upstream.exchange(exchange());
 		expect(asked.map((a) => a.hosts)).toEqual([
@@ -184,6 +186,7 @@ describe("idp-github", () => {
 					timeout: "300ms",
 				}),
 				async () => ["10.0.0.5"],
+				{ floor: testTlsOptions },
 			);
 		for (const [internal, expected] of [
 			[[], "refused"],
@@ -248,7 +251,9 @@ describe("idp-github", () => {
 	it("takes the authorization endpoint over plain http only where outbound's policy for the browser does, refusing it at its key", () => {
 		const both = { "client-id": "cid", "client-secret": "sec" };
 		const refusalsOver = (more: Record<string, unknown>): OutboundRefusals => {
-			const paths = outboundOver(outboundSection.parse(more), async () => ["10.0.0.5"]);
+			const paths = outboundOver(outboundSection.parse(more), async () => ["10.0.0.5"], {
+				floor: testTlsOptions,
+			});
 			const { explained, plainInternal, browsedRefusal } = paths;
 			return { explained, plainInternal, browsedRefusal };
 		};
@@ -300,7 +305,7 @@ describe("idp-github", () => {
 		}
 	});
 
-	it("refuses an answer from another issuer before using its code, and takes the issuer's own", async () => {
+	it("refuses an answer from another issuer before using its code, and takes the issuer's own [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a]", async () => {
 		const { upstream, asked } = open({});
 		expect(await outcome(upstream.exchange(exchange({ iss: "https://evil.example" })))).toBe(
 			"refused",

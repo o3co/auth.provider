@@ -1,16 +1,18 @@
 import { namesPackages, writeDeployment } from "@mod/app-output";
-import { full, optIns } from "@mod/combinations";
+import { assemblyFor } from "./assembly.ts";
 import type { FullPlan } from "./contract.ts";
-import { packagesFor } from "./packages.ts";
 
-export async function generateFull(plan: FullPlan): Promise<void> {
+/** Writes the full template's app; `index` is the published release's, a test's where given. */
+export async function generateFull(plan: FullPlan, index?: string): Promise<void> {
 	const add = plan.add ?? [];
 	namesPackages(add);
-	const modules = full(add);
-	await writeDeployment(plan.target, modules, packagesFor(plan), {
+	const { packages, combinations } = assemblyFor(plan, index);
+	const modules = combinations.full(add);
+	await writeDeployment(plan.target, modules, packages, {
 		template: "full-readme.md",
 		fill: {
-			optIns: optIns()
+			optIns: combinations
+				.optIns()
 				.filter((name) => !add.includes(name))
 				.map((name) => `- \`${name}\``)
 				.join("\n"),

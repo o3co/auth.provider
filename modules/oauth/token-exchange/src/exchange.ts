@@ -3,6 +3,7 @@ import { clientAllowance } from "@mod/client-allowance";
 import type { Client } from "@mod/clients";
 import type { Grant, GrantInput, GrantOutcome, TokenTie } from "@mod/grants";
 import { Unavailable } from "@mod/kernel";
+import { resourceRefusal } from "@mod/resource-indicators";
 import { type Binding, carried } from "@mod/sender-binding";
 import type { Actor, IssuedAccess, Tokens } from "@mod/tokens";
 import { verified } from "./answer.ts";
@@ -48,14 +49,22 @@ const isRefusal = (value: object): value is Refusal => "kind" in value && value.
 
 /** A presented token must outlive the exchange by this much, or it is refused as expired. */
 const expiryMarginMs = 1000;
-/** A lifetime asked in `expires_in`: 1 to 10 ASCII digits, above zero. */
+/**
+ * The request parameter asking a lifetime. RFC 6749 registers `expires_in` for answers alone, so the
+ * one this provider adds carries its prefix (RFC 6749 §8.2); a request's `expires_in` is unknown, read
+ * as nothing.
+ */
+const lifetimeParam = "o3co_expires_in";
+/** A lifetime asked in `o3co_expires_in`: 1 to 10 ASCII digits, from 2. */
 const lifetimeShape = /^[0-9]{1,10}$/;
+/** The shortest lifetime `tokens` issues: one second, its iat cut to the second, leaves less than one. */
+const minLifetimeSeconds = 2;
 
-/** `expires_in` in seconds; none when left out or empty, NaN when malformed. */
+/** `o3co_expires_in` in seconds; none when left out or empty, NaN when malformed or under two. */
 const askedLifetime = (value: string | undefined): number | undefined => {
 	if (value === undefined || value === "") return undefined;
 	const seconds = lifetimeShape.test(value) ? Number(value) : 0;
-	return seconds > 0 ? seconds : Number.NaN;
+	return seconds >= minLifetimeSeconds ? seconds : Number.NaN;
 };
 
 const depthOf = (actor: Actor | undefined): number => (actor ? 1 + depthOf(actor.actor) : 0);
@@ -79,6 +88,18 @@ const mayActFor = (subject: Exchanged, party: { readonly sub: string; readonly i
 			(sub === undefined || sub === party.sub) &&
 			(iss === undefined || iss === party.iss),
 	);
+
+/** The refusal of the `resource` asked, where one is and it is not the audience issued; none otherwise. */
+const resourceMismatch = (param: GrantInput["param"], audience: string): Refusal | undefined => {
+	const resource = param("resource");
+	// RFC 8693 §2.1: an absolute URI without a fragment, read as resource-indicators reads one.
+	const malformed = resource ? resourceRefusal(resource) : undefined;
+	if (malformed) return refused(malformed, "invalid_target");
+	if (resource && resource !== audience) {
+		return refused("resource is not the audience issued", "invalid_target");
+	}
+	return undefined;
+};
 
 export function exchangeGrant(parts: Parts): Grant {
 	// In their names' order, so a family is read and joined before a session, however composed.
@@ -143,10 +164,8 @@ export function exchangeGrant(parts: Parts): Grant {
 		if (audience === undefined || !clientAllowance.allowsAudience(client, audience, parts.issuer)) {
 			return refused("audience is not one the client may be issued", "invalid_target");
 		}
-		const resource = param("resource");
-		if (resource && resource !== audience) {
-			return refused("resource is not the audience issued", "invalid_target");
-		}
+		const mismatch = resourceMismatch(param, audience);
+		if (mismatch) return mismatch;
 		return { scope: [...allowed.scope], audience: [audience] };
 	};
 
@@ -167,10 +186,8 @@ export function exchangeGrant(parts: Parts): Grant {
 		if (audience === undefined || !held.includes(audience)) {
 			return refused("audience is not one the subject token and the client hold", "invalid_target");
 		}
-		const resource = param("resource");
-		if (resource && resource !== audience) {
-			return refused("resource is not the audience issued", "invalid_target");
-		}
+		const mismatch = resourceMismatch(param, audience);
+		if (mismatch) return mismatch;
 		return { scope: asked.length > 0 ? [...new Set(asked)] : ceiling, audience: [audience] };
 	};
 
@@ -224,34 +241,41 @@ export function exchangeGrant(parts: Parts): Grant {
 		};
 	};
 
+	/** What the request asks, read and checked before any token is: the first that does not hold refuses it. */
+	const readRequest = ({ client, param }: GrantInput) => {
+		if (client.kind !== "confidential" && !parts.publicExchange(client)) {
+			return { kind: "error", error: "invalid_client", status: 401 } satisfies Refusal;
+		}
+		const asked = askedLifetime(param(lifetimeParam));
+		if (Number.isNaN(asked)) {
+			return refused(`${lifetimeParam} must be a whole number of seconds from 2, in ASCII digits`);
+		}
+		const requested = param("requested_token_type");
+		if (requested !== undefined && requested !== accessTokenType) {
+			return refused("requested_token_type is not supported");
+		}
+		const [subjectToken, subjectType] = [param("subject_token"), param("subject_token_type")];
+		const [actorToken, actorType] = [param("actor_token"), param("actor_token_type")];
+		if (!subjectToken || !subjectType) {
+			return refused("subject_token and subject_token_type are required");
+		}
+		if (Boolean(actorToken) !== Boolean(actorType)) {
+			return refused("actor_token and actor_token_type go together");
+		}
+		const actorParam = actorToken && actorType ? { token: actorToken, type: actorType } : undefined;
+		return { asked, subjectToken, subjectType, actorParam };
+	};
+
 	return {
 		grantType,
 		readsAmbient: "none",
 		// It reads `audience` and `resource` itself, by its own exact rule.
 		targets: true,
 		handle: async (input) => {
-			const { client, param } = input;
-			if (client.kind !== "confidential" && !parts.publicExchange(client)) {
-				return { kind: "error", error: "invalid_client", status: 401 };
-			}
-			const asked = askedLifetime(param("expires_in"));
-			if (Number.isNaN(asked)) {
-				return refused("expires_in must be a positive whole number of seconds in ASCII digits");
-			}
-			const requested = param("requested_token_type");
-			if (requested !== undefined && requested !== accessTokenType) {
-				return refused("requested_token_type is not supported");
-			}
-			const [subjectToken, subjectType] = [param("subject_token"), param("subject_token_type")];
-			const [actorToken, actorType] = [param("actor_token"), param("actor_token_type")];
-			if (!subjectToken || !subjectType) {
-				return refused("subject_token and subject_token_type are required");
-			}
-			if (Boolean(actorToken) !== Boolean(actorType)) {
-				return refused("actor_token and actor_token_type go together");
-			}
-			const actorParam =
-				actorToken && actorType ? { token: actorToken, type: actorType } : undefined;
+			const { client } = input;
+			const request = readRequest(input);
+			if (isRefusal(request)) return request;
+			const { asked, subjectToken, subjectType, actorParam } = request;
 
 			const check = async () => {
 				const subject = await presented(client, "subject", subjectToken, subjectType);
@@ -282,6 +306,8 @@ export function exchangeGrant(parts: Parts): Grant {
 			const access = {
 				subject: subject.subject,
 				issuedTo: client.id,
+				// It stands where the subject token does, never from its own issue.
+				standingAt: subject.standingAt,
 				...target,
 				...(chain ? { actor: chain } : {}),
 				...(own?.amr ? { amr: own.amr } : {}),
@@ -289,15 +315,6 @@ export function exchangeGrant(parts: Parts): Grant {
 				...(own?.acr === undefined ? {} : { acr: own.acr }),
 			};
 			const from = tie.session ? { session: tie.session } : {};
-			// A once-only token is used up last: after the policies' leave, so a refusal leaves it usable.
-			const verifier = parts.verifiers.get(subjectType);
-			if (verifier?.consume) {
-				const admitted = await input.admits(access, from);
-				if (admitted.kind === "refused") return admitted;
-				const used = await verifier.consume(subjectToken);
-				if (used === "replayed") return refused("subject_token has been used");
-				if (used !== "consumed") throw new Unavailable("token-exchange");
-			}
 			const allowed = await input.issue(access, {
 				notAfter,
 				...(lifetimeSeconds === undefined ? {} : { lifetimeSeconds }),
@@ -306,6 +323,22 @@ export function exchangeGrant(parts: Parts): Grant {
 			if (allowed.kind === "refused") return allowed;
 			const issued = allowed.access;
 			if (!(await join(tie, issued))) return refused("subject_token has ended");
+			// A once-only token is used up last, once its token is issued, so a refusal or a failure
+			// before leaves it usable. That token is never handed out unless it was used up here; one
+			// whose revocation fails is held by no one.
+			const verifier = parts.verifiers.get(subjectType);
+			if (verifier?.consume) {
+				const withdrawn = () => parts.tokens.revokeAccess(issued.token).catch(() => undefined);
+				const used = await verifier.consume(subjectToken).catch(async (error: unknown) => {
+					await withdrawn();
+					throw error;
+				});
+				if (used !== "consumed") {
+					await withdrawn();
+					if (used === "replayed") return refused("subject_token has been used");
+					throw new Unavailable("token-exchange");
+				}
+			}
 			return {
 				kind: "issued",
 				body: {

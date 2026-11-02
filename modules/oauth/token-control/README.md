@@ -11,7 +11,7 @@
 ## Offers
 - Routes: `POST /oauth/introspect` and `POST /oauth/revoke`. Revocation answers `http`'s listed origins (a page may send `authorization` and `content-type`, and read `www-authenticate` and `retry-after`); introspection answers none.
 - Extension point: revocable token kinds, one per hint; a kind takes a token and a client and answers written, done, unknown or unsupported.
-- `issuer` metadata: `introspection_endpoint`, and `revocation_endpoint` where any token can be revoked; both absolute on `http`'s public origin, and left out without one. With each, its `*_auth_methods_supported` (`clients`' methods; at introspection, not `none`) and `*_auth_signing_alg_values_supported` where a method signs.
+- `issuer` metadata: `introspection_endpoint`, and `revocation_endpoint` where any token can be revoked; both absolute on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written. With each, its `*_auth_methods_supported` (`clients`' methods; at introspection, not `none`) and `*_auth_signing_alg_values_supported` where a method signs.
 - Audit events, never holding a token: declared in `./audit-events`, listed in the audit event reference.
 - Both events carry `source` when `request-source` determines it.
 - Operator section: `requests` (per source, window and route; 1–100000, default 60) and `window` (written with its unit, `1s` to `1d` in whole seconds, default `1m`).
@@ -21,7 +21,7 @@
 - Both routes authenticate the client through `token-endpoint`'s `authenticateClient`, handing it the audit, which records a refusal as `client.authentication.failure`.
 - Both routes refuse a repeated parameter with `invalid_request`.
 - Introspection refuses public clients.
-- Introspection answers active only for a valid token whose audience the caller may see (`token-endpoint`'s allowance); every other token is `active:false`.
+- Introspection answers active only for a valid token whose audience the caller may see (`client-allowance`'s `maySee`); every other token is `active:false`.
 - A bound token is introspected with its own token type and `cnf`.
 - Only the client a token was issued to can revoke it; another client gets `200` and the token stays.
 - An access token's revocation is written on every request, past any earlier one, and answered only once confirmed.
@@ -31,7 +31,7 @@
 - An unavailable dependency answers `503` `temporarily_unavailable` (each route's declared answer), never `active:false` or `200`; `http` then warns `http.unavailable` with what and the route, and introspection records `introspection.unavailable`.
 
 ## Depends on
-- `kernel`, `http`, `request-source`, `clients`, `issuer`, `tokens`, `token-endpoint`, `rate-limit`, `audit`
+- `kernel`, `http`, `request-source`, `clients`, `client-allowance`, `issuer`, `tokens`, `token-endpoint`, `rate-limit`, `audit`
 
 ## Vocabulary
 - written: this request wrote the token's revocation.

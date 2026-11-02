@@ -81,6 +81,12 @@ export function refreshStoreContract(name: string, open: () => Promise<RefreshSt
 		]);
 		for (let i = 2; i < cap; i++) await lists.add(key, `m-${i}`, 5000);
 		expect((await lists.add(key, "late", 4000)).pushedOut).toEqual(["a"]);
+		// Pushed out, it awaits until settled, and is no member meanwhile.
+		expect(await lists.awaiting(key)).toEqual(["a"]);
+		expect(await names(lists, key)).not.toContain("a");
+		await lists.settled(key, "a");
+		expect(await lists.awaiting(key)).toEqual([]);
+		expect(await lists.awaiting(fresh())).toEqual([]);
 		expect(await names(lists, fresh())).toEqual([]);
 		place.advance(3000);
 		expect(await names(lists, key)).not.toContain("b");

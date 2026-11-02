@@ -10,7 +10,15 @@ export type LoginOutcome =
 			readonly gate: string;
 			readonly answer: unknown;
 			readonly cookies: readonly string[];
-	  };
+	  }
+	/** A gate refused the login: no session, and no cookies; the caller answers it with its own failure, telling nothing of why. */
+	| {
+			readonly kind: "refused";
+			readonly gate: string;
+			readonly cookies: readonly [];
+	  }
+	/** `session` refused it, its subject revoked since the proof began: no session, and no cookies; the caller answers it. */
+	| { readonly kind: "revoked"; readonly cookies: readonly [] };
 
 /** A held login resumed at or past the deadline its caller set; no gate ran. */
 export type ResumeOutcome = LoginOutcome | { readonly kind: "expired" };
@@ -51,9 +59,17 @@ export interface Logins {
 
 export const logins = contract<Logins>("login-gates");
 
-/** A step a login must pass before its session opens; one that holds it writes and cleans up its own state. */
+/**
+ * A step a login must pass before its session opens; one that holds it writes and cleans up its own
+ * state, and one that refuses it ends it, writing nothing the login keeps.
+ */
 export interface LoginGate {
 	readonly name: string;
+	/**
+	 * Asked again when a login a gate after it held resumes, before the gates after that one: it may
+	 * only pass or refuse there, as one that never holds.
+	 */
+	readonly rechecked?: boolean;
 	hold(
 		request: HttpRequest,
 		facts: LoginFacts,
@@ -62,6 +78,7 @@ export interface LoginGate {
 	): Promise<
 		| { readonly kind: "pass" }
 		| { readonly kind: "held"; readonly answer: unknown; readonly cookies?: readonly string[] }
+		| { readonly kind: "refused" }
 	>;
 }
 
@@ -81,14 +98,19 @@ export const amrSources = extensionPoint<AmrSource>("login-gates.amr-sources", {
 	keyOf: (source) => source.name,
 });
 
-/** A path on the public origin a login may return to, contributed by the module that owns it. */
+/**
+ * A path on the public origin a login may return to, contributed by the module that owns it; with
+ * `segment`, the paths one name segment below it instead (letters, digits, `-` or `_`, up to 64),
+ * as a route that takes a name there.
+ */
 export interface ReturnPath {
 	readonly path: string;
+	readonly segment?: true;
 }
 
 export const returnPaths = extensionPoint<ReturnPath>("login-gates.return-paths", {
 	multiplicity: "keyed",
-	keyOf: (p) => p.path,
+	keyOf: (p) => (p.segment ? `${p.path}/*` : p.path),
 });
 
 /** A caller told when a login it asked for opens after a gate held it. */

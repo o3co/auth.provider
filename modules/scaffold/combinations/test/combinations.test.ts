@@ -2,7 +2,15 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { completed, composed, full, needed, optIns } from "../src/contract.ts";
+import {
+	addable,
+	combinationsWith,
+	completed,
+	composed,
+	full,
+	needed,
+	optIns,
+} from "../src/contract.ts";
 import { completedWith, declaredIn } from "../src/declared.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.
@@ -43,6 +51,7 @@ it("composes the default that replaces an owner in the owner's place, needed or 
 		"@mod/code-grant",
 		"@mod/users",
 		"@mod/webauthn",
+		"@mod/passkeys",
 	]);
 	expect(byDefault).toEqual(
 		expect.arrayContaining([
@@ -77,20 +86,27 @@ it("has every bridge and wiring name only modules the workspace has", () => {
 });
 
 // How full is derived is tried on a fixture; here, that the workspace's own declarations make it.
-it("composes the workspace's full template: each axis's default, no owner it replaces, and no feature that opts in", () => {
+it("composes the workspace's full template: each axis's default, no owner it replaces, and no feature that opts in but a bridge joining what it composes", () => {
 	const composed = full();
 	expect(composed).toEqual(
 		expect.arrayContaining(["@mod/redis", "@mod/audit-http", "@mod/log-stdout"]),
 	);
 	expect(composed).not.toContain("@mod/store");
 	expect(optIns()).toEqual(expect.arrayContaining(["@mod/dpop", "@mod/mtls", "@mod/device-grant"]));
-	// A feature that opts in comes only where a composed module needs it to run.
+	// A feature that opts in comes only where a composed module needs it to run, or, a bridge, where
+	// all it joins is composed.
 	const needed = (name: string) =>
 		composed.some((other) => {
 			const manifest = manifests.find((m) => m.name === other);
 			return Object.keys(manifest?.dependencies ?? {}).includes(name);
 		});
-	expect(composed.filter((name) => optIns().includes(name) && !needed(name))).toEqual([]);
+	const joined = (name: string) => {
+		const joins: string[] = manifests.find((m) => m.name === name)?.joins ?? [];
+		return joins.length > 0 && joins.every((other) => composed.includes(other));
+	};
+	expect(
+		composed.filter((name) => optIns().includes(name) && !needed(name) && !joined(name)),
+	).toEqual([]);
 	expect(full(["@mod/dpop"])).toContain("@mod/dpop");
 	// A bridge that opts in comes with what it joins: the witness's keeper with the witness.
 	expect(full(["@mod/mfa-witness-http"])).toContain("@mod/mfa-witnessing");
@@ -138,3 +154,29 @@ it("composes mfa wherever a factor kind is added alone, so a kind is never compo
 		expect(needed([kind]), kind).toContain("@mod/mfa");
 	}
 }, 30_000);
+
+// What is composed beside the workspace is tried on a fixture; here, that the contract composes it
+// over the workspace's own declarations, and composes as before where nothing is declared beside it.
+it("composes packages declared outside the workspace beside its own", () => {
+	const none = combinationsWith([]);
+	expect(none.full()).toEqual(full());
+	expect(none.addable()).toEqual(addable());
+	const grant = { name: "@x/did-grant", kind: "feature", needs: ["@mod/tokens"] };
+	const beside = combinationsWith([grant]);
+	expect(beside.addable()).toContain("@x/did-grant");
+	expect(beside.needed(["@x/did-grant"])).toEqual(["@x/did-grant", ...needed(["@mod/tokens"])]);
+	expect(() => combinationsWith([{ ...grant, needs: ["@mod/nope"] }])).toThrow(
+		/@x\/did-grant: needs @mod\/nope, which is not declared/,
+	);
+});
+
+it("brings a feature that opts in only where named, though it ties modules composed together: the id_token assertions", () => {
+	const bridge = "@mod/jwt-bearer-id-tokens";
+	const both = ["@mod/jwt-bearer", "@mod/exchange-id-tokens"];
+	// Generated again or completed, an app with both never takes it unasked.
+	expect(completed(both)).not.toContain(bridge);
+	expect(needed(both)).not.toContain(bridge);
+	expect(full(both)).not.toContain(bridge);
+	expect(optIns()).toContain(bridge);
+	expect(needed([bridge])).toEqual(expect.arrayContaining([bridge, ...both]));
+});

@@ -1,4 +1,7 @@
 import { testRequest } from "@mod/http/testing";
+import { defineModule, Unavailable } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
+import { type Witnessing, witnessing } from "@mod/mfa-extensions";
 import { sessions } from "@mod/session";
 import { revocations } from "@mod/subject-revocation";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -33,7 +36,10 @@ describe("a reset composed with mfa-flows and its stores", () => {
 		const pending = await s.heldLogin("ann");
 		await s.enrollCode("bob");
 		s.events.length = 0;
-		expect(await s.app.get(mfaReset).reset("ann", { requestedBy: "ticket-7" })).toBe(2);
+		expect(await s.app.get(mfaReset).run("ann", { requestedBy: "ticket-7" })).toMatchObject({
+			kind: "done",
+			removed: 2,
+		});
 		expect(s.events).toEqual([
 			{
 				kind: "mfa.reset",
@@ -70,7 +76,7 @@ describe("a reset composed with mfa-flows and its stores", () => {
 		const s = await serve();
 		await s.enrollCode("cal");
 		const before = runtime.clock.now() - 1000;
-		expect(await s.app.get(mfaReset).reset("cal")).toBe(2);
+		expect(await s.app.get(mfaReset).run("cal")).toMatchObject({ kind: "done", removed: 2 });
 		const boundaries = s.app.get(revocations);
 		expect(await boundaries.compare("cal", before, "sessions")).toBe("revoked");
 		expect(await boundaries.compare("cal", before, "delegations")).toBe("valid");
@@ -83,4 +89,29 @@ describe("a reset composed with mfa-flows and its stores", () => {
 			complete: "true",
 		});
 	});
+	it("answers stopped at the factors, with no removed, where the witness fails after the factors went", async () => {
+		// A witness whose mark cannot be cleared: mfa removes the factors first, then fails on the mark.
+		const failing: Witnessing = {
+			standing: async (_subject, counts) => (counts ? "held" : "none"),
+			settle: async () => {},
+			cleared: async () => {
+				throw new Unavailable("witness");
+			},
+		};
+		const witness = defineModule(
+			{ name: "failing-witness", replicaSafe: false, takes: [] },
+			(m) => [m.contribute(witnessing).by(() => failing)],
+		);
+		const s = await serve({}, [witness]);
+		await s.enrollCode("dot");
+		expect(await s.app.get(mfaReset).run("dot")).toEqual({ kind: "stopped", at: "factors" });
+		// The factors went all the same: whether they did is what removed would have told.
+		clock.shift += 1000;
+		expect((await s.login("dot")).kind).toBe("opened");
+	});
+});
+
+it("takes all it names, composed with mfa-flows and its stores", async () => {
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused((await serve()).input))["mfa-reset"]).toBeUndefined();
 });

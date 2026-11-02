@@ -5,6 +5,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { crlOf, type Issued, issue, ocspAnswer, pemOf, thumbprintOf } from "../src/authority.ts";
 import { type MtlsPart, mtlsScene } from "../src/main.ts";
 
+/** The code a certificate refused at issuance is answered with, by the target. */
+const refusedCertificate = areaTarget().differs("certificate-refused-as-invalid-client")
+	? "invalid_certificate"
+	: "invalid_client";
+
 const issuer = "https://issuer.example";
 const header = "x-client-cert";
 const signing = generateKeyPairSync("ed25519");
@@ -83,15 +88,13 @@ function running(part: () => MtlsPart & { readonly dpop?: boolean }) {
 	};
 }
 
-const mtls = describe.runIf(areaTarget().can("mtls"));
-
-mtls("self-signed certificates", () => {
+describe.runIf(areaTarget().can("mtls"))("self-signed certificates", () => {
 	const at = running(() => ({
 		header: { dialect: "pem", name: header },
 		trustedProxies: loopback,
 	}));
 
-	it("binds a token to the certificate's thumbprint, as a bearer token, and says so at introspection", async () => {
+	it("binds a token to the certificate's thumbprint, as a bearer token, and says so at introspection [rfc8705-3.1-a] [rfc8705-3.1-b] [rfc8705-3.1-c]", async () => {
 		const own = await issue({ cn: "client" });
 		const answer = await at.token(pemHeader(own));
 		const cnf = { "x5t#S256": thumbprintOf(own.der) };
@@ -121,13 +124,13 @@ mtls("self-signed certificates", () => {
 	});
 });
 
-mtls("a peer that is not a trusted proxy", () => {
+describe.runIf(areaTarget().can("mtls"))("a peer that is not a trusted proxy", () => {
 	const at = running(() => ({
 		header: { dialect: "pem", name: header },
 		trustedProxies: ["192.0.2.1"],
 	}));
 
-	it("binds nothing to the certificate header it sends", async () => {
+	it("binds nothing to the certificate header it sends [rfc8705-3-a]", async () => {
 		const own = await issue({ cn: "client" });
 		expect(await at.boundTo(own, pemHeader(own))).toBe(false);
 	});
@@ -197,7 +200,7 @@ const authority = {
 beforeAll(() => authority.start());
 afterAll(() => authority.fake?.stop());
 
-mtls("certificates under PKI, revocation by CRL", () => {
+describe.runIf(areaTarget().can("mtls"))("certificates under PKI, revocation by CRL", () => {
 	const at = running(() => authority.part("crl", "reject"));
 
 	it("binds a certificate whose path reaches the anchor and whose CRL does not list it", async () => {
@@ -208,10 +211,10 @@ mtls("certificates under PKI, revocation by CRL", () => {
 	it("refuses a certificate its CRL lists, or one from another authority", async () => {
 		const revoked = await authority.client({ crl: "revoked" });
 		const listed = await at.token(pemHeader(revoked));
-		expect([listed.status, listed.body.error]).toEqual([400, "invalid_certificate"]);
+		expect([listed.status, listed.body.error]).toEqual([400, refusedCertificate]);
 		const stranger = await issue({ cn: "client", by: await issue({ cn: "root", ca: true }) });
 		const foreign = await at.token(pemHeader(stranger));
-		expect([foreign.status, foreign.body.error]).toEqual([400, "invalid_certificate"]);
+		expect([foreign.status, foreign.body.error]).toEqual([400, refusedCertificate]);
 	});
 
 	it("answers unavailable while the CRL cannot be fetched, when told to reject", async () => {
@@ -221,18 +224,21 @@ mtls("certificates under PKI, revocation by CRL", () => {
 	});
 });
 
-mtls("certificates under PKI, allowing what cannot be confirmed", () => {
-	const at = running(() => authority.part("crl", "allow"));
+describe.runIf(areaTarget().can("mtls"))(
+	"certificates under PKI, allowing what cannot be confirmed",
+	() => {
+		const at = running(() => authority.part("crl", "allow"));
 
-	it("binds a certificate while its CRL cannot be fetched, and still refuses one it lists", async () => {
-		const down = await authority.client({ crl: "down" });
-		expect(await at.boundTo(down, pemHeader(down))).toBe(true);
-		const revoked = await authority.client({ crl: "revoked" });
-		expect((await at.token(pemHeader(revoked))).status).toBe(400);
-	});
-});
+		it("binds a certificate while its CRL cannot be fetched, and still refuses one it lists", async () => {
+			const down = await authority.client({ crl: "down" });
+			expect(await at.boundTo(down, pemHeader(down))).toBe(true);
+			const revoked = await authority.client({ crl: "revoked" });
+			expect((await at.token(pemHeader(revoked))).status).toBe(400);
+		});
+	},
+);
 
-mtls("certificates under PKI, revocation by OCSP", () => {
+describe.runIf(areaTarget().can("mtls"))("certificates under PKI, revocation by OCSP", () => {
 	const at = running(() => authority.part("ocsp", "reject"));
 
 	it("binds a certificate its responder answers good for, with the nonce asked", async () => {
@@ -244,7 +250,7 @@ mtls("certificates under PKI, revocation by OCSP", () => {
 		for (const says of ["revoked", "unknown", "without nonce"] as const) {
 			const issued = await authority.client({ ocsp: says });
 			const answer = await at.token(pemHeader(issued));
-			expect([answer.status, answer.body.error], says).toEqual([400, "invalid_certificate"]);
+			expect([answer.status, answer.body.error], says).toEqual([400, refusedCertificate]);
 		}
 	});
 
@@ -255,33 +261,39 @@ mtls("certificates under PKI, revocation by OCSP", () => {
 	});
 });
 
-mtls("certificates under PKI, OCSP allowing what cannot be confirmed", () => {
-	const at = running(() => authority.part("ocsp", "allow"));
+describe.runIf(areaTarget().can("mtls"))(
+	"certificates under PKI, OCSP allowing what cannot be confirmed",
+	() => {
+		const at = running(() => authority.part("ocsp", "allow"));
 
-	it("binds one while the responder is down", async () => {
-		const down = await authority.client({ ocsp: "down" });
-		expect(await at.boundTo(down, pemHeader(down))).toBe(true);
-	});
-});
+		it("binds one while the responder is down", async () => {
+			const down = await authority.client({ ocsp: "down" });
+			expect(await at.boundTo(down, pemHeader(down))).toBe(true);
+		});
+	},
+);
 
-mtls("certificates under PKI, revocation by OCSP and then CRL", () => {
-	const at = running(() => authority.part("both", "reject"));
+describe.runIf(areaTarget().can("mtls"))(
+	"certificates under PKI, revocation by OCSP and then CRL",
+	() => {
+		const at = running(() => authority.part("both", "reject"));
 
-	it("falls back to the CRL while the responder is down", async () => {
-		const good = await authority.client({ ocsp: "down", crl: "good" });
-		expect(await at.boundTo(good, pemHeader(good))).toBe(true);
-		const revoked = await authority.client({ ocsp: "down", crl: "revoked" });
-		expect((await at.token(pemHeader(revoked))).status).toBe(400);
-	});
+		it("falls back to the CRL while the responder is down", async () => {
+			const good = await authority.client({ ocsp: "down", crl: "good" });
+			expect(await at.boundTo(good, pemHeader(good))).toBe(true);
+			const revoked = await authority.client({ ocsp: "down", crl: "revoked" });
+			expect((await at.token(pemHeader(revoked))).status).toBe(400);
+		});
 
-	it("lets the CRL only add a revocation to an unknown, never clear it", async () => {
-		for (const crl of ["good", "revoked"] as const) {
-			const issued = await authority.client({ ocsp: "unknown", crl });
-			const answer = await at.token(pemHeader(issued));
-			expect([answer.status, answer.body.error], crl).toEqual([400, "invalid_certificate"]);
-		}
-	});
-});
+		it("lets the CRL only add a revocation to an unknown, never clear it", async () => {
+			for (const crl of ["good", "revoked"] as const) {
+				const issued = await authority.client({ ocsp: "unknown", crl });
+				const answer = await at.token(pemHeader(issued));
+				expect([answer.status, answer.body.error], crl).toEqual([400, refusedCertificate]);
+			}
+		});
+	},
+);
 
 const holder = generateKeyPairSync("ed25519");
 async function proof() {
@@ -314,7 +326,7 @@ const sha256 = (der: Uint8Array) => createHash("sha256").update(der).digest("hex
 const element = (issued: Issued, more = "") =>
 	`Hash=${sha256(issued.der)};Cert="${encodeURIComponent(pemOf(issued.der))}"${more}`;
 
-mtls("Envoy's XFCC header", () => {
+describe.runIf(areaTarget().can("mtls"))("Envoy's XFCC header", () => {
 	const at = running(() => ({ header: { dialect: "xfcc", name: xfcc }, trustedProxies: loopback }));
 
 	it("binds the certificate of the one element the proxy sets", async () => {

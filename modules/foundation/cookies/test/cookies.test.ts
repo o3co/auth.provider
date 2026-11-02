@@ -1,7 +1,7 @@
 import http from "@mod/http/module";
 import { testRequest } from "@mod/http/testing";
 import { assemble, kernelConfig } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { describe, expect, it } from "vitest";
 import { type CookieLookup, cookies, cookiesFor } from "../src/contract.ts";
 import cookiesModule from "../src/module.ts";
@@ -11,10 +11,16 @@ const foundValue = (looked: CookieLookup) => (looked.kind === "found" ? looked.v
 
 /** The cookies of a deployment at this public origin, logging to `logged`. */
 async function at(origin: string, logged = recordingLog()) {
-	const insecure = origin.startsWith("http:") ? { "insecure-origin": true } : {};
+	// A plain-http origin is one only a development deployment takes.
+	const plain = origin.startsWith("http:");
+	const insecure = plain ? { "insecure-origin": true } : {};
+	const environment = plain ? "development" : "production";
 	const app = await assemble({
 		modules: [http, cookiesModule],
-		config: { ...kernelConfig(), http: { port: 0, "public-origin": origin, ...insecure } },
+		config: {
+			...kernelConfig({ environment }),
+			http: { port: 0, "public-origin": origin, ...insecure },
+		},
 		runtime: quietRuntime({ log: logged.log }),
 	});
 	return app.get(cookies);
@@ -140,4 +146,9 @@ describe("lookup", () => {
 			),
 		).toEqual({ kind: "withheld", reason: "duplicate" });
 	});
+});
+
+it("takes every handle its takes name, on a site of its own", async () => {
+	const config = { ...kernelConfig(), http: { port: 0, "public-origin": "https://app.example" } };
+	expect((await takesUnused({ modules: [http, cookiesModule], config })).cookies).toBeUndefined();
 });

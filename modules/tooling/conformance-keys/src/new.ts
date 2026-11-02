@@ -22,11 +22,22 @@ function keysSection(part: KeysPart): Record<string, unknown> {
 	return section;
 }
 
+/**
+ * oidc signs ID tokens with RS256 unless the operator writes another: a scene signing with another
+ * key writes it, as that operator would, where oidc is composed.
+ */
+const idTokenAlg = (part: KeysPart, modules: readonly string[]) => {
+	const alg = part.signing?.alg;
+	return alg === undefined || alg === "HS256" || alg === "RS256" || !modules.includes("@mod/oidc")
+		? {}
+		: { oidc: { "id-token-alg": alg } };
+};
+
 // The keys a scene sets are the deployment's only ones: a pattern's app mixes none of its own in.
-onNew(keysArea, (part) => ({
+onNew(keysArea, (part, _scene, modules) => ({
 	modules: ["@mod/keys"],
 	whole: ["keys"],
-	config: { keys: keysSection(part) },
+	config: { keys: keysSection(part), ...idTokenAlg(part, modules) },
 	// ID tokens need an asymmetric key, so a deployment signing only with a shared secret has no oidc.
 	...(part.signing?.alg === "HS256" ? { without: ["@mod/oidc"] } : {}),
 }));

@@ -11,7 +11,7 @@ import { type LoginFrom, logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import { type FactorStore, factorStore, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
-import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
+import { type MfaSettings, mfaConfig, updatingTogether } from "@mod/mfa/testing";
 import bindingProofModule from "@mod/mfa-binding-proof/module";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
@@ -22,7 +22,7 @@ import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { type Sessions, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
 import { type Revocations, revocations } from "@mod/subject-revocation";
@@ -72,7 +72,7 @@ const entering = {
 		return sessionsDown.wrap({
 			...kept,
 			raise: (...args: Parameters<Sessions["raise"]>) => held(kept.raise(...args)),
-			complete: (...args: Parameters<Sessions["complete"]>) => held(kept.complete(...args)),
+			open: (...args: Parameters<Sessions["open"]>) => held(kept.open(...args)),
 		});
 	},
 };
@@ -113,7 +113,7 @@ afterEach(async () => {
 });
 
 /** A guessable, counting kind: the proof is the secret and a counter that must go up. */
-const code = defineModule({ name: "kind-code" }, (m) => [
+const code = defineModule({ name: "kind-code", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -138,7 +138,7 @@ const code = defineModule({ name: "kind-code" }, (m) => [
 	})),
 ]);
 /** A way back that does not count and cannot be guessed: single-use codes. */
-const backup = defineModule({ name: "kind-backup" }, (m) => [
+const backup = defineModule({ name: "kind-backup", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "backup",
 		amr: [],
@@ -174,7 +174,8 @@ const afterWrite = async <T>(write: Promise<T>) => {
 /** mfa's factor lists on the records stand-in, kept without end. */
 const factorStand = () => {
 	const stand = memoryRecords<StoredFactors>(() => 0, { shards: 1, perShard: 1 });
-	return defineModule({ name: "factor-store" }, (m) => [
+	const joint = updatingTogether(stand.records);
+	return defineModule({ name: "factor-store", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(factorStore).by(() =>
 			factorsDown.wrap({
 				save: (key: string, record: StoredFactors) =>
@@ -183,6 +184,7 @@ const factorStand = () => {
 				update: (...args: Parameters<typeof stand.records.change>) =>
 					afterWrite(stand.records.change(...args)),
 				scan: stand.records.scan,
+				updateTogether: (...args: Parameters<typeof joint>) => afterWrite(joint(...args)),
 			}),
 		),
 	]);
@@ -220,7 +222,7 @@ export async function serve(
 		simulated.shiftClock(ms);
 		lag += ms;
 	};
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			audit.module,
@@ -258,7 +260,8 @@ export async function serve(
 			...flowsConfig(pick(true)),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -310,8 +313,13 @@ export async function serve(
 	/** A fresh browser, signed in by password. */
 	const signIn = async (subject = "alice") => {
 		jar = new Map();
-		const facts = { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() };
-		const { cookies } = await app.get(sessions).complete(testRequest(), facts);
+		const facts = {
+			subject,
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
+		const { cookies } = openedOf(await app.get(sessions).open(testRequest(), facts));
 		keep(cookies);
 	};
 	/** Enrolls a code factor from a signed-in browser and answers its secret and the recovery codes. */
@@ -331,7 +339,12 @@ export async function serve(
 		from?: LoginFrom,
 	) => {
 		jar = new Map();
-		const facts = { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() };
+		const facts = {
+			subject,
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
 		const outcome = await app.get(logins).login(testRequest(), facts, done, from);
 		keep(outcome.cookies);
 		return outcome;
@@ -354,6 +367,7 @@ export async function serve(
 	};
 	return {
 		app,
+		input,
 		simulated,
 		kept,
 		lagStores,

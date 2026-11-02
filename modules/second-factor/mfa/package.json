@@ -16,7 +16,10 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/labels": "workspace:*",
 		"@mod/login-gates": "workspace:*",
+		"@mod/mfa-binding": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",
+		"@mod/mfa-managing": "workspace:*",
+		"@mod/mfa-reading": "workspace:*",
 		"@mod/mfa-witness": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"zod": "4.6.7"

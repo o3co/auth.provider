@@ -182,5 +182,5 @@ export interface Policy {
 	limitsOf(narrower?: Narrower, signed?: boolean): Limits;
 }
 
-export { type HostEntry, hostEntryOf, policyOf, withinHosts } from "./policy.ts";
-export { hostList, type PolicySettings, policySettings } from "./settings.ts";
+export { policyOf } from "./policy.ts";
+export { type PolicySettings, policySettings } from "./settings.ts";

@@ -20,6 +20,8 @@ onNew(codeArea, (part, scene) => {
 		],
 		store: "volatile",
 		...(part.without ? { without: part.without } : {}),
+		// The scene alone chooses the document hosts: a trial's allow beside allow-any-host refuses boot.
+		...(part.documents ? { whole: ["clients-cimd"] } : {}),
 		config: {
 			// A code that comes again must revoke what it gave.
 			tokens: { revocation: "denylist" },
@@ -32,12 +34,25 @@ onNew(codeArea, (part, scene) => {
 			// Without its page, consent cannot ask.
 			...(part.withoutConsent ? {} : { consent: { page: `${origin}/consent` } }),
 			...(part.acr ? { acr: { values: part.acr.values } } : {}),
-			...(part.documents ? { "clients-cimd": part.documents } : {}),
-			// The back channel reaches the allowed origins alone, those on plain http at loopback as such.
+			...(part.documents
+				? {
+						"clients-cimd": {
+							...(part.documents.allow ? { allow: part.documents.allow } : {}),
+							...(part.documents.anyHost ? { "allow-any-host": true } : {}),
+							...(part.documents.deny ? { deny: part.documents.deny } : {}),
+							...(part.documents.scopes ? { scopes: part.documents.scopes } : {}),
+						},
+					}
+				: {}),
+			// The back channel reaches the allowed origins alone, those on plain http at loopback as such;
+			// the documents' hosts stay within reach beside them.
 			...(part.logout
 				? {
 						outbound: {
-							allow: part.logout.allowed.map((origin) => new URL(origin).hostname),
+							allow: [
+								...part.logout.allowed.map((origin) => new URL(origin).hostname),
+								...(part.documents?.allow ?? []),
+							],
 							"plain-loopback": part.logout.allowed
 								.filter((origin) => origin.startsWith("http:"))
 								.map((origin) => new URL(origin).host),
@@ -47,6 +62,10 @@ onNew(codeArea, (part, scene) => {
 			...(part.refresh?.lifetimeSeconds
 				? { refresh: { lifetime: `${part.refresh.lifetimeSeconds}s` } }
 				: {}),
+			...(part.sweepSeconds
+				? { "session-lifecycle": { "sweep-interval": `${part.sweepSeconds}s` } }
+				: {}),
+			...(part.closingShards ? { "session-store": { "closing-shards": part.closingShards } } : {}),
 		},
 	};
 });

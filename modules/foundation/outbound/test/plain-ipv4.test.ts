@@ -2,11 +2,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { setDefaultAutoSelectFamily } from "node:net";
 import { isUnavailable } from "@mod/kernel";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
 import { outboundOver, section } from "../src/module.ts";
-import { type Resolver, systemResolver } from "../src/transport.ts";
+import { type Lookup, systemLookup } from "../src/transport.ts";
 
 // A name ECS Service Connect answers, as its hosts file lines give it: 127.255.0.1, which its proxy
 // takes, and 2600:f0f0::1, which in the environment reported does not reach. A connection to
@@ -37,7 +38,7 @@ const own = { internal: configuredUrl(url) };
 /** A resolver answering by family as the hosts file does, recording each lookup. */
 function serviceConnect(answers: { all?: readonly string[]; ipv4?: readonly string[] } = {}) {
 	const asked: { host: string; family: 4 | undefined }[] = [];
-	const resolve: Resolver = async (host, family) => {
+	const resolve: Lookup = async (host, family) => {
 		asked.push({ host, family });
 		return family === 4
 			? (answers.ipv4 ?? ["127.255.0.1"])
@@ -47,7 +48,7 @@ function serviceConnect(answers: { all?: readonly string[]; ipv4?: readonly stri
 }
 
 /** Outbound over the resolver given; `lookups` at once, as the threadpool would allow. */
-const over = (resolve: Resolver, settings: Record<string, unknown> = {}, lookups?: number) =>
+const over = (resolve: Lookup, settings: Record<string, unknown> = {}, lookups?: number) =>
 	outboundOver(
 		section.parse({
 			"allow-any-public": true,
@@ -56,7 +57,7 @@ const over = (resolve: Resolver, settings: Record<string, unknown> = {}, lookups
 			...settings,
 		}),
 		resolve,
-		{},
+		{ floor: testTlsOptions },
 		AbortSignal.timeout,
 		lookups,
 	);
@@ -118,7 +119,7 @@ describe("plain http to a pair plain-ipv4 names", () => {
 	});
 
 	it("says unreachable where the lookup fails, as before, telling it from an empty answer", async () => {
-		const failing: Resolver = async () => {
+		const failing: Lookup = async () => {
 			throw Object.assign(new Error("no IPv4"), { code: "ENOTFOUND" });
 		};
 		expect(await failure(over(failing).fetch(url, {}, own))).toBe("unavailable: unreachable");
@@ -169,7 +170,7 @@ describe("plain http to a pair plain-ipv4 names", () => {
 	it("resolves the same name at once for IPv4 alone and for every family, neither taking the other's answer", async () => {
 		const settle: Record<string, (addresses: readonly string[]) => void> = {};
 		const asked: (4 | undefined)[] = [];
-		const resolve: Resolver = (_host, family) => {
+		const resolve: Lookup = (_host, family) => {
 			asked.push(family);
 			return new Promise((done) => {
 				settle[String(family)] = done;
@@ -189,8 +190,8 @@ describe("plain http to a pair plain-ipv4 names", () => {
 
 describe("the system's resolver", () => {
 	it("answers IPv4 addresses alone where asked for them, the hosts file included", async () => {
-		const every = await systemResolver("localhost");
-		const ipv4 = await systemResolver("localhost", 4);
+		const every = await systemLookup("localhost");
+		const ipv4 = await systemLookup("localhost", 4);
 		expect(ipv4.length).toBeGreaterThan(0);
 		expect(ipv4.every((address) => /^\d+\.\d+\.\d+\.\d+$/.test(address))).toBe(true);
 		expect(every.length).toBeGreaterThanOrEqual(ipv4.length);
@@ -205,9 +206,9 @@ describe("plain-ipv4 in the operator's section", () => {
 			: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
 	};
 
-	it("takes pairs of either plain list, as the lists compare hosts: case and a trailing dot", () => {
+	it("takes pairs of either plain list, as the lists compare hosts: in any case", () => {
 		expect(
-			refusal({ "plain-internal": ["api-internal:9092"], "plain-ipv4": ["API-Internal.:9092"] }),
+			refusal({ "plain-internal": ["api-internal:9092"], "plain-ipv4": ["API-Internal:9092"] }),
 		).toBe("taken");
 		expect(refusal({ "plain-loopback": ["sidecar:8080"], "plain-ipv4": ["sidecar:8080"] })).toBe(
 			"taken",
@@ -226,14 +227,7 @@ describe("plain-ipv4 in the operator's section", () => {
 	});
 
 	it("refuses a pair whose host is an address, in any spelling a URL reads as one", () => {
-		for (const host of [
-			"127.255.0.1",
-			"127.1",
-			"2147483649",
-			"0x7f000001",
-			"[::ffff:127.0.0.1]",
-			"[2600:f0f0::1]",
-		]) {
+		for (const host of ["127.255.0.1", "[::ffff:127.0.0.1]", "[2600:f0f0::1]"]) {
 			const pair = `${host}:9092`;
 			const said = refusal({ "plain-internal": [pair], "plain-ipv4": [pair] });
 			expect(said, host).toContain(
@@ -241,17 +235,28 @@ describe("plain-ipv4 in the operator's section", () => {
 			);
 			expect(said, host).not.toContain(host);
 		}
+		// A short or numeric IPv4 form is no host as the plain lists read one: plain-internal refuses
+		// it first, and plain-ipv4 as no pair.
+		for (const host of ["127.1", "2147483649", "0x7f000001"]) {
+			const pair = `${host}:9092`;
+			const said = refusal({ "plain-internal": [pair], "plain-ipv4": [pair] });
+			expect(said, host).toBe(
+				"plain-internal.0: not a host:port pair; plain-ipv4.0: not a host:port pair",
+			);
+		}
 	});
 
 	it("refuses a pair named twice, in any spelling the lists take as one", () => {
 		const twice = refusal({
 			"plain-internal": ["api-internal:9092"],
-			"plain-ipv4": ["api-internal:9092", "API-INTERNAL.:9092"],
+			"plain-ipv4": ["api-internal:9092", "API-INTERNAL:9092"],
 		});
 		expect(twice).toBe("plain-ipv4: plain-ipv4 names a pair once");
 	});
 
-	it("refuses an entry that is not a host:port pair, or holds another part of a URL in its host", () => {
+	it("refuses an entry that is not a host:port pair, or holds another part of a URL in its host, once at its place", () => {
+		// No rule of the section repeats it: not "names only pairs…", nor "names a pair once".
+		const twice = "plain-ipv4.0: not a host:port pair; plain-ipv4.1: not a host:port pair";
 		for (const entry of [
 			"api-internal",
 			"api-internal:09092",
@@ -263,8 +268,13 @@ describe("plain-ipv4 in the operator's section", () => {
 			"api-internal#x:9092",
 			"api-internal\\x:9092",
 			"api-internal:80:9092",
+			"api-internal.:9092",
+			"api..internal:9092",
+			".api-internal:9092",
+			"api_internal:9092",
+			"::1:9092",
 		]) {
-			expect(refusal({ "plain-ipv4": [entry] }), entry).toContain("not a host:port pair");
+			expect(refusal({ "plain-ipv4": [entry, entry] }), entry).toBe(twice);
 		}
 	});
 

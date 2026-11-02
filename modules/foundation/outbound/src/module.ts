@@ -1,10 +1,9 @@
 import { isLoopbackAddress } from "@mod/address-reach";
-import { contract, defineModule } from "@mod/kernel";
+import { hostList } from "@mod/host-entries";
+import { type BuildContext, contract, defineModule } from "@mod/kernel";
 import {
 	type CredentialPolicy,
 	credentialPolicy,
-	DestinationRefused,
-	hostList,
 	type Narrower,
 	type OutboundLimits,
 	type OutboundRefusals,
@@ -13,6 +12,7 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
+import { isFloor, tlsOptions } from "@mod/tls-options";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 import {
@@ -23,8 +23,19 @@ import {
 	type SignedOutbound,
 	signedOutbound,
 } from "./contract.ts";
+import { sentRequest } from "./credential/credential.ts";
+import {
+	inProcessPool,
+	LookupRefused,
+	type Lookups,
+	lookupShares,
+	lookupsOver,
+	type Pool,
+} from "./lookups/contract.ts";
 import { plainIpv4Rules, plainIpv4Setting, takesIpv4 } from "./plain-ipv4.ts";
-import { type Resolver, type Route, send, systemResolver, type Trust } from "./transport.ts";
+import { type ResolverPool, resolverPool } from "./resolver-process/contract.ts";
+import type { Tls } from "./tls/tls.ts";
+import { type Lookup, type Resolver, type Route, send, systemLookup } from "./transport.ts";
 
 export const section = policySettings
 	.safeExtend({
@@ -61,6 +72,25 @@ export const section = policySettings
 			"The hosts reached directly while a proxy is set; `.name` covers the name and the names under it.",
 		),
 		"plain-ipv4": plainIpv4Setting,
+		resolution: z
+			.enum(["helper", "in-process"])
+			.prefault("helper")
+			.describe(
+				"Where names are resolved, as the system resolves them: `helper`, in helper processes, one ended once no request waits on its lookups; `in-process`, here, where no deadline stops a lookup.",
+			),
+		"max-lookups": z
+			.number()
+			.int()
+			.min(1)
+			.max(1024)
+			.optional()
+			.describe(
+				"Names resolving at once, the outside party's half among them; one more is unavailable at once. Four by default, never more than max-concurrent.",
+			),
+	})
+	.refine((s) => s["max-lookups"] === undefined || s["max-lookups"] <= s["max-concurrent"], {
+		message: "max-lookups is never more than max-concurrent",
+		path: ["max-lookups"],
 	})
 	.refine((s) => s["proxy-authorization"] === undefined || s.proxy !== undefined, {
 		message: "proxy-authorization is for a proxy: set proxy too",
@@ -91,18 +121,28 @@ function places(max: number) {
 	};
 }
 
-/** Node's threadpool when `UV_THREADPOOL_SIZE` sets none it can read. */
-const defaultThreadpool = 4;
+/** Names resolving at once: the setting, else four, never more than `max-concurrent`. */
+const maxLookupsOf = (settings: z.output<typeof section>) =>
+	settings["max-lookups"] ?? Math.min(4, settings["max-concurrent"]);
 
-/**
- * How many names may resolve at once: half the threadpool, rounded up, at least one and never more
- * than `max-concurrent`. A lookup runs on the threadpool and no deadline stops it, so names that
- * answer slowly hold at most half of it, leaving the rest to hashing and the file system.
- */
-export function lookupsAtOnce(threadpool: string | undefined, maxConcurrent: number): number {
-	const size = /^[1-9]\d*$/.test(threadpool ?? "") ? Number(threadpool) : defaultThreadpool;
-	return Math.min(maxConcurrent, Math.max(1, Math.floor((size + 1) / 2)));
+/** The two pools a section's lookups run in, the deployment's own and the outside party's, and their shares. */
+export interface LookupPools {
+	readonly own: Pool;
+	readonly outside: Pool;
+	readonly shares: { readonly own: number; readonly outside: number };
 }
+
+/** A pool of no place: an outside party's where its share is none. */
+const noPool: Pool = { run: () => undefined };
+
+/** A pool's lookups as a request's resolver: their refusals as outbound's own. */
+const resolverOf =
+	(lookups: Lookups, family?: 4): Resolver =>
+	(name, signal) =>
+		lookups.resolve(name, family, signal).catch((error: unknown) => {
+			if (!(error instanceof LookupRefused)) throw error;
+			throw new OutboundUnavailable(error.failure === "unavailable" ? "busy" : error.failure);
+		});
 
 interface Paths {
 	readonly fetch: Outbound["fetch"];
@@ -115,33 +155,36 @@ interface Paths {
 	readonly lookupsOf: NonNullable<OutboundLimits["lookupsOf"]>;
 }
 
-/** One header value: printable ASCII on one line, no space at either end. */
-const headerValue = /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/;
-
-/** The request as sent: its credential as the Authorization header; none for signed material. Its value is never told. */
-function sentRequest(request: OutboundRequest, signed: boolean): OutboundRequest {
-	const { credential, ...rest } = request;
-	// An Authorization value goes only as a credential, under its rules: never one a caller writes.
-	if (Object.keys(rest.headers ?? {}).some((name) => name.toLowerCase() === "authorization")) {
-		throw new TypeError("outbound: an Authorization value goes as the request's credential");
+/** A floor not tls-options' own handed to `outboundOver`: the composition is wrong, not a setting. */
+export class NotTheFloor extends TypeError {
+	constructor() {
+		super("the TLS floor is not one tls-options made: provide it from @mod/tls-options");
 	}
-	if (credential === undefined) return rest;
-	if (signed) throw new DestinationRefused("credential");
-	if (!headerValue.test(credential)) {
-		throw new TypeError("outbound: a credential is one header value, printable ASCII on one line");
-	}
-	return { ...rest, headers: { ...rest.headers, authorization: credential } };
 }
 
 /** The outbound paths over a resolver; the module passes the system's, a test its own. */
 /** `deadlineOf` makes a request's one deadline; a test gives one it fires itself. */
 export function outboundOver(
 	settings: z.output<typeof section>,
-	resolve: Resolver,
-	trust: Trust = {},
+	/** The pools to resolve in; a lookup function, as a test gives, runs in this process. */
+	lookupsIn: LookupPools | Lookup,
+	/** The floor every TLS connection holds to, and a test's authorities. */
+	tls: Tls,
 	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
-	lookups = lookupsAtOnce(process.env.UV_THREADPOOL_SIZE, settings["max-concurrent"]),
+	/** In this process, the lookups at once; else as the settings and the threadpool give. */
+	lookupsAtOnce?: number,
 ): Paths {
+	// A copy of the floor, or another's value, may carry a weaker one: tls-options' own alone is taken.
+	// Each read once, so what was checked is what is sent: the caller's object is never read again.
+	const { floor, ca } = tls;
+	if (!isFloor(floor)) throw new NotTheFloor();
+	const checked: Tls = Object.freeze({ floor, ...(ca === undefined ? {} : { ca }) });
+	const pools =
+		typeof lookupsIn === "function"
+			? inProcessPools(settings, lookupsIn, lookupsAtOnce)
+			: lookupsIn;
+	const own = lookupsOver(pools.own);
+	const outside = lookupsOver(pools.outside);
 	const policy = policyOf(settings);
 	const direct = settings["direct-hosts"];
 	const route: Route | undefined =
@@ -149,47 +192,26 @@ export function outboundOver(
 			? undefined
 			: {
 					proxy: new URL(settings.proxy),
+					// The proxy is the deployment's own: its name resolves in the deployment's pool.
+					resolve: resolverOf(own),
 					...(settings["proxy-authorization"]
 						? { authorization: settings["proxy-authorization"] }
 						: {}),
 					direct: (host) => policy.listed(host, direct),
 				};
 	const requestPlace = places(settings["max-concurrent"]);
-	// A name lookup cannot be stopped at a deadline: one still running past it holds a lookup of its
-	// own, never a request's place, and no more run at once than half the threadpool. Names an outside
-	// party chose take half of those at most, so slow ones of theirs never hold every lookup.
-	const outsideLookups = Math.floor(lookups / 2);
-	const outsidePlace = places(outsideLookups);
-	const ownPlace = places(lookups - outsideLookups);
-	// A name already resolving, for the same family, is answered by that lookup, which takes one place
-	// for all who ask: a lookup for IPv4 alone never answers one for every family, nor the reverse.
-	const resolving = new Map<string, Promise<readonly string[]>>();
-	const boundedBy =
-		(place: ReturnType<typeof places>): Resolver =>
-		(host, family) => {
-			const key = `${family ?? "any"} ${host}`;
-			return (
-				resolving.get(key) ??
-				place(() => {
-					const lookup = resolve(host, family);
-					resolving.set(key, lookup);
-					return lookup.finally(() => resolving.delete(key));
-				})
-			);
-		};
-	const outsideChosen = boundedBy(outsidePlace);
-	const own = boundedBy(ownPlace);
 	const go = async (url: string, request: OutboundRequest, narrower: Narrower, signed: boolean) => {
 		const limits = policy.limitsOf(narrower, signed);
 		const sent = sentRequest(request, signed);
 		const admitted = policy.admit(url, narrower, signed);
-		const bounded = narrower.outsideChosen ? outsideChosen : own;
+		// Names an outside party chose resolve in a pool of their own, so theirs never hold every lookup.
 		// A plain-ipv4 pair's name is resolved for IPv4 alone; the policy checks every answer as ever.
-		const resolving: Resolver = takesIpv4(settings["plain-ipv4"], admitted)
-			? (host) => bounded(host, 4)
-			: (host) => bounded(host);
+		const resolving = resolverOf(
+			narrower.outsideChosen ? outside : own,
+			takesIpv4(settings["plain-ipv4"], admitted) ? 4 : undefined,
+		);
 		return requestPlace(() =>
-			send(admitted, sent, limits, resolving, policy, route, trust, deadlineOf),
+			send(admitted, sent, limits, resolving, policy, route, checked, deadlineOf),
 		);
 	};
 	return {
@@ -201,46 +223,128 @@ export function outboundOver(
 		browsedRefusal: policy.browsedRefusal,
 		// The call `go` cuts a request by, for a plain request.
 		limitsOf: (narrower) => policy.limitsOf(narrower, false),
-		lookupsOf: (narrower) => (narrower?.outsideChosen ? outsideLookups : lookups - outsideLookups),
+		lookupsOf: (narrower) => (narrower?.outsideChosen ? pools.shares.outside : pools.shares.own),
 	};
+}
+
+/**
+ * Lookups in this process with `lookup`: the shares of `lookupsAtOnce` where given, else of
+ * `max-lookups` held to half the threadpool.
+ */
+function inProcessPools(
+	settings: z.output<typeof section>,
+	lookup: Lookup,
+	lookupsAtOnce?: number,
+): LookupPools {
+	const shares =
+		lookupsAtOnce === undefined
+			? lookupShares({
+					maxLookups: maxLookupsOf(settings),
+					inProcess: { threadpool: process.env.UV_THREADPOOL_SIZE },
+				})
+			: lookupShares({ maxLookups: lookupsAtOnce });
+	return {
+		own: inProcessPool(shares.own, lookup),
+		outside: shares.outside > 0 ? inProcessPool(shares.outside, lookup) : noPool,
+		shares,
+	};
+}
+
+/** Each pool's resolver helper, started for its share; a refused start ends both before boot is refused. */
+async function startedPools(
+	c: BuildContext<unknown>,
+	shares: LookupPools["shares"],
+): Promise<LookupPools> {
+	const poolOf = (pool: string, size: number) =>
+		resolverPool({ pool, size, warn: c.log.warn, now: () => c.clock.now() });
+	const started: ResolverPool[] = [poolOf("own", shares.own)];
+	if (shares.outside > 0) started.push(poolOf("outside", shares.outside));
+	const stopAll = () => Promise.all(started.map((pool) => pool.stop())).then(() => {});
+	c.onStop(stopAll);
+	try {
+		await Promise.all(started.map((pool) => pool.start()));
+	} catch {
+		await stopAll();
+		c.refuse(
+			"outbound.resolution",
+			"the resolver's helper process did not start: allow it to start, or set resolution = in-process",
+		);
+	}
+	const [ownPool, outsidePool] = started as [ResolverPool, ResolverPool?];
+	return { own: ownPool, outside: outsidePool ?? noPool, shares };
 }
 
 const paths = contract<Paths>("outbound.paths");
 
-export default defineModule({ name: "outbound", section, replicaSafe: true }, (m) => [
-	m.provide(paths).by((c) => {
-		const { proxy } = c.section;
-		// Their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
-		const plainInternal = c.section["plain-internal"].length;
-		if (plainInternal > 0) c.log.warn("outbound.plain_internal", { count: plainInternal });
-		if (proxy !== undefined) {
-			const host = new URL(proxy).hostname;
-			c.log.warn("outbound.proxy_checks_addresses", { host });
-			if (c.section["proxy-authorization"] && !isLoopbackAddress(host)) {
-				c.log.warn("outbound.proxy_credentials_in_clear", { host });
+export default defineModule(
+	{ name: "outbound", section, replicaSafe: true, takes: [tlsOptions] },
+	(m) => [
+		m.provide(paths).by(async (c) => {
+			const tls = { floor: await c.get(tlsOptions) };
+			/** The paths over these lookups, a floor not tls-options' own refusing boot as composed wrong. */
+			const over = (lookups: LookupPools | Lookup) => {
+				try {
+					return outboundOver(c.section, lookups, tls);
+				} catch (error) {
+					if (error instanceof NotTheFloor) return c.refuse("outbound", error.message);
+					throw error;
+				}
+			};
+			const { proxy } = c.section;
+			// Their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
+			const plainInternal = c.section["plain-internal"].length;
+			if (plainInternal > 0) c.log.warn("outbound.plain_internal", { count: plainInternal });
+			// The operator's other loosenings, each said at every start by its count or reason alone.
+			const counted = [
+				["outbound.plain_loopback", c.section["plain-loopback"].length],
+				["outbound.plain_ipv4", c.section["plain-ipv4"].length],
+				["outbound.internal_hosts", c.section["internal-hosts"].length],
+			] as const;
+			for (const [event, count] of counted) if (count > 0) c.log.warn(event, { count });
+			if (c.section["allow-any-public"]) {
+				c.log.warn("outbound.any_public_host", {
+					reason: "any public host is reached by name, not only those outbound.allow lists",
+				});
 			}
-		}
-		const present = proxyVariables.filter((name) => (process.env[name] ?? "") !== "");
-		if (proxy === undefined && present.length > 0 && !c.section["direct-despite-proxy"]) {
-			c.refuse(
-				"outbound",
-				`${present.join(", ")} is set and never read: write outbound.proxy, or declare direct-despite-proxy`,
-			);
-		}
-		return outboundOver(c.section, systemResolver);
-	}),
-	// One set of counts for both paths.
-	m.provide(outbound).by(async (c) => ({ fetch: (await c.get(paths)).fetch })),
-	m.provide(signedOutbound).by(async (c) => ({ fetch: (await c.get(paths)).fetchSigned })),
-	m.provide(outboundRefusals).by(async (c) => {
-		const { explained, plainInternal, browsedRefusal } = await c.get(paths);
-		return { explained, plainInternal, browsedRefusal };
-	}),
-	m.provide(credentialPolicy).by(async (c) => ({
-		refusalOf: (await c.get(paths)).credentialRefusalOf,
-	})),
-	m.provide(outboundLimits).by(async (c) => {
-		const { limitsOf, lookupsOf } = await c.get(paths);
-		return { of: limitsOf, lookupsOf };
-	}),
-]);
+			if (c.section.resolution === "in-process") {
+				c.log.warn("outbound.resolution_in_process", {
+					reason: "names resolve in the app's own process, not in helpers",
+				});
+			}
+			// Neither names the proxy: a log line carries no value.
+			if (proxy !== undefined) {
+				c.log.warn("outbound.proxy_checks_addresses", {
+					reason: "the proxy, not outbound, resolves names and checks where they lead",
+				});
+				if (c.section["proxy-authorization"] && !isLoopbackAddress(new URL(proxy).hostname)) {
+					c.log.warn("outbound.proxy_credentials_in_clear", {
+						reason: "the proxy's credentials go in the clear",
+					});
+				}
+			}
+			const present = proxyVariables.filter((name) => (process.env[name] ?? "") !== "");
+			if (proxy === undefined && present.length > 0 && !c.section["direct-despite-proxy"]) {
+				c.refuse(
+					"outbound",
+					`${present.join(", ")} is set and never read: write outbound.proxy, or declare direct-despite-proxy`,
+				);
+			}
+			if (c.section.resolution === "in-process") return over(systemLookup);
+			return over(await startedPools(c, lookupShares({ maxLookups: maxLookupsOf(c.section) })));
+		}),
+		// One set of counts for both paths.
+		m.provide(outbound).by(async (c) => ({ fetch: (await c.get(paths)).fetch })),
+		m.provide(signedOutbound).by(async (c) => ({ fetch: (await c.get(paths)).fetchSigned })),
+		m.provide(outboundRefusals).by(async (c) => {
+			const { explained, plainInternal, browsedRefusal } = await c.get(paths);
+			return { explained, plainInternal, browsedRefusal };
+		}),
+		m.provide(credentialPolicy).by(async (c) => ({
+			refusalOf: (await c.get(paths)).credentialRefusalOf,
+		})),
+		m.provide(outboundLimits).by(async (c) => {
+			const { limitsOf, lookupsOf } = await c.get(paths);
+			return { of: limitsOf, lookupsOf };
+		}),
+	],
+);

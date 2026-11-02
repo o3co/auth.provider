@@ -2,7 +2,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { accessTokenSigning, keys } from "@mod/keys";
 import { afterEach, expect, it } from "vitest";
 import { idTokenHints } from "../src/contract.ts";
-import { booted } from "./parts.ts";
+import { booted, readers } from "./parts.ts";
 
 const start = 1_800_000_000_000;
 let now = start;
@@ -20,12 +20,36 @@ async function serve() {
 		app.get(keys).sign({ ...core, sid: "s1", ...over }, typ);
 	/** An access token the provider signed, the same claims under the access token type. */
 	const access = () => app.get(accessTokenSigning).sign({ ...core, sid: "s1" });
-	return { check: app.get(idTokenHints).check, signed, access };
+	/** authorize's reading of a hint, through the one reader oidc contributes. */
+	const read = (hint: string) => {
+		const [reader, ...more] = app.get(readers);
+		if (!reader || more.length > 0) throw new Error("not one hint reader contributed");
+		return reader.read(hint);
+	};
+	return { check: app.get(idTokenHints).check, read, signed, access };
 }
 
 it("answers the subject, session, client and issue time of an ID token the provider signed", async () => {
 	const { check, signed } = await serve();
 	expect(await check(await signed())).toEqual({
+		kind: "valid",
+		subject: "alice",
+		session: "s1",
+		client: "app",
+		issuedAt: now,
+	});
+});
+
+it("ignores the claims of a hint it does not understand [oidc-core-2-s]", async () => {
+	const { check, signed } = await serve();
+	const odd = {
+		ext: "x",
+		nested: { a: [1] },
+		nonce: "n",
+		acr: "urn:x",
+		"https://other.example/c": 1,
+	};
+	expect(await check(await signed(odd))).toEqual({
 		kind: "valid",
 		subject: "alice",
 		session: "s1",
@@ -79,4 +103,19 @@ it("answers a token that names no session apart", async () => {
 	const { check, signed } = await serve();
 	expect(await check(await signed({ sid: undefined }))).toEqual({ kind: "sessionless" });
 	expect(await check(await signed({ sid: "" }))).toEqual({ kind: "sessionless" });
+});
+
+it("reads for authorize the subject of a hint it takes, a long expired one included, and any other, one naming no session among them, as invalid [oidc-core-3.1.2.2-f] [oidc-core-3.1.2.2-g]", async () => {
+	const { read, signed, access } = await serve();
+	const hint = await signed();
+	expect(await read(hint)).toEqual({ kind: "subject", subject: "alice" });
+	const others = [
+		await signed({ sid: undefined }),
+		await access(),
+		await signed({ iss: "x" }),
+		"x",
+	];
+	now += 30 * 86_400_000;
+	expect(await read(hint)).toEqual({ kind: "subject", subject: "alice" });
+	for (const token of others) expect(await read(token)).toEqual({ kind: "invalid" });
 });

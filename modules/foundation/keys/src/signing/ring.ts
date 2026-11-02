@@ -11,16 +11,22 @@ export interface RingKey {
 
 export interface Ring {
 	readonly signing: RingKey;
+	/** The key that signs next, published among `publicKeys` too. */
+	readonly next?: RingKey;
 	/** Keys safe to publish: the signing key's public half (unless HS256), the previous keys and the next. */
 	readonly publicKeys: readonly RingKey[];
 }
+
+/** RS256's least modulus, in bits (RFC 7518 §3.3). */
+const rsaModulusFloor = 2048;
 
 const keyTypes: Readonly<Record<AsymmetricAlg, (key: KeyObject) => boolean>> = {
 	EdDSA: (key) => key.asymmetricKeyType === "ed25519",
 	ES256: (key) =>
 		key.asymmetricKeyType === "ec" && key.asymmetricKeyDetails?.namedCurve === "prime256v1",
 	RS256: (key) =>
-		key.asymmetricKeyType === "rsa" && (key.asymmetricKeyDetails?.modulusLength ?? 0) >= 2048,
+		key.asymmetricKeyType === "rsa" &&
+		(key.asymmetricKeyDetails?.modulusLength ?? 0) >= rsaModulusFloor,
 };
 
 /** True once the key's expiry has passed; reads the clock only for keys that expire. */
@@ -71,10 +77,10 @@ export function readRing(section: Section): Ring | { readonly unreadable: string
 		});
 	}
 	const coming = section.next;
-	if (coming !== undefined) {
-		const key = parsed(() => createPublicKey(coming["public-key"]));
-		if (!key || !keyTypes[coming.alg](key)) return { unreadable: "next.public-key" };
-		publicKeys.push({ kid: coming.kid, alg: coming.alg, key });
-	}
-	return { signing, publicKeys };
+	if (coming === undefined) return { signing, publicKeys };
+	const key = parsed(() => createPublicKey(coming["public-key"]));
+	if (!key || !keyTypes[coming.alg](key)) return { unreadable: "next.public-key" };
+	const next = { kid: coming.kid, alg: coming.alg, key };
+	publicKeys.push(next);
+	return { signing, next, publicKeys };
 }

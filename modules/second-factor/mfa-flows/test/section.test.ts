@@ -21,7 +21,9 @@ it("defaults each setting, its times read as an operator writes them, and refuse
 it.each(Object.keys({ ...times, ...lockoutTimes }))(
 	"reads %s written with its unit, in whole seconds, never a bare number",
 	(key) => {
-		expect(timeOf(section.parse(at(key, { [key]: "20m" })), key)).toBe(1200);
+		// memory is at least 1h; the others take 20m.
+		const [written, read] = key === "memory" ? ["2h", 7200] : ["20m", 1200];
+		expect(timeOf(section.parse(at(key, { [key]: written })), key)).toBe(read);
 		const refused = [600, "600", "1500ms"].map((value) => parses(at(key, { [key]: value })));
 		expect(refused).toEqual([false, false, false]);
 	},
@@ -41,6 +43,22 @@ it("takes the other numbers whole and within their bounds", () => {
 		const taken = [min - 1, min, min + 0.5, max, max + 1].map((value) => parses({ [name]: value }));
 		expect([name, taken]).toEqual([name, [false, true, false, true, false]]);
 	}
+});
+
+it.each(["threshold", "budget", "hard-limit"])(
+	"takes lockout's %s from 1 to 100, the most consecutive failures NIST SP 800-63B rev 4 §3.2.2 allows, and nothing outside",
+	(key) => {
+		// The order threshold ≤ budget ≤ hard-limit is rate-limit's to judge, at boot.
+		const taken = [0, 1, 100, 101].map((n) => parses({ lockout: { [key]: n } }));
+		expect(taken).toEqual([false, true, true, false]);
+	},
+);
+
+it("takes a lockout memory from 1h, and refuses one a second shorter", () => {
+	expect(["3600s", "3599s"].map((memory) => parses({ lockout: { memory } }))).toEqual([
+		true,
+		false,
+	]);
 });
 
 it.each([

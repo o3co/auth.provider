@@ -8,27 +8,46 @@ import { purposes } from "./contract.ts";
 import { emailFactor } from "./kind.ts";
 import { type Settings, section } from "./section.ts";
 
-export default defineModule({ name: "mfa-email", section, replicaSafe: true }, (m) => {
-	// Stateless: each contribution builds its own.
-	const build = async (c: BuildContext<Settings>) =>
-		emailFactor({
-			mail: await c.get(mail),
-			users: await c.get(users),
-			// Late: session's own build asks mfa, which asks this kind.
-			attributes: c.late(subjectAttributes),
-			addsSecondFactor: c.section["adds-second-factor"],
-			log: c.log,
-			codeMs: c.section["code-lifetime"] * 1000,
-			now: c.clock.now,
-			random: c.random.bytes,
-		});
-	return [
-		m.contribute(factorKinds).by(async (c) => (await build(c)).kind),
-		m.contribute(bindingProofs).by(async (c) => {
-			// Named late, as it collects this proof: boot refuses where it is not composed to hear it.
+/** The binding proof of the account's address, which mfa-email-proof contributes. */
+const accountEmail = "account-email";
+
+export default defineModule(
+	{
+		name: "mfa-email",
+		section,
+		replicaSafe: true,
+		takes: [mail, bindingProof, bindingProofs, subjectAttributes, users],
+	},
+	(m) => [
+		m.contribute(factorKinds).by(async (c: BuildContext<Settings>) => {
+			// A code by email comes with the proof of the account's address before a first binding, and
+			// with mfa-binding-proof, which hears it and gates the binding: named late, so boot refuses
+			// without it, whatever contributes the proof. Without either a first factor binds unproved.
 			c.late(bindingProof);
-			return (await build(c)).proof;
+			const proofs = await c.collect(bindingProofs);
+			if (!proofs.some((proof) => proof.name === accountEmail)) {
+				c.refuse(
+					"mfa-email",
+					"a code by email is composed without mfa-email-proof, which proves the account's address before a first binding: compose it",
+				);
+			}
+			// The operator's choice, yet said at every start: the mailbox alone meets a second factor.
+			if (c.section["adds-second-factor"]) {
+				c.log.warn("mfa-email.counts_as_second_factor", {
+					reason: "a code by mail meets a required second factor",
+				});
+			}
+			return emailFactor({
+				mail: await c.get(mail),
+				users: await c.get(users),
+				// Late: session's own build asks mfa, which asks this kind.
+				attributes: c.late(subjectAttributes),
+				addsSecondFactor: c.section["adds-second-factor"],
+				codeMs: c.section["code-lifetime"] * 1000,
+				now: c.clock.now,
+				random: c.random.bytes,
+			});
 		}),
 		...Object.values(purposes).map((purpose) => m.contribute(mailPurposes).by(() => ({ purpose }))),
-	];
-});
+	],
+);

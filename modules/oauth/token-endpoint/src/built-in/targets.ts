@@ -3,6 +3,9 @@ import type { BuildContext } from "@mod/kernel";
 
 export const unread: TargetRule = { target: ({ audience }) => ({ kind: "audience", audience }) };
 
+/** What `composedRule` takes from the build context. */
+export const targetTakes = [targetRules] as const;
+
 export async function composedRule(c: Pick<BuildContext<unknown>, "collect" | "refuse">) {
 	const rules = await c.collect(targetRules);
 	if (rules.length > 1) {

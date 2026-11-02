@@ -27,7 +27,7 @@ Thank you for helping. This guide covers how the repository is laid out, what a 
 
 Generated documents (`docs/configuration.md`, `docs/audit-events.md`, `docs/routes.md` and each module's `reference.conf`) are written by `pnpm --filter @mod/references run configuration`; run it after changing a section, an audit event, a route or a route's policy, and commit the result. Their tests fail when the committed files are behind.
 
-CI also checks, on each pull request, that every commit installs, and that no file or commit message holds a path into a local workspace or a reference to an unrelated project.
+CI also checks, on each pull request, that every commit's `package.json` files parse and hold no conflict marker, and that no file or commit message holds a path into a local workspace or a reference to an unrelated project.
 
 ## The guard
 
@@ -41,14 +41,28 @@ The [guard](modules/tooling/guard/README.md) holds the workspace to its rules: n
 
 ## Commits
 
+- **The README in two languages.** `README.ja.md` is a full translation of `README.md`; a commit that changes one changes the other.
+- A commit says why, not only what; the diff shows what.
+
+In a pull request into `develop`:
+
 - **Conventional Commits**: `feat(<module>): …`, `fix(<module>): …`, `docs: …`, with `!` after the type for a breaking change.
 - **One module per commit.** The card changes in the same commit as the code it describes. A row of the owner map changes in its own commit, right after the module's.
 - **Changing an interface** takes three commits, each in one module: the provider adds the new form, each user switches to it, then the provider removes the old one.
-- **The README in two languages.** `README.ja.md` is a full translation of `README.md`; a commit that changes one changes the other.
-- A commit says why, not only what; the diff shows what.
+
+On `main`, each release is one commit per package, in the order of their dependencies, holding the package's whole change in that version: its subject is in the same form, of the change's main type (`feat` where it adds, `fix` where it only repairs, `!` where it breaks), and its body names the pull requests into `develop` it gathers. The repository's root files and generated documents follow, and the version's commit is last. [Releasing](docs/releasing.md#before-the-tag) says how the release branch is built.
 
 ## Pull requests
 
 - Open pull requests against `develop`. `main` takes releases.
+- `develop` is reset to `main` after each release, so the commits of a merged pull request are not kept on either branch: the pull request holds them, and its description says why the change was made. After a release, move an open branch onto the new `develop` with `git rebase --onto develop <the old develop's head> <branch>`, and push it with `git push --force-with-lease`, your own branch alone.
 - The required check is `build-and-test`, which passes when both `checks` and `integration` pass.
 - Describe the change, how you tested it, and any setting, route or behavior an operator would notice; a change an operator must act on also adds its line to [the migration guide](docs/migration.md).
+
+## Change records
+
+A change that fixes a finding, or a design fix an audit would ask about, carries a change record: what the two commits differ in, and what was run again ([findings and fixes](docs/audit/findings.md)).
+
+- `pnpm --filter @mod/guard run change-record <base> <head>` writes its machine rows as Markdown: the modules touched, the contract's changes by structure, the dependency edges and the budget measures that moved. It reads each commit in a worktree of its own and keeps nothing.
+- Add by hand the owner's confirmation of each contract change, the checks run again with their runs, and whether a design review was needed.
+- A finding not yet fixed is never described in public: its fix and its record are made privately, as `SECURITY.md` says. A pull request's description holds a change record only for a finding already fixed, or a fix of no finding.

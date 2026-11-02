@@ -24,6 +24,12 @@ export interface AccessGrant {
 	readonly authenticatedAtUnknown?: true;
 	readonly acr?: string;
 	/**
+	 * Epoch ms: when the grant's own check compared its subject's boundary, for a token tied to no
+	 * session. Written as `o3co_standing_at` in whole seconds, floored and never after the token's
+	 * issue; it never moves the token's lifetime. Without it, the token stands from its issue.
+	 */
+	readonly standingAt?: number;
+	/**
 	 * Claims the grant adds to its access token: JSON within `added-claims`' limits, no name
 	 * reserved; an empty set is none. What the grant states, never what the provider vouches for.
 	 */
@@ -35,6 +41,7 @@ export interface IssuedAccess {
 	readonly id: string;
 	/** Epoch ms. */
 	readonly expiresAt: number;
+	/** Whole seconds left once signed, rounded up: at least 1, as `issue` refuses a token with less. */
 	readonly expiresIn: number;
 	readonly tokenType: string;
 	/** The names of the claims the grant added, in name order; none where it added none. */
@@ -48,6 +55,8 @@ export type AccessCheck =
 			readonly id: string;
 			readonly grant: AccessGrant;
 			readonly expiresAt: number;
+			/** Epoch ms: the token's standing time, its standing claim where it carries one, else its issue time. */
+			readonly standingAt: number;
 			readonly tokenType: string;
 			readonly binding?: Binding;
 	  }
@@ -103,7 +112,10 @@ export interface IssuanceRefused {
 export type Issued = { readonly kind: "issued"; readonly access: IssuedAccess } | IssuanceRefused;
 export type Admitted = { readonly kind: "allowed" } | IssuanceRefused;
 
-/** `notAfter` (epoch ms) caps the expiry; `lifetimeSeconds` (1–86400) replaces the section's lifetime. */
+/**
+ * `notAfter` (epoch ms) caps the expiry, a token it leaves less than a second refused by `issue`;
+ * `lifetimeSeconds` (2–86400) replaces the section's lifetime.
+ */
 export interface IssueLimits {
 	readonly notAfter?: number;
 	readonly binding?: Binding;
@@ -113,9 +125,21 @@ export interface IssueLimits {
 /** Its `verifyAccess` is the validity `sender-binding` checks a token by at a resource. */
 export interface Tokens extends TokenValidity<AccessCheck> {
 	revocable(): boolean;
-	/** Whether an access token may be issued for the request; the same judgment `issue` makes. */
+	/** Whether access tokens are checked against subject revocation: false where the section states `subject-check = none`. */
+	subjectsChecked(): boolean;
+	/**
+	 * Whether an access token may be issued for the request; the same judgment `issue` makes, but for
+	 * the lifetime, which only `issue`'s limits and signing fix.
+	 */
 	admits(request: IssuanceRequest): Promise<Admitted>;
-	/** Issues once every policy, its own first, allows it; throws Unavailable when one cannot tell. */
+	/**
+	 * Issues once every policy, its own first, allows it; throws Unavailable when one cannot tell.
+	 * The token's `iat` is when `issue` was asked, before the policies are, and its lifetime runs
+	 * from there, their wait included; what it answers is left runs from signing. Refuses, as its
+	 * own rule, a token with less than a second left once signed, its cap passed, its lifetime spent
+	 * in the policies' wait or its signing slow: policy `tokens`, reason `no_lifetime_left`, the
+	 * client's word `expired`. Such a token is handed to no one, and nothing of it is kept.
+	 */
 	issue(request: IssuanceRequest, limits?: IssueLimits): Promise<Issued>;
 	verifyAccess(token: string): Promise<AccessCheck>;
 	revokeReferenced(reference: string): Promise<Revocation>;
@@ -132,6 +156,8 @@ export interface IssuedFor {
 	readonly subject: string;
 	/** Epoch ms. */
 	readonly issuedAt: number;
+	/** Epoch ms: the time its subject's authentication stands from, its standing claim else its issue. */
+	readonly standingAt: number;
 }
 
 /** A condition every access token must still meet, contributed by the module that owns it. */

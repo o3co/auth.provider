@@ -12,7 +12,7 @@
 
 ## Invariants
 - A value must name its unit (`30s`, `"64 KiB"`); a bare number, or a string of one as an environment variable gives, is refused.
-- The forms read are the HOCON library's; only this module names the library's markers.
+- The forms read are the HOCON library's; only this module names the library's markers, which review holds: no check refuses another module naming one.
 
 ## Depends on
 - None (the HOCON library only)

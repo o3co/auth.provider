@@ -107,7 +107,7 @@ describe("federation grants: refusals", () => {
 		expect((await t.grantCall(id, "token")).status).toBe(200);
 	});
 
-	it("refuses the answer to the question without evidence of the provider's origin", async () => {
+	it("refuses the answer to the question without evidence of the provider's origin [guarantee-9-a]", async () => {
 		const lodged = await t.lodge();
 		const b = await t.loggedIn();
 		const { challenge } = await t.open(b, lodged.body.connect_uri);
@@ -128,7 +128,7 @@ describe("federation grants: refusals", () => {
 
 	// Ours ties a connection's round trip to the browser that began it, as well as to its session.
 	it.skipIf(areaTarget().differs("grants-round-trip-tied-to-browser"))(
-		"takes nothing for a callback that comes back in another browser, leaving the round trip to its own",
+		"takes nothing for a callback that comes back in another browser, leaving the round trip to its own [oidc-core-3.1.2.7-a] [rfc9700-2.1-d]",
 		async () => {
 			const lodged = await t.lodge();
 			const first = await t.loggedIn();

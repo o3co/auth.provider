@@ -28,6 +28,8 @@ export interface Idp {
 	readonly formPost: boolean;
 	readonly redirectUri: string;
 	readonly upstreamAmr: ReadonlyMap<string, string>;
+	/** How long before a demand for a fresh login the upstream may say the user logged in. */
+	readonly freshLoginAllowanceMs: number;
 }
 
 /** What the round trip hands a continuation once the upstream's answer is taken, exchanged and fresh. */
@@ -103,6 +105,11 @@ export const sent = (location: string, cookies: readonly string[]): HttpResponse
 	headers: { ...noStore, location },
 	cookies,
 });
+export const landed = (location: string, cookies: readonly string[]): HttpResponse => ({
+	status: 303,
+	headers: { ...noStore, location },
+	cookies,
+});
 /** What a start or a callback answers when a store or the upstream cannot tell, in OAuth's word. */
 const unavailable = { error: "temporarily_unavailable" };
 export const secondOf = (ms: number) => Math.floor(ms / 1000) * 1000;
@@ -115,8 +122,19 @@ export const federationIdps = contract<ReadonlyMap<string, Idp>>("federation.idp
 const landingWith = (landing: string | undefined, at: Pick<Site, "origin">) =>
 	landing ?? `${at.origin}/`;
 
+export const landingTakes = [site] as const;
+
 export const landingIn = async (c: BuildContext<Settings>) =>
 	landingWith(c.section.landing, await c.get(site));
+
+/** What `roundTripIn` and `landingIn` (`landingTakes`) take from the build context; the IdPs are the module's own. */
+export const roundTripTakes = [
+	roundTrips,
+	upstreamContinuations,
+	originEvidence,
+	logins,
+	...landingTakes,
+] as const;
 
 /** The round trip over the IdPs, ending in the continuation its start chose. */
 export async function roundTripIn(
@@ -273,7 +291,7 @@ async function finish(flow: Flow, at: At, trip: Trip, cleared: readonly string[]
 	if (field("error") !== undefined || code === undefined) return refused(400, "upstream_refused");
 	const upstreamLogin = await exchanged(flow, at, trip, code);
 	if (!upstreamLogin) return refused(502, "exchange_failed");
-	if (!fresh(trip, upstreamLogin, idp.upstream.clockSkewMs ?? 0, flow.clock.now())) {
+	if (!fresh(trip, upstreamLogin, idp.freshLoginAllowanceMs, flow.clock.now())) {
 		return refused(401, "login_required");
 	}
 	if (chosen) {
@@ -316,10 +334,10 @@ async function exchanged(flow: Flow, { name, idp, params }: At, trip: Trip, code
 }
 
 /** Whether the upstream login came after an ask to log in again, and within a max age; it must say when. */
-function fresh(trip: Trip, upstreamLogin: UpstreamLogin, skewMs: number, now: number) {
+function fresh(trip: Trip, upstreamLogin: UpstreamLogin, allowanceMs: number, now: number) {
 	if (trip.prompt === undefined && trip.maxAgeSeconds === undefined) return true;
 	const at = upstreamLogin.authenticatedAt;
 	if (at === undefined) return false;
-	if (trip.prompt === "login" && at + skewMs < secondOf(trip.startedAt)) return false;
-	return trip.maxAgeSeconds === undefined || at + skewMs + trip.maxAgeSeconds * 1000 >= now;
+	if (trip.prompt === "login" && at + allowanceMs < secondOf(trip.startedAt)) return false;
+	return trip.maxAgeSeconds === undefined || at + allowanceMs + trip.maxAgeSeconds * 1000 >= now;
 }

@@ -5,6 +5,12 @@
 	"type": "module",
 	"kind": "feature",
 	"storeWiring": true,
+	"asks": [
+		{
+			"line": "`tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
+			"decides": true
+		}
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
@@ -12,7 +18,6 @@
 	},
 	"dependencies": {
 		"@mod/added-claims": "workspace:*",
-		"@mod/http": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/keys": "workspace:*",
@@ -21,6 +26,7 @@
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
+		"@mod/http": "workspace:*",
 		"@mod/records": "workspace:*",
 		"vitest": "5.0.5"
 	},

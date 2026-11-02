@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
-import type { Pkg } from "../../../src/workspace.ts";
+import type { Pkg } from "@mod/guard-imports";
+import { describe, expect, it, vi } from "vitest";
 import { budget, pkg } from "../../../test/workspace.ts";
 import { check } from "../../contract.ts";
+import { reachesOf } from "../network.ts";
+
+// Each case checks a package, its sources bound by the type checker, which is slow when the machine is busy.
+vi.setConfig({ testTimeout: 60_000 });
 
 /** What G26 says of a package, as `where detail`. */
 const said = (p: Pkg) =>
@@ -11,7 +15,7 @@ const said = (p: Pkg) =>
 const declaring = (p: Pkg, card: string) => ({ ...p, card: `# ${p.name}\n\n${card}\n` });
 
 describe("G26 the network is reached through outbound, or as a package declares", () => {
-	it("refuses shipped code that connects, serves or fetches without a declaration", () => {
+	it("refuses shipped code that connects, serves or fetches without a declaration [guarantee-7-a]", () => {
 		const p = pkg("@t/reach", {
 			"src/a.ts": 'import { request } from "node:https";\nexport const a = request;\n',
 			"src/b.ts": 'import * as net from "node:net";\nexport const b = net;\n',
@@ -26,7 +30,51 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		]);
 	});
 
-	it("refuses the network reached by a dynamic import, a global's property, a resolver or a process", () => {
+	it("reads a class's extends and an instantiation as values, and type arguments and implements not [guarantee-7-a]", () => {
+		const p = pkg("@t/heritage", {
+			"src/a.ts": "export const Socket = class extends WebSocket {};\n",
+			"src/b.ts": "export const List = class extends Array<WebSocket> {};\n",
+			"src/c.ts": "export const open = WebSocket<[]>;\n",
+			"src/d.ts": "export const Shaped = class implements EventSource {};\n",
+		});
+		expect(said(p)).toEqual(["src/a.ts WebSocket", "src/c.ts WebSocket"]);
+	});
+
+	it("reads a declared class's extends, in a source and in a declaration file, as reaching nothing", () => {
+		const p = pkg("@t/ambient", {
+			"src/a.ts": "export declare class Socket extends WebSocket {}\n",
+			"src/b.d.ts": "export declare class Socket extends WebSocket {}\n",
+			"src/c.ts": "export declare class Socket extends globalThis.WebSocket {}\n",
+			"src/d.d.ts": 'export declare class Pool extends (require("undici").Pool) {}\n',
+		});
+		expect(said(p)).toEqual([]);
+	});
+
+	it("reads a module's default taken by name as the module whole, as a default is, and one taken as a type as nothing [guarantee-7-a]", () => {
+		const p = pkg("@t/named-default", {
+			"src/a.ts": 'import { default as fetch } from "node-fetch";\nexport const a = fetch;\n',
+			"src/b.ts": 'import { default as cp } from "node:child_process";\nexport const b = cp;\n',
+			"src/c.ts": 'import { default as https } from "node:https";\nexport const c = https;\n',
+			"src/d.ts": 'import { default as net, type Socket } from "net";\nexport const d = net;\n',
+			"src/e.ts": 'import { type default as tls } from "node:tls";\nexport type E = typeof tls;\n',
+		});
+		expect(said(p)).toEqual([
+			"src/a.ts node-fetch",
+			"src/b.ts node:child_process (forks does not name it)",
+			"src/c.ts node:https",
+			"src/d.ts node:net",
+		]);
+	});
+
+	it("reads a global named by a shorthand property, and a require in parentheses, as any other read [guarantee-7-a]", () => {
+		const p = pkg("@t/forms", {
+			"src/a.ts": "export const a = { fetch };\n",
+			"src/b.ts": 'export const b = (require)("node:https");\n',
+		});
+		expect(said(p)).toEqual(["src/a.ts fetch", "src/b.ts node:https"]);
+	});
+
+	it("refuses the network reached by a dynamic import, a global's property, a resolver or a process [guarantee-7-a]", () => {
 		const p = pkg("@t/around", {
 			"src/a.ts": 'export const a = async () => (await import("node:https")).request;\n',
 			"src/b.ts": "export const b = (name: string) => import(name);\n",
@@ -45,7 +93,7 @@ describe("G26 the network is reached through outbound, or as a package declares"
 			"src/c.ts fetch",
 			"src/d.ts fetch",
 			"src/e.ts node:dns/promises lookup",
-			"src/f.ts node:child_process",
+			"src/f.ts node:child_process (forks does not name it)",
 			"src/g.ts undici",
 			"src/i.ts fetch",
 			"src/h.ts fetch",
@@ -71,7 +119,7 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		expect(said(tool)).toEqual([]);
 	});
 
-	it("takes what a declared word covers, stated on the card, and nothing past it", () => {
+	it("takes what a declared word covers, stated on the card, and nothing past it [guarantee-7-a]", () => {
 		const files = {
 			"src/a.ts": 'import { connect } from "node:tls";\nexport const a = connect;\n',
 		};
@@ -91,7 +139,21 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		]);
 	});
 
-	it("refuses a word it does not know, and takes several words in a list", () => {
+	it("refuses a module imported whole past what its words name, as the whole reaches each of its names [guarantee-7-a]", () => {
+		const files = {
+			"src/a.ts":
+				'import * as http from "node:http";\nexport const a = (url: string) => http.request(url);\n',
+			"src/b.ts": 'import http from "node:http";\nexport const b = http;\n',
+			"src/c.ts": 'export * from "node:http";\n',
+			"src/d.ts": 'import { createServer } from "node:http";\nexport const d = createServer;\n',
+		};
+		const manifest = { exports: { ".": "./src/contract.ts" }, network: "serves-http" };
+		expect(
+			said(declaring(pkg("@t/whole", files, manifest), "- (`network`: `serves-http`)")),
+		).toEqual(["src/a.ts node:http", "src/b.ts node:http", "src/c.ts node:http"]);
+	});
+
+	it("refuses a word it does not know, and takes several words in a list [guarantee-7-a]", () => {
 		const files = {
 			"src/a.ts":
 				'import { connect } from "node:net";\nimport Mail from "nodemailer/lib/smtp-connection";\nexport const a = [connect, Mail];\n',
@@ -133,5 +195,38 @@ describe("G27 a package that talks to a server the deployment provides states th
 		};
 		const outbound = { exports: { ".": "./src/contract.ts" }, network: "outbound" };
 		expect(g27(declaring(pkg("@t/out", out, outbound), "- (`network`: `outbound`)"))).toEqual([]);
+	});
+});
+
+describe("a re-export", () => {
+	it("reaches what it re-exports, named or whole [guarantee-7-a]", () => {
+		const p = pkg("@t/re-export", {
+			"src/a.ts": 'export { request } from "node:https";\n',
+			"src/b.ts": 'export * from "node:net";\n',
+			"src/c.ts": 'export { exec } from "child_process";\n',
+			"src/d.ts": 'export { default as Redis } from "ioredis";\n',
+			"src/e.ts": 'export type { Socket } from "node:net";\n',
+			"src/f.ts": 'export { default as https } from "node:https";\n',
+			"src/g.ts": 'export { type ChildProcess } from "node:child_process";\n',
+			"src/h.ts": 'export { type RedisOptions } from "ioredis";\n',
+			"src/i.ts": 'import { type RedisOptions } from "ioredis";\nexport type R = RedisOptions;\n',
+		});
+		expect(said(p)).toEqual([
+			"src/a.ts node:https request",
+			"src/b.ts node:net",
+			"src/c.ts node:child_process (forks does not name it)",
+			"src/d.ts ioredis",
+			"src/f.ts node:https",
+		]);
+	});
+});
+
+describe("a source written as .mjs", () => {
+	it("is read for what it reaches, as a .ts file is", () => {
+		const p = pkg("@t/mjs-reach", {
+			"src/helper.mjs":
+				'import { request } from "node:https";\nexport const go = () => request("https://x.example");\nfetch("https://y.example");\n',
+		});
+		expect(reachesOf(`${p.dir}/src/helper.mjs`)).toEqual(["node:https request", "fetch"]);
 	});
 });

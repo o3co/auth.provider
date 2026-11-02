@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { back, harness, origin, scopes, upstreamLogin, upstreamTokens } from "./harness.ts";
 
 describe("connecting a grant", () => {
-	it("lodges an intent, asks the user, sends the browser upstream and activates on the callback", async () => {
+	it("lodges an intent, asks the user, starts the upstream and activates on its return", async () => {
 		const h = await harness();
 		const flow = await h.started();
 		expect(flow.lodged.status).toBe(201);
@@ -16,12 +16,8 @@ describe("connecting a grant", () => {
 		expect(String(flow.lodged.json?.connect_uri)).toMatch(
 			`${origin}/session/federation-grants/connect?request=`,
 		);
-		expect(h.location(flow.opened).href).toMatch(`${origin}/consent-page?challenge=`);
-		// An answered question is no longer shown.
-		const shown = await h.browse("GET", "/session/federation-grants/consent", flow.browser, {
-			challenge: flow.challenge,
-		});
-		expect(shown.status).toBe(400);
+		// An answered question is no longer asked.
+		expect((await h.intents.asked(flow.challenge)).kind).toBe("invalid");
 		const start = h.asked.starts[0];
 		expect(start).toMatchObject({
 			scopes,

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import clientsModule from "@mod/clients/module";
@@ -17,21 +17,27 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { crowdingFor, memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionParticipants from "@mod/session-participants/module";
 import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { sessionTokens } from "@mod/session-tokens";
 import bridgeModule from "@mod/session-tokens/module";
 import { sessionTokensInMemory } from "@mod/session-tokens/testing";
-import { revocations } from "@mod/subject-revocation";
+import { revocations, subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls, grantInput } from "@mod/token-endpoint/testing";
-import { type IssuanceRequest, type IssuedAccess, issuancePolicies, tokens } from "@mod/tokens";
+import {
+	type IssuanceRequest,
+	type IssuedAccess,
+	issuancePolicies,
+	subjectChecks,
+	tokens,
+} from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { fromStored } from "../src/codes.ts";
@@ -44,6 +50,7 @@ import {
 	type IdTokenRequest,
 	idTokens,
 	type Redeemed,
+	redemptionHooks,
 	type StoredCode,
 	sessionRedemptions,
 	type VoidList,
@@ -55,7 +62,18 @@ import { codeGrantConfig, codeStoreContract } from "../src/testing.ts";
 const grantsSeen = contract<readonly Grant[]>("grants-seen");
 
 let shift = 0;
-const runtime = quietRuntime({ clock: { now: () => Date.now() + shift } });
+/** A copy of every draw of 32 bytes the composition made, in order, so a test can tell what a code was made from. */
+const drawn: Uint8Array[] = [];
+const runtime = quietRuntime({
+	clock: { now: () => Date.now() + shift },
+	random: {
+		bytes: (n) => {
+			const bytes = new Uint8Array(randomBytes(n));
+			if (n === 32) drawn.push(bytes.slice());
+			return bytes;
+		},
+	},
+});
 let stop = async () => {};
 /** A code's name as a place might make it: not the code, so a test that peeks by code finds nothing. */
 const nameOf = (code: string) => `n.${createHash("sha256").update(code).digest("base64url")}`;
@@ -71,7 +89,7 @@ const memoryStores = () => {
 		missing = false;
 		return Promise.resolve(undefined);
 	};
-	const module = defineModule({ name: "code-stores" }, (m) => [
+	const module = defineModule({ name: "code-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(codeStore).by((c) => {
 			clock = c.clock.now;
 			return { nameOf, save: stand.records.create, update };
@@ -82,6 +100,7 @@ const memoryStores = () => {
 };
 afterEach(async () => {
 	shift = 0;
+	drawn.length = 0;
 	await stop();
 });
 
@@ -102,11 +121,11 @@ codeStoreContract("records stand-in", async () => {
 const verifier = "v".repeat(43);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
 const maker = (scope: string) =>
-	defineModule({ name: `maker-${scope}` }, (m) => [
+	defineModule({ name: `maker-${scope}`, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({ scope, make: async () => "id.token" })),
 	]);
 /** Hands the grants to the test, so it can call the code grant directly. */
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [grants] }, (m) => [
 	m.provide(grantsSeen).by((c) => c.collect(grants)),
 ]);
 
@@ -125,7 +144,7 @@ const refusedFor = (reason: string) =>
 
 /** A policy that allows what `allows` allows, and refuses the rest. */
 const policy = (allows: (request: IssuanceRequest) => boolean) =>
-	defineModule({ name: "test-policy" }, (m) => [
+	defineModule({ name: "test-policy", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(issuancePolicies).by(() => ({
 			name: "test-policy",
 			judge: async (request) =>
@@ -135,17 +154,18 @@ const policy = (allows: (request: IssuanceRequest) => boolean) =>
 		})),
 	]);
 
-async function serve(
-	options: {
-		revocation?: "denylist" | "unsupported";
-		/** Whether session-tokens records the tokens issued from a session (as combinations composes it). */
-		recorded?: boolean;
-		extra?: Module[];
-		codeGrant?: Parameters<typeof codeGrantConfig>[0];
-	} = {},
-) {
+type Options = {
+	revocation?: "denylist" | "unsupported";
+	/** Whether session-tokens records the tokens issued from a session (as combinations composes it). */
+	recorded?: boolean;
+	extra?: Module[];
+	codeGrant?: Parameters<typeof codeGrantConfig>[0];
+};
+
+/** What `serve` assembles, with the stores it reaches into. */
+function assembly(options: Options = {}) {
 	const stores = memoryStores();
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			tokensStandIn({ revocable: (options.revocation ?? "denylist") === "denylist" }),
@@ -183,14 +203,23 @@ async function serve(
 			...codeGrantConfig(options.codeGrant ?? { "sweep-interval": "1s" }),
 		},
 		runtime,
-	});
+	};
+	return { input, stores };
+}
+
+async function serve(options: Options = {}) {
+	const { input, stores } = assembly(options);
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
-	const { session, cookies } = await app.get(sessions).complete(testRequest(), {
-		subject: "alice",
-		amr: ["pwd"],
-		authenticatedAt: runtime.clock.now(),
-	});
+	const { session, cookies } = openedOf(
+		await app.get(sessions).open(testRequest(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		}),
+	);
 	const facts: CodeFacts = {
 		clientId: "app",
 		redirectUri: "https://app.example/cb",
@@ -291,11 +320,14 @@ it("issues for the code's subject, session and login as they were when it was is
 	const code = await s.issue();
 	const all = s.app.get(sessions);
 	expect(await all.raise(carrying(s.cookies), ["otp"])).toBeDefined();
-	const bob = await all.complete(testRequest(), {
-		subject: "bob",
-		amr: ["pwd", "otp"],
-		authenticatedAt: runtime.clock.now(),
-	});
+	const bob = openedOf(
+		await all.open(testRequest(), {
+			subject: "bob",
+			amr: ["pwd", "otp"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		}),
+	);
 	const params = {
 		grant_type: "authorization_code",
 		code,
@@ -312,6 +344,39 @@ it("issues for the code's subject, session and login as they were when it was is
 	expect(await s.app.get(sessionTokens).sessionOf(checked.id)).toEqual({
 		kind: "bound",
 		handle: s.session.id,
+	});
+});
+
+it("gives a token that verifies from a session opened after its subject's revocation, its authentication, as an upstream's auth_time, before it", async () => {
+	const checked = defineModule(
+		{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
+		(m) => [
+			m.contribute(subjectChecks).by(async (c) => {
+				const revocation = await c.get(subjectRevocation);
+				return {
+					holds: async (t) =>
+						(await revocation.check(t.subject, t.standingAt)) === "valid" ? "holds" : "revoked",
+				};
+			}),
+		],
+	);
+	const s = await serve({ extra: [checked] });
+	await s.app.get(subjectRevocation).revoke("alice");
+	shift += 1500;
+	// Federated: opened now, on an upstream login a minute old.
+	const authenticatedAt = Math.floor(runtime.clock.now() / 1000) * 1000 - 60_000;
+	const { session } = openedOf(
+		await s.app.get(sessions).open(testRequest(), {
+			subject: "alice",
+			amr: ["fed"],
+			authenticatedAt,
+			provenSince: runtime.clock.now(),
+		}),
+	);
+	const answer = await s.redeem(await s.app.get(codes).issue({ ...s.facts, session: session.id }));
+	expect(await s.app.get(tokens).verifyAccess(String(answer.body.access_token))).toMatchObject({
+		kind: "valid",
+		grant: { authenticatedAt },
 	});
 });
 
@@ -334,7 +399,7 @@ it("revokes the code's access token when its session closes, through session-tok
 	expect(await revoked(s, token)).toBe(true);
 });
 
-it("ends the access token no later than its session, when the session ends first", async () => {
+it("ends the access token no later than its session, when the session ends first [rfc6749-5.1-b]", async () => {
 	const s = await serve();
 	const entry = await s.app.get(sessions).entryOf(s.session.id);
 	if (entry.kind !== "entered") throw new Error("not entered");
@@ -358,7 +423,7 @@ it("refuses a code whose session authenticated far ahead of the clock, leaving i
 	expect(keptOf(s, code)?.state).toBe("issued");
 });
 
-it("asks the issuance policies before the code is used up, and only for its own client and verifier", async () => {
+it("asks the issuance policies before the code is used up, and only for its own client and verifier [rfc7636-4.6-b]", async () => {
 	const s = await serve({ extra: [policy(() => false)] });
 	const code = await s.issue();
 	const refused = { error: "invalid_grant", error_description: "refused here" };
@@ -370,7 +435,7 @@ it("asks the issuance policies before the code is used up, and only for its own 
 });
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
-const narrowing = defineModule({ name: "narrowing" }, (m) => [
+const narrowing = defineModule({ name: "narrowing", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
 		target: ({ param, audience, within }) => {
 			const asked = param("resource");
@@ -405,7 +470,7 @@ it("refuses a resource outside the code's audience when the look before use miss
 });
 
 it("takes the resource the rule refuses to a grant that takes no audience, as one that asks it", async () => {
-	const strict = defineModule({ name: "strict" }, (m) => [
+	const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(targetRules).by(() => ({
 			target: ({ param, audience, within }) => {
 				const asked = param("resource");
@@ -442,7 +507,7 @@ it("refuses a code the policies refuse once it is used up, issuing nothing", asy
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 });
 
-it("redeems a code once, and a code that comes again revokes what it gave", async () => {
+it("redeems a code once, and a code that comes again revokes what it gave [rfc6749-4.1.2-d] [rfc6749-4.1.2-e] [oidc-core-16.9-a]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	const first = await s.redeem(code);
@@ -451,7 +516,19 @@ it("redeems a code once, and a code that comes again revokes what it gave", asyn
 	expect(await revoked(s, String(first.body.access_token))).toBe(true);
 });
 
-it("refuses a code another exchange used up while this one was turning it, and lists and marks it void", async () => {
+it("keeps neither the code nor the token it gave in code-grant's own record of the code, the token noted by its reference and end alone [rfc6749-10.3-a]", async () => {
+	const s = await serve();
+	const code = await s.issue();
+	const redeemed = await s.redeem(code);
+	expect(redeemed.status).toBe(200);
+	const stored = JSON.stringify(s.stores.peek(nameOf(code)));
+	for (const secret of [code, String(redeemed.body.access_token)]) {
+		expect(stored).not.toContain(secret);
+	}
+	expect(Object.keys(keptOf(s, code)?.token ?? {}).sort()).toEqual(["expiresAt", "reference"]);
+});
+
+it("refuses a code another exchange used up while this one was turning it, and lists and marks it void [rfc6749-4.1.2-d]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	s.stores.raceNextChange((kept) => overwritten(kept, { state: "consumed" }));
@@ -497,7 +574,7 @@ it("drops a listed void whose record it does not know, as one it cannot revoke, 
 	expect(s.stores.pending()).toEqual([]);
 });
 
-it("refuses a request missing the code, the redirect URI or the verifier, or with a malformed verifier, leaving the code unused", async () => {
+it("refuses a request missing the code, the redirect URI or the verifier, a code or redirect URI sent empty as one left out, or with a malformed verifier, leaving the code unused [rfc6749-5.2-f] [rfc7636-4.5-b] [rfc6749-4.1.3-e] [rfc6749-3.2-b]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	const cases: Record<string, Record<string, string>> = {
@@ -522,7 +599,7 @@ it("refuses a code whose subject was revoked after it signed in", async () => {
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 	expect(keptOf(s, code)?.token).toBeUndefined();
 });
-it("refuses a code issued to another client, or presented with another redirect URI", async () => {
+it("refuses a code issued to another client, or presented with another redirect URI [rfc6749-4.1.3-c] [rfc6749-4.1.3-e]", async () => {
 	const s = await serve();
 	const elsewhere = await s.app.get(codes).issue({ ...s.facts, clientId: "other" });
 	expect((await s.redeem(elsewhere)).body).toEqual(refusedBody);
@@ -530,6 +607,26 @@ it("refuses a code issued to another client, or presented with another redirect 
 	expect((await s.redeem(code, { redirect_uri: "https://app.example/other" })).body).toEqual(
 		refusedBody,
 	);
+});
+
+it("redeems a code issued for OpenID Connect only for its own client and redirect URI, only once and only while it lives [oidc-core-3.1.3.2-b] [oidc-core-3.1.3.2-c] [oidc-core-3.1.3.2-e]", async () => {
+	const s = await serve({ codeGrant: { "code-lifetime": "10s", "sweep-interval": "1s" } });
+	const oidc = ["openid", "read"];
+	const elsewhere = await s.app.get(codes).issue({ ...s.facts, scope: oidc, clientId: "other" });
+	expect((await s.redeem(elsewhere)).body).toEqual(refusedBody);
+	const moved = await s.issue(oidc);
+	expect((await s.redeem(moved, { redirect_uri: "https://app.example/other" })).body).toEqual(
+		refusedBody,
+	);
+	expect((await s.redeem("not-a-code")).body).toEqual(refusedBody);
+	const late = await s.issue(oidc);
+	shift = 11_000;
+	expect((await s.redeem(late)).body).toEqual(refusedBody);
+	shift = 0;
+	const code = await s.issue(oidc);
+	const first = await s.redeem(code);
+	expect([first.status, first.body.scope]).toEqual([200, "openid read"]);
+	expect((await s.redeem(code)).body).toEqual(refusedBody);
 });
 
 it("issues nothing for a code whose session closed before the exchange", async () => {
@@ -542,7 +639,7 @@ it("issues nothing for a code whose session closed before the exchange", async (
 
 /** A requirement a session falls short of at use while `short.now` is set. */
 const shortToUse = (short: { now: boolean }) =>
-	defineModule({ name: "short-to-use" }, (m) => [
+	defineModule({ name: "short-to-use", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(entryRequirements).by(() => ({
 			name: "mfa",
 			judges: ["use"],
@@ -558,10 +655,10 @@ it("issues nothing for a code whose session falls short of a requirement to be u
 	short.now = true;
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 	expect(keptOf(s, code)?.token).toBeUndefined();
-	await expect(s.app.get(codes).issue(s.facts), "a code for it").rejects.toThrow(TypeError);
+	await expect(s.app.get(codes).issue(s.facts), "a code for it").rejects.toThrow(Unavailable);
 });
 
-it("keeps an unused code for code-lifetime, and no longer", async () => {
+it("keeps an unused code for code-lifetime, and no longer [oidc-core-16.9-a]", async () => {
 	const s = await serve({ codeGrant: { "code-lifetime": "10s" } });
 	const code = await s.issue();
 	shift = 9000;
@@ -599,7 +696,7 @@ it("voids the token it issued when the code is used again while the token is mad
 	expect(await revoked(s, given[0] as string)).toBe(true);
 });
 
-it("uses a code up on a wrong verifier", async () => {
+it("uses a code up on a wrong verifier [rfc7636-4.6-b]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	expect((await s.redeem(code, { code_verifier: "w".repeat(43) })).body.error).toBe(
@@ -608,7 +705,7 @@ it("uses a code up on a wrong verifier", async () => {
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 });
 
-it("refuses a held challenge of another length, or of the same length with other bytes", async () => {
+it("refuses a held challenge of another length, or of the same length with other bytes [rfc7636-4.5-a]", async () => {
 	const s = await serve();
 	const other = `${challenge.slice(0, -1)}${challenge.endsWith("A") ? "B" : "A"}`;
 	for (const held of [challenge.slice(0, -1), `${challenge}A`, other]) {
@@ -620,7 +717,7 @@ it("refuses a held challenge of another length, or of the same length with other
 	}
 });
 
-it("adds an ID token when the code's scope holds the maker's scope, and names that scope", async () => {
+it("adds an ID token when the code's scope holds the maker's scope, and names that scope [oidc-core-3.1.3.3-c] [oidc-core-3.1.3.2-f]", async () => {
 	const s = await serve({ extra: [maker("openid")] });
 	expect(s.app.get(codes).idTokenScope()).toBe("openid");
 	expect((await s.redeem(await s.issue(["openid", "read"]))).body.id_token).toBe("id.token");
@@ -629,7 +726,7 @@ it("adds an ID token when the code's scope holds the maker's scope, and names th
 
 describe("what the ID token maker is told", () => {
 	const recordingMaker = (asked: IdTokenRequest[]) =>
-		defineModule({ name: "maker-recording" }, (m) => [
+		defineModule({ name: "maker-recording", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(idTokens).by(() => ({
 				scope: "openid",
 				make: async (request) => {
@@ -662,9 +759,14 @@ describe("what the ID token maker is told", () => {
 	it("that the authentication time is unknown, for a session whose login could not tell it", async () => {
 		const asked: IdTokenRequest[] = [];
 		const s = await serve({ extra: [recordingMaker(asked)] });
-		const { session } = await s.app
-			.get(sessions)
-			.complete(testRequest(), { subject: "alice", amr: ["pwd"], authenticatedAt: "unknown" });
+		const { session } = openedOf(
+			await s.app.get(sessions).open(testRequest(), {
+				subject: "alice",
+				amr: ["pwd"],
+				authenticatedAt: "unknown",
+				provenSince: runtime.clock.now(),
+			}),
+		);
 		const unknown = await s.app
 			.get(codes)
 			.issue({ ...s.facts, scope: ["openid"], session: session.id });
@@ -681,6 +783,14 @@ describe("what the ID token maker is told", () => {
 		expect(asked.map((r) => r.session)).toEqual([s.session.id]);
 	});
 
+	it("the redemption's name, the same the code's name gives", async () => {
+		const asked: IdTokenRequest[] = [];
+		const s = await serve({ extra: [recordingMaker(asked)] });
+		const code = await s.issue(["openid"]);
+		expect((await s.redeem(code)).status).toBe(200);
+		expect(asked.map((r) => r.redemption)).toEqual([s.app.get(codes).redemptionOf(code)]);
+	});
+
 	it("the scope the code was issued for", async () => {
 		const asked: IdTokenRequest[] = [];
 		const s = await serve({ extra: [recordingMaker(asked)] });
@@ -694,9 +804,10 @@ it("names no ID token scope without a maker", async () => {
 });
 
 it("refuses to start with two ID token makers, without revocable tokens, without its tokens recorded to their session, or with an addition on a response field", async () => {
-	const onAccessToken = defineModule({ name: "adds-access_token" }, (m) => [
-		m.contribute(additions).by(() => ({ field: "access_token", issue: async () => "x" })),
-	]);
+	const onAccessToken = defineModule(
+		{ name: "adds-access_token", replicaSafe: true, takes: [] },
+		(m) => [m.contribute(additions).by(() => ({ field: "access_token", issue: async () => "x" }))],
+	);
 	await expect(serve({ extra: [maker("openid"), maker("other")] })).rejects.toEqual(
 		refusedFor("more than one ID token maker"),
 	);
@@ -741,7 +852,7 @@ it("never brings back a code that expired while it was being redeemed", async ()
 it("adds what a contribution issues alongside, under its own field, from the redeemed facts", async () => {
 	const seen: Redeemed[] = [];
 	const adding = (field: string, value: string | undefined) =>
-		defineModule({ name: `adds-${field}` }, (m) => [
+		defineModule({ name: `adds-${field}`, replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(additions).by(() => ({
 				field,
 				issue: async (redeemed) => {
@@ -770,7 +881,7 @@ it("adds what a contribution issues alongside, under its own field, from the red
 
 it("tells the additions the code's acr, and none for a code without one", async () => {
 	const seen: Redeemed[] = [];
-	const adding = defineModule({ name: "adds-acr" }, (m) => [
+	const adding = defineModule({ name: "adds-acr", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(additions).by(() => ({
 			field: "extra",
 			issue: async (redeemed) => {
@@ -788,7 +899,7 @@ it("tells the additions the code's acr, and none for a code without one", async 
 
 it("tells the access token and the additions that a session did not know its authentication time", async () => {
 	const seen: Redeemed[] = [];
-	const adding = defineModule({ name: "adds-unknown" }, (m) => [
+	const adding = defineModule({ name: "adds-unknown", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(additions).by(() => ({
 			field: "extra",
 			issue: async (redeemed) => {
@@ -798,9 +909,14 @@ it("tells the access token and the additions that a session did not know its aut
 		})),
 	]);
 	const s = await serve({ extra: [adding] });
-	const { session } = await s.app
-		.get(sessions)
-		.complete(testRequest(), { subject: "alice", amr: ["pwd"], authenticatedAt: "unknown" });
+	const { session } = openedOf(
+		await s.app.get(sessions).open(testRequest(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: "unknown",
+			provenSince: runtime.clock.now(),
+		}),
+	);
 	const unknown = await s.redeem(await s.app.get(codes).issue({ ...s.facts, session: session.id }));
 	const known = await s.redeem(await s.issue());
 	const grantOf = async (body: Record<string, unknown>) => {
@@ -817,7 +933,7 @@ it("tells the access token and the additions that a session did not know its aut
 it("takes back what was issued alongside a code that comes again", async () => {
 	const issuedFor: string[] = [];
 	const taken: string[] = [];
-	const adding = defineModule({ name: "adds-taken" }, (m) => [
+	const adding = defineModule({ name: "adds-taken", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(additions).by(() => ({
 			field: "extra",
 			issue: async (redeemed) => {
@@ -839,7 +955,7 @@ it("takes back what was issued alongside a code that comes again", async () => {
 
 it("tells an addition the binding the redeemed tokens carry", async () => {
 	const seen: Redeemed[] = [];
-	const adding = defineModule({ name: "adds-seen" }, (m) => [
+	const adding = defineModule({ name: "adds-seen", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(additions).by(() => ({
 			field: "extra",
 			issue: async (redeemed) => {
@@ -864,15 +980,18 @@ it("refuses to issue a code for facts the session or the client contradict", asy
 		"audience outside the client": { audience: ["https://other"] },
 		"malformed challenge": { challenge: "short" },
 		"unknown client": { clientId: "nobody" },
-		"unknown session": { session: "x".repeat(43) },
 	};
 	for (const [label, over] of Object.entries(bad)) {
 		await expect(issue({ ...s.facts, ...over }), label).rejects.toThrow(TypeError);
 	}
+	// A session not entered at use may have closed meanwhile: the caller answers it as it can.
+	await expect(issue({ ...s.facts, session: "x".repeat(43) }), "unknown session").rejects.toThrow(
+		Unavailable,
+	);
 	expect(typeof (await issue(s.facts))).toBe("string");
 });
 
-it("marks nothing void when listing a reused code fails, so a later reuse still revokes", async () => {
+it("marks nothing void when listing a reused code fails, so a later reuse still revokes [rfc6749-4.1.2-e]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	const first = await s.redeem(code);
@@ -888,7 +1007,7 @@ it("marks nothing void when listing a reused code fails, so a later reuse still 
 
 /** Notes each redemption in a session as told, running `during` first when given. */
 const noting = (noted: [string, string][], during?: () => Promise<void>) =>
-	defineModule({ name: "noting" }, (m) => [
+	defineModule({ name: "noting", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(sessionRedemptions).by(() => ({
 			name: "noting",
 			redeemed: async (session, clientId) => {
@@ -903,6 +1022,115 @@ it("tells each contribution the session and client a code was redeemed in", asyn
 	const s = await serve({ extra: [noting(noted)] });
 	expect((await s.redeem(await s.issue())).status).toBe(200);
 	expect(noted).toEqual([[s.session.id, "app"]]);
+});
+
+it("tells how long a code lives, as code-lifetime says", async () => {
+	expect((await serve()).app.get(codes).lifetimeMs()).toBe(600_000);
+	await stop();
+	const short = await serve({ codeGrant: { "code-lifetime": "30s", "sweep-interval": "1s" } });
+	expect(short.app.get(codes).lifetimeMs()).toBe(30_000);
+});
+
+it("names a code's redemption as its record is named, from the code alone", async () => {
+	const s = await serve();
+	const code = await s.issue();
+	expect(s.app.get(codes).redemptionOf(code)).toBe(nameOf(code));
+	expect(s.app.get(codes).redemptionOf(code)).not.toBe(code);
+});
+
+describe("redemption hooks", () => {
+	/** Notes what each hook is told, in order, into `seen`; `fail` makes one throw. */
+	const hooking = (
+		seen: string[],
+		fail: { pin?: boolean; redeemed?: boolean } = {},
+		redeemedSeen: Redeemed[] = [],
+	) =>
+		defineModule({ name: "hooking", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(redemptionHooks).by(() => ({
+				name: "hooking",
+				pin: async (redemption) => {
+					seen.push(`pin ${redemption}`);
+					if (fail.pin) throw new Error("cannot pin");
+				},
+				redeemed: async (redeemed) => {
+					seen.push(`redeemed ${redeemed.redemption}`);
+					redeemedSeen.push(redeemed);
+					if (fail.redeemed) throw new Error("cannot note");
+				},
+			})),
+			m.contribute(additions).by(() => ({
+				field: "extra",
+				issue: async (redeemed) => {
+					seen.push(`addition ${redeemed.redemption}`);
+					return undefined;
+				},
+				revoke: async (redemption) => {
+					seen.push(`revoke ${redemption}`);
+				},
+			})),
+		]);
+
+	it("pins a used-up code before its token is issued, and tells of the redemption after the additions", async () => {
+		const seen: string[] = [];
+		const redeemedSeen: Redeemed[] = [];
+		const s = await serve({ extra: [hooking(seen, {}, redeemedSeen)] });
+		const code = await s.issue();
+		const name = nameOf(code);
+		const answer = await handleDirectly(s, code, {
+			issue: async (g) => {
+				seen.push("issue");
+				const issued = await s.app.get(tokens).issue({ grant: g, grantType: "authorization_code" });
+				return issued.kind === "refused" ? { kind: "refused", refusal: issued } : issued;
+			},
+		});
+		expect(answer).toMatchObject({ kind: "issued" });
+		expect(seen).toEqual([`pin ${name}`, "issue", `addition ${name}`, `redeemed ${name}`]);
+		expect(redeemedSeen).toMatchObject([{ redemption: name, subject: "alice", scope: ["read"] }]);
+		expect(redeemedSeen[0]?.access.id).toEqual(expect.any(String));
+	});
+
+	it("pins nothing for a code refused before it is used up, or used up by a wrong verifier", async () => {
+		const seen: string[] = [];
+		const s = await serve({ extra: [hooking(seen)] });
+		const code = await s.issue();
+		expect((await s.redeem(code, { redirect_uri: "https://other.example/cb" })).status).toBe(400);
+		expect((await s.redeem(code)).status).toBe(400);
+		const other = await s.issue();
+		expect((await s.redeem(other, { code_verifier: "w".repeat(43) })).status).toBe(400);
+		expect(seen.filter((step) => step.startsWith("pin"))).toEqual([]);
+	});
+
+	it("voids the code and issues nothing when the pin fails", async () => {
+		const seen: string[] = [];
+		const s = await serve({ extra: [hooking(seen, { pin: true })] });
+		const code = await s.issue();
+		const answer = await handleDirectly(s, code, {
+			issue: async () => {
+				throw new Error("issued after a failed pin");
+			},
+		}).catch((error: unknown) => ({ kind: "thrown", error }));
+		expect(answer).toMatchObject({ kind: "thrown", error: { message: "cannot pin" } });
+		expect(keptOf(s, code)).toMatchObject({ state: "consumed", void: true });
+		expect(keptOf(s, code)).not.toHaveProperty("token");
+	});
+
+	it("voids the code, revoking its token and what the additions gave, when telling of the redemption fails", async () => {
+		const seen: string[] = [];
+		const s = await serve({ extra: [hooking(seen, { redeemed: true })] });
+		const code = await s.issue();
+		const given: string[] = [];
+		const answer = await handleDirectly(s, code, {
+			issue: async (g) => {
+				const issued = await s.app.get(tokens).issue({ grant: g, grantType: "authorization_code" });
+				if (issued.kind === "refused") return { kind: "refused", refusal: issued };
+				given.push(issued.access.token);
+				return issued;
+			},
+		}).catch((error: unknown) => ({ kind: "thrown", error }));
+		expect(answer).toMatchObject({ kind: "thrown", error: { message: "cannot note" } });
+		expect(await revoked(s, given[0] ?? "")).toBe(true);
+		expect(seen).toContain(`revoke ${nameOf(code)}`);
+	});
 });
 
 describe("tokens issued while the exchange goes wrong are revoked", () => {
@@ -924,11 +1152,11 @@ describe("tokens issued while the exchange goes wrong are revoked", () => {
 		return { answer, token: given[0] as string };
 	};
 	const failingAddition = (issue: () => Promise<string | undefined>) =>
-		defineModule({ name: "failing-addition" }, (m) => [
+		defineModule({ name: "failing-addition", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(additions).by(() => ({ field: "extra", issue })),
 		]);
 	const failingMaker = (make: () => Promise<string>) =>
-		defineModule({ name: "failing-maker" }, (m) => [
+		defineModule({ name: "failing-maker", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(idTokens).by(() => ({ scope: "openid", make })),
 		]);
 
@@ -945,7 +1173,7 @@ describe("tokens issued while the exchange goes wrong are revoked", () => {
 
 	it("when recording it to the session fails in issuing, leaving the code used up", async () => {
 		const told: string[] = [];
-		const failing = defineModule({ name: "failing-record" }, (m) => [
+		const failing = defineModule({ name: "failing-record", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(sessionIssuances).by(() => ({
 				issued: async (_, { id }) => {
 					told.push(`stand-in.${id}`);
@@ -1040,6 +1268,22 @@ describe("tokens issued while the exchange goes wrong are revoked", () => {
 	});
 });
 
+// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
+// Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
+it("makes each code of 32 fresh random bytes, nothing of its challenge, and gives the challenge out nowhere [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c] [rfc7636-4.4-b]", async () => {
+	const s = await serve();
+	const code = await s.issue();
+	const made = drawn.at(-1);
+	expect(made && Buffer.from(made).toString("base64url")).toBe(code);
+	const other = await s.issue();
+	expect(other).not.toBe(code);
+	expect(Buffer.from(drawn.at(-1) ?? []).toString("base64url")).toBe(other);
+	expect(code).not.toContain(challenge);
+	const redeemed = await s.redeem(code);
+	expect(redeemed.status).toBe(200);
+	expect(JSON.stringify(redeemed.body)).not.toContain(challenge);
+});
+
 it("offers the shape of an S256 challenge: 43 base64url characters, as RFC 7636 makes it", async () => {
 	const { challengeShape } = await import("../src/contract.ts");
 	expect(challengeShape.test("A".repeat(43))).toBe(true);
@@ -1051,5 +1295,23 @@ it("offers the shape of an S256 challenge: 43 base64url characters, as RFC 7636 
 		`${"A".repeat(42)}=`,
 	]) {
 		expect(challengeShape.test(refused), refused).toBe(false);
+	}
+});
+
+it("takes all its module names, with an ID token maker and an addition or with neither", async () => {
+	const adding = defineModule({ name: "adds-extra", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(additions).by(() => ({ field: "extra", issue: async () => undefined })),
+	]);
+	const hooked = defineModule({ name: "hooked", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(redemptionHooks).by(() => ({
+			name: "hooked",
+			pin: async () => {},
+			redeemed: async () => {},
+		})),
+	]);
+	for (const extra of [[], [maker("openid"), adding, hooked]]) {
+		const { input } = assembly({ extra });
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused(input))["code-grant"]).toBeUndefined();
 	}
 });

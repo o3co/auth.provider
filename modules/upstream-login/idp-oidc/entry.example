@@ -1,0 +1,6 @@
+{
+	"type": "oidc",
+	"issuer": "https://idp.example.invalid",
+	"client-id": "REPLACE-CLIENT-ID",
+	"client-secret": "REPLACE-CLIENT-SECRET"
+}

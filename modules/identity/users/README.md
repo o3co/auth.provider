@@ -10,7 +10,7 @@
 ## Offers
 - `verify` (identifier, password), `bySubject` and `byUpstream` (IdP name, upstream subject), each answering a user or none; `bySubject` and `claimedContacts` may answer unanswerable.
 - `claimedContacts`, `verifiedContact` (subject, `{ kind: "email", value }`), `contactsOf`, `link` (linked, already or conflict) and `unlink` (unlinked, none or fixed).
-- Extension point `ledgers`: a user ledger (verification, user by subject or unanswerable, and optionally by upstream identity), which takes the same work for an unknown identifier as for a known one; one looking users up by upstream identity has the last word there: links are neither read nor written here, nor a link store asked for, so `link` answers already or conflict, and `unlink` fixed or none.
+- Extension point `ledgers`: a user ledger (verification, user by subject or unanswerable, and optionally by upstream identity), which takes the same work for an unknown identifier as for a known one; one looking users up by upstream identity has the last word there: links are neither read nor written here, and the link store, composed all the same, is never asked, so `link` answers already or conflict, and `unlink` fixed or none.
 - Extension point `upstreamNames`: the IdP names a module passes to `byUpstream`, each with the issuer it stands for, one list per module; boot is refused on an empty name or issuer, and on a name standing for two issuers, within one list or across them, naming the declaring modules and never a name or an issuer.
 - Operator section `registered`: `identifier`, `subject` (default the identifier), `password-hash`, `attributes`, `upstream` (each `{ idp, subject }`).
 - Store interfaces for links, per upstream identity, and verified contacts, per subject, kept without end: no eviction, survives a crash and a failover, and link reads confirmed.
@@ -27,7 +27,8 @@
 - A settings link wins over a written link of the same upstream identity, which stays hidden and cannot be unlinked (unlink answers fixed); taking the identity out of the settings lets the written link take effect again.
 - A contact is kept once per subject by `mail`'s canonical form, as first given, up to 20, and another past them throws RangeError; an empty subject, upstream part or contact value throws TypeError.
 - A claimed contact is the user's `email` attribute, as given, apart from verified contacts.
-- Attribute values: `email` one mail takes, `picture` an https URL that reads back as given, `email_verified` a boolean, `name` text, `groups` a list of text, no text with a control or format character; another refuses boot in the settings, and from a ledger is left out, its name logged.
+- Attribute values: `email` one mail takes that is also RFC 5322's addr-spec in ASCII (a dot-atom local part, LDH labels), `picture` an https URL that reads back as given, `email_verified` a boolean, `name` text holding more than blanks, `groups` a list of text, no text with a control or format character; another refuses boot in the settings, and from a ledger is left out, its name logged.
+- `email_verified` holds only beside `email`: without it, boot is refused in the settings, and a ledger's is left out, as it is with an email left out.
 - A password hash is one `secret-hash` reads (bcrypt or scrypt), else boot is refused; a password over 1024 bytes is none before any computation or ledger call, and `secret-hash` decides the rest, within its assembly's `max-concurrent`.
 - Each verification does the work of every kind of hash in use, so timing does not tell whether a user exists.
 

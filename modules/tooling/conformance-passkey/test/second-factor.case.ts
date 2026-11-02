@@ -1,5 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
-import { sceneOf } from "@mod/conformance";
+import { type AreaScene, areaTarget, sceneOf } from "@mod/conformance";
+import { codeScene } from "@mod/conformance-code";
 import { identityArea } from "@mod/conformance-identity";
 import { keysArea } from "@mod/conformance-keys";
 import { secondFactorArea } from "@mod/conformance-second-factor";
@@ -115,5 +116,47 @@ describe("WebAuthn as a second factor", () => {
 		);
 		expect(done.status).toBe(401);
 		expect((await b.send("GET", "/session/mfa/factors")).body.factors).toEqual([]);
+	});
+});
+
+describe("acr asking the amr a passkey second factor proves", () => {
+	/** An app with WebAuthn as its second factor, and an acr asking `amr` alone. */
+	const asking = (amr: string): AreaScene => {
+		const code = codeScene({
+			issuer,
+			keys: {
+				signing: {
+					kid: "webauthn-acr",
+					alg: "EdDSA",
+					privatePem: pair.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+					publicPem: pair.publicKey.export({ format: "pem", type: "spki" }).toString(),
+				},
+			},
+			clients: [],
+			users: [{ identifier: "alice", password }],
+			mfa: { mode: "optional" },
+			acr: { values: { "urn:t:key": [[amr]] } },
+		});
+		const passkey = sceneOf(
+			passkeyArea.part({ rpId: new URL(issuer).hostname, origins: [issuer], secondFactor: true }),
+		);
+		return { ...code, parts: { ...code.parts, ...passkey.parts } };
+	};
+	const started = async (scene: AreaScene) => {
+		const run = await areaTarget().start(scene);
+		if (run.kind === "running") await run.stop();
+		return run;
+	};
+
+	it("starts with an acr asking pop, and refuses one asking hwk alone, which no passkey proves", async () => {
+		expect((await started(asking("pop"))).kind).toBe("running");
+		const hard = await started(asking("hwk"));
+		// The legacy build's passkeys prove `hwk`.
+		if (areaTarget().differs("passkey-amr-pop")) {
+			expect(hard.kind).toBe("running");
+			return;
+		}
+		expect(hard.kind).toBe("refused");
+		if (hard.kind === "refused") expect(hard.output).toMatch(/acr\.values\.urn:t:key/);
 	});
 });

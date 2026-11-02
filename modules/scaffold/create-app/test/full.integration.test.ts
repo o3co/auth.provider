@@ -1,21 +1,13 @@
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { createServer } from "node:net";
+import { type ChildProcess, spawn } from "node:child_process";
+import { docker as dockerRun, dockerSync, dockerWithin } from "@mod/docker-client";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { freePort } from "./checks.ts";
 import { configured, installed } from "./full-app.ts";
 
 const image = "redis:7.4-alpine";
 let container = "";
 let redisUrl = "";
 let app: ChildProcess | undefined;
-
-async function freePort(): Promise<number> {
-	return new Promise((resolve) => {
-		const server = createServer().listen(0, "127.0.0.1", () => {
-			const address = server.address();
-			server.close(() => resolve(typeof address === "object" && address ? address.port : 0));
-		});
-	});
-}
 
 async function waitFor(what: string, check: () => boolean | Promise<boolean>, ms = 30_000) {
 	const end = Date.now() + ms;
@@ -26,7 +18,8 @@ async function waitFor(what: string, check: () => boolean | Promise<boolean>, ms
 	throw new Error(`${what} did not happen in ${ms} ms`);
 }
 
-const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8" }).trim();
+const docker = (...args: string[]) => dockerSync(args, dockerWithin.control);
+const run = (...args: string[]) => dockerRun(["run", ...args], dockerWithin.run);
 /** Whether Redis answers PING; a container still starting answers nothing yet. */
 const pings = () => {
 	try {
@@ -39,8 +32,7 @@ const pings = () => {
 beforeAll(async () => {
 	const port = await freePort();
 	// What the redis module's boot checks ask of the server for the spaces full declares.
-	container = docker(
-		"run",
+	container = await run(
 		"-d",
 		"--rm",
 		"-p",
@@ -56,11 +48,11 @@ beforeAll(async () => {
 	);
 	redisUrl = `redis://127.0.0.1:${port}`;
 	await waitFor("redis start", pings);
-}, 60_000);
+}, dockerWithin.run + 60_000);
 
 afterAll(() => {
 	app?.kill("SIGKILL");
-	if (container) docker("rm", "-f", container);
+	if (container) docker("rm", "-f", "-v", container);
 });
 
 const answers = async (url: string) => {

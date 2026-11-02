@@ -10,7 +10,7 @@ describe("code-grant's section", () => {
 		expect([under, low, high, over].map(parses)).toEqual([false, true, true, false]);
 	});
 
-	it("keeps a code 10 minutes and sweeps every 30 seconds where nothing is set", () => {
+	it("keeps a code 10 minutes and sweeps every 30 seconds where nothing is set [rfc6749-4.1.2-c]", () => {
 		expect(section.parse({})).toMatchObject({ "code-lifetime": 600, "sweep-interval": 30 });
 	});
 

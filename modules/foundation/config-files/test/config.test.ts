@@ -82,7 +82,13 @@ describe("loadConfig", () => {
 
 	it("refuses unreadable and malformed files without quoting them", async () => {
 		const unreadable = await refusalsOf(loadConfig({ files: ["/nonexistent.conf"], env: {} }));
-		expect(unreadable.map((r) => r.where)).toEqual(["/nonexistent.conf"]);
+		expect(unreadable).toEqual([
+			{
+				where: "/nonexistent.conf",
+				reason:
+					"cannot read the configuration file: create it, or leave it out of the files the app reads",
+			},
+		]);
 		const [file] = await files("a = 1\nb = { secret-value");
 		const located = await refusalsOf(loadConfig({ files: [file as string], env: {} }));
 		expect(located).toEqual([
@@ -100,7 +106,12 @@ describe("loadConfig", () => {
 describe("sections read from loaded files", () => {
 	const seen = contract<unknown>("seen");
 	const server = defineModule(
-		{ name: "server", section: z.strictObject({ port: z.number(), tls: z.boolean() }) },
+		{
+			name: "server",
+			replicaSafe: true,
+			section: z.strictObject({ port: z.number(), tls: z.boolean() }),
+			takes: [],
+		},
 		(m) => [m.provide(seen).by((c) => c.section)],
 	);
 	async function boot(env: Record<string, string>) {
@@ -131,7 +142,9 @@ describe("sections read from loaded files", () => {
 	it("refuses a key that names an object's prototype in a file, by its path and never its value", async () => {
 		const limits = defineModule({
 			name: "m",
+			replicaSafe: true,
 			section: z.strictObject({ limits: z.record(z.string(), z.number()) }),
+			takes: [],
 		});
 		const paths = await files(
 			'kernel.deployment = single\nm { limits { "__proto__" = 54321, ok = 1 } }',
@@ -148,12 +161,14 @@ describe("sections read from loaded files", () => {
 		const connections = defineModule(
 			{
 				name: "m",
+				replicaSafe: true,
 				section: z.strictObject({
 					connections: z.record(
 						z.string(),
 						z.strictObject({ "max-seconds": z.number().int(), subsets: z.boolean() }),
 					),
 				}),
+				takes: [],
 			},
 			(m) => [m.provide(seen).by((c) => c.section)],
 		);
@@ -169,7 +184,9 @@ describe("sections read from loaded files", () => {
 	it("refuses a key that names an object's prototype with the section's other refusals", async () => {
 		const limits = defineModule({
 			name: "m",
+			replicaSafe: true,
 			section: z.strictObject({ limits: z.record(z.string(), z.number()), n: z.number() }),
+			takes: [],
 		});
 		const paths = await files(
 			'kernel.deployment = single\nm { limits { "__proto__" = 5 }, n = "x" }',

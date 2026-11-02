@@ -1,9 +1,12 @@
 # conformance-oauth
 
 ## Responsibilities
-- Owns the conformance scenes of the OAuth endpoints area: client credentials, introspection and revocation, jwt-bearer, DPoP, the metadata document, tokens refused to users whose email is not verified, the audit events of issuing and revoking tokens.
+- Owns the conformance scenes of the OAuth endpoints area: client credentials, introspection and revocation, jwt-bearer (in the internal module `jwt-bearer`), DPoP, the metadata document, tokens refused to users whose email is not verified, the audit events of issuing and revoking tokens.
+- Owns the scenes of the token, introspection and revocation endpoints' refusals carrying no client's secret, no other client's token and no part of the signing key.
 - Owns the scenes of cross-origin requests to the token and revocation endpoints, the metadata documents and the key set (the key set's here, as the keys area cannot compose identity's origins without a cycle).
-- Sets up the OAuth area's parts (issuer, clients, introspection, revocation, trusted issuers, DPoP, the metadata document, requiring a verified email) on each of the legacy and new targets.
+- Owns the fault scenes of the OAuth endpoints, on a Redis topology and a deployment of their own, each after a control with no fault: a JWT bearer assertion's, a client assertion's and a DPoP proof's `jti` spent once (internal modules `assertion-once`, `client-assertion-once`, `dpop-once`); no token for a JWT bearer assertion, and no revocation answered done, while the store cannot answer (`token-unavailable`, `revocation-unavailable`); with what they share (`faults`).
+- Owns, on the same footing, the fault scenes of the token endpoint's request limit letting no request by while the store cannot count, its fail mode closed (internal module `requests-unavailable`).
+- Sets up the OAuth area's parts (issuer, clients, a client's binding requirement, introspection, revocation, trusted issuers and their profile, DPoP and its nonces at the token endpoint, the metadata document, requiring a verified email) on each of the legacy and new targets.
 - The set-up of clients that receive the code flow (clients with a redirect URI) also lives here.
 
 ## Not here
@@ -13,11 +16,15 @@
 - Area `oauth` and the shape of its parts
 - Scene builder (builds the key parts and the OAuth parts from the form written in a scene)
 - The scene builder also takes store marks
+- The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run only with `CONFORMANCE_FAULTS=1`, as CI sets and the script does not; named to the evidence as `@mod/conformance-oauth#faults` by the run itself; the area's own run and its pattern runs leave them out
 
 ## Invariants
 - The legacy set-up, and the needs the legacy system cannot provide and the differences it answers differently, live only in `src/legacy.ts`.
 - The new system always composes subject revocation and its check on tokens, which `tokens` requires.
+- The new set-up composes `client-credentials` only where a scene's client is allowed the grant, as boot refuses a grant a client is allowed that nothing composed serves.
+- A scene registers only the clients of its own grants; a client there only to be refused or to authenticate is allowed no grant.
 - A scene about DPoP, the jwt-bearer grant or resource indicators being absent says so (`false`).
+- A part names DPoP nonces (`dpopNonce`) only beside DPoP: the part's type refuses one without it. A DPoP part without them states `nonce.required = never`, whatever dpop's default.
 - The new set-up of a scene about DPoP, the jwt-bearer grant or resource indicators being absent names that module as one the scene is without.
 - A pattern's app with a user ledger and verified-email leaves out a jwt-bearer scene: no source can vouch for the subject's email.
 - Touches only the HTTP interface and boot refusals.

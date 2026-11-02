@@ -11,10 +11,11 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { isLabel } from "@mod/labels";
 import { logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
+import { factorBinding } from "@mod/mfa-binding";
 import * as extensions from "@mod/mfa-extensions";
 import {
 	type Enrolled,
@@ -22,7 +23,11 @@ import {
 	firstBindingGates,
 	type Opened,
 	type Sending,
+	type Witnessing,
+	witnessing,
 } from "@mod/mfa-extensions";
+import { factorManaging } from "@mod/mfa-managing";
+import { factorReading } from "@mod/mfa-reading";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
@@ -31,18 +36,23 @@ import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import * as offered from "../src/contract.ts";
-import { enforcers, factors, proofSteps, type Witnessing, witnessing } from "../src/contract.ts";
+import { enforcers, proofSteps } from "../src/contract.ts";
+import type { Decisions } from "../src/factors.ts";
 import mfaModule from "../src/module.ts";
-import { listKeyOf, storedList } from "../src/records/records.ts";
+import { claimKeyOf, listKeyOf, storedList } from "../src/records/records.ts";
 import { section } from "../src/section.ts";
-import type { StoredFactors } from "../src/store.ts";
+import { type FactorStore, factorStore, type StoredFactors } from "../src/store.ts";
 import { type MfaSettings, mfaConfig } from "../src/testing.ts";
 import { memoryFactors } from "./stores.ts";
 
 let shift = 0;
 /** Where set, the clock stands at this time (before the shift), so a test can judge a window's very edge. */
 let stopped: number | undefined;
-const runtime = quietRuntime({ clock: { now: () => (stopped ?? Date.now()) + shift } });
+const logged = recordingLog();
+const runtime = quietRuntime({
+	clock: { now: () => (stopped ?? Date.now()) + shift },
+	log: logged.log,
+});
 let stop = async () => {};
 afterEach(async () => {
 	shift = 0;
@@ -51,7 +61,7 @@ afterEach(async () => {
 });
 
 /** A guessable, counting kind: the proof is the secret and a counter that must go up. */
-const code = defineModule({ name: "kind-code" }, (m) => [
+const code = defineModule({ name: "kind-code", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -72,8 +82,24 @@ const code = defineModule({ name: "kind-code" }, (m) => [
 		},
 	})),
 ]);
+/** A way back a subject binds: guessable, not counting, adding no mfa, as a code by mail is by default. */
+const mailBack = defineModule({ name: "kind-mail-back", replicaSafe: false, takes: [] }, (m) => [
+	m.contribute(factorKinds).by(() => ({
+		kind: "mail-back",
+		amr: ["email"],
+		addsSecondFactor: false,
+		guessable: true,
+		counts: false,
+		enroll: async () => {
+			const secret = randomBytes(6).toString("hex");
+			return { secret, show: { secret } };
+		},
+		verify: async (secret, _state, proof) =>
+			proof === secret ? { kind: "valid" as const, state: null } : { kind: "invalid" as const },
+	})),
+]);
 /** A way back that does not count and cannot be guessed: single-use codes. */
-const backup = defineModule({ name: "kind-backup" }, (m) => [
+const backup = defineModule({ name: "kind-backup", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "backup",
 		amr: [],
@@ -97,12 +123,12 @@ const backup = defineModule({ name: "kind-backup" }, (m) => [
 ]);
 
 /** A step that proves factors, as a login flow contributes one. */
-const step = defineModule({ name: "step" }, (m) => [
+const step = defineModule({ name: "step", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
 
 /** A counting kind whose proof names its amr: the secret, then the amr it claims. */
-const key = defineModule({ name: "kind-key" }, (m) => [
+const key = defineModule({ name: "kind-key", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "key",
 		amr: ["hwk", "swk"],
@@ -119,7 +145,7 @@ const key = defineModule({ name: "kind-key" }, (m) => [
 	})),
 ]);
 /** A counting kind that does not add a second factor. */
-const mail = defineModule({ name: "kind-mail" }, (m) => [
+const mail = defineModule({ name: "kind-mail", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "mail",
 		amr: ["otp"],
@@ -144,7 +170,7 @@ const ping = {
 	from: [] as unknown[],
 };
 /** A counting kind that sends a challenge: its proof is the code the challenge kept. */
-const pinged = defineModule({ name: "kind-ping" }, (m) => [
+const pinged = defineModule({ name: "kind-ping", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "ping",
 		amr: ["otp"],
@@ -173,7 +199,7 @@ const pinged = defineModule({ name: "kind-ping" }, (m) => [
 ]);
 
 /** A counting kind whose first proof names a credential no two factors may hold. */
-const card = defineModule({ name: "kind-card" }, (m) => [
+const card = defineModule({ name: "kind-card", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "card",
 		amr: ["hwk"],
@@ -188,7 +214,7 @@ const card = defineModule({ name: "kind-card" }, (m) => [
 
 /** How the told kind answers its next enrolment; its secret is the value no two factors may hold. */
 const told = { answer: undefined as Enrolled | undefined };
-const toldKind = defineModule({ name: "kind-told" }, (m) => [
+const toldKind = defineModule({ name: "kind-told", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "told",
 		amr: ["otp"],
@@ -202,7 +228,7 @@ const toldKind = defineModule({ name: "kind-told" }, (m) => [
 	})),
 ]);
 /** A way back that will not enrol now. */
-const stuck = defineModule({ name: "kind-stuck" }, (m) => [
+const stuck = defineModule({ name: "kind-stuck", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "stuck",
 		amr: [],
@@ -215,22 +241,28 @@ const stuck = defineModule({ name: "kind-stuck" }, (m) => [
 ]);
 
 /** A module holding sessions to the factors, as `mfa-entry` does in an app. */
-const enforcer = defineModule({ name: "enforcer" }, (m) => [
+const enforcer = defineModule({ name: "enforcer", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(enforcers).by(() => ({ name: "enforcer" })),
 ]);
 
 async function serve(
 	settings: Partial<MfaSettings> = {},
-	{ steps = [step], kinds = [code, backup], extra = [] as Module[], enforced = true } = {},
+	{
+		steps = [step],
+		kinds = [code, backup],
+		extra = [] as Module[],
+		enforced = true,
+		store = undefined as Module | undefined,
+	} = {},
 ) {
 	const audit = auditStandIn();
 	const place = memoryFactors();
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			audit.module,
 			subjectRevocationStandIn,
-			place.module,
+			store ?? place.module,
 			sealModule,
 			sessionStandIn,
 			gatesModule,
@@ -247,9 +279,15 @@ async function serve(
 			...mfaConfig(settings),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	stop = () => app.stop(1000);
-	const decided = app.get(factors);
+	// mfa's three faces, as one for these tests.
+	const decided: Decisions = {
+		...app.get(factorReading),
+		...app.get(factorBinding),
+		...app.get(factorManaging),
+	};
 	/** A code binding begun and proved for the subject, not yet bound. */
 	const provedCode = async (subject: string, passed?: string) => {
 		const begun = await decided.begin(subject, "code", passed, "t");
@@ -283,6 +321,7 @@ async function serve(
 		(await decided.held(subject)).find((f) => f.kind === kind)?.id ?? "";
 	return {
 		app,
+		input,
 		decided,
 		provedCode,
 		bindCode,
@@ -451,7 +490,7 @@ describe("decisions on the subject's factors", () => {
 
 	it("takes a kind that does not say whether guessing beats it as one guessing does, as 0.17 did", async () => {
 		/** A kind written without the declaration, as untyped code could contribute one. */
-		const silent = defineModule({ name: "kind-silent" }, (m) => [
+		const silent = defineModule({ name: "kind-silent", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(factorKinds).by(
 				() =>
 					({
@@ -907,62 +946,45 @@ describe("values no two factors may hold", () => {
 	it("counts a factor of a unique value once its claim names it; one written before claims, unless another holds it", async () => {
 		const { decided, bindKind, place } = await serve({}, { kinds: [card, backup] });
 		await bindKind("ann", "card", "c1");
-		// Read between a binding's write of its factor and its claim on the value.
-		const seen: Record<string, boolean> = {};
-		let reading: string | undefined;
-		place.hooks.beforeSave = async (key) => {
-			if (key.startsWith("u-") && reading) seen[reading] = await decided.countingWritten(reading);
-		};
-		reading = "bob";
+		// A duplicate writes neither the factor nor a claim.
 		expect(await bindKind("bob", "card", "c1")).toEqual({ kind: "duplicate" });
-		expect(seen.bob).toBe(false);
-		reading = "cid";
+		expect(await decided.countingWritten("bob")).toBe(false);
 		expect(await bindKind("cid", "card", "c2")).toMatchObject({ kind: "bound" });
-		// Not yet claimed, its binding could still end as a duplicate.
-		expect(seen.cid).toBe(false);
-		reading = undefined;
 		expect([await decided.countingWritten("ann"), await decided.countingWritten("cid")]).toEqual([
 			true,
 			true,
 		]);
+		// Its claim missing, as 0.18 left one whose claim was never made: it may yet be another's.
+		await place.records.remove(claimKeyOf("card", "c2"));
+		expect(await decided.countingWritten("cid")).toBe(false);
 		// A factor written before claims were kept carries no mark: it counts unless another holds its value.
 		const unmarked = (record: StoredFactors) => {
 			const list = record as unknown as { factors: { claims?: true }[] };
 			const factors = list.factors.map(({ claims: _, ...rest }) => rest);
 			return { value: { ...list, factors } as unknown as StoredFactors };
 		};
-		reading = "dee";
-		place.hooks.beforeSave = async (key) => {
-			if (!key.startsWith("u-") || !reading) return;
-			await place.factors.update(listKeyOf(reading), unmarked);
-			seen[reading] = await decided.countingWritten(reading);
-		};
 		expect(await bindKind("dee", "card", "c3")).toMatchObject({ kind: "bound" });
-		expect(seen.dee).toBe(true);
-		reading = "eve";
-		expect(await bindKind("eve", "card", "c1")).toEqual({ kind: "duplicate" });
-		expect(seen.eve).toBe(false);
+		await place.factors.update(listKeyOf("dee"), unmarked);
+		await place.records.remove(claimKeyOf("card", "c3"));
+		expect(await decided.countingWritten("dee")).toBe(true);
+		expect(await bindKind("eve", "card", "c3")).toMatchObject({ kind: "bound" });
+		expect([await decided.countingWritten("dee"), await decided.countingWritten("eve")]).toEqual([
+			false,
+			true,
+		]);
 	});
 
-	it("refuses removing the last factor that stands while a binding beside it is not yet claimed, and ends as a duplicate", async () => {
+	it("refuses removing the last factor that stands beside a factor whose claim is missing", async () => {
 		const { decided, bindKind, bindCode, idOf, place } = await serve(
 			{ mode: "required" },
 			{ kinds: [code, backup, card] },
 		);
-		await bindKind("ann", "card", "c1");
 		await bindCode("zed");
-		// Zed's card is written and not yet claimed when zed's code is removed; ann holds its value.
-		let removed: string | undefined;
-		place.hooks.beforeSave = async (key) => {
-			if (!key.startsWith("u-") || removed !== undefined) return;
-			removed = await decided.remove(
-				"zed",
-				await idOf("zed", "code"),
-				await decided.fenceOf("zed"),
-			);
-		};
-		expect(await bindKind("zed", "card", "c1")).toEqual({ kind: "duplicate" });
-		expect(removed).toBe("last");
+		expect(await bindKind("zed", "card", "c1")).toMatchObject({ kind: "bound" });
+		// Its claim missing, as 0.18 left one: the card does not stand for zed.
+		await place.records.remove(claimKeyOf("card", "c1"));
+		const fence = await decided.fenceOf("zed");
+		expect(await decided.remove("zed", await idOf("zed", "code"), fence)).toBe("last");
 		expect((await decided.held("zed")).map((f) => f.kind)).toContain("code");
 	});
 
@@ -1089,7 +1111,7 @@ describe("a binding begun", () => {
 });
 
 it("refuses to start under required when no composed kind counts", async () => {
-	const told = defineModule({ name: "kind-told" }, (m) => [
+	const told = defineModule({ name: "kind-told", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(factorKinds).by(() => ({
 			kind: "told",
 			amr: ["sms"],
@@ -1119,6 +1141,22 @@ it("refuses to start without a module holding sessions to the factors, whatever 
 			},
 		]);
 	}
+});
+
+it("refuses to start over a factor store that cannot write a list and a claim as one", async () => {
+	const { factors } = memoryFactors();
+	const { updateTogether: _, ...lacking } = factors;
+	const store = defineModule({ name: "factor-store", replicaSafe: true, takes: [] }, (m) => [
+		m.provide(factorStore).by(() => lacking as FactorStore),
+	]);
+	const refused = await serve({}, { store }).catch((error) => error);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals).toEqual([
+		{
+			where: "mfa",
+			reason: "its factor store cannot write a list and a claim as one (updateTogether)",
+		},
+	]);
 });
 
 it("refuses to start without a step that proves factors, naming what it lacks", async () => {
@@ -1157,7 +1195,7 @@ it("passes where an ask came from to the kind unread", async () => {
 
 describe("a gate contributed before a first counting factor", () => {
 	const asked: unknown[] = [];
-	const gate = defineModule({ name: "gate" }, (m) => [
+	const gate = defineModule({ name: "gate", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(firstBindingGates).by(() => ({
 			admits: async (ask) => {
 				asked.push(ask);
@@ -1192,18 +1230,24 @@ it("refuses manage-within, now session's one recent-authentication window", () =
 
 describe("the extension points mfa-extensions offers", () => {
 	it("are offered by mfa-extensions alone, never again by mfa", () => {
-		for (const name of ["factorKinds", "firstBindingGates", "secondFactorAmr"]) {
+		for (const name of ["factorKinds", "firstBindingGates", "secondFactorAmr", "witnessing"]) {
+			expect(Object.keys(offered), name).not.toContain(name);
+		}
+	});
+
+	it("leaves the factor contracts to mfa-reading, mfa-binding and mfa-managing, offering no factors of its own", () => {
+		for (const name of ["factors", "factorReading", "factorBinding", "factorManaging"]) {
 			expect(Object.keys(offered), name).not.toContain(name);
 		}
 	});
 
 	it("asks a gate contributed through mfa-extensions before a first binding, and a kind through it", async () => {
-		const gate = defineModule({ name: "gate-by-extensions" }, (m) => [
+		const gate = defineModule({ name: "gate-by-extensions", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(extensions.firstBindingGates).by(() => ({ admits: async () => false })),
 		]);
 		const { decided } = await serve({}, { extra: [gate] });
 		expect(await decided.begin("zed", "code")).toEqual({ kind: "binding-proof-required" });
-		const kind = defineModule({ name: "kind-by-extensions" }, (m) => [
+		const kind = defineModule({ name: "kind-by-extensions", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(extensions.factorKinds).by(() => ({
 				kind: "other",
 				amr: [],
@@ -1217,6 +1261,17 @@ describe("the extension points mfa-extensions offers", () => {
 		const other = await serve({}, { extra: [kind] });
 		expect((await other.decided.begin("amy", "other")).kind).toBe("begun");
 	});
+});
+
+it("provides reading, binding and managing as one implementation in each app", async () => {
+	const { app } = await serve();
+	const reading = app.get(factorReading);
+	expect(app.get(factorBinding)).toBe(reading);
+	expect(app.get(factorManaging)).toBe(reading);
+	// The later serve takes over the stop after each test: this app is stopped here.
+	await app.stop(1000);
+	const other = await serve();
+	expect(other.app.get(factorReading)).not.toBe(reading);
 });
 
 describe("an enrollment witness", () => {
@@ -1244,7 +1299,9 @@ describe("an enrollment witness", () => {
 			},
 		};
 		const contributing = (name: string) =>
-			defineModule({ name }, (m) => [m.contribute(witnessing).by(() => told)]);
+			defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
+				m.contribute(witnessing).by(() => told),
+			]);
 		const { decided, bindCode } = await serve({}, { extra: [contributing("told")] });
 		await bindCode("ola");
 		await decided.clear("ola");
@@ -1252,6 +1309,121 @@ describe("an enrollment witness", () => {
 		await expect(
 			serve({}, { extra: [contributing("one"), contributing("two")] }),
 		).rejects.toBeInstanceOf(BootRefused);
+	});
+
+	describe("what a reset gives its witnessing to read after it", () => {
+		/** A witnessing keeping each reset's `after`, to be read when a test asks. */
+		const keeping = () => {
+			const afters: (() => Promise<string>)[] = [];
+			const told: Witnessing = {
+				standing: async (_subject, counts) => (counts ? "held" : "none"),
+				settle: async () => {},
+				cleared: async (_subject, after) => {
+					if (after) afters.push(after);
+				},
+			};
+			const module = defineModule({ name: "keeping", replicaSafe: false, takes: [] }, (m) => [
+				m.contribute(witnessing).by(() => told),
+			]);
+			return { module, afters };
+		};
+
+		it("answers none after a reset nothing followed, and again for the next reset", async () => {
+			const kept = keeping();
+			const { decided, bindCode } = await serve({}, { extra: [kept.module] });
+			await bindCode("ann");
+			await decided.clear("ann");
+			expect(await kept.afters[0]?.()).toBe("none");
+			await decided.clear("ann");
+			expect(await kept.afters[1]?.()).toBe("none");
+		});
+
+		it("answers counting where a binding wrote a factor after the reset", async () => {
+			const kept = keeping();
+			const { decided, bindCode } = await serve({}, { extra: [kept.module] });
+			await bindCode("ben");
+			await decided.clear("ben");
+			await bindCode("ben");
+			expect(await kept.afters[0]?.()).toBe("counting");
+		});
+
+		it("answers unsure where a factor written after the reset does not stand, its claim lost", async () => {
+			const kept = keeping();
+			const { decided, bindKind, place } = await serve({}, { kinds: [card], extra: [kept.module] });
+			await decided.clear("cal");
+			expect((await bindKind("cal", "card", "c-9")).kind).toBe("bound");
+			expect(await kept.afters[0]?.()).toBe("counting");
+			await place.records.remove(claimKeyOf("card", "c-9"));
+			expect(await kept.afters[0]?.()).toBe("unsure");
+		});
+
+		it("answers unsure once the subject's record is lost after the reset, though a later reset answers none", async () => {
+			const kept = keeping();
+			const { decided, bindCode, place } = await serve({}, { extra: [kept.module] });
+			await bindCode("eli");
+			await decided.clear("eli");
+			await place.records.remove(listKeyOf("eli"));
+			expect(await kept.afters[0]?.()).toBe("unsure");
+			await decided.clear("eli");
+			expect(await kept.afters[1]?.()).toBe("none");
+		});
+
+		it("answers unsure, not counting, where the record goes after its factors were read", async () => {
+			const kept = keeping();
+			const { decided, bindCode, place } = await serve({}, { extra: [kept.module] });
+			await decided.clear("fay");
+			await bindCode("fay");
+			let reads = 0;
+			place.hooks.afterRead = async (key) => {
+				if (key !== listKeyOf("fay")) return;
+				reads += 1;
+				if (reads === 1) await place.records.remove(key);
+			};
+			expect(await kept.afters[0]?.()).toBe("unsure");
+		});
+	});
+
+	it("tells how the subject's counting factors stand as written: counting, unclaimed or none", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [card] });
+		expect(await decided.writtenStanding("gus")).toBe("none");
+		expect((await bindKind("gus", "card", "c-7")).kind).toBe("bound");
+		expect(await decided.writtenStanding("gus")).toBe("counting");
+		await place.records.remove(claimKeyOf("card", "c-7"));
+		expect(await decided.writtenStanding("gus")).toBe("unclaimed");
+		expect(await decided.countingWritten("gus")).toBe(false);
+	});
+
+	it("counts the subject's counting factors written that do not stand, one beside a factor that does included", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [card] });
+		expect(await decided.unclaimedWritten("gus")).toBe(0);
+		expect((await bindKind("gus", "card", "c-7")).kind).toBe("bound");
+		expect((await bindKind("gus", "card", "c-8")).kind).toBe("bound");
+		expect(await decided.unclaimedWritten("gus")).toBe(0);
+		await place.records.remove(claimKeyOf("card", "c-7"));
+		// One stands, so the subject reads as counting: only this count tells the other.
+		expect(await decided.writtenStanding("gus")).toBe("counting");
+		expect(await decided.unclaimedWritten("gus")).toBe(1);
+		await place.records.remove(claimKeyOf("card", "c-8"));
+		expect(await decided.unclaimedWritten("gus")).toBe(2);
+	});
+
+	it("warns at every start where a session needs no second factor, and not where it is required", async () => {
+		const warned = async (mode: "required" | "optional") => {
+			const from = logged.lines().length;
+			await serve({ mode });
+			return logged
+				.lines()
+				.slice(from)
+				.filter((line) => line.event === "mfa.not_required");
+		};
+		expect(await warned("optional")).toEqual([
+			{
+				level: "warn",
+				event: "mfa.not_required",
+				fields: { reason: "using a session needs no second factor" },
+			},
+		]);
+		expect(await warned("required")).toEqual([]);
 	});
 
 	it("tells whether every session needs a second factor, as the mode says", async () => {
@@ -1273,5 +1445,142 @@ describe("an enrollment witness", () => {
 		await bindCode("lee");
 		await place.factors.update(listKeyOf("lee"), () => ({ value: storedList("lee", []) }));
 		expect(await decided.asks("lee")).toBe("nothing");
+	});
+});
+
+describe("a binding writing its factor and the claim on its value together", () => {
+	it("writes the factor of a unique value and its claim in one write, never one without the other", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [card] });
+		const saved: string[] = [];
+		place.hooks.beforeSave = async (key) => void saved.push(key);
+		expect((await bindKind("ann", "card", "c-1")).kind).toBe("bound");
+		expect(saved).toEqual([]);
+		expect(place.peek(claimKeyOf("card", "c-1"))).toEqual({
+			listKey: listKeyOf("ann"),
+			factor: (await decided.held("ann"))[0]?.id,
+		});
+		expect(await decided.writtenStanding("ann")).toBe("counting");
+	});
+
+	it("writes neither the factor nor its claim for a first binding of a unique value another counting factor beat", async () => {
+		const { decided, bindCode, bindKind, place } = await serve(
+			{ mode: "required" },
+			{ kinds: [code, backup, card] },
+		);
+		const begun = await decided.begin("liz", "card");
+		if (begun.kind !== "begun") throw new Error(begun.kind);
+		const valid = await decided.provePending("liz", begun.pending, "c-2");
+		if (valid.kind !== "valid") throw new Error(valid.kind);
+		await bindCode("liz");
+		expect(await decided.bind("liz", begun.pending, valid.state)).toEqual({
+			kind: "first-binding-closed",
+		});
+		expect(place.peek(claimKeyOf("card", "c-2"))).toBeUndefined();
+		expect((await decided.held("liz")).map((f) => f.kind)).not.toContain("card");
+		// The value stays free for another.
+		expect((await bindKind("max", "card", "c-2")).kind).toBe("bound");
+	});
+
+	it("writes neither the factor nor its claim for a binding of a unique value whose fence moved as it wrote", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [code, backup, card] });
+		const begun = await decided.begin("lia", "card");
+		if (begun.kind !== "begun") throw new Error(begun.kind);
+		const valid = await decided.provePending("lia", begun.pending, "c-3");
+		if (valid.kind !== "valid") throw new Error(valid.kind);
+		// The fence moves once the binding has read it: the write itself must refuse.
+		let moved = false;
+		place.hooks.afterRead = async (key) => {
+			if (key !== listKeyOf("lia") || moved) return;
+			moved = true;
+			await decided.fence("lia");
+		};
+		expect(await decided.bind("lia", begun.pending, valid.state)).toEqual({ kind: "fenced" });
+		delete place.hooks.afterRead;
+		expect(moved).toBe(true);
+		expect(place.peek(claimKeyOf("card", "c-3"))).toBeUndefined();
+		expect(await decided.held("lia")).toEqual([]);
+		expect((await bindKind("max", "card", "c-3")).kind).toBe("bound");
+	});
+
+	it("binds nothing where another factor holds the value, and takes a claim its factor left", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [card] });
+		expect((await bindKind("ann", "card", "c-2")).kind).toBe("bound");
+		expect((await bindKind("bob", "card", "c-2")).kind).toBe("duplicate");
+		expect(await decided.held("bob")).toEqual([]);
+		await decided.clear("ann");
+		expect((await bindKind("bob", "card", "c-2")).kind).toBe("bound");
+		expect((place.peek(claimKeyOf("card", "c-2")) as unknown as { listKey: string }).listKey).toBe(
+			listKeyOf("bob"),
+		);
+	});
+
+	it("leaves the factor with its claim where the write's answer is lost, so it counts though the bind is unavailable", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [card] });
+		place.hooks.afterTogether = async () => {
+			throw new Unavailable("factor-store");
+		};
+		await expect(bindKind("cid", "card", "c-3")).rejects.toSatisfy(isUnavailable);
+		place.hooks.afterTogether = undefined;
+		expect(await decided.writtenStanding("cid")).toBe("counting");
+		expect((await bindKind("dee", "card", "c-3")).kind).toBe("duplicate");
+	});
+
+	it("answers full as before, writing no claim for it", async () => {
+		const { decided, bindKind, place } = await serve({ "max-factors": 2 }, { kinds: [card] });
+		expect((await bindKind("eve", "card", "c-4")).kind).toBe("bound");
+		// Two bindings begun while one place is left: the second to bind finds none.
+		const proved = async (proof: string) => {
+			const begun = await decided.begin("eve", "card");
+			if (begun.kind !== "begun") throw new Error(begun.kind);
+			const done = await decided.provePending("eve", begun.pending, proof);
+			if (done.kind !== "valid") throw new Error(done.kind);
+			return { pending: begun.pending, state: done.state };
+		};
+		const [five, six] = [await proved("c-5"), await proved("c-6")];
+		expect((await decided.bind("eve", five.pending, five.state)).kind).toBe("bound");
+		expect((await decided.bind("eve", six.pending, six.state)).kind).toBe("full");
+		expect(place.peek(claimKeyOf("card", "c-6"))).toBeUndefined();
+	});
+});
+
+it("takes all it names, with a witnessing and without", async () => {
+	const told: Witnessing = {
+		standing: async (_subject, counts) => (counts ? "held" : "none"),
+		settle: async () => {},
+		cleared: async () => {},
+	};
+	const contributing = defineModule({ name: "told", replicaSafe: false, takes: [] }, (m) => [
+		m.contribute(witnessing).by(() => told),
+	]);
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused((await serve()).input)).mfa).toBeUndefined();
+	await stop();
+	expect(
+		(await takesUnused((await serve({}, { extra: [contributing] })).input)).mfa,
+	).toBeUndefined();
+});
+
+describe("a way back that does not count", () => {
+	it("is bound by its subject through begin, its proof adding its own amr and never mfa", async () => {
+		const { decided } = await serve({}, { kinds: [code, backup, mailBack] });
+		const begun = await decided.begin("wen", "mail-back");
+		expect(begun.kind).toBe("begun");
+		if (begun.kind !== "begun") return;
+		const secret = String((begun.show as { secret: string }).secret);
+		const proved = await decided.provePending("wen", begun.pending, secret);
+		expect(proved).toMatchObject({ kind: "valid" });
+		if (proved.kind !== "valid") return;
+		expect(proved.amr).toEqual(["email"]);
+		const bound = await decided.bind("wen", begun.pending, proved.state);
+		// Its first factor, and none of them counts: no codes are due, which a reissue would refuse.
+		expect(bound).toMatchObject({ kind: "bound", codesDue: false });
+		expect((await decided.held("wen")).map((f) => f.kind)).toEqual(["mail-back"]);
+		// It is no counting factor: a required second factor is still to bind.
+		expect(await decided.countingHeld("wen", "login")).toBe(false);
+	});
+
+	it("is refused to begin where mfa issues it itself (one guessing cannot beat), as before", async () => {
+		const { decided } = await serve({}, { kinds: [code, backup, mailBack] });
+		expect(await decided.begin("wen", "backup")).toEqual({ kind: "unknown-kind" });
 	});
 });

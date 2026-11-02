@@ -1,0 +1,22 @@
+{
+	"name": "@mod/upstream-handoff-seal",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"joins": [
+		"@mod/upstream-handoff",
+		"@mod/seal"
+	],
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/seal": "workspace:*",
+		"@mod/upstream-handoff": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5"
+	}
+}

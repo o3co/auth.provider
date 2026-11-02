@@ -1,109 +1,41 @@
-import { type Audit, declaredAudit } from "@mod/audit";
-import { type Log, Unavailable } from "@mod/kernel";
+import { Unavailable } from "@mod/kernel";
 import { isLabel } from "@mod/labels";
+import type { FactorBinding } from "@mod/mfa-binding";
+import { issuedWayBack, type Opened } from "@mod/mfa-extensions";
+import type { FactorManaging } from "@mod/mfa-managing";
+import type { FactorReading, Fence } from "@mod/mfa-reading";
+import { bindingWith } from "./binding/binding.ts";
+import { clearingWith } from "./clearing/clearing.ts";
+import { type Factor, sealContext } from "./records/records.ts";
 import {
-	type FactorKind,
-	type FirstBindingGate,
-	type Opened,
-	secondFactorAmr,
-} from "@mod/mfa-extensions";
-import type { Seal } from "@mod/seal";
-import events from "./audit-events.ts";
-import type { Asked, Factors, Fence, Shown, Witnessing } from "./contract.ts";
-import { type Factor, factorRecords, sealContext } from "./records/records.ts";
-import type { FactorStore } from "./store.ts";
+	amrOf,
+	counting,
+	type FactorParts,
+	guessing,
+	sameState,
+	sharedOf,
+	shown,
+	usable,
+} from "./shared.ts";
+import { standingWith } from "./standing/standing.ts";
 
-export interface FactorParts {
-	readonly stored: FactorStore;
-	readonly kinds: ReadonlyMap<string, FactorKind>;
-	readonly seal: Seal;
-	readonly required: boolean;
-	readonly maxFactors: number;
-	readonly gates: readonly FirstBindingGate[];
-	readonly random: (n: number) => Uint8Array;
-	readonly now: () => number;
-	readonly audit: Audit;
-	/** Who tells, apart from the store, that a subject enrolled; none leaves the store alone to tell. */
-	readonly witnessing: Witnessing | undefined;
-	readonly log: Pick<Log, "warn">;
-}
+export { addsMfa, byKind, counting, type FactorParts, guessing } from "./shared.ts";
 
-export const byKind = (kinds: readonly FactorKind[]) => new Map(kinds.map((k) => [k.kind, k]));
-export const addsMfa = (kind: FactorKind) => kind.addsSecondFactor;
-/** Whether guessing can beat the kind: unless it says no, as 0.17 took it, so a kind that says nothing is held to the stricter side. */
-export const guessing = (kind: FactorKind) => kind.guessable !== false;
-/** A proof's own amr kept to its kind's, else its kind's, and `mfa` when the kind adds it. */
-const amrOf = (kind: FactorKind, own?: readonly string[]) => [
-	...(own ? own.filter((amr) => kind.amr.includes(amr)) : kind.amr),
-	...(addsMfa(kind) ? [secondFactorAmr] : []),
-];
-/** The factors the subject holds of kinds this deployment knows. */
-const usable = (all: readonly Factor[], kinds: ReadonlyMap<string, FactorKind>) =>
-	all.filter((f) => kinds.has(f.kind));
-export const counting = (all: readonly Factor[], kinds: ReadonlyMap<string, FactorKind>) =>
-	all.filter((f) => kinds.get(f.kind)?.counts);
-const shown = (factor: Factor): Shown => ({
-	id: factor.id,
-	kind: factor.kind,
-	...(factor.label ? { label: factor.label } : {}),
-});
-/** States are JSON as the store keeps them, so equal text means the same state. */
-const sameState = (a: unknown, b: unknown) =>
-	JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+/** mfa's decisions: the members of the three contracts it provides, one implementation in each app. */
+export type Decisions = FactorReading & FactorBinding & FactorManaging;
 
-/** A binding begun: the kind and its secret, sealed together for the subject. */
-interface Pending {
-	readonly kind: string;
-	readonly secret: string;
-	/** Begun while the subject held no counting factor: it binds only while it would still be the first. */
-	readonly first?: true;
-	/** The subject's fence when it began: a reset or a fence since leaves it nothing to bind. None reads as 0. */
-	readonly fences?: number;
-}
-
-const isWayBack = (kind: FactorKind) => !kind.counts && !guessing(kind);
-
-export function factorDecisions(p: FactorParts): Factors {
-	const wayBack = (factor: Factor) => {
-		const kind = p.kinds.get(factor.kind);
-		return kind !== undefined && isWayBack(kind);
-	};
-	const records = factorRecords(p.stored);
-	const audited = declaredAudit(p.audit, events);
-	const recorded = (
-		kind: "factor.enrolled" | "factor.removed" | "recovery_code.used" | "recovery_codes.generated",
-		subject: string,
-		attributes: Record<string, string>,
-	) => audited.record(`mfa.${kind}`, { subject, attributes });
-	const id = () => Buffer.from(p.random(16)).toString("base64url");
-	const opened = (sealed: string, context: string) => {
-		const plain = p.seal.open(sealed, context);
-		if (plain.kind !== "opened") throw new Unavailable("mfa");
-		return plain.plain;
-	};
-	const secretOf = (subject: string, factor: Factor) =>
-		opened(factor.secret, sealContext(subject, factor.id));
-	/** The secret sealed again under the current key when a past key sealed it; none otherwise. */
-	const resealedSecret = (subject: string, factor: Factor) => {
-		const read = p.seal.open(factor.secret, sealContext(subject, factor.id));
-		return read.kind === "opened" && read.stale
-			? p.seal.seal(read.plain, sealContext(subject, factor.id))
-			: undefined;
-	};
-	const heldOf = (subject: string, all: readonly Factor[], kind: string): Opened[] =>
-		all
-			.filter((f) => f.kind === kind)
-			.map((f) => ({ secret: secretOf(subject, f), state: f.state }));
+export function factorDecisions(p: FactorParts): Decisions {
+	const shared = sharedOf(p);
+	const { records, recorded, id, opened, secretOf, resealedSecret, heldOf, wayBack } = shared;
+	const standings = standingWith(shared);
+	const { standing, standingIds, countsNow, writtenStanding, unclaimedWritten } = standings;
+	const clearing = clearingWith(shared, standings);
+	const { clear } = clearing;
+	const binding = bindingWith(shared, standings, clearing);
 	const challengeContext = (subject: string, factor: string) =>
 		sealContext(subject, `challenge ${factor}`);
-	const pendingOf = (subject: string, pending: string) => {
-		const value = JSON.parse(opened(pending, sealContext(subject, "pending"))) as Pending;
-		const kind = p.kinds.get(value.kind);
-		const fences = typeof value.fences === "number" ? value.fences : 0;
-		return kind ? { kind, secret: value.secret, first: value.first === true, fences } : undefined;
-	};
 	const recovery = async (subject: string) => {
-		const kind = [...p.kinds.values()].find(isWayBack);
+		const kind = [...p.kinds.values()].find(issuedWayBack);
 		if (!kind) return undefined;
 		const enrolled = await kind.enroll(
 			subject,
@@ -121,51 +53,6 @@ export function factorDecisions(p: FactorParts): Factors {
 		};
 		return { factor, show: enrolled.show };
 	};
-	const standing = async (subject: string, counts: boolean, at: Asked) =>
-		p.witnessing
-			? p.witnessing.standing(subject, counts, at)
-			: counts
-				? ("held" as const)
-				: ("none" as const);
-	/**
-	 * A counting factor with a unique value counts once its claim names it: before, its binding may
-	 * still end as a duplicate. One written before claims were kept counts unless another holds it.
-	 */
-	const stands = async (subject: string, factor: Factor) => {
-		const unique = p.kinds
-			.get(factor.kind)
-			?.uniqueSecret?.({ secret: secretOf(subject, factor), state: factor.state });
-		if (unique === undefined) return true;
-		if (await records.claimedFor(subject, factor.kind, unique, factor.id)) return true;
-		if (factor.claims) return false;
-		return !(await records.heldByAnother(subject, factor.kind, unique, factor.id));
-	};
-	/** The ids of the subject's counting factors that stand, as `stands` reads them. */
-	const standingIds = async (subject: string) => {
-		const ids = new Set<string>();
-		for (const factor of counting(await records.list(subject), p.kinds)) {
-			if (await stands(subject, factor)) ids.add(factor.id);
-		}
-		return ids;
-	};
-	const countsNow = async (subject: string) => (await standingIds(subject)).size > 0;
-	const settle = async (subject: string) => p.witnessing?.settle(subject, () => countsNow(subject));
-	/** A first binding refused, recorded with why; nothing of it is kept. */
-	const closed = (subject: string, kind: string, reason: "competing" | "reset-cleared") => {
-		audited.record("mfa.first_binding_conflict", { subject, attributes: { kind, reason } });
-		return { kind: "first-binding-closed" } as const;
-	};
-	// Factors first, then the mark: a failure between leaves a mark and no factor, which stops logins.
-	const clear = async (subject: string) => {
-		// Written even when nothing is held: the fence moves, so no binding begun before it binds.
-		const cleared = await records.decide(subject, (all) => ({
-			next: [],
-			fence: true,
-			verdict: { count: all.length, kinds: [...new Set(all.map((f) => f.kind))].sort() },
-		}));
-		await p.witnessing?.cleared(subject);
-		return cleared;
-	};
 	return {
 		held: async (subject) => usable(await records.list(subject), p.kinds).map(shown),
 		countingHeld: async (subject, at) => {
@@ -173,6 +60,8 @@ export function factorDecisions(p: FactorParts): Factors {
 			return (await standing(subject, counts, at)) === "held";
 		},
 		countingWritten: (subject) => countsNow(subject),
+		writtenStanding,
+		unclaimedWritten,
 		secondFactorRequired: () => p.required,
 		asks: async (subject) => {
 			const all = await records.list(subject);
@@ -231,7 +120,7 @@ export function factorDecisions(p: FactorParts): Factors {
 				return { next, verdict: true };
 			});
 			if (!written) return { kind: "raced" };
-			if (isWayBack(kind)) {
+			if (issuedWayBack(kind)) {
 				const remaining =
 					result.remaining === undefined ? {} : { remaining: String(result.remaining) };
 				recorded("recovery_code.used", subject, {
@@ -242,104 +131,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			}
 			return { kind: "valid", amr: amrOf(kind, result.amr) };
 		},
-		begin: async (subject, name, passed, transaction, from) => {
-			const kind = p.kinds.get(name);
-			if (!kind?.counts) return { kind: "unknown-kind" };
-			const all = await records.list(subject);
-			const fences = await records.fences(subject);
-			if (all.length >= p.maxFactors) return { kind: "full" };
-			const counts = counting(all, p.kinds).length > 0;
-			const first = (await standing(subject, counts, "binding")) === "none";
-			// A login's ask holds the password alone, which lets it bind a first factor and never add one.
-			if (!first && from?.kind === "login") return closed(subject, name, "competing");
-			if (p.gates.length > 0 && first) {
-				const ask = { subject, kind: name, transaction, passed, from };
-				for (const gate of p.gates) {
-					if (!(await gate.admits(ask))) return { kind: "binding-proof-required" };
-				}
-			}
-			const enrolled = await kind.enroll(subject, heldOf(subject, all, kind.kind), from);
-			if (!("secret" in enrolled)) return { kind: enrolled.kind };
-			const unique = kind.uniqueSecret?.({ secret: enrolled.secret, state: null });
-			if (unique !== undefined && (await records.taken(kind.kind, unique))) {
-				return { kind: "duplicate" };
-			}
-			const value: Pending = {
-				kind: kind.kind,
-				secret: enrolled.secret,
-				...(first ? { first } : {}),
-				...(fences > 0 ? { fences } : {}),
-			};
-			const pending = p.seal.seal(JSON.stringify(value), sealContext(subject, "pending"));
-			return { kind: "begun", pending, show: enrolled.show };
-		},
-		provePending: async (subject, pending, proof) => {
-			const found = pendingOf(subject, pending);
-			if (!found) return { kind: "unknown" };
-			const result = await found.kind.verify(found.secret, null, proof);
-			if (result.kind !== "valid") return { kind: "invalid" };
-			return { kind: "valid", state: result.state, amr: amrOf(found.kind, result.amr) };
-		},
-		bind: async (subject, pending, state, label, from) => {
-			if (label !== undefined && !isLabel(label)) return { kind: "malformed-label" };
-			const found = pendingOf(subject, pending);
-			if (!found) return { kind: "unknown" };
-			// A reset or a fence since it began leaves it nothing to bind; checked again in the write below.
-			if ((await records.fences(subject)) !== found.fences) return { kind: "fenced" };
-			// Asked from a login, it binds only as the first, whenever and however it began.
-			const asFirst = found.first || from?.kind === "login";
-			// A mark beside nothing counting is a store that lost its factors: no first binding refills it.
-			if (asFirst && p.witnessing) {
-				const counts = counting(await records.list(subject), p.kinds).length > 0;
-				await standing(subject, counts, "binding");
-			}
-			const unique = found.kind.uniqueSecret?.({ secret: found.secret, state });
-			const fid = id();
-			const factor: Factor = {
-				id: fid,
-				kind: found.kind.kind,
-				...(label ? { label } : {}),
-				secret: p.seal.seal(found.secret, sealContext(subject, fid)),
-				state,
-				boundAt: p.now(),
-				...(unique !== undefined ? { claims: true as const } : {}),
-			};
-			const backed = [...p.kinds.values()].some(isWayBack);
-			// Decided on the factors as written: of two first bindings at once, one binds.
-			const written = await records.decide<"full" | "closed" | "fenced" | { due: boolean }>(
-				subject,
-				(all, fences) => {
-					if (fences !== found.fences) return { verdict: "fenced" };
-					// A first binding another counting factor beat to the subject binds nothing: it was let begin as the first.
-					if (asFirst && counting(all, p.kinds).length > 0) return { verdict: "closed" };
-					// A subject holding no codes keeps them a place, for the reissue to write them in.
-					const due = backed && !all.some(wayBack);
-					if (all.length + 1 + (due ? 1 : 0) > p.maxFactors) return { verdict: "full" };
-					return { next: [...all, factor], verdict: { due } };
-				},
-			);
-			if (written === "fenced") return { kind: "fenced" };
-			if (written === "full") return { kind: "full" };
-			if (written === "closed") return closed(subject, factor.kind, "competing");
-			const { due } = written;
-			const ours = new Set([fid]);
-			// A reset since the write took what was written: nothing stands for this binding.
-			if (!(await records.list(subject)).some((f) => f.id === fid)) {
-				return closed(subject, factor.kind, "reset-cleared");
-			}
-			if (unique !== undefined && !(await records.claim(subject, factor.kind, unique, fid))) {
-				// Another factor holds the value: this one goes again.
-				await records.decide(subject, (all) => ({
-					next: all.filter((f) => !ours.has(f.id)),
-					verdict: undefined,
-				}));
-				return { kind: "duplicate" };
-			}
-			recorded("factor.enrolled", subject, { kind: factor.kind, factor: fid });
-			// The mark follows the factor: a write that fails leaves none, and a missing one is filled here.
-			await settle(subject);
-			return { kind: "bound", factor: shown(factor), fence: found.fences as Fence, codesDue: due };
-		},
+		...binding,
 		fence: (subject) => records.fence(subject),
 		fenceOf: async (subject) => (await records.fences(subject)) as Fence,
 		rename: async (subject, target, label) => {
@@ -365,7 +157,7 @@ export function factorDecisions(p: FactorParts): Factors {
 					const rest = all.filter((f) => f.id !== target);
 					const counted = counting(rest, p.kinds).length > 0;
 					// Under a witness only a reset ends an enrollment: its mark stays, so no factor would stand for it.
-					// One not yet claimed may still end as a duplicate, so it does not stand for the subject.
+					// One whose claim is missing may yet be another's, so it does not stand for the subject.
 					const stays = rest.some((f) => stood.has(f.id));
 					if ((p.required || p.witnessing) && !stays) return { verdict: "last" };
 					// A way back left alone would hold every login once its codes run out: it goes with the last counting factor.

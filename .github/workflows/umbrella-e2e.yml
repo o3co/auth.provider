@@ -8,11 +8,10 @@ name: umbrella-e2e
 # runs the suite at the umbrella's develop, with only PROVIDER_REV overridden:
 # auth.proxy and auth.policy-verifier stay at the umbrella's pins.
 #
-# While 0.18 is prepared it runs by hand only and is no required check: the
-# umbrella still builds the provider as 0.17 was laid out (packages/,
-# templates/standalone, `pnpm -r run build`), so it cannot pass against 0.18
-# until the umbrella moves. Once it does, put back the pull_request trigger on
-# main and the required check, together.
+# It runs by hand only and is no required check: once for each release,
+# dispatched with the release branch as its ref before the branch's pull request
+# to main (docs/releasing.md, "Before the tag", step 8), so it tests the head
+# the release takes.
 #
 # Red means this change breaks the umbrella's contract — or the umbrella's
 # develop is itself red: check its latest e2e run first. For a broken contract,

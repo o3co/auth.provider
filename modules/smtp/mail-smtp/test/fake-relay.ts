@@ -1,12 +1,12 @@
 import { createServer, type Server, type Socket } from "node:net";
-import { TLSSocket, createServer as tlsServer } from "node:tls";
+import { TLSSocket, type TlsOptions, createServer as tlsServer } from "node:tls";
 
 /** How the fake relay behaves. */
 export interface Script {
 	/** EHLO's extensions; STARTTLS is offered only before TLS. */
 	readonly extensions?: readonly string[];
-	/** The certificate for STARTTLS, or for TLS from the first byte with `implicit`. */
-	readonly certificate?: { readonly cert: string; readonly key: string };
+	/** The certificate for STARTTLS, or for TLS from the first byte with `implicit`, and any other server options. */
+	readonly certificate?: TlsOptions;
 	readonly implicit?: boolean;
 	/** Replies in place of the defaults, by verb ("greeting", "EHLO", "MAIL", "RCPT", "DATA", "message", "AUTH", "STARTTLS", "QUIT"). "drop" closes the connection, "none" says nothing. */
 	readonly replies?: Readonly<Record<string, string>>;
@@ -22,6 +22,8 @@ export interface FakeRelay {
 	readonly messages: string[];
 	/** Bytes received over every connection. */
 	readonly received: () => number;
+	/** The code of each TLS error on its side: a handshake it refused, or a connection broken after. */
+	readonly refused: string[];
 	close(): Promise<void>;
 }
 
@@ -42,6 +44,8 @@ const defaults: Readonly<Record<string, string>> = {
 export async function fakeRelay(script: Script = {}): Promise<FakeRelay> {
 	const lines: string[] = [];
 	const messages: string[] = [];
+	const refused: string[] = [];
+	const noteRefused = (error: NodeJS.ErrnoException) => refused.push(error.code ?? error.message);
 	const sockets = new Set<Socket>();
 	let received = 0;
 	const replyTo = (verb: string) => script.replies?.[verb] ?? defaults[verb] ?? "502 5.5.1 unknown";
@@ -85,7 +89,7 @@ export async function fakeRelay(script: Script = {}): Promise<FakeRelay> {
 			if (verb === "STARTTLS" && reply.startsWith("220") && script.certificate) {
 				socket.off("data", read);
 				socket = new TLSSocket(plain, { isServer: true, ...script.certificate });
-				socket.on("error", () => {});
+				socket.on("error", noteRefused);
 				socket.on("data", read);
 				secured = true;
 				lines.push("(tls)");
@@ -113,6 +117,7 @@ export async function fakeRelay(script: Script = {}): Promise<FakeRelay> {
 	const server: Server = script.implicit
 		? tlsServer({ ...script.certificate }, serve)
 		: createServer(serve);
+	server.on("tlsClientError", noteRefused);
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
 	if (address === null || typeof address === "string") throw new Error("no port");
@@ -121,6 +126,7 @@ export async function fakeRelay(script: Script = {}): Promise<FakeRelay> {
 		lines,
 		messages,
 		received: () => received,
+		refused,
 		close: () =>
 			new Promise((resolve) => {
 				for (const s of sockets) s.destroy();

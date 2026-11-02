@@ -12,8 +12,8 @@ Internal module of `clients-cimd`: reading and judging a client's metadata docum
 
 ## Offers
 - `documentUrl` (an id) → the URL, or none.
-- `recordOf` (the URL, the document, the ceiling's scopes and audiences, the copying sections) → the client record, or the reason it is refused; `neededFields` and `computedSections`, which boot checks the copies against.
-- `readingOver` collects the sections with a copy from `metadataSections`, refusing boot where none reads a needed field or one copies a computed section.
+- `recordOf` (the URL, the document, the ceiling's scopes and audiences, the owners' copies) → the client record, or the reason it is refused; `neededFields` and `computedSections`, which boot checks the copies against.
+- `readingOver` collects the copies from `client-documents`' `documentCopies`, refusing boot where none reads a needed field, where a copy's section is not among `metadataSections`, or where one copies a computed section.
 - `readingOver` (the build context) → `readingWith` (`outbound`, the narrower, the ceiling, the log, `clients`' `checkRecord`, taken late) → a loader for `fetching`.
 
 ## Invariants
@@ -22,5 +22,5 @@ Internal module of `clients-cimd`: reading and judging a client's metadata docum
 - A refusal's reason is the field refused, the status, `not a JSON object`, `outbound`'s refusal or failure, or `record at` the paths where `checkRecord` refuses the record. A record is checked before it is kept; a check that throws rejects, which `fetching` takes as a failure.
 
 ## Depends on
-- `outbound` (the fetch, its refusals, reading JSON), `client-allowance` (scope words, allowances within the ceiling), `code-grant` and `refresh` (the grants' names), `clients` (the record and section types, `metadataSections`, `checkRecord`), `kernel` (the build context, the log)
+- `outbound` (the fetch, its refusals, reading JSON), `client-allowance` (scope words, allowances within the ceiling), `code-grant` and `refresh` (the grants' names), `clients` (the record type, `metadataSections`, `checkRecord`), `client-documents` (the copies), `kernel` (the build context, the log)
 - The package's section and `fetching`'s loader answer

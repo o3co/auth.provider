@@ -1,4 +1,5 @@
 import { auditStandIn } from "@mod/audit/testing";
+import { type DocumentCopy, documentCopies } from "@mod/client-documents";
 import { clientSources } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, publicClient } from "@mod/clients/testing";
@@ -7,15 +8,15 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
-import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
+import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
+import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Session, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import { type Asked, clientSection, consents, isFirstParty } from "../src/contract.ts";
+import { type Asked, clientCopy, clientSection, consents, isFirstParty } from "../src/contract.ts";
 import consentModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import type { StoredAsk, StoredGrant } from "../src/store.ts";
@@ -32,7 +33,8 @@ afterEach(async () => {
 	await stop();
 });
 
-const runtime = quietRuntime({ clock: { now: () => now } });
+const logged = recordingLog();
+const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
 const asked: Asked = {
 	clientId: "app",
 	range: ["read", "write"],
@@ -85,7 +87,7 @@ function faulty<T extends StoredGrant | StoredAsk>() {
 
 /** A client a source other than the operator's settings shows, as a metadata document would. */
 const documentId = "https://docs.example/client.json";
-const documents = defineModule({ name: "documents" }, (m) => [
+const documents = defineModule({ name: "documents", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(clientSources).by(() => ({
 		find: async (id: string) =>
 			id === documentId
@@ -99,6 +101,13 @@ const documents = defineModule({ name: "documents" }, (m) => [
 	})),
 ]);
 
+/** The document copies composed, as client-documents' reader collects them. */
+const copiesSeen = contract<readonly DocumentCopy[]>("test.copies-seen");
+const copiesProbe = defineModule(
+	{ name: "copies-probe", replicaSafe: true, takes: [documentCopies] },
+	(m) => [m.provide(copiesSeen).by((c) => c.collect(documentCopies))],
+);
+
 const challengeOf = (url: string) => new URL(url).searchParams.get("challenge") ?? "";
 
 /** `page` null composes consent without a consent page. */
@@ -109,7 +118,8 @@ async function serve(
 	const grants = faulty<StoredGrant>();
 	const asks = faulty<StoredAsk>();
 	const recorded = auditStandIn();
-	const app = await assemble({
+	// The composition as one value, for a test of what its modules take.
+	const input = {
 		modules: [
 			http,
 			clientsModule,
@@ -122,6 +132,7 @@ async function serve(
 			subjectRevocationStandIn,
 			consentStoresOn({ grants, asks }),
 			consentModule,
+			copiesProbe,
 		],
 		config: {
 			...kernelConfig(),
@@ -131,6 +142,7 @@ async function serve(
 			}),
 			...clientsConfig([
 				publicClient({ id: "app" }),
+				publicClient({ id: "own", sections: { [clientSection.name]: { "first-party": true } } }),
 				publicClient({
 					id: "named",
 					sections: {
@@ -147,18 +159,22 @@ async function serve(
 				: consentConfig({ "challenge-lifetime": "1m", page })),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
 	const opened = app.get(sessions);
 	const given = app.get(consents);
 	const sessionFor = async (subject: string) => {
-		const { cookies } = await opened.complete(testRequest(), {
-			subject,
-			amr: ["pwd"],
-			authenticatedAt: runtime.clock.now(),
-		});
+		const { cookies } = openedOf(
+			await opened.open(testRequest(), {
+				subject,
+				amr: ["pwd"],
+				authenticatedAt: runtime.clock.now(),
+				provenSince: runtime.clock.now(),
+			}),
+		);
 		const cookie = cookies[0]?.split(";")[0] ?? "";
 		const session = (await opened.enter(
 			testRequest({ headers: new Map([["cookie", cookie]]) }),
@@ -207,7 +223,18 @@ async function serve(
 				call("POST", cookie, { challenge, decision }, headers),
 		};
 	};
-	return { grants, asks, sessionFor, pendingFor, call, given, events: recorded.events };
+	const copies = app.get(copiesSeen);
+	return {
+		input,
+		grants,
+		asks,
+		sessionFor,
+		pendingFor,
+		call,
+		given,
+		copies,
+		events: recorded.events,
+	};
 }
 
 describe("consent: asking", () => {
@@ -339,7 +366,7 @@ describe("consent: the page", () => {
 });
 
 describe("consent: the answer", () => {
-	it("records the grant on acceptance and sends the user on; a resend gets the same answer, the other decision none", async () => {
+	it("records the grant on acceptance and sends the user on by 303; a resend gets the same answer, the other decision none [rfc9700-2.1-c] [rfc9700-4.12-a]", async () => {
 		const { pendingFor, given } = await serve();
 		const alice = await pendingFor("alice");
 		const accepted = await alice.answer("accept");
@@ -349,7 +376,7 @@ describe("consent: the answer", () => {
 		expect((await alice.answer("deny")).status).toBe(400);
 	});
 
-	it("sends a refusal on without granting anything", async () => {
+	it("sends a refusal on by 303 without granting anything [rfc9700-2.1-c]", async () => {
 		const { pendingFor, given } = await serve();
 		const denied = await (await pendingFor("alice")).answer("deny");
 		expect([denied.status, denied.location]).toEqual([303, asked.onDeny]);
@@ -384,7 +411,7 @@ describe("consent: the answer", () => {
 		]);
 	});
 
-	it("keeps the challenge when the answer is refused for CSRF or a bad decision", async () => {
+	it("keeps the challenge when the answer is refused for CSRF or a bad decision [oidc-core-3.1.2.3-e] [rfc6749-10.12-a]", async () => {
 		const { pendingFor } = await serve();
 		const alice = await pendingFor("alice");
 		expect((await alice.answer("accept", { origin: "https://evil.example" })).status).toBe(403);
@@ -408,7 +435,7 @@ describe("consent: the answer", () => {
 		expect(await given.granted("app", "alice")).toEqual(["read", "write"]);
 	});
 
-	it("answers only the session that parked the challenge", async () => {
+	it("answers only the session that parked the challenge [rfc6749-10.12-a]", async () => {
 		const { sessionFor, pendingFor, call } = await serve();
 		const alice = await pendingFor("alice");
 		const { challenge } = alice;
@@ -587,6 +614,18 @@ describe("consent's records", () => {
 });
 
 describe("consent's sections", () => {
+	it("takes a consent page on the operator's own machine over plain http, as authorize's login page, which production refuses", () => {
+		const local = "http://127.0.0.1:3000/consent";
+		expect(section.safeParse({ page: local }).success).toBe(true);
+		expect(section.safeParse({ page: "http://acme.example/consent" }).success).toBe(false);
+		const refused = consentModule.refusedInProduction;
+		expect(refused?.(section.parse({ page: local }))).toEqual([
+			{ key: "page", reason: expect.stringContaining("set kernel.environment = development") },
+		]);
+		expect(refused?.(section.parse({ page: "https://as.example/consent" }))).toEqual([]);
+		expect(refused?.(section.parse({}))).toEqual([]);
+	});
+
 	it("takes first-party only from clients the operator registered", async () => {
 		const client = (registered: boolean, value: unknown) => ({
 			id: "c",
@@ -634,11 +673,16 @@ describe("consent's sections", () => {
 		expect(await check({ name: "Acme", host: "acme.example\r\n" })).toBe("refused");
 	});
 
+	it("contributes the copy client-documents collects, for its own section", async () => {
+		const { copies } = await serve();
+		expect(copies).toEqual([clientCopy]);
+		expect(clientCopy.section).toBe(clientSection);
+		expect(clientCopy.reads).toEqual(["client_name", "client_uri"]);
+	});
+
 	it("copies a metadata document's name, page and host, refusing a name absent, not a string or blank", async () => {
 		const from = { id: "https://acme.example/client.json", host: "acme.example" };
-		const copy = (document: Record<string, unknown>) =>
-			clientSection.fromDocument?.(document, from);
-		expect(clientSection.reads).toEqual(["client_name", "client_uri"]);
+		const copy = (document: Record<string, unknown>) => clientCopy.copy(document, from);
 		for (const name of [undefined, 7, " \t\n "]) {
 			expect(copy({ client_name: name }), String(name)).toEqual({ refused: "client_name" });
 		}
@@ -660,6 +704,18 @@ describe("consent's sections", () => {
 		expect(await clientSection.schema["~standard"].validate(value)).toEqual({
 			value: { "first-party": false, name: "Acme", host: "acme.example" },
 		});
+	});
+
+	it("warns at every start for each client the operator registered as first-party, by its id", async () => {
+		const from = logged.lines().length;
+		await serve();
+		const warned = logged
+			.lines()
+			.slice(from)
+			.filter((line) => line.event === "consent.first_party");
+		expect(warned).toEqual([
+			{ level: "warn", event: "consent.first_party", fields: { client: "own" } },
+		]);
 	});
 
 	it("takes a challenge's time written with its unit, in whole seconds from 1m to 1h, 10m unless set", () => {
@@ -688,4 +744,15 @@ describe("consent's sections", () => {
 			expect(page(value), value).toBe(false);
 		}
 	});
+});
+
+it("takes all it names, with a consent page and without one", async () => {
+	for (const page of ["https://as.example/consent", null]) {
+		const { input } = await serve("https://as.example", page);
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect(
+			((unused) => [unused["consent"], unused["consent-stores"]])(await takesUnused(input)),
+			String(page),
+		).toEqual([undefined, undefined]);
+	}
 });

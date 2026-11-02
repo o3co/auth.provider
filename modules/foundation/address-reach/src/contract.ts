@@ -77,10 +77,10 @@ export function carriedIPv4(address: string): string | undefined {
 }
 
 /**
- * An address as a connection reaches it: an IPv4 address mapped into IPv6 is that IPv4 one, but no
- * other IPv6 form that carries one (compatible, translated).
+ * An IP address as a connection reaches it, unbracketed and IPv6 in canonical form: an IPv4 address
+ * mapped into IPv6 is that IPv4 one, but no other IPv6 form that carries one (compatible, translated).
  */
-function reached(address: string): string {
+export function reachedAddress(address: string): string {
 	const bare = unbracketed(address);
 	if (isIP(bare) !== 6) return bare;
 	const written = unbracketed(URL.parse(`https://[${bare}]`)?.hostname ?? "");
@@ -91,7 +91,7 @@ function reached(address: string): string {
 
 /** Whether an IP address, as a connection reaches it, is private: 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7, but a cloud metadata address. */
 export const isPrivateAddress = (address: string): boolean => {
-	const spelled = reached(address);
+	const spelled = reachedAddress(address);
 	return inList(privately, spelled) && !inList(metadata, spelled);
 };
 

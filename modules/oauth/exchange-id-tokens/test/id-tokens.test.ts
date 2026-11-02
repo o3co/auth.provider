@@ -1,177 +1,32 @@
 import { createHash } from "node:crypto";
-import clientAllowanceModule from "@mod/client-allowance/module";
-import { allowancesFor } from "@mod/client-allowance/testing";
-import clientsModule from "@mod/clients/module";
-import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
-import externalJwtModule from "@mod/external-jwt/module";
-import { testSigner } from "@mod/external-jwt/testing";
-import type { GrantOutcome } from "@mod/grants";
-import http from "@mod/http/module";
-import { httpConfig } from "@mod/http/testing";
-import issuerModule from "@mod/issuer/module";
-import { issuerConfig } from "@mod/issuer/testing";
-import {
-	assemble,
-	BootRefused,
-	contract,
-	defineModule,
-	kernelConfig,
-	type Module,
-} from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
-import outboundModule from "@mod/outbound/module";
-import secretHashModule from "@mod/secret-hash/module";
-import { type Binding, senderBindings } from "@mod/sender-binding";
+import { BootRefused, contract, defineModule } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
+import type { Binding } from "@mod/sender-binding";
 import { revocations } from "@mod/subject-revocation";
-import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
-import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
+import { laggingRevocation } from "@mod/subject-revocation/testing";
 import { type ExchangeVerifier, exchangeVerifiers } from "@mod/token-exchange";
-import tokenExchange from "@mod/token-exchange/module";
 import { tokens } from "@mod/tokens";
-import { tokensStandIn } from "@mod/tokens/testing";
 import { upstreamNames } from "@mod/users";
-import usersModule from "@mod/users/module";
-import { memoryUsersStores, testUser } from "@mod/users/testing";
 import { describe, expect, it } from "vitest";
-import { usedIdTokens } from "../src/contract.ts";
-import { exchangeIdTokensOver, type Issuers } from "../src/testing.ts";
-import { memoryUsedIdTokens } from "./stores.ts";
-
-const now = 1_800_000_000_000;
-const clock = { at: now };
-const runtime = quietRuntime({
-	clock: { now: () => clock.at },
-	random: { bytes: (n) => new Uint8Array(n).map(() => Math.floor(Math.random() * 256)) },
-});
-const grantType = "urn:ietf:params:oauth:grant-type:token-exchange";
-const idTokenType = "urn:ietf:params:oauth:token-type:id_token";
-const api = "https://api.example";
-
-const apple = await testSigner("RS256", "apple-1");
-const google = await testSigner("RS256", "google-1");
-const stranger = await testSigner("RS256", "google-1");
-/** A key the issuer's set holds, for an algorithm never taken. */
-const elliptic = await testSigner("ES256", "google-es");
-const issuers: Issuers = {
-	apple: { iss: ["https://appleid.apple.com"], keys: { inline: [apple.jwk] } },
-	google: {
-		iss: ["https://accounts.google.com", "accounts.google.com"],
-		keys: { inline: [google.jwk, elliptic.jwk] },
-	},
-};
-
-const allowed = allowancesFor({ grants: [grantType], scopes: ["read"], audiences: [api] });
-const settings = {
-	apple: {
-		clients: {
-			"ios-app": { audiences: ["com.example.ios"] },
-			device: { audiences: ["com.example.device"] },
-		},
-	},
-	google: {
-		clients: {
-			"android-app": { audiences: ["srv"], "authorized-parties": ["android"] },
-			"web-backend": { audiences: ["srv"] },
-		},
-	},
-};
-
-const dpopKind = defineModule({ name: "dpop-kind" }, (m) => [
-	m
-		.contribute(senderBindings)
-		.by(() => ({ member: "jkt", tokenType: "DPoP", read: async () => ({ kind: "absent" }) })),
-]);
-/** The id_tokens taken, in memory, fresh for each composition. */
-const usedStandIn = defineModule({ name: "used-id-tokens" }, (m) => [
-	m.provide(usedIdTokens).by(() => memoryUsedIdTokens().used),
-]);
-
-/** Alice's links, one through each kind the section takes, under the name it gives users: a link no module names refuses boot. */
-const linksFor = (section: unknown) =>
-	(["apple", "google"] as const).flatMap((kind) => {
-		const taken = (section as Record<string, { upstream?: string } | undefined>)[kind];
-		return taken ? [{ idp: taken.upstream ?? kind, subject: `${kind}-sub` }] : [];
-	});
-
-const boot = (section: unknown, extra: readonly Module[] = []) =>
-	assemble({
-		modules: [
-			http,
-			tokensStandIn(),
-			issuerModule,
-			clientsModule,
-			secretHashModule,
-			grantCaller,
-			clientAllowanceModule,
-			dpopKind,
-			outboundModule,
-			externalJwtModule,
-			usedStandIn,
-			subjectRevocationStandIn,
-			usersModule,
-			memoryUsersStores().module,
-			tokenExchange,
-			exchangeIdTokensOver(issuers),
-			...extra,
-		],
-		config: {
-			...kernelConfig(),
-			...httpConfig(),
-			...issuerConfig(),
-			...clientsConfig([
-				...["ios-app", "android-app", "web-backend"].map((id) =>
-					confidentialClient({ id, sections: allowed }),
-				),
-				publicClient({
-					id: "device",
-					sections: { ...allowed, "token-exchange": { "public-exchange": true } },
-				}),
-			]),
-			users: {
-				registered: [testUser("alice", "pw", { subject: "acct-1", upstream: linksFor(section) })],
-			},
-			"exchange-id-tokens": section,
-		},
-		runtime,
-	});
-
-async function serve(section: unknown = settings) {
-	const app = await boot(section);
-	const exchange = (client: string, idToken: string, binding?: Binding) =>
-		app.get(grantCalls).call(
-			grantType,
-			client,
-			{
-				grant_type: grantType,
-				subject_token: idToken,
-				subject_token_type: idTokenType,
-				scope: "read",
-			},
-			binding ? { binding } : {},
-		);
-	return { app, exchange };
-}
-
-const appleClaims = (more: Record<string, unknown> = {}) => ({
-	iss: "https://appleid.apple.com",
-	sub: "apple-sub",
-	aud: "com.example.ios",
-	iat: now / 1000 - 10,
-	exp: now / 1000 + 600,
-	...more,
-});
-const googleClaims = (more: Record<string, unknown> = {}) => ({
-	iss: "https://accounts.google.com",
-	sub: "google-sub",
-	aud: "srv",
-	azp: "android",
-	iat: now / 1000 - 10,
-	exp: now / 1000 + 600,
-	...more,
-});
-const said = (outcome: GrantOutcome) =>
-	outcome.kind === "error" ? [outcome.error, outcome.description] : ["issued"];
-const failed = ["invalid_request", "subject_token validation failed"];
+import {
+	api,
+	apple,
+	appleClaims,
+	assembly,
+	boot,
+	clock,
+	elliptic,
+	failed,
+	google,
+	googleClaims,
+	idTokenType,
+	now,
+	said,
+	serve,
+	settings,
+	standingChecked,
+	stranger,
+} from "./harness.ts";
 
 describe("exchange-id-tokens", () => {
 	it("exchanges Apple's and Google's id_tokens for a token of the account users links them to", async () => {
@@ -196,17 +51,21 @@ describe("exchange-id-tokens", () => {
 
 	it("answers a foreign token for the one client that takes it, with no scope or audience of its own", async () => {
 		const verifiersSeen = contract<readonly ExchangeVerifier[]>("test.verifiers");
-		const reader = defineModule({ name: "verifier-reader" }, (m) => [
-			m.provide(verifiersSeen).by((c) => c.collect(exchangeVerifiers)),
-		]);
+		const reader = defineModule(
+			{ name: "verifier-reader", replicaSafe: true, takes: [exchangeVerifiers] },
+			(m) => [m.provide(verifiersSeen).by((c) => c.collect(exchangeVerifiers))],
+		);
 		const app = await boot(settings, [reader]);
 		const verifier = app.get(verifiersSeen).find((v) => v.tokenType === idTokenType);
-		const answer = await verifier?.verify(await apple.sign(appleClaims()));
+		const claims = appleClaims();
+		const answer = await verifier?.verify(await apple.sign(claims));
 		expect(answer).toEqual({
 			kind: "foreign",
 			subject: "acct-1",
 			issuer: "https://appleid.apple.com",
 			expiresAt: expect.any(Number),
+			// Its iat less the section's skew, 30 s.
+			standingAt: claims.iat * 1000 - 30_000,
 			clients: ["ios-app"],
 		});
 	});
@@ -226,7 +85,7 @@ describe("exchange-id-tokens", () => {
 		expect(said(await s.exchange("ios-app", token))).toEqual(["issued"]);
 	});
 
-	it("lets only the client whose audience and party it names exchange it", async () => {
+	it("lets only the client whose audience and party it names exchange it [rfc8693-2.1-g] [rfc8693-2.2.2-b]", async () => {
 		const s = await serve();
 		const notThisClient = ["invalid_request", "subject_token does not name this client"];
 		expect(said(await s.exchange("web-backend", await apple.sign(appleClaims())))).toEqual(
@@ -247,7 +106,7 @@ describe("exchange-id-tokens", () => {
 		}
 	});
 
-	it("refuses another issuer, another algorithm, an unknown key, and an id_token without iat, too old or from the future", async () => {
+	it("refuses another issuer, another algorithm, an unknown key, and an id_token without iat, too old or from the future [rfc8693-2.1-g] [rfc8693-2.2.2-b]", async () => {
 		const s = await serve();
 		for (const token of [
 			await apple.sign(appleClaims({ iss: "https://idp.example" })),
@@ -262,6 +121,23 @@ describe("exchange-id-tokens", () => {
 		expect(
 			said(await s.exchange("ios-app", await apple.sign(appleClaims({ iat: now / 1000 - 620 })))),
 		).toEqual(["issued"]);
+	});
+
+	it("takes an id_token under the algorithms its kind's settings name, RS256 alone by default", async () => {
+		const es256 = await elliptic.sign(googleClaims());
+		expect(said(await (await serve()).exchange("android-app", es256))).toEqual(failed);
+		const widened = await serve({
+			...settings,
+			google: { ...settings.google, algorithms: ["ES256"] },
+		});
+		expect(said(await widened.exchange("android-app", es256))).toEqual(["issued"]);
+		const rs256 = await google.sign(googleClaims());
+		expect(said(await widened.exchange("android-app", rs256))).toEqual(failed);
+		for (const algorithms of [["HS256"], []]) {
+			await expect(
+				boot({ ...settings, google: { ...settings.google, algorithms } }),
+			).rejects.toBeInstanceOf(BootRefused);
+		}
 	});
 
 	it("refuses an upstream subject users links to no one, and an id_token from before the subject's revocation, by the clock skew", async () => {
@@ -280,6 +156,31 @@ describe("exchange-id-tokens", () => {
 			const after = await apple.sign(appleClaims({ iat: now / 1000 + 32 }));
 			clock.at = now + 33_000;
 			expect(said(await s.exchange("ios-app", after))).toEqual(["issued"]);
+		} finally {
+			clock.at = now;
+		}
+	});
+
+	it("issues on a stale read of its subject's boundary a token the next verification refuses, as it stands from the id_token's iat less the skew [guarantee-4-e]", async () => {
+		const lagging = laggingRevocation();
+		const s = await serve(settings, undefined, [standingChecked], lagging.module);
+		lagging.lag();
+		await s.app.get(revocations).record("acct-1");
+		/** The exchange of an id_token issued at `iat`, on the stale read, verified once the read catches up. */
+		const verified = async (iat: number) => {
+			const idToken = await apple.sign(appleClaims({ iat: iat / 1000 }));
+			clock.at = iat + 1000;
+			const outcome = await s.exchange("ios-app", idToken);
+			if (outcome.kind !== "issued") expect.unreachable("the stale read lets it through");
+			lagging.catchUp();
+			const checked = await s.app.get(tokens).verifyAccess(String(outcome.body.access_token));
+			lagging.lag();
+			return checked;
+		};
+		try {
+			// Issued 20 s after the boundary, by an issuer whose clock may run the 30 s skew ahead.
+			expect(await verified(now + 20_000)).toEqual({ kind: "invalid", reason: "revoked" });
+			expect(await verified(now + 32_000)).toMatchObject({ kind: "valid", standingAt: now + 2000 });
 		} finally {
 			clock.at = now;
 		}
@@ -354,7 +255,7 @@ describe("exchange-id-tokens", () => {
 
 	it("tells users each upstream name it takes, with its issuer, so another module's same name refuses boot unless the issuer is the same", async () => {
 		const naming = (issuer: string) =>
-			defineModule({ name: "federation-like" }, (m) => [
+			defineModule({ name: "federation-like", replicaSafe: true, takes: [] }, (m) => [
 				m.contribute(upstreamNames).by(() => ({
 					declaredBy: "federation-like",
 					names: [{ name: "google", issuer }],
@@ -372,4 +273,14 @@ describe("exchange-id-tokens", () => {
 			boot({ google: { ...settings.google, upstream: "work" } }, [naming("https://idp.example")]),
 		).resolves.toBeDefined();
 	});
+});
+
+it("takes all it names, with both kinds taken or one", async () => {
+	for (const section of [settings, { apple: settings.apple }]) {
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect(
+			(await takesUnused(assembly(section)))["exchange-id-tokens"],
+			JSON.stringify(section),
+		).toBeUndefined();
+	}
 });

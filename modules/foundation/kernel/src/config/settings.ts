@@ -7,8 +7,17 @@ const stopRange = { error: "whole seconds from 1 to 3600" };
 export const kernelSection = z.strictObject(
 	{
 		deployment: z
-			.enum(["single", "multi"], { error: "single or multi" })
+			.enum(["single", "multi"], {
+				error: (issue) =>
+					issue.input === undefined ? "required, and not set: single or multi" : "single or multi",
+			})
 			.describe("single or multi; multi refuses a module unsafe on multiple instances"),
+		environment: z
+			.enum(["production", "development"], { error: "production or development" })
+			.prefault("production")
+			.describe(
+				"production or development; production refuses what each module declares a production deployment must not hold",
+			),
 		logging: z
 			.strictObject(
 				{
@@ -29,7 +38,7 @@ export const kernelSection = z.strictObject(
 				"how long a stop given no deadline waits for its hooks, from `1s` to `1h` in whole seconds; an orchestrator's grace period must be longer",
 			),
 	},
-	{ error: "needs a section holding only deployment, logging and stop-deadline" },
+	{ error: "needs a section holding only deployment, environment, logging and stop-deadline" },
 );
 
 export type KernelSettings = z.output<typeof kernelSection>;

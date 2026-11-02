@@ -1,14 +1,24 @@
-import { randomBytes } from "node:crypto";
+import { generateKeyPairSync, randomBytes, verify } from "node:crypto";
+import { claimsSelections } from "@mod/claims-selection";
 import type { IdTokenRequest } from "@mod/code-grant";
 import type { Assembly } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { keys } from "@mod/keys";
 import { userAttribute } from "@mod/users";
 import usersModule from "@mod/users/module";
 import { testUser, usersConfig } from "@mod/users/testing";
 import { describe, expect, it } from "vitest";
 import oidc from "../src/module.ts";
-import { booted, loginOf, makers, published, sessionsOf, unanswering } from "./parts.ts";
+import {
+	booted,
+	composed,
+	hooks,
+	loginOf,
+	makers,
+	published,
+	sessionsOf,
+	unanswering,
+} from "./parts.ts";
 
 const now = 1_800_000_000_000;
 const runtime = quietRuntime({ clock: { now: () => now } });
@@ -21,6 +31,7 @@ const request = (more: Partial<IdTokenRequest> = {}): IdTokenRequest => ({
 	amr: [],
 	scope: ["openid"],
 	session: "s",
+	redemption: "r-test",
 	...more,
 });
 
@@ -40,7 +51,7 @@ const makerOf = (app: Assembly) => {
 };
 
 describe("the ID token", () => {
-	it("is signed with the core claims and the session", async () => {
+	it("is signed with the core claims and the session [oidc-core-2-a] [oidc-core-2-b] [oidc-core-2-d] [oidc-core-2-e] [oidc-core-2-f] [oidc-core-2-g] [oidc-core-2-i] [oidc-core-2-n] [oidc-core-2-o] [oidc-core-15.1-e] [oidc-core-7.4-b]", async () => {
 		const app = await booted({ runtime, config: { oidc: { "id-token-lifetime": "5m" } } });
 		const token = await makerOf(app).make(
 			request({
@@ -107,9 +118,27 @@ describe("the ID token", () => {
 		expect(known.payload.auth_time).toBe((now - 5000) / 1000);
 	});
 
-	it("names the JWT type, the algorithm keys signs with, and its key id in the header", async () => {
+	it("names the JWT type, the algorithm keys signs with, and its key id in the header, and nothing else [oidc-core-10.1-d] [oidc-core-2-r]", async () => {
 		const { header } = decoded(await makerOf(await booted({ runtime })).make(request()));
-		expect([header.typ, header.alg, typeof header.kid]).toEqual(["JWT", "EdDSA", "string"]);
+		expect([header.typ, header.alg, typeof header.kid]).toEqual(["JWT", "RS256", "string"]);
+		// No x5u, x5c, jku or jwk: the key is found by its kid in the published set alone.
+		expect(Object.keys(header).sort()).toEqual(["alg", "kid", "typ"]);
+	});
+
+	it("is signed with RS256, the default, by the RS256 key the operator places, as the metadata names [oidc-core-15.1-a]", async () => {
+		const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+		const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+		const signing = { kid: "r", alg: "RS256", "private-key": pem };
+		const app = await booted({ runtime, config: { keys: { signing } } });
+		const token = await makerOf(app).make(request());
+		const [head = "", body = "", signature = ""] = token.split(".");
+		expect(decoded(token).header.alg).toBe("RS256");
+		const signed = Buffer.from(`${head}.${body}`);
+		expect(verify("sha256", signed, publicKey, Buffer.from(signature, "base64url"))).toBe(true);
+		expect(app.get(published)).toContainEqual({
+			name: "id_token_signing_alg_values_supported",
+			value: ["RS256"],
+		});
 	});
 });
 
@@ -135,7 +164,7 @@ it("takes a lifetime of whole seconds from 60 to 86400, refusing to start with a
 
 describe("the section", () => {
 	it("reads the ID token's lifetime as an operator writes it, with a unit", async () => {
-		expect(oidc.section?.parse({ "id-token-lifetime": "30m" })).toEqual({
+		expect(oidc.section?.parse({ "id-token-lifetime": "30m" })).toMatchObject({
 			"id-token-lifetime": 1800,
 		});
 		const app = await booted({ runtime, config: { oidc: { "id-token-lifetime": "30m" } } });
@@ -158,8 +187,8 @@ describe("the section", () => {
 		expect(read?.error?.issues).toMatchObject([{ params: { problem: "missing-unit" } }]);
 	});
 
-	it("reads an empty section as an hour", () => {
-		expect(oidc.section?.parse({})).toEqual({ "id-token-lifetime": 3600 });
+	it("reads an empty section as an hour, signed with RS256", () => {
+		expect(oidc.section?.parse({})).toEqual({ "id-token-lifetime": 3600, "id-token-alg": "RS256" });
 	});
 });
 
@@ -167,7 +196,7 @@ describe("the released claims an ID token carries", () => {
 	const alice = { subject: "s-alice", clientId: "app", amr: ["pwd"], session: "h" };
 	const sessionsAs = sessionsOf({ h: loginOf("s-alice", "users") });
 
-	it("carries users' attributes through the table for the code's scope, beside the core claims", async () => {
+	it("carries users' attributes through the table for the code's scope, beside the core claims [oidc-core-5.6-a]", async () => {
 		const registered = testUser("alice", "pw", {
 			subject: "s-alice",
 			attributes: { [userAttribute.name]: "Alice", [userAttribute.email]: "alice@example.com" },
@@ -207,31 +236,96 @@ describe("the released claims an ID token carries", () => {
 	});
 });
 
+describe("the claims a code's selection asks of the ID token", () => {
+	const alice = { subject: "s-alice", clientId: "app", amr: ["pwd"], session: "h" };
+	const registered = testUser("alice", "pw", {
+		subject: "s-alice",
+		attributes: { [userAttribute.name]: "Alice", [userAttribute.email]: "alice@example.com" },
+	});
+	const served = async () => {
+		const app = await booted({
+			runtime,
+			config: { ...usersConfig([registered]) },
+			sessionsAs: sessionsOf({ h: loginOf("s-alice", "users") }),
+		});
+		const [hook] = app.get(hooks);
+		if (!hook) throw new Error("no hook");
+		return { maker: makerOf(app), selections: app.get(claimsSelections), hook };
+	};
+
+	it("carries the names pinned for the ID token, held to their constraints, and never userinfo's", async () => {
+		const { maker, selections, hook } = await served();
+		await selections.keepForCode(
+			"r-1",
+			{
+				idToken: {
+					names: [{ name: "name", scope: "profile" }],
+					constraints: [{ name: "email", value: "bob@example.com" }],
+				},
+				userinfo: { names: [{ name: "email", scope: "email" }], constraints: [] },
+			},
+			600_000,
+		);
+		await hook.pin("r-1");
+		const { payload } = decoded(
+			await maker.make(request({ ...alice, scope: ["openid", "email"], redemption: "r-1" })),
+		);
+		expect(payload).toMatchObject({ name: "Alice" });
+		// email comes from the scope, but the ID token's constraint holds it back.
+		expect(payload).not.toHaveProperty("email");
+	});
+
+	it("carries the scope's claims alone for a code pinned without a selection", async () => {
+		const { maker, hook } = await served();
+		await hook.pin("r-2");
+		const { payload } = decoded(
+			await maker.make(request({ ...alice, scope: ["openid", "email"], redemption: "r-2" })),
+		);
+		expect(payload).toMatchObject({ email: "alice@example.com" });
+		expect(payload).not.toHaveProperty("name");
+	});
+
+	it("makes no ID token for a redemption whose pin is gone", async () => {
+		const { maker } = await served();
+		await expect(
+			maker.make(request({ ...alice, scope: ["openid", "email"], redemption: "r-3" })),
+		).rejects.toThrow();
+	});
+});
+
 describe("issuer's metadata", () => {
 	const items = async () => (await booted({ runtime })).get(published);
 
-	it("names openid and the table's scopes as the scopes it supports", async () => {
+	it("names openid and the table's scopes as the scopes it supports, the ones OpenID Connect Core defines among them [oidc-discovery-3-s] [rfc8414-2-f] [oidc-discovery-3-u]", async () => {
 		expect(await items()).toContainEqual({
 			name: "scopes_supported",
 			value: ["openid", "profile", "email", "groups"],
 		});
 	});
 
-	it("names sub and the table's claims as the claims it supports", async () => {
+	it("names sub and the table's claims as the claims it supports [oidc-discovery-3-af]", async () => {
 		expect(await items()).toContainEqual({
 			name: "claims_supported",
 			value: ["sub", "name", "picture", "email", "email_verified", "groups"],
 		});
 	});
 
-	it("names that every client sees a user by the same subject", async () => {
+	it("names that every client sees a user by the same subject [oidc-discovery-3-y] [oidc-core-8-a]", async () => {
 		expect(await items()).toContainEqual({ name: "subject_types_supported", value: ["public"] });
 	});
 
-	it("names the algorithm ID tokens are signed with", async () => {
+	it("names the algorithm ID tokens are signed with, RS256 by default [oidc-discovery-3-z] [oidc-discovery-3-aa]", async () => {
 		expect(await items()).toContainEqual({
 			name: "id_token_signing_alg_values_supported",
-			value: ["EdDSA"],
+			value: ["RS256"],
 		});
 	});
+});
+
+it("takes all it names, with users and with a ledger that cannot answer", async () => {
+	const runtime = quietRuntime();
+	for (const usersAs of [[usersModule], [usersModule, unanswering]]) {
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused(composed({ runtime, usersAs })))["oidc"]).toBeUndefined();
+	}
 });

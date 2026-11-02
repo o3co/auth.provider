@@ -34,17 +34,22 @@ function serving(table: Record<string, Uint8Array>, missing: number, sent: Sent[
 			return { status: body ? 200 : missing, headers: new Map(), body: body ?? new Uint8Array() };
 		},
 	};
-	return defineModule({ name: "signed-material" }, (m) => [
+	return defineModule({ name: "signed-material", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(signedOutbound).by(() => outbound),
 	]);
 }
 
 const published = contract<readonly MetadataItem[]>("published");
 const kindNames = contract<readonly (string | undefined)[]>("kind-names");
-const reader = defineModule({ name: "reader" }, (m) => [
-	m.provide(published).by((c) => c.collect(metadata)),
-	m.provide(kindNames).by(async (c) => (await c.collect(senderBindings)).map((kind) => kind.name)),
-]);
+const reader = defineModule(
+	{ name: "reader", replicaSafe: true, takes: [metadata, senderBindings] },
+	(m) => [
+		m.provide(published).by((c) => c.collect(metadata)),
+		m
+			.provide(kindNames)
+			.by(async (c) => (await c.collect(senderBindings)).map((kind) => kind.name)),
+	],
+);
 
 async function boot(
 	section: unknown,
@@ -123,7 +128,7 @@ describe("mtls", () => {
 		expect(app.get(kindNames)).toEqual(["mtls"]);
 	});
 
-	it("binds a token to a self-signed certificate's thumbprint, as a bearer token", async () => {
+	it("binds a token to a self-signed certificate's thumbprint, as a bearer token [rfc8705-3.1-b] [rfc8705-3.1-c]", async () => {
 		const { bindingOf } = await boot({ mode: "self-signed" });
 		const own = await issue({ cn: "client" });
 		expect(await bindingOf(own)).toEqual({
@@ -157,7 +162,7 @@ describe("mtls", () => {
 		});
 		expect(await listing.bindingOf(revoked, [intermediate])).toMatchObject({
 			kind: "refused",
-			error: "invalid_certificate",
+			error: "invalid_client",
 		});
 		const resource = { kind: "resource", token: "t" } as const;
 		expect(await listing.bindingOf(revoked, [intermediate], resource)).toMatchObject({
@@ -205,7 +210,7 @@ describe("mtls", () => {
 		);
 		expect(await ocsp.bindingOf(client, [intermediate])).toMatchObject({
 			kind: "refused",
-			error: "invalid_certificate",
+			error: "invalid_client",
 		});
 	});
 
@@ -269,6 +274,45 @@ describe("mtls", () => {
 		expect(reaching.sent.every(([, , n]) => n.timeoutMs === 1234)).toBe(true);
 	});
 
+	/** The warnings a start under this section logs. */
+	const warned = async (section: unknown) => {
+		const recorded = recordingLog();
+		await boot(section, { run: quietRuntime({ log: recorded.log }) });
+		return recorded.lines().filter((line) => line.level === "warn");
+	};
+
+	it("warns at every start where any certificate that parses binds, and not under PKI", async () => {
+		expect(await warned({ mode: "self-signed" })).toEqual([
+			{
+				level: "warn",
+				event: "mtls.self_signed",
+				fields: {
+					reason: "any certificate that parses binds, with no path to an anchor and no revocation",
+				},
+			},
+		]);
+		expect(await warned((await pki()).section)).toEqual([]);
+	});
+
+	it("warns at every start where revocation is not checked, or an outage binds", async () => {
+		const { section } = await pki();
+		expect(await warned({ ...section, revocation: { mode: "disabled" } })).toEqual([
+			{
+				level: "warn",
+				event: "mtls.revocation_unchecked",
+				fields: { reason: "no certificate's revocation is checked" },
+			},
+		]);
+		const allowing = { ...section.revocation, "on-unavailable": "allow" };
+		expect(await warned({ ...section, revocation: allowing })).toEqual([
+			{
+				level: "warn",
+				event: "mtls.binds_during_outage",
+				fields: { reason: "a certificate binds while its revocation cannot be confirmed" },
+			},
+		]);
+	});
+
 	it("judges the leaf's end and the CRL's next update by the runtime's clock, logging a refusal", async () => {
 		const { root, intermediate, client, section } = await pki();
 		const recorded = recordingLog();
@@ -282,7 +326,7 @@ describe("mtls", () => {
 				.lines()
 				.filter((line) => line.level === "warn")
 				.map((line) => line.event),
-		).toEqual(["mtls.certificate_refused"]);
+		).toEqual(["mtls.revocation_unchecked", "mtls.certificate_refused"]);
 		const table = {
 			"http://ca.example/crl": await crlOf({ by: intermediate }),
 			"http://root.example/crl": await crlOf({ by: root }),

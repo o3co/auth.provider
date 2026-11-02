@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import { type Algorithm, externalJwt } from "@mod/external-jwt";
 import externalJwtModule from "@mod/external-jwt/module";
+import { withinHosts } from "@mod/host-entries";
 import {
 	assemble,
 	contract,
 	defineModule,
 	isUnavailable,
 	kernelConfig,
+	readConfigured,
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
@@ -19,7 +21,8 @@ import {
 	outbound,
 } from "@mod/outbound";
 import { outboundOver, section as outboundSection } from "@mod/outbound/module";
-import { type OutboundRefusals, outboundRefusals, withinHosts } from "@mod/outbound-policy";
+import { type OutboundRefusals, outboundRefusals } from "@mod/outbound-policy";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import {
 	type AuthorizationStart,
 	type CodeExchange,
@@ -110,9 +113,11 @@ const policyRefusing = (refused: readonly string[] = []): OutboundRefusals => ({
 
 let rsa: { privateKey: CryptoKey; jwk: JWK };
 let other: { privateKey: CryptoKey; jwk: JWK };
+/** An RSA key for PSS signatures, its JWK naming no `alg`, as an IdP's set may hold one. */
+let pss: { privateKey: CryptoKey; jwk: JWK };
 beforeAll(async () => {
-	const made = async (kid: string) => {
-		const pair = await generateKeyPair("RS256", { extractable: true });
+	const made = async (kid: string, alg = "RS256") => {
+		const pair = await generateKeyPair(alg, { extractable: true });
 		return {
 			privateKey: pair.privateKey,
 			jwk: { ...(await exportJWK(pair.publicKey)), kid },
@@ -120,6 +125,7 @@ beforeAll(async () => {
 	};
 	rsa = await made("k1");
 	other = await made("k2");
+	pss = await made("p1", "PS256");
 });
 
 /** An id_token issued now, unless `iat` says otherwise (`null` leaves it out). */
@@ -155,6 +161,8 @@ interface World {
 	readonly token?: Handler;
 	/** The issuer's key set cannot be reached. */
 	readonly keysUnreachable?: boolean;
+	/** The issuer's key set, in place of the RSA key alone. */
+	readonly keys?: readonly JWK[];
 	readonly settings?: Record<string, unknown>;
 	readonly more?: Record<string, Handler>;
 	/** Hosts outbound's destination policy refuses. */
@@ -180,12 +188,15 @@ async function open(world: World = {}) {
 					jwks_uri: `${issuer}/jwks`,
 					...world.description,
 				})),
-		[`${issuer}/jwks`]: () => (world.keysUnreachable ? "unreachable" : ok({ keys: [rsa.jwk] })),
+		[`${issuer}/jwks`]: () =>
+			world.keysUnreachable ? "unreachable" : ok({ keys: world.keys ?? [rsa.jwk] }),
 		[`${issuer}/token`]: world.token ?? (() => ok({ id_token: "missing" })),
 	});
 	const app = await assemble({
 		modules: [
-			defineModule({ name: "outbound" }, (m) => [m.provide(outbound).by(() => stub.outbound)]),
+			defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
+				m.provide(outbound).by(() => stub.outbound),
+			]),
 			externalJwtModule,
 		],
 		config: kernelConfig(),
@@ -272,7 +283,9 @@ const givenEndpoints = {
 };
 /** outbound's own refusals over `settings`, every name resolving to a private address. */
 const refusalsOver = (settings: Record<string, unknown>): OutboundRefusals => {
-	const paths = outboundOver(outboundSection.parse(settings), async () => ["10.0.0.5"]);
+	const paths = outboundOver(outboundSection.parse(settings), async () => ["10.0.0.5"], {
+		floor: testTlsOptions,
+	});
 	const { explained, plainInternal, browsedRefusal } = paths;
 	return { explained, plainInternal, browsedRefusal };
 };
@@ -302,7 +315,7 @@ describe("idp-oidc", () => {
 		expect((await open()).upstream.issuer).toBe(issuer);
 	});
 
-	it("builds the authorization request at the described endpoint, with nonce, PKCE, prompt and max_age", async () => {
+	it("builds the authorization request at the described endpoint, with nonce, PKCE, prompt and max_age [oidc-core-3.1.2.1-y] [oidc-core-7.2.1-a] [rfc9700-2.1.1-f] [rfc9700-2.1.1-h] [rfc9700-2.1.2-a]", async () => {
 		const { upstream } = await open();
 		const url = new URL(
 			upstream.authorizationUrl({ ...authorizationStart, prompt: "login", maxAgeSeconds: 0 }),
@@ -325,7 +338,7 @@ describe("idp-oidc", () => {
 		expect(asked.searchParams.get("scope")).toBe("openid profile");
 	});
 
-	it("refuses at boot a description that names another issuer, one only starting with it included", async () => {
+	it("refuses at boot a description that names another issuer, one only starting with it included [oidc-discovery-4.3-b] [oidc-discovery-4.3-c] [oidc-discovery-7.2-a]", async () => {
 		for (const named of ["https://other.example", `${issuer}/`, `${issuer}/tenant`]) {
 			await expect(open({ description: { issuer: named } }), named).rejects.toThrow(
 				/another issuer/,
@@ -333,7 +346,31 @@ describe("idp-oidc", () => {
 		}
 	});
 
-	it("reads the description of an issuer named with a trailing slash at one slash before .well-known", async () => {
+	it("compares the description's issuer once its JSON escaping is removed, code point by code point [oidc-discovery-5-a] [oidc-discovery-5-c]", async () => {
+		/** A description written by hand, its issuer as the text gives it. */
+		const describedAs = (issuerText: string) => () => ({
+			status: 200,
+			headers: new Map(),
+			body: new TextEncoder().encode(
+				`{"issuer":"${issuerText}","authorization_endpoint":"${issuer}/authorize","token_endpoint":"${issuer}/token","jwks_uri":"${issuer}/jwks"}`,
+			),
+		});
+		// The same code points, escaped: the issuer it names is ours.
+		for (const escaped of [
+			"https:\\/\\/idp.example",
+			"https://idp.\\u0065xample",
+			"\\u0068ttps://idp.example",
+		]) {
+			await expect(open({ describes: describedAs(escaped) }), escaped).resolves.toBeDefined();
+		}
+		for (const other of ["https://idp.\\u0045xample", "https://idp.example\\/"]) {
+			await expect(open({ describes: describedAs(other) }), other).rejects.toThrow(
+				/another issuer/,
+			);
+		}
+	});
+
+	it("reads the description of an issuer named with a trailing slash at one slash before .well-known [oidc-discovery-4.1-c]", async () => {
 		const slashed = `${issuer}/`;
 		const { asked } = await open({
 			settings: { issuer: slashed },
@@ -505,6 +542,34 @@ describe("idp-oidc", () => {
 		]);
 	});
 
+	it("compares an id_token's nonce with the login's code point by code point, unescaped and never normalized [oidc-discovery-5-a] [oidc-discovery-5-b] [oidc-discovery-5-c]", async () => {
+		const composed = "caf\u00e9";
+		const decomposed = "cafe\u0301";
+		/** An id_token whose payload is written by hand, its nonce as the text gives it. */
+		const writtenWith = async (nonceText: string) => {
+			const t = Math.floor(now / 1000);
+			const payload = `{"iss":"${issuer}","sub":"u-alice","aud":"client","iat":${t},"exp":${t + 300},"nonce":"${nonceText}"}`;
+			return new CompactSign(new TextEncoder().encode(payload))
+				.setProtectedHeader({ alg: "RS256", kid: rsa.jwk.kid as string })
+				.sign(rsa.privateKey);
+		};
+		const loggedIn = async (token: string, nonce: string) => {
+			const { upstream } = await open({ token: () => granted(token) });
+			return outcome(upstream.exchange(codeExchange({ nonce })));
+		};
+		expect(await loggedIn(await idToken({ nonce: composed }), composed)).toMatchObject({
+			subject: "u-alice",
+		});
+		// Its JSON escaping removed, the escaped nonce is the same code points.
+		expect(await loggedIn(await writtenWith("caf\\u00e9"), composed)).toMatchObject({
+			subject: "u-alice",
+		});
+		// Canonically equal, but other code points: neither side is normalized.
+		expect(await loggedIn(await idToken({ nonce: decomposed }), composed)).toBe("refused");
+		expect(await loggedIn(await idToken({ nonce: composed }), decomposed)).toBe("refused");
+		expect(await loggedIn(await idToken({ nonce: "CAF\u00c9" }), composed)).toBe("refused");
+	});
+
 	it("logs in at an issuer named on plain http, comparing its iss as written", async () => {
 		const token = await idToken({ iss: loopbackIssuer });
 		const { upstream } = await open({
@@ -519,7 +584,7 @@ describe("idp-oidc", () => {
 		expect(await outcome(upstream.exchange(codeExchange({ iss: other })))).toBe("refused");
 	});
 
-	it("refuses, asking the token endpoint nothing, an iss of the issuer's origin in another form", async () => {
+	it("refuses, asking the token endpoint nothing, an iss of the issuer's origin in another form [rfc9700-4.4.2.1-a]", async () => {
 		const token = await idToken({ iss: loopbackIssuer });
 		const { upstream, asked } = await open({
 			settings: { issuer: loopbackIssuer },
@@ -576,6 +641,17 @@ describe("idp-oidc", () => {
 		expect(settings.parse({ ...base, "endpoint-hosts": taken })["endpoint-hosts"]).toEqual(taken);
 	});
 
+	it("takes an endpoint-hosts name in another script, its marks included, and refuses an address with a zone", () => {
+		const settings = settingsOf(asymmetric, policyRefusing());
+		const base = { issuer, "client-id": "c", "client-secret": "s" };
+		expect(settings.parse({ ...base, "endpoint-hosts": ["कि.example"] })["endpoint-hosts"]).toEqual(
+			["कि.example"],
+		);
+		const issues = settings.safeParse({ ...base, "endpoint-hosts": ["fe80::1%eth0"] }).error
+			?.issues;
+		expect(issues?.map((i) => i.path)).toEqual([["endpoint-hosts", 0]]);
+	});
+
 	it("refuses at boot, under issuer and naming it, a description's token endpoint or key set outbound's policy refuses", async () => {
 		const cdn = "https://tokens.idp-cdn.example";
 		const named = { "endpoint-hosts": ["tokens.idp-cdn.example"] };
@@ -620,7 +696,7 @@ describe("idp-oidc", () => {
 		expect(isUnavailable(unreachable)).toBe(true);
 	});
 
-	it("reaches as the operator's URL the issuer for all its description names, and each given endpoint for itself", async () => {
+	it("reaches as the operator's URL the issuer for all its description names, and each given endpoint for itself [oidc-core-3.1.3.7-j]", async () => {
 		const described = await answering(await idToken());
 		await described.upstream.exchange(codeExchange());
 		expect(described.asked.map((a) => [a.url, a.internal])).toEqual([
@@ -645,7 +721,9 @@ describe("idp-oidc", () => {
 		/** outbound itself, every name resolving to a private address, a request ending fast. */
 		const reachOf = (internal: readonly string[]) => {
 			const settings = { allow: ["idp.corp"], "internal-hosts": internal, timeout: "300ms" };
-			const paths = outboundOver(outboundSection.parse(settings), async () => ["10.0.0.5"]);
+			const paths = outboundOver(outboundSection.parse(settings), async () => ["10.0.0.5"], {
+				floor: testTlsOptions,
+			});
 			return {
 				outbound: { fetch: paths.fetch } as Outbound,
 				refusals: { explained: paths.explained },
@@ -660,7 +738,7 @@ describe("idp-oidc", () => {
 		expect(isUnavailable(reached)).toBe(true);
 	});
 
-	it("reaches an endpoint the operator gives on another host", async () => {
+	it("reaches an endpoint the operator gives on another host [oidc-core-3.1.3.7-j]", async () => {
 		const { upstream, asked } = await answering(await idToken(), {
 			settings: { ...givenEndpoints, "jwks-uri": "https://keys.other.example/jwks" },
 			more: { "https://keys.other.example/jwks": () => ok({ keys: [rsa.jwk] }) },
@@ -752,7 +830,7 @@ describe("idp-oidc", () => {
 		expect(settingsOf(["RS256"], policyRefusing()).safeParse(base).success).toBe(false);
 	});
 
-	it("takes an id_token's at_hash only as the access token's, by its signature's digest", async () => {
+	it("takes an id_token's at_hash only as the access token's, by its signature's digest [oidc-core-3.1.3.5-a]", async () => {
 		const half = (digest: string, token: string) => {
 			const full = createHash(digest).update(token).digest();
 			return full.subarray(0, full.length / 2).toString("base64url");
@@ -858,46 +936,65 @@ describe("idp-oidc", () => {
 		expect(sent?.request.credential).toBeUndefined();
 	});
 
-	it("refuses an answer from another issuer before using its code, and one without iss where iss is asked", async () => {
+	it("refuses an answer from another issuer before using its code, and one without iss unless the operator accepts its absence [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b]", async () => {
 		const token = await idToken();
 		const { upstream, asked } = await answering(token);
-		for (const iss of ["https://evil.example", ""]) {
-			expect(await outcome(upstream.exchange(codeExchange({ iss }))), iss).toBe("refused");
+		for (const iss of ["https://evil.example", "", undefined]) {
+			expect(await outcome(upstream.exchange(codeExchange({ iss }))), String(iss)).toBe("refused");
 		}
 		expect(asked.some((a) => a.url === `${issuer}/token`)).toBe(false);
-		expect(await outcome(upstream.exchange(codeExchange({ iss: undefined })))).toMatchObject({
-			subject: "u-alice",
-		});
-		const asking: Record<string, Omit<World, "token">> = {
-			"the description offers iss": {
-				description: { authorization_response_iss_parameter_supported: true },
-			},
-			"the operator requires iss": { settings: { "require-iss": true } },
-		};
-		for (const [label, world] of Object.entries(asking)) {
-			const strict = await answering(token, world);
-			expect(await outcome(strict.upstream.exchange(codeExchange({ iss: undefined }))), label).toBe(
+		const accepting = await answering(token, { settings: { "accept-missing-iss": true } });
+		// Accepting a missing iss takes no other: a wrong or empty one is refused before its code is used.
+		for (const iss of ["https://evil.example", ""]) {
+			expect(await outcome(accepting.upstream.exchange(codeExchange({ iss }))), iss).toBe(
 				"refused",
 			);
 		}
+		expect(accepting.asked.some((a) => a.url === `${issuer}/token`)).toBe(false);
+		expect(
+			await outcome(accepting.upstream.exchange(codeExchange({ iss: undefined }))),
+		).toMatchObject({ subject: "u-alice" });
+		const offering = await answering(token, {
+			settings: { "accept-missing-iss": true },
+			description: { authorization_response_iss_parameter_supported: true },
+		});
+		expect(await outcome(offering.upstream.exchange(codeExchange({ iss: undefined })))).toBe(
+			"refused",
+		);
 	});
 
-	it("warns at boot when neither the operator nor the description requires iss", async () => {
+	it("warns at every start where the operator accepts a missing iss the description does not offer", async () => {
+		const accepting = { "accept-missing-iss": true };
 		const notRequired = [{ event: "idp-oidc.iss_not_required", fields: { idp: "corp" } }];
-		expect((await open()).warned).toEqual(notRequired);
-		expect((await open({ settings: givenEndpoints })).warned).toEqual(notRequired);
-		const asking: Record<string, World> = {
+		expect((await open({ settings: accepting })).warned).toEqual(notRequired);
+		expect((await open({ settings: { ...givenEndpoints, ...accepting } })).warned).toEqual(
+			notRequired,
+		);
+		const required: Record<string, World> = {
+			"by default": {},
+			"without discovery": { settings: givenEndpoints },
 			"the description offers iss": {
+				settings: accepting,
 				description: { authorization_response_iss_parameter_supported: true },
 			},
-			"the operator requires iss": { settings: { "require-iss": true } },
 		};
-		for (const [label, world] of Object.entries(asking)) {
+		for (const [label, world] of Object.entries(required)) {
 			expect((await open(world)).warned, label).toEqual([]);
 		}
 	});
 
-	it("refuses an id_token that does not hold", async () => {
+	it("refuses 0.18's require-iss as an unknown key, naming it, read as federation reads an IdP's settings", () => {
+		const read = readConfigured(settingsOf(asymmetric, policyRefusing()), {
+			issuer,
+			"client-id": "client",
+			"client-secret": "s",
+			"require-iss": true,
+		});
+		expect(read).toEqual({ issues: [expect.objectContaining({ path: [] })] });
+		expect("issues" in read && read.issues[0]?.message).toMatch(/"require-iss"/);
+	});
+
+	it("refuses an id_token that does not hold [oidc-core-2-v] [oidc-core-3.1.3.7-b] [oidc-core-3.1.3.7-d] [oidc-core-3.1.3.7-e] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-3.1.3.7-k] [oidc-core-16.3-a] [oidc-discovery-7.2-a] [rfc9700-2.1.1-e] [rfc9700-4.5.3.2-a]", async () => {
 		const hmac = new TextEncoder().encode("a".repeat(32));
 		const cases: Record<
 			string,
@@ -907,6 +1004,9 @@ describe("idp-oidc", () => {
 			"another issuer": { token: () => idToken({ iss: "https://evil.example" }) },
 			"another audience": { token: () => idToken({ aud: "someone" }) },
 			"many audiences, no azp": { token: () => idToken({ aud: ["client", "x"] }) },
+			"another audience, the client authorized": {
+				token: () => idToken({ aud: ["client", "x"], azp: "client" }),
+			},
 			"azp not the client": { token: () => idToken({ aud: "client", azp: "x" }) },
 			"another nonce": { token: () => idToken({ nonce: "other" }) },
 			"no subject": { token: () => idToken({ sub: "" }) },
@@ -931,10 +1031,43 @@ describe("idp-oidc", () => {
 		}
 		const { upstream } = await answering(await idToken());
 		expect(await outcome(upstream.exchange(codeExchange({ nonce: "x" })))).toBe("refused");
-		for (const aud of [["client", "x"], ["client"]]) {
-			const listed = await idToken({ aud, ...(aud.length > 1 ? { azp: "client" } : {}) });
-			expect(await exchanged(listed), aud.join()).toMatchObject({ subject: "u-alice" });
-		}
+		const listed = await idToken({ aud: ["client"] });
+		expect(await exchanged(listed)).toMatchObject({ subject: "u-alice" });
+	});
+
+	it("takes by default one algorithm for each kind of key, PS256 only where the operator names it [oidc-core-3.1.3.7-i]", async () => {
+		const base = { issuer, "client-id": "c", "client-secret": "s" };
+		const read = settingsOf(asymmetric, policyRefusing()).parse(base);
+		expect(read.algorithms).toEqual(["RS256", "ES256", "EdDSA"]);
+		const ps = await idToken({}, pss, "PS256");
+		const keys = [pss.jwk];
+		expect(await exchanged(ps, { keys })).toBe("refused");
+		// One RSA algorithm named, so a key of the IdP's set with no `alg` is not ambiguous.
+		const named = { keys, settings: { algorithms: ["PS256"] } };
+		expect(await exchanged(ps, named)).toMatchObject({ subject: "u-alice" });
+		expect(await exchanged(await idToken(), { settings: { algorithms: ["PS256"] } })).toBe(
+			"refused",
+		);
+	});
+
+	it("reads each key of the IdP's set under one algorithm, its own alg or the one taken for its kind [oidc-core-3.1.3.7-i]", async () => {
+		const both = { settings: { algorithms: ["RS256", "PS256"] } };
+		// Two RSA algorithms taken: a key naming no alg is used under neither.
+		expect(await exchanged(await idToken(), both)).toBe("refused");
+		expect(await exchanged(await idToken({}, pss, "PS256"), { ...both, keys: [pss.jwk] })).toBe(
+			"refused",
+		);
+		// A key naming its alg is read under that one alone, never under the other.
+		const named = { ...both, keys: [{ ...pss.jwk, alg: "PS256" }] };
+		expect(await exchanged(await idToken({}, pss, "PS256"), named)).toMatchObject({
+			subject: "u-alice",
+		});
+		const rs = { ...both, keys: [{ ...rsa.jwk, alg: "RS256" }] };
+		expect(await exchanged(await idToken(), rs)).toMatchObject({ subject: "u-alice" });
+		expect(await exchanged(await idToken({}, pss, "PS256"), rs)).toBe("refused");
+		// A key whose alg is not taken is used under none.
+		const untaken = { keys: [{ ...rsa.jwk, alg: "RS256" }], settings: { algorithms: ["ES256"] } };
+		expect(await exchanged(await idToken(), untaken)).toBe("refused");
 	});
 
 	it("refuses an id_token without a numeric issue time, or one issued past the upstream's skew", async () => {
@@ -954,7 +1087,7 @@ describe("idp-oidc", () => {
 		});
 	});
 
-	it("allows the upstream's clock its skew, and no more", async () => {
+	it("allows the upstream's clock its skew, and no more [oidc-core-2-t] [oidc-core-2-u]", async () => {
 		const token = await idToken();
 		const { upstream } = await open({ token: () => granted(token) });
 		now += 300_000 + 29_000;
@@ -1013,7 +1146,7 @@ describe("idp-oidc", () => {
 		});
 	});
 
-	it("refuses a token answer without an access token and its type, or with a lifetime that is none", async () => {
+	it("refuses a token answer without an access token and its type, or with a lifetime that is none [oidc-core-3.1.3.5-a]", async () => {
 		const token = await idToken();
 		const answers: Record<string, unknown> = {
 			"no access token": { id_token: token, token_type: "Bearer" },
@@ -1135,7 +1268,7 @@ describe("idp-oidc", () => {
 		).toBe(false);
 	});
 
-	it("asks for offline access to delegate, with the delegation's scopes and resource", async () => {
+	it("asks for offline access to delegate, with the delegation's scopes and resource [oidc-core-11-g]", async () => {
 		const { upstream } = await open();
 		const url = delegationUrl(upstream, delegationStart);
 		expect(`${url.origin}${url.pathname}`).toBe(`${issuer}/authorize`);
@@ -1169,7 +1302,7 @@ describe("idp-oidc", () => {
 		});
 	});
 
-	it("exchanges a delegation's code for the checked login, its issuer and the tokens", async () => {
+	it("exchanges a delegation's code for the checked login, its issuer and the tokens [oidc-core-3.1.3.7-k]", async () => {
 		const token = await idToken();
 		const { upstream } = await open({
 			token: () => granted(token, { refresh_token: "rt", scope: "openid files.read" }),
@@ -1261,13 +1394,15 @@ describe("idp-oidc", () => {
 		const recorded = recordingLog();
 		const app = await assemble({
 			modules: [
-				defineModule({ name: "outbound" }, (m) => [
+				defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 					m.provide(outbound).by(() => stub.outbound),
 					m.provide(outboundRefusals).by(() => policyRefusing()),
 				]),
 				externalJwtModule,
 				idpOidc,
-				defineModule({ name: "types" }, (m) => [m.provide(types).by((c) => c.collect(idpTypes))]),
+				defineModule({ name: "types", replicaSafe: true, takes: [idpTypes] }, (m) => [
+					m.provide(types).by((c) => c.collect(idpTypes)),
+				]),
 			],
 			config: kernelConfig(),
 			runtime: quietRuntime({ clock, log: recorded.log }),
@@ -1276,7 +1411,12 @@ describe("idp-oidc", () => {
 			app.get(types).find((type) => type.type === "oidc"),
 			"the oidc type",
 		);
-		const base = { issuer, "client-id": "client", "client-secret": "s" };
+		const base = {
+			issuer,
+			"client-id": "client",
+			"client-secret": "s",
+			"accept-missing-iss": true,
+		};
 		expect(oidc.settings.safeParse({ ...base, algorithms: ["HS256"] }).success).toBe(false);
 		await oidc.open(oidc.settings.parse(base), {
 			idp: "corp",
@@ -1288,5 +1428,217 @@ describe("idp-oidc", () => {
 				.filter((line) => line.event === "idp-oidc.iss_not_required")
 				.map((line) => line.fields),
 		).toEqual([{ idp: "corp" }]);
+	});
+
+	describe("reading the upstream's UserInfo, where the operator turns it on", () => {
+		const userinfoAt = `${issuer}/userinfo`;
+		const json = (body: unknown, status = 200, contentType = "application/json") => ({
+			status,
+			headers: new Map([["content-type", contentType]]),
+			body: new TextEncoder().encode(typeof body === "string" ? body : JSON.stringify(body)),
+		});
+		const reading = {
+			settings: { "read-userinfo": true },
+			description: { userinfo_endpoint: userinfoAt },
+		};
+		/** An upstream whose UserInfo answers as `answer`, the id_token saying `claims`. */
+		const withUserinfo = async (
+			answer: Handler,
+			claims: Record<string, unknown> = {},
+			world: Omit<World, "token" | "more"> = reading,
+		) => {
+			const opened_ = await answering(await idToken(claims), {
+				...world,
+				more: { [userinfoAt]: answer },
+			});
+			const asked = () => opened_.asked.filter((a) => a.url === userinfoAt);
+			return { ...opened_, asked };
+		};
+
+		it("boots without reading UserInfo whatever the description says of it, as before", async () => {
+			for (const userinfo_endpoint of [null, "", "not a url", 7, "http://elsewhere.example/u"]) {
+				const { upstream } = await open({ description: { userinfo_endpoint } });
+				expect(upstream.issuer, String(userinfo_endpoint)).toBe(issuer);
+			}
+			await expect(
+				open({ settings: { "read-userinfo": true }, description: { userinfo_endpoint: null } }),
+			).rejects.toThrow(UpstreamMismatch);
+		});
+
+		it("asks nothing of UserInfo by default, whatever the description names", async () => {
+			const { upstream, asked } = await withUserinfo(
+				() => json({ sub: "u-alice", name: "Info" }),
+				{},
+				{
+					description: { userinfo_endpoint: "https://elsewhere.example/userinfo" },
+				},
+			);
+			expect(await outcome(upstream.exchange(codeExchange()))).toMatchObject({
+				subject: "u-alice",
+			});
+			expect(asked()).toEqual([]);
+		});
+
+		it("asks UserInfo by GET with the access token as a Bearer credential in no body, completing the id_token's profile [oidc-core-5.3.1-a] [rfc6750-2.2-c]", async () => {
+			const { upstream, asked } = await withUserinfo(
+				() =>
+					json({
+						sub: "u-alice",
+						name: "Info",
+						picture: "p",
+						email: "i@x.test",
+						email_verified: true,
+					}),
+				{ name: "Token", amr: ["pwd"], auth_time: Math.floor(start / 1000) - 60 },
+			);
+			expect(await upstream.exchange(codeExchange())).toMatchObject({
+				subject: "u-alice",
+				amr: ["pwd"],
+				authenticatedAt: start - 60_000,
+				profile: { name: "Token", picture: "p", email: "i@x.test", emailVerified: true },
+			});
+			expect(asked()).toEqual([
+				{
+					url: userinfoAt,
+					request: {
+						method: "GET",
+						headers: { accept: "application/json" },
+						credential: "Bearer at",
+					},
+					hosts: ["idp.example"],
+					internal: issuer,
+				},
+			]);
+		});
+
+		it("never takes from UserInfo who logged in, or how", async () => {
+			const { upstream } = await withUserinfo(
+				() => json({ sub: "u-alice", amr: ["mfa"], auth_time: 1, acr: "gold", groups: ["admin"] }),
+				{ amr: ["pwd"] },
+			);
+			const login = await upstream.exchange(codeExchange());
+			expect([login.subject, login.amr, login.authenticatedAt, login.profile]).toEqual([
+				"u-alice",
+				["pwd"],
+				undefined,
+				undefined,
+			]);
+		});
+
+		it("refuses the login on any answer but its subject's JSON, and is unavailable while UserInfo is down [oidc-core-5.3.2-n]", async () => {
+			const refusing: Handler[] = [
+				() => json({ sub: "u-bob", name: "Info" }),
+				() => json({ name: "Info" }),
+				() => json("", 401, ""),
+				() => json("Bearer error=invalid_token", 401, "text/plain"),
+				() => json({ error: "insufficient_scope" }, 403),
+				() => json({ sub: "u-alice" }, 302),
+				() => json("eyJ.a.b", 200, "application/jwt"),
+				() => "broken",
+			];
+			for (const answer of refusing) {
+				const { upstream } = await withUserinfo(answer);
+				expect(await outcome(upstream.exchange(codeExchange()))).toBe("refused");
+			}
+			for (const answer of [
+				() => json("", 502, ""),
+				() => json({}, 503),
+				() => "unreachable" as const,
+			]) {
+				const { upstream } = await withUserinfo(answer);
+				expect(await outcome(upstream.exchange(codeExchange()))).toBe("unavailable");
+			}
+		});
+
+		it("refuses a token that is no Bearer token, asking UserInfo nothing", async () => {
+			const token = await idToken();
+			const { upstream, asked } = await open({
+				...reading,
+				token: () => granted(token, { token_type: "DPoP" }),
+				more: { [userinfoAt]: () => json({ sub: "u-alice" }) },
+			});
+			expect(await outcome(upstream.exchange(codeExchange()))).toBe("refused");
+			expect(asked.filter((a) => a.url === userinfoAt)).toEqual([]);
+		});
+
+		it("asks UserInfo nothing for an id_token that does not hold, a refresh or a delegation's code", async () => {
+			const answer = () => json({ sub: "u-alice", name: "Info" });
+			const bad = await withUserinfo(answer, { nonce: "other" });
+			expect(await outcome(bad.upstream.exchange(codeExchange()))).toBe("refused");
+			expect(bad.asked()).toEqual([]);
+			const token = await idToken();
+			const { upstream, asked } = await open({
+				...reading,
+				token: () => granted(token, { refresh_token: "rt" }),
+				more: { [userinfoAt]: answer },
+			});
+			await offered(upstream.refresh, "refresh")("rt", ["openid"]);
+			await offered(upstream.delegation, "delegation").exchange(delegatedExchange());
+			expect(asked.filter((a) => a.url === userinfoAt)).toEqual([]);
+		});
+
+		it("refuses at boot a description naming no UserInfo, or one elsewhere or not on https", async () => {
+			for (const description of [
+				{},
+				{ userinfo_endpoint: "https://elsewhere.example/userinfo" },
+				{ userinfo_endpoint: "http://idp.example/userinfo" },
+			]) {
+				const opening = open({ settings: { "read-userinfo": true }, description });
+				await expect(opening, JSON.stringify(description)).rejects.toThrow(UpstreamMismatch);
+			}
+		});
+
+		it("asks https of UserInfo and its description, even where outbound takes plain http", async () => {
+			const settings = settingsOf(asymmetric, loopbackRefusals());
+			const base = { "client-id": "client", "client-secret": "s", "read-userinfo": true };
+			const refusedAt = (read: Record<string, unknown>) =>
+				settings.safeParse({ ...base, ...read }).error?.issues.map((i) => i.path.join("."));
+			expect(refusedAt({ issuer: loopbackIssuer })).toEqual(["issuer"]);
+			expect(
+				refusedAt({
+					issuer,
+					...givenEndpoints,
+					"userinfo-endpoint": `${loopbackIssuer}/userinfo`,
+				}),
+			).toEqual(["userinfo-endpoint"]);
+			// Without UserInfo, plain http stays outbound's to take.
+			expect(
+				settings.safeParse({ ...base, "read-userinfo": false, issuer: loopbackIssuer }).success,
+			).toBe(true);
+		});
+
+		it("takes a UserInfo endpoint given without discovery, only with the reading on", () => {
+			const settings = settingsOf(asymmetric, policyRefusing(["elsewhere.example"]));
+			const base = { issuer, "client-id": "client", "client-secret": "s" };
+			const holds = (read: Record<string, unknown>) =>
+				settings.safeParse({ ...base, ...read }).success;
+			expect(
+				holds({ ...givenEndpoints, "read-userinfo": true, "userinfo-endpoint": userinfoAt }),
+			).toBe(true);
+			expect(holds({ ...givenEndpoints, "read-userinfo": true })).toBe(false);
+			expect(holds({ ...givenEndpoints, "userinfo-endpoint": userinfoAt })).toBe(false);
+			expect(holds({ "read-userinfo": true, "userinfo-endpoint": userinfoAt })).toBe(false);
+			expect(
+				holds({
+					...givenEndpoints,
+					"read-userinfo": true,
+					"userinfo-endpoint": "https://elsewhere.example/userinfo",
+					"endpoint-hosts": ["elsewhere.example"],
+				}),
+			).toBe(false);
+		});
+
+		it("sends the access token to the given UserInfo endpoint as its own URL, and to no other host", async () => {
+			const token = await idToken();
+			const { upstream, asked } = await open({
+				settings: { ...givenEndpoints, "read-userinfo": true, "userinfo-endpoint": userinfoAt },
+				token: () => granted(token),
+				more: { [userinfoAt]: () => json({ sub: "u-alice" }) },
+			});
+			await upstream.exchange(codeExchange());
+			expect(asked.filter((a) => a.request.credential === "Bearer at")).toEqual([
+				expect.objectContaining({ url: userinfoAt, internal: userinfoAt }),
+			]);
+		});
 	});
 });

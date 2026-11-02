@@ -3,18 +3,19 @@ import { auditStandIn } from "@mod/audit/testing";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
-import { factorStore, factors, proofSteps, type StoredFactors } from "@mod/mfa";
+import { factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
-import { mfaConfig } from "@mod/mfa/testing";
+import { mfaConfig, updatingTogether } from "@mod/mfa/testing";
+import { factorBinding } from "@mod/mfa-binding";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
 import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, expect, it } from "vitest";
@@ -22,7 +23,8 @@ import { bindingProof, bindingProofs } from "../src/contract.ts";
 import bindingProofModule from "../src/module.ts";
 
 let shift = 0;
-const runtime = quietRuntime({ clock: { now: () => Date.now() + shift } });
+const logged = recordingLog();
+const runtime = quietRuntime({ clock: { now: () => Date.now() + shift }, log: logged.log });
 let stop = async () => {};
 afterEach(async () => {
 	await stop();
@@ -34,7 +36,7 @@ afterEach(async () => {
 
 /** Counting kinds whose proof is their secret: two, so a pass is seen to begin only its own kind. */
 const counting = (kind: string) =>
-	defineModule({ name: `kind-${kind}` }, (m) => [
+	defineModule({ name: `kind-${kind}`, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(factorKinds).by(() => ({
 			kind,
 			amr: ["otp"],
@@ -46,13 +48,13 @@ const counting = (kind: string) =>
 				proof === secret ? { kind: "valid" as const, state: null } : { kind: "invalid" as const },
 		})),
 	]);
-const step = defineModule({ name: "step" }, (m) => [
+const step = defineModule({ name: "step", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
 
 /** What the proof last kept, and how it answers: not available to `nobody`. */
 const contact = { kept: "", limited: false, refused: false, from: [] as unknown[] };
-const owning = defineModule({ name: "proof-contact" }, (m) => [
+const owning = defineModule({ name: "proof-contact", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(bindingProofs).by(() => ({
 		name: "contact",
 		available: async (subject, from) => {
@@ -72,15 +74,16 @@ const owning = defineModule({ name: "proof-contact" }, (m) => [
 
 async function serve(mode?: "never" | "when-available" | "always", proofs = [owning]) {
 	const stand = memoryRecords<StoredFactors>(() => runtime.clock.now(), { shards: 1, perShard: 1 });
-	const store = defineModule({ name: "factor-store" }, (m) => [
+	const store = defineModule({ name: "factor-store", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(factorStore).by(() => ({
 			save: (key, record) => stand.records.create(key, record, "endless"),
 			read: stand.records.read,
 			update: stand.records.change,
 			scan: stand.records.scan,
+			updateTogether: updatingTogether(stand.records),
 		})),
 	]);
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			auditStandIn().module,
@@ -106,10 +109,11 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 			...(mode ? { "mfa-binding-proof": { mode } } : {}),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	stop = () => app.stop(1000);
 	const asking = app.get(bindingProof);
-	const decided = app.get(factors);
+	const decided = app.get(factorBinding);
 	const inAMinute = () => runtime.clock.now() + 60_000;
 	/** A pass for the subject, bound to a transaction and kind; a proof that gives none fails the test. */
 	const passOf = async (subject: string, bound = { transaction: "t", kind: "code" }) => {
@@ -127,8 +131,16 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 		if (proved.kind !== "valid") throw new Error(proved.kind);
 		return decided.bind(subject, begun.pending, proved.state);
 	};
-	return { asking, decided, passOf, bindCode, inAMinute, sessions: app.get(sessions) };
+	return { input, asking, decided, passOf, bindCode, inAMinute, sessions: app.get(sessions) };
 }
+
+it("takes all it names, whatever the mode", async () => {
+	for (const mode of ["never", "when-available", "always"] as const) {
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused((await serve(mode)).input))["mfa-binding-proof"]).toBeUndefined();
+		await stop();
+	}
+});
 
 it("asks the available proof of a subject holding no counting factor, and nothing of one it is not available to or one holding a factor", async () => {
 	const { asking, passOf, bindCode } = await serve();
@@ -193,6 +205,36 @@ it("lets mfa begin a first binding only with the subject's pass, for the transac
 	expect(await decided.begin("bob", "code", bob, "t"), "past its end").toEqual(required);
 });
 
+it("warns at every start where it asks nothing, under never or with no proof composed, and not by default", async () => {
+	const warned = async (mode?: "never") => {
+		const from = logged.lines().length;
+		await serve(mode);
+		return logged
+			.lines()
+			.slice(from)
+			.filter((line) => line.event.startsWith("mfa-binding-proof."));
+	};
+	expect(await warned("never")).toEqual([
+		{
+			level: "warn",
+			event: "mfa-binding-proof.never_asked",
+			fields: { reason: "a first counting factor binds with no binding proof asked" },
+		},
+	]);
+	await stop();
+	expect(await warned()).toEqual([]);
+	await stop();
+	const from = logged.lines().length;
+	await serve(undefined, []);
+	expect(logged.lines().slice(from)).toContainEqual({
+		level: "warn",
+		event: "mfa-binding-proof.none_available",
+		fields: {
+			reason: "no binding proof is composed, so a first counting factor binds with none asked",
+		},
+	});
+});
+
 it("asks nothing under never, and the first contributed under always", async () => {
 	const never = await serve("never");
 	expect(await never.asking.asks("ann")).toBe("nothing");
@@ -226,8 +268,13 @@ it("passes where an ask came from to the proof unread", async () => {
 it("holds the sessions it composes to mfa's entry requirement: a subject holding a factor changes credentials only after proving one", async () => {
 	const { passOf, bindCode, sessions: open } = await serve();
 	expect((await bindCode("ann", await passOf("ann"))).kind).toBe("bound");
-	const facts = { subject: "ann", amr: ["pwd"], authenticatedAt: runtime.clock.now() };
-	const { cookies } = await open.complete(testRequest(), facts);
+	const facts = {
+		subject: "ann",
+		amr: ["pwd"],
+		authenticatedAt: runtime.clock.now(),
+		provenSince: runtime.clock.now(),
+	};
+	const { cookies } = openedOf(await open.open(testRequest(), facts));
 	const cookie = cookies.map((c) => c.split(";")[0]).join("; ");
 	const request = testRequest({
 		headers: new Map([["cookie", cookie]]),

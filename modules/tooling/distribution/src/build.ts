@@ -75,7 +75,7 @@ const asksOfDeployment = (card: string) =>
 
 /**
  * The index a bundle may ask for: each shipped member's manifest as written, its public package
- * and entry, and its section's example, for a module that composes them from a bundle.
+ * and entry, its section's example and its entry sample, for a module that composes them from a bundle.
  */
 function indexOf(
 	manifests: Manifests,
@@ -90,12 +90,14 @@ function indexOf(
 				...manifest
 			} = JSON.parse(readFileSync(join(path, "package.json"), "utf8"));
 			const fragment = join(path, "config.example");
+			const sample = join(path, "entry.example");
 			return {
 				name,
 				package: publicNameOf(bundle),
 				entry: `${publicNameOf(bundle)}/${written.dir}`,
 				manifest,
 				...(existsSync(fragment) ? { fragment: readFileSync(fragment, "utf8") } : {}),
+				...(existsSync(sample) ? { sample: readFileSync(sample, "utf8") } : {}),
 				// The section's defaults ship beside the member, for an app to point at.
 				...(existsSync(join(path, "reference.conf")) ? { references: true } : {}),
 				// Its card asks something of the deployment, for an app to point at that section.

@@ -1,3 +1,4 @@
+import type { Target } from "@mod/claims-selection";
 import { testRequest } from "@mod/http/testing";
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import type { Claim } from "@mod/oidc";
@@ -17,11 +18,12 @@ const grant: AccessGrant = {
 const valid = (
 	tokenType = "Bearer",
 	granted: AccessGrant = grant,
-): Extract<AccessCheck, { kind: "valid" }> => ({
+): Extract<AccessCheck, { kind: "valid" }> & { readonly standingAt?: number } => ({
 	kind: "valid",
 	id: "token-1",
 	grant: granted,
-	expiresAt: 0,
+	expiresAt: 1000,
+	standingAt: 0,
 	tokenType,
 });
 const open: AuthContext = { subject: "ann", amr: ["pwd"], authenticatedAt: 0 };
@@ -38,16 +40,24 @@ function over(
 		session?: TokenSession;
 		entry?: Entry;
 		claims?: Record<string, Claim>;
-		failing?: "admitted" | "session" | "entry" | "claims";
+		selection?: Target;
+		/** Runs while the selection is read, as a host that stalls there. */
+		duringSelection?: (clock: { at: number }) => void;
+		failing?: "admitted" | "session" | "entry" | "selection" | "claims";
 	} = {},
 ) {
 	const calls: unknown[][] = [];
+	/** The Authorization header of each request handed to sender-binding. */
+	const admittedFrom: (string | undefined)[] = [];
+	const clock = { at: 0 };
 	const fail = (part: string) => {
 		if (told.failing === part) throw new Unavailable(part);
 	};
 	const handle = userinfoOver({
+		now: () => clock.at,
 		senderBinding: {
-			admitted: async () => {
+			admitted: async (request) => {
+				admittedFrom.push(request.headers.get("authorization"));
 				calls.push(["admitted"]);
 				fail("admitted");
 				return (told.admission ?? { kind: "admitted", access: valid() }) as never;
@@ -69,25 +79,33 @@ function over(
 				return told.entry ?? entered(open);
 			},
 		},
+		selections: {
+			forToken: async (id) => {
+				calls.push(["selection", id]);
+				fail("selection");
+				told.duringSelection?.(clock);
+				return told.selection;
+			},
+		},
 		claims: {
-			of: async (subject, scope, handle) => {
-				calls.push(["claims", subject, scope, handle]);
+			of: async (subject, scope, handle, asked) => {
+				calls.push(["claims", subject, scope, handle, asked]);
 				fail("claims");
 				return told.claims ?? { name: "Ann" };
 			},
 		},
 	});
-	const run = async () => {
-		const res = await handle(testRequest());
+	const run = async (request = testRequest()) => {
+		const res = await handle(request);
 		return { status: res.status, headers: res.headers, json: (res.body as { json: unknown }).json };
 	};
-	return { run, calls };
+	return { run, calls, admittedFrom };
 }
 
 const noStore = { "cache-control": "no-store", pragma: "no-cache" };
 
 describe("userinfo", () => {
-	it("answers the claims oidc releases for the token's scope, with sub from the token, for its open session", async () => {
+	it("answers the claims oidc releases for the token's scope, with sub from the token, for its open session [oidc-core-5.3.2-a] [oidc-core-5.3.2-d]", async () => {
 		const o = over({ claims: { name: "Ann", sub: "someone else" } as never });
 		const answer = await o.run();
 		expect(answer).toEqual({ status: 200, headers: noStore, json: { name: "Ann", sub: "ann" } });
@@ -95,17 +113,61 @@ describe("userinfo", () => {
 			["admitted"],
 			["session", "token-1"],
 			["entry", "h1"],
-			["claims", "ann", ["openid", "profile"], "h1"],
+			["selection", "token-1"],
+			["claims", "ann", ["openid", "profile"], "h1", undefined],
 		]);
 	});
 
-	it("answers only sub for a token issued in no session", async () => {
+	it("hands oidc the selection kept for the token: the names it asks beyond its scope, and the constraints", async () => {
+		const selection: Target = {
+			names: [{ name: "email", scope: "email" }],
+			constraints: [{ name: "name", value: "Ann" }],
+		};
+		const o = over({ selection });
+		expect((await o.run()).status).toBe(200);
+		expect(o.calls.at(-1)).toEqual(["claims", "ann", ["openid", "profile"], "h1", selection]);
+	});
+
+	it("refuses a token that ends while it is answered, read once its selection is, never answering without it", async () => {
+		const refused = {
+			status: 401,
+			headers: { ...noStore, "www-authenticate": 'Bearer error="invalid_token"' },
+			json: { error: "invalid_token" },
+		};
+		// Checked just before its end; the read of its selection stalls past its end and the two minutes after.
+		const stalled = over({
+			duringSelection: (clock) => {
+				clock.at = 1000 + 120_000 + 1;
+			},
+		});
+		expect(await stalled.run()).toEqual(refused);
+		expect(stalled.calls.map((c) => c[0])).not.toContain("claims");
+		// At its end exactly, it has ended too; a moment before, it is answered.
+		const ended = over({ duringSelection: (clock) => (clock.at = 1000) });
+		expect(await ended.run()).toEqual(refused);
+		const inTime = over({ duringSelection: (clock) => (clock.at = 999) });
+		expect((await inTime.run()).status).toBe(200);
+	});
+
+	it("reads no selection for a token issued in no session, or one whose session ended, and answers 503 when it cannot read one", async () => {
+		expect((await over({ session: { kind: "unbound" } }).run()).status).toBe(200);
+		const unbound = over({ session: { kind: "unbound" } });
+		await unbound.run();
+		const ended = over({ entry: { kind: "absent" } });
+		await ended.run();
+		for (const o of [unbound, ended]) expect(o.calls.map((c) => c[0])).not.toContain("selection");
+		const failing = over({ failing: "selection" });
+		await expect(failing.run()).rejects.toSatisfy(isUnavailable);
+		expect(failing.calls.map((c) => c[0])).not.toContain("claims");
+	});
+
+	it("answers only sub for a token issued in no session [oidc-core-5.3.2-d]", async () => {
 		const o = over({ session: { kind: "unbound" } });
 		expect(await o.run()).toEqual({ status: 200, headers: noStore, json: { sub: "ann" } });
 		expect(o.calls.map((c) => c[0])).toEqual(["admitted", "session"]);
 	});
 
-	it("refuses a token whose session ended, is short of a requirement, or is another subject's, in the token's scheme", async () => {
+	it("refuses a token whose session ended, is short of a requirement, or is another subject's, in the token's scheme [rfc9449-7.1-c] [rfc6749-7.2-a]", async () => {
 		const refused = {
 			status: 401,
 			headers: { ...noStore, "www-authenticate": 'DPoP error="invalid_token"' },
@@ -126,7 +188,8 @@ describe("userinfo", () => {
 		expect(await other.run()).toEqual(refused);
 	});
 
-	it("refuses a token whose scope lacks openid as insufficient_scope, in the token's scheme, before reading its session", async () => {
+	// This test's resource item reads "meant for it" as: the issuer's resource tells its own tokens by the openid scope (OIDC Core §5.3.1); see the userinfo card's Invariants.
+	it("refuses a token whose scope lacks openid as insufficient_scope, in the token's scheme, before reading its session [rfc6750-3.1-c] [rfc9449-7.1-c] [rfc9700-2.3-c]", async () => {
 		for (const scope of [[], ["profile"], ["openidx"]]) {
 			const o = over({
 				admission: { kind: "admitted", access: valid("DPoP", { ...grant, scope }) },
@@ -170,6 +233,26 @@ describe("userinfo", () => {
 			json: { error: "invalid_request" },
 		});
 		expect(invalid.calls).toEqual([["admitted"]]);
+	});
+
+	it("hands the token presented to sender-binding alone, the other parts its id, and answers it nowhere [rfc9700-4.9.3-a]", async () => {
+		const presented = new Map([["authorization", "Bearer s3cr3t-token"]]);
+		const short = valid("Bearer", { ...grant, scope: ["profile"] });
+		const seen: unknown[] = [];
+		for (const told of [
+			{},
+			{ session: { kind: "unbound" } as const },
+			{ entry: { kind: "absent" } as const },
+			{ admission: { kind: "admitted", access: short } as const },
+		]) {
+			const o = over(told);
+			seen.push(await o.run(testRequest({ headers: presented })), o.calls);
+			expect(o.admittedFrom).toEqual(["Bearer s3cr3t-token"]);
+		}
+		expect(seen.filter((_, i) => i % 2 === 0).map((a) => (a as { status: number }).status)).toEqual(
+			[200, 200, 401, 403],
+		);
+		expect(JSON.stringify(seen)).not.toContain("s3cr3t");
 	});
 
 	it("fails unavailable when a check or the claims cannot tell, answering no claim", async () => {

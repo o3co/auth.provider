@@ -3,7 +3,7 @@
 Internal module of `token-endpoint`: calling a contributed grant directly, as the endpoint does once a request has passed it, for the tests of the modules that contribute grants.
 
 ## Responsibilities
-- Builds the input a grant is handed from a client, its parameters and a binding, and calls the grant through the endpoint's own checks of a mistyped parameter and an untargeted request.
+- Builds the input a grant is handed from a client, its parameters, a binding and what the grant identified (`identified`), and calls the grant through the endpoint's own checks of a mistyped parameter and an untargeted request.
 
 ## Not here
 - Authenticating the client, allowing the grant and reading the binding (`route`, checked in its tests). The targets rule (`built-in`).

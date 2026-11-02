@@ -5,14 +5,19 @@
 	"type": "module",
 	"kind": "foundation",
 	"network": "outbound",
+	"forks": {
+		"src/resolver-process/process.ts": "src/resolver-process/helper.mjs"
+	},
 	"exports": {
 		".": "./src/contract.ts",
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
 		"@mod/address-reach": "workspace:*",
+		"@mod/host-entries": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound-policy": "workspace:*",
+		"@mod/tls-options": "workspace:*",
 		"@mod/url-setting": "workspace:*",
 		"zod": "4.6.7"
 	},

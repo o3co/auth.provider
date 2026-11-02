@@ -6,7 +6,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { type AuthContext, sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
@@ -44,20 +44,24 @@ const verified = (value: unknown) => ({ [userAttribute.emailVerified]: value });
 /** Tokens with the policy over a reader answering `answer`; `reads` lists each subject and handle read. */
 async function over(answer: () => Promise<AttributesAnswer>) {
 	const reads: (readonly [string, string | undefined])[] = [];
-	const reader = defineModule({ name: "subject-attributes" }, (m) => [
-		m.provide(subjectAttributes).by(() => ({
-			of: async (subject, handle) => {
-				reads.push([subject, handle]);
-				return answer();
-			},
-		})),
-	]);
-	const app = await assemble({
+	const reader = defineModule(
+		{ name: "subject-attributes", replicaSafe: false, takes: [] },
+		(m) => [
+			m.provide(subjectAttributes).by(() => ({
+				of: async (subject, handle) => {
+					reads.push([subject, handle]);
+					return answer();
+				},
+			})),
+		],
+	);
+	const input = {
 		modules: [tokensStandIn(), reader, verifiedEmail],
 		config: kernelConfig(),
 		runtime,
-	});
-	return { admits: (request: IssuanceRequest) => app.get(tokens).admits(request), reads };
+	};
+	const app = await assemble(input);
+	return { admits: (request: IssuanceRequest) => app.get(tokens).admits(request), reads, input };
 }
 
 describe("what counts as verified", () => {
@@ -137,7 +141,7 @@ describe("over users and the session's login", () => {
 		attributes: { source, values: { [userAttribute.emailVerified]: true } },
 	});
 	/** A ledger that cannot look users up by subject. */
-	const unanswering = defineModule({ name: "ledger" }, (m) => [
+	const unanswering = defineModule({ name: "ledger", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(ledgers).by(() => ({
 			verify: async () => ({ kind: "none" }),
 			bySubject: async () => ({ kind: "unanswerable" }),
@@ -150,7 +154,7 @@ describe("over users and the session's login", () => {
 				memoryUsersStores().module,
 				...parts.users,
 				secretHashModule,
-				defineModule({ name: "sessions" }, (m) => [
+				defineModule({ name: "sessions", replicaSafe: false, takes: [tokens] }, (m) => [
 					// Sessions that reach tokens as they are built, as a composition's closing tokens does.
 					m.provide(sessions).by(async (c) => {
 						await c.get(tokens);
@@ -173,7 +177,9 @@ describe("over users and the session's login", () => {
 		usersConfig([testUser("alice", "pw", { subject: "s-alice", attributes })]);
 
 	it("allows a registered user users states verified", async () => {
-		const app = await boot({ users: [usersModule], config: registered(verified(true)) });
+		// Beside the email, where users takes a verification.
+		const attributes = { email: "alice@example.com", ...verified(true) };
+		const app = await boot({ users: [usersModule], config: registered(attributes) });
 		expect(await app.get(tokens).admits(asked("session", "h1"))).toEqual({ kind: "allowed" });
 	});
 
@@ -198,4 +204,10 @@ describe("over users and the session's login", () => {
 		const upstream = await boot({ users, config: {}, login: login("federation:acme") });
 		expect(await upstream.get(tokens).admits(asked("session", "h1"))).toEqual(refused);
 	});
+});
+
+it("takes all it names", async () => {
+	const { input } = await over(async () => known(verified(true)));
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(input))["verified-email"]).toBeUndefined();
 });

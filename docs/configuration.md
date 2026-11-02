@@ -35,9 +35,11 @@ From `@mod/authorize`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `authorize.login-page` | string |  | yes | `AUTHORIZE_LOGIN_PAGE` | `https://login.example.invalid/login` | The login page, given the return URL as `redirect_to`, and the `prompt=login` and `max_age` a request asked: an https URL (http only on a loopback host). |
-| `authorize.step-up-page` | string |  |  |  |  | Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host). |
+| `authorize.login-page` | string |  | yes | `AUTHORIZE_LOGIN_PAGE` | `https://login.example.invalid/login` | The login page, given the return URL as `redirect_to`, and the `prompt=login` and `max_age` a request asked: an https URL (http only on a loopback host, with `kernel.environment = development`). |
+| `authorize.step-up-page` | string |  |  |  |  | Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host, with `kernel.environment = development`). |
+| `authorize.login-url-limit` | string | `8KiB` |  |  |  | The longest login URL a browser is sent to, `redirect_to` and all: a size with a unit, from 2KiB to 64KiB. A request whose login URL would be longer is answered here, `400`, nothing sent back. |
 | `authorize.oidc-mode` | oidc-required \| dual | `oidc-required` |  |  |  | oidc-required refuses a request whose own scope does not name openid, as invalid_scope; dual lets it through with the scope it asks or the client's default. |
+| `authorize.claims-parameter` | boolean | `true` |  |  |  | Whether the claims request parameter's names and value constraints are taken, and discovery says it is supported. False ignores them, and boot warns; the sub asked, the acr, an essential auth_time and the parameter's form still hold, as do the scope's claims and the selections already kept. |
 | `authorize.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both methods together; over it, 429. |
 | `authorize.window` | string | `1m` |  |  |  | The rate limit's window: a duration with a unit, e.g. 1m. |
 
@@ -49,6 +51,7 @@ From `@mod/client-assertion`.
 |---|---|---|---|---|---|---|
 | `client-assertion.max-lifetime` | string | `1h` |  |  |  | The longest lifetime a client assertion may have, from `1s` to `1d` in whole seconds. |
 | `client-assertion.clock-skew` | string | `30s` |  |  |  | How far a client's clock may be off when an assertion's times are checked, from `0s` to `5m` in whole seconds. |
+| `client-assertion.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256","ES256","ES384","ES512","EdDSA"]` |  |  |  | The algorithms a client's assertion may be signed with: asymmetric ones only, by default one for each kind of key. |
 
 ## clients
 
@@ -64,7 +67,8 @@ From `@mod/clients-cimd`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `clients-cimd.allow` | list of string | `[]` |  |  |  | The host names a client id's document may be fetched from (.name also takes the names under it); when not empty, only these, and outbound's hosts narrow to them. |
+| `clients-cimd.allow` | list of string | `[]` |  |  | `["documents.example.invalid"]` | The host names a client id's document may be fetched from (.name also takes the names under it), outbound's hosts narrowed to them; boot is refused while it is empty, unless allow-any-host is set. |
+| `clients-cimd.allow-any-host` | boolean | `false` |  |  |  | Fetches a client id's document from any host deny leaves, where allow is empty; warned of at every start. |
 | `clients-cimd.deny` | list of string | `[]` |  |  |  | The host names a client id's document is never fetched from (.name also takes the names under it), checked before allow. |
 | `clients-cimd.scopes` | list of string | `[]` |  |  |  | The ceiling of scopes such a client may get: a document asking none gets all of them. |
 | `clients-cimd.audiences` | list of string | `[]` |  |  |  | The audiences such a client's tokens may name, as the operator allows. |
@@ -99,7 +103,7 @@ From `@mod/consent`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `consent.page` | string |  |  | `CONSENT_PAGE` | `https://login.example.invalid/consent` | The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked. |
+| `consent.page` | string |  |  | `CONSENT_PAGE` | `https://login.example.invalid/consent` | The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked, and the authorization endpoint serves only first-party clients. An https URL (http only on a loopback host, with `kernel.environment = development`, as authorize's login page). |
 | `consent.challenge-lifetime` | string | `10m` |  |  |  | How long a pending consent challenge stays answerable, from `1m` to `1h` in whole seconds. |
 
 ## device-grant
@@ -125,7 +129,7 @@ From `@mod/dpop`.
 |---|---|---|---|---|---|---|
 | `dpop.algorithms` | list of ES256 \| ES384 \| EdDSA \| RS256 | `["ES256","ES384","EdDSA","RS256"]` |  |  |  | The signing algorithms a DPoP proof may use. |
 | `dpop.proof-window` | string | `1m` |  |  |  | How far a proof's `iat` may lie from the clock on either side, from `1s` to `5m` in whole seconds. |
-| `dpop.nonce.required` | never \| as \| as+rs | `never` |  | `DPOP_NONCE_REQUIRED` | `never` | Where a server-provided nonce is asked: never, at the token endpoint, or there and at resources. |
+| `dpop.nonce.required` | never \| as \| as+rs | `as` |  | `DPOP_NONCE_REQUIRED` | `as` | Where a server-provided nonce is asked: never, at the token endpoint, or there and at resources. |
 | `dpop.nonce.ttl` | string | `5m` |  | `DPOP_NONCE_TTL` | `5m` | How often the nonce changes, from `1s` to `1h` in whole seconds; one is taken for twice this. |
 | `dpop.nonce.secret` | string |  |  | `DPOP_NONCE_SECRET` | `REPLACE-NONCE-SECRET-BASE64-32-BYTES` | The nonce's key, shared by every instance: base64 of 32 bytes or more; required unless never. |
 
@@ -136,11 +140,13 @@ From `@mod/exchange-id-tokens`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `exchange-id-tokens.max-age` | string | `10m` |  |  |  | The oldest an id_token may be, from its `iat`, from 1m to 1h. |
-| `exchange-id-tokens.clock-skew` | string | `30s` |  |  |  | How far an id_token's times may be off this host's clock, from 0s to 5m. |
-| `exchange-id-tokens.apple.upstream` | string | `apple` |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
-| `exchange-id-tokens.apple.clients` | map |  |  |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
-| `exchange-id-tokens.google.upstream` | string | `google` |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
-| `exchange-id-tokens.google.clients` | map |  |  |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
+| `exchange-id-tokens.clock-skew` | string | `30s` |  |  |  | How far an id_token's times may be off this host's clock, from 0s to 5m. Set it no lower than your issuers' real clock drift: narrowing it can admit an id_token a wider skew refused at a revocation. |
+| `exchange-id-tokens.apple.upstream` | string | `apple` when `exchange-id-tokens.apple` is set |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
+| `exchange-id-tokens.apple.clients` | map |  | when `exchange-id-tokens.apple` is set |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
+| `exchange-id-tokens.apple.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256"]` when `exchange-id-tokens.apple` is set |  |  |  | The algorithms Apple's id_tokens may be signed with: asymmetric ones only, RS256 by default. |
+| `exchange-id-tokens.google.upstream` | string | `google` when `exchange-id-tokens.google` is set |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
+| `exchange-id-tokens.google.clients` | map |  | when `exchange-id-tokens.google` is set |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
+| `exchange-id-tokens.google.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256"]` when `exchange-id-tokens.google` is set |  |  |  | The algorithms Google's id_tokens may be signed with: asymmetric ones only, RS256 by default. |
 
 ## external-jwt
 
@@ -156,9 +162,9 @@ From `@mod/federation`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `federation.idps` | map | `{}` |  |  |  | Each IdP by name (1 to 32 lowercase letters, digits and `-`, not starting with `-`): its `type`, `upstream-amr` (the upstream's amr values mapped to ours; none by default; mapping one to `mfa`, say, trusts the upstream's claim for that amr and any acr it satisfies, such as `urn:o3co:acr:mfa`) and the type's own settings. With none, every login answers not found, and each boot warns `federation.no_idps`. |
+| `federation.idps` | map | `{}` |  |  |  | Each IdP by name (1 to 32 lowercase letters, digits and `-`, not starting with `-`): its `type`, `upstream-amr` (the upstream's amr values mapped to ours; none by default; mapping one to `mfa`, say, trusts the upstream's claim for that amr and any acr it satisfies, such as `urn:o3co:acr:mfa`, and lets its logins past the local second factor), `fresh-login-allowance` (how long before a demand for a fresh login the upstream may say the user logged in, for `prompt=login` and a max age, from 0s to 5m; the type's clock allowance, `clock-skew`, by default) and the type's own settings. With none, every login answers not found, and each boot warns `federation.no_idps`. |
 | `federation.landing` | string |  |  |  |  | The https URL a login lands on when it named no return target; the public origin's root by default. |
-| `federation.held-page` | string |  |  |  |  | The page a browser goes to when a gate holds its login, to go on there: on the public origin, as it reads the held login with this deployment's cookies; https, or http on a loopback host. Without it, a held login is answered 403 with the gate's answer. |
+| `federation.held-page` | string |  |  |  |  | The page a browser goes to when a gate holds its login, to go on there: on the public origin, as it reads the held login with this deployment's cookies; https, or http on a loopback host with `kernel.environment = development`. Without it, a held login is answered 403 with the gate's answer. |
 | `federation.transaction-lifetime` | string | `10m` |  |  |  | How long a round trip, or a held login's tokens, may wait, from 1m to 1h. |
 | `federation.requests` | integer (1–1000) | `60` |  |  |  | Starts and callbacks allowed per source in each window. |
 | `federation.window` | string | `1m` |  |  |  | The window `requests` counts in, from 1s to 1h. |
@@ -169,9 +175,6 @@ From `@mod/federation-grants`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `federation-grants.page` | string |  |  | `FEDERATION_GRANTS_PAGE` | `https://login.example.invalid/federation-grants` | The page that asks the user, on this deployment's origin: an https URL (http only on a loopback host). |
-| `federation-grants.login-page` | string |  |  | `FEDERATION_GRANTS_LOGIN_PAGE` | `https://login.example.invalid/login` | Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host). |
-| `federation-grants.step-up-page` | string |  |  |  |  | Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host). |
 | `federation-grants.connections` | map | `{}` |  |  |  | What a grant may be for, by a name (a-z, 0-9 and -, at most 32): idp (a federation IdP that offers delegation), scopes (holding openid), resource, max-access-token-lifetime and scope-subsets. |
 | `federation-grants.default-lifetime` | string | `30d` |  |  |  | A grant's lifetime from its activation when a client asks for none: a duration with a unit, from 1m to 365d, e.g. 30d. |
 | `federation-grants.max-lifetime` | string | `30d` |  |  |  | The most a grant may live from its activation: a duration with a unit, from 1m to 365d, e.g. 90d. |
@@ -181,12 +184,21 @@ From `@mod/federation-grants`.
 | `federation-grants.rotation-window` | string | `1h` |  |  |  | The window a grant's upstream refreshes are counted in: a duration with a unit, from 1s to 1d, e.g. 1h. |
 | `federation-grants.lodges` | integer (1–100000) | `60` |  |  |  | Intents a client may lodge or renew in each lodge-window, together, whatever subject it names, from 1 to 100000. |
 | `federation-grants.lodge-window` | string | `1m` |  |  |  | The window a client's lodged and renewed intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m. |
-| `federation-grants.revocation-skew` | string | `1s` |  |  |  | How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. A duration with a unit, from 0s to 5m, e.g. 1s. |
 | `federation-grants.sweep-interval` | string | `1h` |  |  |  | How often each host walks every grant kept, erasing the credentials of one past its end or ended by its subject's revocation though no request reads it: a duration with a unit, from 1m to 1d, e.g. 1h. |
 | `federation-grants.keep-on-subject-revocation` | boolean | `false` |  |  |  | Whether a subject's revocation may be asked to leave its established grants. |
-| `federation-grants.identity-check` | required \| none | `required` |  |  |  | required refuses a callback whose upstream account another user holds; none does not check. |
 | `federation-grants.requests` | integer (1–1000) | `60` |  |  |  | Requests allowed per source in each window, on every route, from 1 to 1000. |
 | `federation-grants.window` | string | `1m` |  |  |  | The window a source's requests are counted in, on every route: a duration with a unit, from 1s to 1h, e.g. 1m. |
+
+## federation-grants-connect
+
+From `@mod/federation-grants-connect`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `federation-grants-connect.page` | string |  |  | `FEDERATION_GRANTS_CONNECT_PAGE` | `https://login.example.invalid/federation-grants` | The page that asks the user; it posts the decision under `csrf`, so serve it on this deployment's origin (not checked at boot): an https URL (http only on a loopback host, with `kernel.environment = development`). Connections refuse boot without it. |
+| `federation-grants-connect.login-page` | string |  |  | `FEDERATION_GRANTS_CONNECT_LOGIN_PAGE` | `https://login.example.invalid/login` | Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host, with `kernel.environment = development`). |
+| `federation-grants-connect.step-up-page` | string |  |  |  |  | Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host, with `kernel.environment = development`). |
+| `federation-grants-connect.identity-check` | required \| none | `required` |  |  |  | required refuses a callback whose upstream account another user holds; none does not check. |
 
 ## federation-grants-store
 
@@ -196,6 +208,14 @@ From `@mod/federation-grants-store`.
 |---|---|---|---|---|---|---|
 | `federation-grants-store.pending-per-client-and-subject` | integer (1–1000) | `16` |  |  |  | How many first-time intents a client may have waiting for one subject; past it, the one ending first is pushed out. |
 | `federation-grants-store.grants-per-subject` | integer (1–10000) | `100` |  |  |  | How many grants a subject's listing keeps; past it, the one ending first is pushed out. |
+
+## federation-link
+
+From `@mod/federation-link`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `federation-link.step-up-page` | string |  |  |  |  | Where a link's start that falls short of a session requirement sends the browser once to raise it, then back to the start: an https URL (http only on a loopback host, with `kernel.environment = development`). Without it, the start's 403 names no page. |
 
 ## federation-tokens
 
@@ -221,10 +241,12 @@ From `@mod/http`.
 | `http.proxy-hops` | integer (1–10) | `1` |  |  |  | How many trusted proxies, at most, a request passes through. |
 | `http.public-origin` | string |  |  | `HTTP_PUBLIC_ORIGIN` | `https://login.example.invalid` | The scheme, host and port users reach this deployment at: an origin only, with no path. |
 | `http.cors-origins` | list of string | `[]` |  |  |  | The https origins whose pages may read cross-origin routes: exact, without a pattern. |
-| `http.insecure-origin` | boolean | `false` |  | `HTTP_INSECURE_ORIGIN` | `false` | Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it. |
-| `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  |  |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
-| `http.client-certificate.header` | string | `client-cert` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
-| `http.client-certificate.chain-header` | string | `client-cert-chain` |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
+| `http.insecure-origin` | boolean | `false` |  | `HTTP_INSECURE_ORIGIN` | `false` | Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it, and only with `kernel.environment = development`, as a production deployment refuses it. |
+| `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  | when `http.client-certificate` is set |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
+| `http.client-certificate.header` | string | `client-cert` when `http.client-certificate` is set and `http.client-certificate.dialect` is `rfc9440` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
+| `http.client-certificate.header` | string |  | when `http.client-certificate` is set and `http.client-certificate.dialect` is `pem` |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
+| `http.client-certificate.header` | string | `x-forwarded-client-cert` when `http.client-certificate` is set and `http.client-certificate.dialect` is `xfcc` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
+| `http.client-certificate.chain-header` | string | `client-cert-chain` when `http.client-certificate` is set and `http.client-certificate.dialect` is `rfc9440` |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
 | `http.headers-timeout` | string | `10s` |  |  |  | How long a client may take to send a request's headers, from 1s to 1m, such as 10s; past it the request is answered 408 and its connection closed. |
 | `http.request-timeout` | string | `30s` |  |  |  | How long a client may take to send a whole request, its body included, from 1s to 5m and no less than headers-timeout, such as 30s; past it the request is answered 408 and its connection closed. |
 | `http.max-connections` | integer (1–1000000) | `10000` |  |  |  | The most connections held open at once, from 1 to 1000000; one past it is closed as it arrives. |
@@ -245,15 +267,29 @@ From `@mod/issuer`.
 |---|---|---|---|---|---|---|
 | `issuer.url` | string |  | yes | `ISSUER_URL` | `https://login.example.invalid` | The issuer the tokens name, as clients see it; no query and no trailing slash. |
 
+## jti-ledger-http
+
+From `@mod/jti-ledger-http`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `jti-ledger-http.issuer` | string |  | yes | `JTI_LEDGER_HTTP_ISSUER` | `https://devices.example.invalid` | The `iss` whose assertions it uses up: one of jwt-bearer's `issuers`. |
+| `jti-ledger-http.consume-url` | string |  | yes | `JTI_LEDGER_HTTP_CONSUME_URL` | `https://ledger.example.invalid/assertions/consume` | Where an assertion's jti is used up. Plain http is reached only where outbound's policy names it. |
+| `jti-ledger-http.credential` | string |  |  |  |  | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material. |
+| `jti-ledger-http.credential-header` | string |  |  |  |  | The header the credential goes in, as it is, such as x-internal-token; unset, it goes as Authorization: Bearer. |
+| `jti-ledger-http.timeout` | string |  |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap. |
+| `jti-ledger-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
+
 ## jwt-bearer
 
 From `@mod/jwt-bearer`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks","subject":"as-is"}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`. |
-| `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | The longest lifetime an assertion may claim, from `1s` to `1d` in whole seconds. |
-| `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. |
+| `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks","subject":"as-is","conditions":{"subject-prefix":"REPLACE-SUBJECT-PREFIX"}}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`. An entry's keys are `issuer`; `keys`, or `jwks-uri` with `accept-key-set-elsewhere`, or neither; `subject`, `upstream`, `subject-is-key-thumbprint`, `self-issued-prefix`, `conditions`, `accept-any-subject`, `ceiling`, `max-assertion-lifetime`, `clock-skew`, `profile` and `client`; and `algorithms`, which only an entry without `keys` takes; `jwt-bearer`'s internal module `issuers` says what each takes. |
+| `jwt-bearer.delegated-issuers` | list of string | `[]` |  |  |  | Issuers whose assertions another module checks by its own rules, each exactly as sent: their audience is an app, not this server, so RFC 7523 §3 does not hold. Each needs the one module that checks it. |
+| `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | How far ahead its `exp` an assertion may be when it is taken, and how far its `exp` may be from its `iat`, from `1s` to `1d` in whole seconds. |
+| `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. Set it no lower than your issuers' real clock drift: narrowing it can admit an assertion a wider skew refused at a revocation. |
 
 ## kernel
 
@@ -262,6 +298,7 @@ From `@mod/kernel`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `kernel.deployment` | single \| multi |  | yes | `KERNEL_DEPLOYMENT` | `single` | single or multi; multi refuses a module unsafe on multiple instances |
+| `kernel.environment` | production \| development | `production` |  | `KERNEL_ENVIRONMENT` | `production` | production or development; production refuses what each module declares a production deployment must not hold |
 | `kernel.logging.level` | trace \| debug \| info \| warn \| error \| fatal \| silent | `info` |  |  |  | the lowest level logged (trace to fatal), or silent for none |
 | `kernel.stop-deadline` | string | `30s` |  | `KERNEL_STOP_DEADLINE` | `30s` | how long a stop given no deadline waits for its hooks, from `1s` to `1h` in whole seconds; an orchestrator's grace period must be longer |
 
@@ -272,13 +309,13 @@ From `@mod/keys`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `keys.signing.kid` | string |  | yes | `KEYS_SIGNING_KID` | `signing-1` | The key id tokens signed with this key carry, unique in the ring. |
-| `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `EdDSA` | The algorithm the provider signs with. |
-| `keys.signing.private-key` | string |  |  | `KEYS_SIGNING_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----"` | The signing key, as a PKCS8 PEM. |
-| `keys.signing.secret` | string |  |  |  |  | The HMAC secret for HS256, its bytes the HMAC key, read as `secret-encoding` names; unset, as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first). At least 32 bytes, of at least 8 byte values, however read. |
+| `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `RS256` | The algorithm the provider signs with. |
+| `keys.signing.private-key` | string |  | when `keys.signing.alg` is `EdDSA`, `ES256` or `RS256` | `KEYS_SIGNING_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----"` | The signing key, as a PKCS8 PEM. |
+| `keys.signing.secret` | string |  | when `keys.signing.alg` is `HS256` |  |  | The HMAC secret for HS256, its bytes the HMAC key, read as `secret-encoding` names; unset, as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first). At least 32 bytes, of at least 8 byte values, however read. |
 | `keys.signing.secret-encoding` | hex \| base64 \| utf8 |  |  |  |  | How `secret` is read: `hex`, `base64` (strict) or `utf8`, the text's own bytes, as 0.17 and policy-verifier read it; a value not of the reading named is refused. Unset, hex or else base64. |
-| `keys.next.kid` | string |  |  |  |  | The key id of the key that signs next, unique in the ring. |
-| `keys.next.alg` | EdDSA \| ES256 \| RS256 |  |  |  |  | The algorithm the next key will sign with. |
-| `keys.next.public-key` | string |  |  |  |  | The next key's public half, as PEM; a private PEM is taken too. |
+| `keys.next.kid` | string |  | when `keys.next` is set |  |  | The key id of the key that signs next, unique in the ring. |
+| `keys.next.alg` | EdDSA \| ES256 \| RS256 |  | when `keys.next` is set |  |  | The algorithm the next key will sign with. |
+| `keys.next.public-key` | string |  | when `keys.next` is set |  |  | The next key's public half, as PEM; a private PEM is taken too. |
 | `keys.previous` | list of map | `[]` |  |  |  | Past signing keys that still verify tokens until each one's `expires-at`. |
 
 ## login-gates
@@ -287,7 +324,19 @@ From `@mod/login-gates`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `login-gates.return-targets` | list of string | `[]` |  |  |  | The https URLs (http only on a loopback host), matched as written, a login may return to besides the return paths modules contribute. |
+| `login-gates.return-targets` | list of string | `[]` |  |  |  | The https URLs (http only on a loopback host, with `kernel.environment = development`), matched as written, a login may return to besides the return paths modules contribute. |
+
+## login-passkey
+
+From `@mod/login-passkey`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `login-passkey.counts-as-mfa` | boolean | `true` |  |  |  | Whether a passkey login whose user was verified proves a second factor too (amr `mfa`). |
+| `login-passkey.attempts` | integer (1–100) | `20` |  |  |  | Requests allowed per source in each window, on each of the two routes. |
+| `login-passkey.window` | string | `15m` |  |  |  | The window `attempts` is counted over, from 1m to 1d. |
+| `login-passkey.password` | allowed \| refused-when-held | `allowed` |  |  |  | `refused-when-held`: a password login of a subject holding a passkey is refused, but in `password-exempt-group`. |
+| `login-passkey.password-exempt-group` | string |  |  |  |  | A group of users whose password logins `refused-when-held` lets through. |
 
 ## login-password
 
@@ -298,8 +347,8 @@ From `@mod/login-password`.
 | `login-password.attempts` | integer (1–100) | `20` |  |  |  | Login attempts allowed per source in each window, within bounds that keep guessing slow. |
 | `login-password.window` | string | `15m` |  |  |  | The window `attempts` is counted over, from 1m to 1d. |
 | `login-password.account-attempts` | integer (1–100) | `10` |  |  |  | Failed attempts allowed at one identifier, from any source, before each next one waits. |
-| `login-password.account-window` | string | `1h` |  |  |  | How long an identifier's run of failed attempts is remembered, from 1m to 1d. |
-| `login-password.account-max-wait` | string | `5m` |  |  |  | The longest an identifier waits between attempts, from 1s to 1h: the wait doubles to it, never locking out. |
+| `login-password.account-window` | string | `1h` |  |  |  | How long an identifier's run of failed attempts is remembered, from 1m to 1d, and no shorter than `account-max-wait`. |
+| `login-password.account-max-wait` | string | `5m` |  |  |  | The longest an identifier waits between attempts, from 1s to 1h and no longer than `account-window`: the wait doubles to it, never locking out. |
 
 ## mail
 
@@ -368,13 +417,13 @@ From `@mod/mfa-flows`.
 | `mfa-flows.attempts-per-transaction` | integer (2–10) | `5` |  |  |  | How many proofs one transaction takes, from 2 to 10; the one that uses up the last ends it. |
 | `mfa-flows.requests` | integer (1–100000) | `60` |  |  |  | POSTs allowed per source in each window, over every form this package's routes take, from 1 to 100000. |
 | `mfa-flows.window` | string | `5m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, such as `5m`. |
-| `mfa-flows.lockout.threshold` | integer (-9007199254740991–9007199254740991) | `5` |  |  |  | Consecutive failures before the first hold; a positive integer, no more than `budget`. |
+| `mfa-flows.lockout.threshold` | integer (1–100) | `5` |  |  |  | Consecutive failures before the first hold; a positive integer up to 100, no more than `budget`. |
 | `mfa-flows.lockout.backoff` | string | `15m` |  |  |  | The first hold after `threshold` failures, in whole seconds, such as `15m`. |
-| `mfa-flows.lockout.max-backoff` | string | `1d` |  |  |  | The longest hold, the first doubling up to it, in whole seconds, such as `1d`. |
-| `mfa-flows.lockout.budget` | integer (-9007199254740991–9007199254740991) | `10` |  |  |  | Failures allowed in any `budget-window`; a positive integer, from `threshold` to `hard-limit`. |
+| `mfa-flows.lockout.max-backoff` | string | `1d` |  |  |  | The longest hold, the first doubling up to it, no shorter than `backoff`, in whole seconds, such as `1d`. |
+| `mfa-flows.lockout.budget` | integer (1–100) | `10` |  |  |  | Failures allowed in any `budget-window`; a positive integer up to 100, from `threshold` to `hard-limit`. |
 | `mfa-flows.lockout.budget-window` | string | `7d` |  |  |  | The window `budget` is counted over, in whole seconds, such as `7d`. |
-| `mfa-flows.lockout.hard-limit` | integer (-9007199254740991–9007199254740991) | `100` |  |  |  | Failures in one run after which the hold is fixed until released; a positive integer, no less than `budget`. |
-| `mfa-flows.lockout.memory` | string | `1d` |  |  |  | How long a run of failures is remembered without one, in whole seconds, such as `1d`. |
+| `mfa-flows.lockout.hard-limit` | integer (1–100) | `100` |  |  |  | Failures in one run after which the hold is fixed until released; a positive integer up to 100, no less than `budget`. |
+| `mfa-flows.lockout.memory` | string | `1d` |  |  |  | How long a run of failures is remembered without one, at least 1h and no shorter than `max-backoff`, in whole seconds, such as `1d`. |
 
 ## mfa-management
 
@@ -400,9 +449,10 @@ From `@mod/mfa-witness-http`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mfa-witness-http.read-url` | string |  | yes | `MFA_WITNESS_HTTP_READ_URL` | `https://ledger.example.invalid/mfa-witness/read` | Where whether a subject carries the mark is read. At the same origin as the other two URLs. Plain http is reached only where outbound's policy names it. |
-| `mfa-witness-http.enroll-url` | string |  | yes | `MFA_WITNESS_HTTP_ENROLL_URL` | `https://ledger.example.invalid/mfa-witness/enroll` | Where the mark is set to a token unless one is set. At the same origin as the other two URLs. Plain http is reached only where outbound's policy names it. |
-| `mfa-witness-http.clear-url` | string |  | yes | `MFA_WITNESS_HTTP_CLEAR_URL` | `https://ledger.example.invalid/mfa-witness/clear` | Where the mark is removed. At the same origin as the other two URLs. Plain http is reached only where outbound's policy names it. |
+| `mfa-witness-http.read-url` | string |  | yes | `MFA_WITNESS_HTTP_READ_URL` | `https://ledger.example.invalid/mfa-witness/read` | Where whether a subject carries the mark is read. At the same origin as the other URLs. Plain http is reached only where outbound's policy names it. |
+| `mfa-witness-http.enroll-url` | string |  | yes | `MFA_WITNESS_HTTP_ENROLL_URL` | `https://ledger.example.invalid/mfa-witness/enroll` | Where the mark is set to a token unless one is set. At the same origin as the other URLs. Plain http is reached only where outbound's policy names it. |
+| `mfa-witness-http.clear-url` | string |  | yes | `MFA_WITNESS_HTTP_CLEAR_URL` | `https://ledger.example.invalid/mfa-witness/clear` | Where the mark is removed. At the same origin as the other URLs. Plain http is reached only where outbound's policy names it. |
+| `mfa-witness-http.withdraw-url` | string |  |  |  |  | Where the mark is removed only where it is the token sent's, by a compare-and-delete on the mark's own row. Optional: without it a ledger is asked to clear instead, and each boot warns. Never reaching clear-url's target, however spelled. At the same origin as the other URLs. Plain http is reached only where outbound's policy names it. |
 | `mfa-witness-http.credential` | string |  | yes | `MFA_WITNESS_HTTP_CREDENTIAL` | `REPLACE-RANDOM-BEARER-TOKEN-32-BYTES` | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material, sent on every call. |
 | `mfa-witness-http.timeout` | string | `5s` |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap; a write's deadline is its sending time plus the time outbound holds the call to. |
 | `mfa-witness-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
@@ -414,21 +464,21 @@ From `@mod/mtls`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `mtls.mode` | self-signed \| pki |  | yes | `MTLS_MODE` | `self-signed` | How a client certificate binds: `self-signed` binds any certificate that parses; `pki` checks a path to an anchor. |
-| `mtls.anchors` | list of string |  |  |  |  | The trust anchors, as PEM text holding one certificate each. |
-| `mtls.max-intermediates` | integer (0–14) | `4` |  |  |  | At most this many certificates between the leaf and an anchor. |
-| `mtls.min-rsa-bits` | integer (2048–16384) | `2048` |  |  |  | The fewest bits an RSA key in the path may have; 2048 at least. |
-| `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  |  |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
-| `mtls.revocation.on-unavailable` | reject \| allow |  |  |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
-| `mtls.revocation.hosts` | list of string |  |  |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
-| `mtls.revocation.nonce` | boolean | `true` |  |  |  | Whether an OCSP request carries a nonce. |
-| `mtls.revocation.skew` | string | `5m` |  |  |  | How far ahead of this host's clock revocation material may say it was issued, from 0s to 1h. |
-| `mtls.revocation.ocsp-fresh` | string | `10m` |  |  |  | How long an OCSP answer without a next update is taken, from 1s to 1d. |
-| `mtls.revocation.crl-ttl` | string | `1h` |  |  |  | How long a CRL is kept at most, its next update aside, from 1s to 1d. |
-| `mtls.revocation.failure-lifetime` | string | `30s` |  |  |  | How long a source that failed is not asked again, from 1s to 1h. |
-| `mtls.revocation.crl-entries` | integer (1–65536) | `256` |  |  |  | How many CRLs are kept. |
-| `mtls.revocation.ocsp-entries` | integer (1–65536) | `1024` |  |  |  | How many OCSP answers are kept. |
-| `mtls.revocation.timeout` | string | `3s` |  |  |  | How long one fetch may take, from 1ms to 1m. |
-| `mtls.revocation.max-fetches` | integer (1–64) | `4` |  |  |  | How many sources one check may fetch from; past them, what is left is unconfirmed. |
+| `mtls.anchors` | list of string |  | when `mtls.mode` is `pki` |  |  | The trust anchors, as PEM text holding one certificate each. |
+| `mtls.max-intermediates` | integer (0–14) | `4` when `mtls.mode` is `pki` |  |  |  | At most this many certificates between the leaf and an anchor. |
+| `mtls.min-rsa-bits` | integer (2048–16384) | `2048` when `mtls.mode` is `pki` |  |  |  | The fewest bits an RSA key in the path may have; 2048 at least. |
+| `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  | when `mtls.mode` is `pki` |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
+| `mtls.revocation.on-unavailable` | reject \| allow |  | when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
+| `mtls.revocation.hosts` | list of string |  | when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
+| `mtls.revocation.nonce` | boolean | `true` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | Whether an OCSP request carries a nonce. |
+| `mtls.revocation.skew` | string | `5m` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How far ahead of this host's clock revocation material may say it was issued, from 0s to 1h. |
+| `mtls.revocation.ocsp-fresh` | string | `10m` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How long an OCSP answer without a next update is taken, from 1s to 1d. |
+| `mtls.revocation.crl-ttl` | string | `1h` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How long a CRL is kept at most, its next update aside, from 1s to 1d. |
+| `mtls.revocation.failure-lifetime` | string | `30s` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How long a source that failed is not asked again, from 1s to 1h. |
+| `mtls.revocation.crl-entries` | integer (1–65536) | `256` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How many CRLs are kept. |
+| `mtls.revocation.ocsp-entries` | integer (1–65536) | `1024` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How many OCSP answers are kept. |
+| `mtls.revocation.timeout` | string | `3s` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How long one fetch may take, from 1ms to 1m. |
+| `mtls.revocation.max-fetches` | integer (1–64) | `4` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How many sources one check may fetch from; past them, what is left is unconfirmed. |
 
 ## oidc
 
@@ -437,6 +487,7 @@ From `@mod/oidc`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `oidc.id-token-lifetime` | string | `1h` |  |  |  | How long an ID token lasts: a duration with a unit, e.g. 1h. |
+| `oidc.id-token-alg` | string | `RS256` |  | `OIDC_ID_TOKEN_ALG` | `RS256` | The JWS algorithm ID tokens are signed with, which `keys` must sign with: RS256 unless written. Another warns at each start, as OpenID Connect Discovery 1.0 §3 has RS256 listed. |
 
 ## outbound
 
@@ -459,6 +510,8 @@ From `@mod/outbound`.
 | `outbound.proxy-authorization` | string |  |  |  |  | The Proxy-Authorization value the proxy asks for, such as `Basic …`: printable ASCII on one line. |
 | `outbound.direct-hosts` | list of string | `[]` |  |  |  | The hosts reached directly while a proxy is set; `.name` covers the name and the names under it. |
 | `outbound.plain-ipv4` | list of string | `[]` |  |  |  | The `host:port` pairs of `plain-loopback` or `plain-internal` whose name is resolved to IPv4 addresses alone, for plain http to that host and port: only those answers are checked and reached, and IPv6 ones are neither. For a network answering a name with an IPv4 address and an IPv6 one that does not reach, as ECS Service Connect writes both in the hosts file. Each names its host by name. |
+| `outbound.resolution` | helper \| in-process | `helper` |  |  |  | Where names are resolved, as the system resolves them: `helper`, in helper processes, one ended once no request waits on its lookups; `in-process`, here, where no deadline stops a lookup. |
+| `outbound.max-lookups` | integer (1–1024) |  |  |  |  | Names resolving at once, the outside party's half among them; one more is unavailable at once. Four by default, never more than max-concurrent. |
 
 ## passkey-registration
 
@@ -466,8 +519,30 @@ From `@mod/passkey-registration`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `passkey-registration.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both registration routes. |
+| `passkey-registration.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over its POST routes. |
 | `passkey-registration.window` | string | `5m` |  |  |  | The window requests are counted over, from 1s to 1d. |
+
+## passkey-witness-http
+
+From `@mod/passkey-witness-http`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `passkey-witness-http.read-url` | string |  | yes | `PASSKEY_WITNESS_HTTP_READ_URL` | `https://ledger.example.invalid/passkey-witness/read` | Where whether a subject carries the mark is read. At the same origin as the other URLs. Plain http is reached only where outbound's policy names it. |
+| `passkey-witness-http.enroll-url` | string |  | yes | `PASSKEY_WITNESS_HTTP_ENROLL_URL` | `https://ledger.example.invalid/passkey-witness/enroll` | Where the mark is set to a token unless one is set. At the same origin as the other URLs. Plain http is reached only where outbound's policy names it. |
+| `passkey-witness-http.withdraw-url` | string |  | yes | `PASSKEY_WITNESS_HTTP_WITHDRAW_URL` | `https://ledger.example.invalid/passkey-witness/withdraw` | Where the mark is removed only where it is the token's. At the same origin as the other URLs. Plain http is reached only where outbound's policy names it. |
+| `passkey-witness-http.credential` | string |  | yes | `PASSKEY_WITNESS_HTTP_CREDENTIAL` | `REPLACE-RANDOM-BEARER-TOKEN-32-BYTES` | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material, sent on every call. |
+| `passkey-witness-http.timeout` | string | `5s` |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap; a write's deadline is its sending time plus the time outbound holds the call to. |
+| `passkey-witness-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
+
+## passkeys
+
+From `@mod/passkeys`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `passkeys.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
+| `passkeys.max-credentials` | integer (1–100) | `10` |  |  |  | The most passkeys a subject may hold, from 1 to 100. |
 
 ## rate-limit
 
@@ -483,16 +558,18 @@ From `@mod/redis`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `redis.url` | string |  | yes | `REDIS_URL` | `rediss://redis.example.invalid:6379` | The Redis server to connect to. |
+| `redis.url` | string |  | yes | `REDIS_URL` | `rediss://redis.example.invalid:6379` | The Redis server to connect to, with no query: each option is its own setting. |
+| `redis.address-family` | ipv4 \| ipv6 |  |  |  |  | The address family the host's name resolves to: ipv4 or ipv6; either when unset. |
 | `redis.prefix` | string | `store` |  |  |  | What every key the store writes begins with. |
 | `redis.connect-timeout` | string | `2s` |  |  |  | How long connecting to Redis may take, at least 100ms. |
 | `redis.replication-timeout` | string | `1s` |  |  |  | How long a confirmation waits for every replica to have a write, from 1ms to 1m. |
 | `redis.command-timeout` | string | `1s` |  |  |  | How long one Redis command may take, from 10ms to 1m. |
 | `redis.replication` | none \| replicas |  |  | `REDIS_REPLICATION` | `replicas` | Required when a space asks for replication or confirmed reads. "replicas": every write must reach the replicas, and Redis itself must refuse writes without them. "none": the operator states there is no failover at all, accepting that a failover would lose writes. |
-| `redis.durability` | none |  |  |  |  | "none": the operator states the server does not fsync every write, accepting that a crash loses the latest writes, among them spent assertion and proof ids and lockout records. Without it, a durable space needs appendonly yes and appendfsync always. |
+| `redis.durability` | none |  |  |  |  | "none": the operator states the server does not fsync every write, accepting that a crash loses the latest writes, among them spent assertion and proof ids and lockout records. Without it, a durable space needs appendonly yes, appendfsync always and no-appendfsync-on-rewrite no. |
 | `redis.server-settings.maxmemory-policy` | string |  |  |  |  | The server's maxmemory-policy, as it is set there. |
 | `redis.server-settings.appendonly` | yes \| no |  |  |  |  | Whether the server keeps an append-only file. |
 | `redis.server-settings.appendfsync` | always \| everysec \| no |  |  |  |  | How often the server fsyncs its append-only file. |
+| `redis.server-settings.no-appendfsync-on-rewrite` | yes \| no |  |  |  |  | Whether the server skips its fsyncs while it rewrites its append-only file. |
 | `redis.server-settings.min-replicas-to-write` | integer (0–9007199254740991) |  |  |  |  | The replicas the server needs before it takes a write. |
 | `redis.server-settings.min-replicas-max-lag` | integer (0–9007199254740991) |  |  |  |  | How many seconds behind a replica may be and still count for writes. |
 
@@ -526,6 +603,8 @@ From `@mod/rp-logout`.
 | `rp-logout.remember-for` | string | `1d` |  |  |  | How long a session's clients are kept from a redemption, from 1m to 30d; at least as long as a session lives. |
 | `rp-logout.notify-within` | string | `1d` |  |  |  | How long an undelivered back-channel notice is tried again, from 1m to 7d. |
 | `rp-logout.sweep-interval` | string | `1m` |  |  |  | How often each host sweeps the kept notices, from 1s to 1h. |
+| `rp-logout.confirm-within` | string | `5m` |  |  |  | How long a logout that asks the person waits for them, from 1m to 15m: the request the logout carries to the confirmation, and the confirmation page. |
+| `rp-logout.error-page` | string |  |  |  |  | Where a browser's refused logout request is sent, with `error` and `error_description` in its query: an https URL (http only on a loopback host, with `kernel.environment = development`). Without it, every refusal is answered as JSON. |
 | `rp-logout.requests` | integer (1–100000) | `60` |  |  |  | Logout requests allowed per source in each window, a GET and a POST together, before any hint is checked. |
 | `rp-logout.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 
@@ -546,9 +625,11 @@ From `@mod/seal`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `seal.current.id` | string |  | yes | `SEAL_CURRENT_ID` | `seal-1` | The key's id, which heads every value it seals. |
-| `seal.current.key` | string |  | yes | `SEAL_CURRENT_KEY` | `REPLACE-32-RANDOM-BYTES-BASE64` | 32 bytes, base64, of at least 8 byte values. |
-| `seal.next.id` | string |  |  |  |  | The key's id, which heads every value it seals. |
-| `seal.next.key` | string |  |  |  |  | 32 bytes, base64, of at least 8 byte values. |
+| `seal.current.algorithm` | aes-256-gcm | `aes-256-gcm` |  |  |  | What the key seals and opens with: aes-256-gcm, the default and only one. |
+| `seal.current.key` | string |  | yes | `SEAL_CURRENT_KEY` | `REPLACE-32-RANDOM-BYTES-BASE64` | The key's bytes, base64, as many as its algorithm takes, of at least 8 byte values. |
+| `seal.next.id` | string |  | when `seal.next` is set |  |  | The key's id: it opens values but seals none until it is made current. |
+| `seal.next.algorithm` | aes-256-gcm | `aes-256-gcm` when `seal.next` is set |  |  |  | What the key seals and opens with: aes-256-gcm, the default and only one. |
+| `seal.next.key` | string |  | when `seal.next` is set |  |  | The key's bytes, base64, as many as its algorithm takes, of at least 8 byte values. |
 | `seal.previous` | list of map | `[]` |  |  |  | Keys that only open what they sealed. |
 
 ## secret-hash
@@ -640,6 +721,15 @@ From `@mod/subject-revocation-http`.
 | `subject-revocation-http.requests` | integer (1–100000) | `600` |  |  |  | Authenticated requests allowed per source in each window, from 1 to 100000. |
 | `subject-revocation-http.window` | string | `1m` |  |  |  | The window a source's authenticated requests are counted in: a duration with a unit, from 1s to 1h, e.g. 1m. |
 
+## tls-options
+
+From `@mod/tls-options`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `tls-options.min-version` | TLSv1.2 \| TLSv1.3 | `TLSv1.2` |  |  |  | The least TLS version the provider's own connections take: TLSv1.2 or TLSv1.3. |
+| `tls-options.suites` | list of TLS_AES_256_GCM_SHA384 \| TLS_CHACHA20_POLY1305_SHA256 \| TLS_AES_128_GCM_SHA256 \| ECDHE-ECDSA-AES128-GCM-SHA256 \| ECDHE-RSA-AES128-GCM-SHA256 \| ECDHE-ECDSA-AES256-GCM-SHA384 \| ECDHE-RSA-AES256-GCM-SHA384 \| ECDHE-ECDSA-CHACHA20-POLY1305 \| ECDHE-RSA-CHACHA20-POLY1305 | `["TLS_AES_256_GCM_SHA384","TLS_CHACHA20_POLY1305_SHA256","TLS_AES_128_GCM_SHA256","ECDHE-ECDSA-AES128-GCM-SHA256","ECDHE-RSA-AES128-GCM-SHA256","ECDHE-ECDSA-AES256-GCM-SHA384","ECDHE-RSA-AES256-GCM-SHA384","ECDHE-ECDSA-CHACHA20-POLY1305","ECDHE-RSA-CHACHA20-POLY1305"]` |  |  |  | The suites they take, among TLS 1.3's and TLS 1.2's ECDHE with AES-GCM or ChaCha20-Poly1305: every one by default. |
+
 ## token-control
 
 From `@mod/token-control`.
@@ -665,7 +755,7 @@ From `@mod/token-exchange`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `token-exchange.max-actor-depth` | integer (1–10) | `3` |  |  |  | The longest chain of actors an exchanged token may carry. |
-| `token-exchange.max-lifetime` | string |  |  |  |  | The longest lifetime an exchange may ask for, from 1s to 1d, even past `tokens`' lifetime. |
+| `token-exchange.max-lifetime` | string |  |  |  |  | The longest lifetime an exchange may ask for, from 2s to 1d, even past `tokens`' lifetime. |
 
 ## tokens
 
@@ -673,7 +763,7 @@ From `@mod/tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from `1s` to `1d` in whole seconds. |
+| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from when it is asked for (the issuance policies' wait included), from `2s` to `1d` in whole seconds. |
 | `tokens.revocation` | denylist \| unsupported |  | yes | `TOKENS_REVOCATION` | `denylist` | Whether revoked access tokens are kept in a denylist and refused, or revocation is not supported. |
 | `tokens.issuance-timeout` | string | `10s` |  |  |  | How long the issuance policies may take together, from `1s` to `1m`; past it, the issuance is unavailable. |
 | `tokens.subject-check` | none |  |  |  |  | Stated where no module checks subject revocation on access tokens. |
@@ -693,7 +783,7 @@ From `@mod/users-http`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `users-http.verify-url` | string |  |  | `USERS_HTTP_VERIFY_URL` | `https://ledger.example.invalid/verify` | Where a password is verified; without it, no password matches. Plain http is reached only where outbound's policy names it. |
-| `users-http.subject-url` | string |  |  |  |  | Where a user is looked up by subject; without it, every lookup by subject is unanswerable. Plain http is reached only where outbound's policy names it. |
+| `users-http.subject-url` | string |  |  | `USERS_HTTP_SUBJECT_URL` | `https://ledger.example.invalid/subject` | Where a user is looked up by subject; without it, every lookup by subject is unanswerable. Plain http is reached only where outbound's policy names it. |
 | `users-http.upstream-url` | string |  |  |  |  | Where a user is looked up by upstream identity; without it, users follows the links it keeps. Plain http is reached only where outbound's policy names it. |
 | `users-http.credential` | string |  |  |  |  | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material. |
 | `users-http.timeout` | string |  |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap. |
@@ -707,11 +797,10 @@ From `@mod/webauthn`.
 |---|---|---|---|---|---|---|
 | `webauthn.rp-id` | string |  | yes | `WEBAUTHN_RP_ID` | `login.example.invalid` | The relying party ID: each web origin's host, or a domain each one lies under. |
 | `webauthn.rp-name` | string |  | yes | `WEBAUTHN_RP_NAME` | `Example` | The relying party's name, as an authenticator shows it. |
-| `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` | The origins ceremonies may come from, matched exactly: https web origins (http only on localhost), or Android app origins. |
+| `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` | The origins ceremonies may come from, matched exactly: https web origins (http only on localhost, with `kernel.environment = development`), or Android app origins. |
 | `webauthn.top-origins` | list of string | `[]` |  |  |  | The pages that may frame a ceremony; none by default, so any ceremony in a frame is refused. |
 | `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
-| `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
-| `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  | The most passkeys a subject may hold, from 1 to 100. |
+| `webauthn.algorithms` | list of EdDSA \| ES256 \| RS256 | `["EdDSA","ES256","RS256"]` |  |  |  | The signature algorithms a passkey may use, offered at registration in this order: EdDSA, ES256 or RS256, at least one. A passkey of one left out can no longer sign in. |
 
 ## webauthn-login
 
@@ -754,7 +843,7 @@ From `@mod/client-assertion`.
 |---|---|---|---|---|
 | `sections.client-assertion.keys` | list of map | `[]` |  | The client's public keys for its assertions, as JWKs: RSA, EC or OKP, with no private member; never beside `jwks-uri`. |
 | `sections.client-assertion.jwks-uri` | string |  |  | Where the client publishes its key set, an https URL (http only where `outbound` allows plain http); never beside written `keys`. A registered client's one that `outbound` refuses refuses boot. |
-| `sections.client-assertion.accept-loose-audience` | boolean | `false` |  | Also takes, from this client, an assertion whose `aud` is the token endpoint's URL or a list holding the issuer's or the token endpoint's URL, as 0.18.5 did; each is logged. While set, an assertion the client made for another authorization server that names this one's token endpoint can be used here. For a client still changing what it sends; to be removed. |
+| `sections.client-assertion.accept-loose-audience` | boolean | `false` |  | Also takes, from this client, an assertion whose `aud` is the token endpoint's URL or a list holding the issuer's or the token endpoint's URL, as 0.18.5 did; each is logged. While set, an assertion the client made for another authorization server that names this one's token endpoint can be used here. For a client whose library names the token endpoint; a registered client that sets it is warned of at every start. |
 
 ### sections.client-secret
 
@@ -782,7 +871,7 @@ From `@mod/federation-grants`.
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
 | `sections.federation-grants.connections` | list of string | `[]` |  | The operator's connections, by name, that the client may ask for; only a registered confidential client asks for any. |
-| `sections.federation-grants.return-uris` | list of string | `[]` |  | Where the browser may be sent back after the user connects or declines, each matched exactly; none may hold `grant_id`, `state` or `error`. |
+| `sections.federation-grants.return-uris` | list of string | `[]` |  | Where the browser may be sent back after the user connects or declines, each matched exactly: https, http to localhost or a loopback address, or a private-use scheme, as redirect-uris takes one; none may hold `grant_id`, `state` or `error`. |
 
 ### sections.federation-tokens
 
@@ -792,6 +881,22 @@ From `@mod/federation-tokens`.
 |---|---|---|---|---|
 | `sections.federation-tokens.receives` | boolean | `false` |  | Whether the client may be handed its sessions' upstream tokens; only a client the operator registers may. |
 | `sections.federation-tokens.post-logout-redirect-uris` | list of string | `[]` |  | Where an upstream logout this client asks may send the browser back, each matched exactly. |
+
+### sections.jwt-bearer
+
+From `@mod/jwt-bearer`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.jwt-bearer.accept-unbound` | boolean | `false` |  | Lets this public client present a delegated issuer's assertion that names no key (no digest in its nonce) without proving one by DPoP: for apps already sent out that make no DPoP key. A leaked assertion can then be used once, before its owner, until it ages out, and the token is bound to no key. Each is logged; one naming a key is proved still. Read for registered clients only. |
+
+### sections.oidc
+
+From `@mod/oidc`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.oidc.id-token-alg` | string |  |  | The JWS algorithm the client's ID tokens are signed with (`id_token_signed_response_alg`): the one `keys` signs with, the default; another is refused. |
 
 ### sections.rp-logout
 
@@ -844,6 +949,7 @@ From `@mod/idp-apple`.
 | `federation.idps.<name>.authorization-endpoint` | string | `https://appleid.apple.com/auth/authorize` |  | Where the browser is sent to log in at Apple; Apple's own unless named. |
 | `federation.idps.<name>.token-endpoint` | string | `https://appleid.apple.com/auth/token` |  | Where a code is exchanged for tokens; Apple's own unless named. |
 | `federation.idps.<name>.jwks-uri` | string | `https://appleid.apple.com/auth/keys` |  | Where the keys that sign Apple's id_tokens are read; Apple's own unless named. |
+| `federation.idps.<name>.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256"]` |  | The algorithms Apple's id_tokens may be signed with: asymmetric ones only, RS256 by default, the one Apple signs with. |
 | `federation.idps.<name>.clock-skew` | string | `30s` |  | How far Apple's clock may be from ours, for its id_token's times: 0s to 5m. |
 | `federation.idps.<name>.end-session-endpoint` | string |  |  | Where to end the session at Apple, which has none of its own. |
 
@@ -870,10 +976,11 @@ From `@mod/idp-google`.
 | `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
 | `federation.idps.<name>.client-secret` | string |  | yes | The client secret the IdP gave this provider, sent to its token endpoint. |
 | `federation.idps.<name>.access` | offline \| online | `offline` |  | `offline` asks for a refresh token, so Google shows its consent screen at every login; `online` asks none. |
-| `federation.idps.<name>.require-iss` | boolean | `true` |  | Asks every callback for `iss`, which Google says it always sends. |
+| `federation.idps.<name>.accept-missing-iss` | boolean | `false` |  | Takes a callback without `iss`, which Google says it always sends; warned of at every start. |
 | `federation.idps.<name>.authorization-endpoint` | string | `https://accounts.google.com/o/oauth2/v2/auth` |  | Where the browser is sent to log in at Google; Google's own unless named. |
 | `federation.idps.<name>.token-endpoint` | string | `https://oauth2.googleapis.com/token` |  | Where a code is exchanged for tokens; Google's own unless named. |
 | `federation.idps.<name>.jwks-uri` | string | `https://www.googleapis.com/oauth2/v3/certs` |  | Where the keys that sign Google's id_tokens are read; Google's own unless named. |
+| `federation.idps.<name>.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256"]` |  | The algorithms Google's id_tokens may be signed with: asymmetric ones only, RS256 by default, the one Google signs with. |
 | `federation.idps.<name>.clock-skew` | string | `30s` |  | How far Google's clock may be from ours, for its id_token's times: 0s to 5m. |
 | `federation.idps.<name>.end-session-endpoint` | string |  |  | Where to end the session at Google; without it, the browser goes back or to Google's logout page. |
 | `federation.idps.<name>.hosted-domains` | list of string |  |  | The Google Workspace domains a login must be from, by its id_token's `hd`; any account when not given. |
@@ -894,7 +1001,9 @@ From `@mod/idp-oidc`.
 | `federation.idps.<name>.jwks-uri` | string |  |  | Where the keys that sign the IdP's id_tokens are read, without discovery. |
 | `federation.idps.<name>.end-session-endpoint` | string |  |  | Where a session at the IdP ends, without discovery; none when not given. |
 | `federation.idps.<name>.scopes` | list of string | `["openid"]` |  | The scopes asked of the IdP at a login, `openid` among them. |
-| `federation.idps.<name>.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256","PS256","ES256","EdDSA"]` |  | The algorithms an id_token may be signed with: asymmetric ones only. |
-| `federation.idps.<name>.endpoint-hosts` | list of string | `[]` |  | Hosts besides the issuer's its endpoints may be on, as outbound reads a host list. |
-| `federation.idps.<name>.require-iss` | boolean | `false` |  | Asks every callback for `iss`, even where the issuer's description does not offer it. |
+| `federation.idps.<name>.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256","ES256","EdDSA"]` |  | The algorithms an id_token may be signed with: asymmetric ones only, by default one for each kind of key. Two for one kind (RS256 and PS256) leave a key of the IdP's set naming no alg unused. |
+| `federation.idps.<name>.endpoint-hosts` | list of string | `[]` |  | Hosts besides the issuer's its endpoints may be on, as host-entries reads a host list. |
+| `federation.idps.<name>.read-userinfo` | boolean | `false` |  | Reads the IdP's UserInfo after each login, with its access token, for profile claims its id_token leaves out; the answer must name the id_token's subject. UserInfo and the description it is read from must then be https. |
+| `federation.idps.<name>.userinfo-endpoint` | string |  |  | Where UserInfo is read, without discovery; only with read-userinfo. |
+| `federation.idps.<name>.accept-missing-iss` | boolean | `false` |  | Takes a callback without `iss` where the issuer's description does not offer it, for an IdP that never sends it; warned of at every start. |
 | `federation.idps.<name>.clock-skew` | string | `30s` |  | How far the IdP's clock may be from ours, for its id_token's times: 0s to 5m. |

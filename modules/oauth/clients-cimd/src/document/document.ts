@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
 import { type AllowanceLists, clientAllowance } from "@mod/client-allowance";
-import type { ClientRecord, Section } from "@mod/clients";
+import type { DocumentCopy } from "@mod/client-documents";
+import type { ClientRecord } from "@mod/clients";
 import { codeGrantType } from "@mod/code-grant";
 import { refreshGrantType } from "@mod/refresh";
 import { isLoopbackName } from "@mod/url-setting";
@@ -72,7 +73,7 @@ export function recordOf(
 	url: URL,
 	doc: Readonly<Record<string, unknown>>,
 	ceiling: Omit<AllowanceLists, "grants">,
-	copies: readonly Section<unknown>[],
+	copies: readonly DocumentCopy[],
 ): ClientRecord | Refused {
 	const refused = refusalOf(url, doc);
 	if (refused) return refused;
@@ -86,11 +87,11 @@ export function recordOf(
 	if (allowances === undefined) return { refused: "audiences" };
 	const copied: Record<string, unknown> = {};
 	const from = { id: url.href, host: url.hostname };
-	for (const section of copies) {
-		const copy = section.fromDocument?.(doc, from);
+	for (const one of copies) {
+		const copy = one.copy(doc, from);
 		if (copy === undefined) continue;
 		if ("refused" in copy) return { refused: copy.refused };
-		copied[section.name] = copy.value;
+		copied[one.section.name] = copy.value;
 	}
 	return { id: url.href, kind: "public", method: "none", sections: { ...copied, ...allowances } };
 }

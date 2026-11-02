@@ -5,6 +5,9 @@
 	"type": "module",
 	"kind": "foundation",
 	"forWiring": true,
+	"asks": [
+		"Store in memory: one instance only, the memory store accepted (`store.accept-volatile = true`)."
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",

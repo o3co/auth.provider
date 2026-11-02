@@ -16,17 +16,17 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { type Passkeys, passkeys } from "@mod/passkeys";
 import rateLimitModule from "@mod/rate-limit/module";
 import { type Beginning, lineage } from "@mod/refresh";
 import secretHashModule from "@mod/secret-hash/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocation } from "@mod/subject-revocation";
-import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { laggingRevocation, subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
-import { type IssuanceRequest, issuancePolicies, tokens } from "@mod/tokens";
+import { type IssuanceRequest, issuancePolicies, subjectChecks, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
-import { type Passkeys, passkeys } from "@mod/webauthn";
 import { afterEach, describe, expect, it } from "vitest";
 import { passkeyAmr, webauthnGrantType } from "../src/contract.ts";
 import { type LoginParts, passkeyGrant } from "../src/grant/grant.ts";
@@ -72,9 +72,13 @@ const recordedAs = {
 	raced: "sign_count_raced",
 } satisfies Record<Refusal, string>;
 
-async function serve(section: Record<string, unknown> = {}, extra: Module[] = []) {
+async function serve(
+	section: Record<string, unknown> = {},
+	extra: Module[] = [],
+	revocation: Module = subjectRevocationStandIn,
+) {
 	const seen: unknown[] = [];
-	const requesters: { asked: string[]; redeemed: string[] } = {
+	const requesters: { asked: unknown[]; redeemed: unknown[] } = {
 		asked: [],
 		redeemed: [],
 	};
@@ -85,17 +89,17 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 		down: false,
 		family: "fam.secret" as string | undefined,
 	};
-	const standIns = defineModule({ name: "stand-ins" }, (m) => [
+	const standIns = defineModule({ name: "stand-ins", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(passkeys).by(() => ({
 			challenge: async (requester) => {
 				requesters.asked.push(requester);
-				if (state.down) throw new Unavailable("webauthn");
+				if (state.down) throw new Unavailable("passkeys");
 				return { options };
 			},
 			assert: async (response, requester) => {
 				seen.push(response);
 				requesters.redeemed.push(requester);
-				if (state.down) throw new Unavailable("webauthn");
+				if (state.down) throw new Unavailable("passkeys");
 				return state.answer;
 			},
 		})),
@@ -110,7 +114,7 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 	]);
 	const allowed = (grants: string[]) =>
 		allowancesFor({ grants, scopes: ["read", "write"], "default-scopes": ["read"] });
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			clientsModule,
@@ -119,7 +123,7 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 			tokensStandIn(),
 			grantCaller,
 			clientAllowanceModule,
-			subjectRevocationStandIn,
+			revocation,
 			rateLimitModule,
 			recorded.module,
 			simulatedStore().module,
@@ -146,7 +150,8 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 			"webauthn-login": section,
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const call = (params: Record<string, unknown>, as = "app", confirmation?: string) =>
@@ -161,14 +166,36 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
 	const ask = (init: RequestInit = asApp) =>
 		fetch(`${base}/oauth/webauthn/authentication/options`, { method: "POST", ...init });
-	return { app, state, seen, requesters, begun, events: recorded.events, call, ask };
+	return { app, input, state, seen, requesters, begun, events: recorded.events, call, ask };
 }
+
+/** A subject check comparing a token's standing time with its subject's boundary, as subject-tokens does. */
+const standingChecked = defineModule(
+	{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
+	(m) => [
+		m.contribute(subjectChecks).by(async (c) => {
+			const revocation = await c.get(subjectRevocation);
+			return {
+				holds: async (token) =>
+					(await revocation.check(token.subject, token.standingAt)) === "valid"
+						? "holds"
+						: "revoked",
+			};
+		}),
+	],
+);
 
 const assertion = { id: "cred", response: { userHandle: "h" } };
 const asApp = { headers: { "content-type": "application/json" }, body: '{"client_id":"app"}' };
 
+it("takes all it names", async () => {
+	const s = await serve();
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(s.input))["webauthn-login"]).toBeUndefined();
+});
+
 describe("the passkey grant", () => {
-	it("issues the client's access token for an asserted passkey, with amr hwk and the challenge's time, and starts its family with the same", async () => {
+	it("issues the client's access token for an asserted passkey, with amr pop and the challenge's time, and starts its family with the same", async () => {
 		const s = await serve();
 		const outcome = await s.call({ assertion, scope: "read write" });
 		expect(outcome).toEqual({
@@ -182,7 +209,7 @@ describe("the passkey grant", () => {
 			},
 		});
 		expect(s.seen).toEqual([assertion]);
-		expect(s.requesters.redeemed).toEqual(["app"]);
+		expect(s.requesters.redeemed).toEqual([{ by: "webauthn-login", id: "app" }]);
 		if (outcome.kind !== "issued") expect.unreachable("the passkey is asserted");
 		const check = await s.app.get(tokens).verifyAccess(String(outcome.body.access_token));
 		if (check.kind !== "valid") expect.unreachable("the access token verifies");
@@ -191,18 +218,18 @@ describe("the passkey grant", () => {
 			issuedTo: "app",
 			audience: [origin],
 			scope: ["read", "write"],
-			amr: ["hwk"],
+			amr: ["pop"],
 			authenticatedAt: now - 5000,
 		});
 		const family = { scope: ["read", "write"], audience: [origin], authenticatedAt: now - 5000 };
-		expect(s.begun).toMatchObject([{ subject: "alice", amr: ["hwk"], ...family }]);
+		expect(s.begun).toMatchObject([{ subject: "alice", amr: ["pop"], ...family }]);
 		expect(s.begun[0]?.client.id).toBe("app");
 		const expiresAt = now + Number(outcome.body.expires_in) * 1000;
 		expect(s.begun[0]?.access).toEqual({ id: check.id, expiresAt });
 	});
 
-	it("gives amr hwk alone, whether or not the user was verified or the passkey is backup eligible", async () => {
-		expect(passkeyAmr).toEqual(["hwk"]);
+	it("gives amr pop alone, whether or not the user was verified or the passkey is backup eligible", async () => {
+		expect(passkeyAmr).toEqual(["pop"]);
 		const s = await serve();
 		for (const [userVerified, backupEligible] of [
 			[true, false],
@@ -214,8 +241,8 @@ describe("the passkey grant", () => {
 			const body = outcome.kind === "issued" ? outcome.body : {};
 			const check = await s.app.get(tokens).verifyAccess(String(body.access_token));
 			const label = `${userVerified} ${backupEligible}`;
-			expect(check.kind === "valid" && check.grant.amr, label).toEqual(["hwk"]);
-			expect(s.begun.at(-1)?.amr, label).toEqual(["hwk"]);
+			expect(check.kind === "valid" && check.grant.amr, label).toEqual(["pop"]);
+			expect(s.begun.at(-1)?.amr, label).toEqual(["pop"]);
 		}
 	});
 
@@ -275,7 +302,7 @@ describe("the passkey grant", () => {
 
 	it("issues through the issuance policies without a session, starting no family when they refuse", async () => {
 		const asked: IssuanceRequest[] = [];
-		const refusing = defineModule({ name: "refusing" }, (m) => [
+		const refusing = defineModule({ name: "refusing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {
@@ -326,6 +353,22 @@ describe("the passkey grant", () => {
 		const s = await serve();
 		await s.app.get(subjectRevocation).revoke("alice");
 		expect(await s.call({ assertion })).toMatchObject({ kind: "error", error: "invalid_grant" });
+	});
+
+	it("issues on a stale read of its subject's boundary a token the next verification refuses, as it stands from its challenge [guarantee-4-a]", async () => {
+		const lagging = laggingRevocation();
+		const s = await serve({}, [standingChecked], lagging.module);
+		lagging.lag();
+		await s.app.get(subjectRevocation).revoke("alice");
+		// Issued in a later second than the boundary, its challenge made before it.
+		now += 1500;
+		const outcome = await s.call({ assertion });
+		if (outcome.kind !== "issued") expect.unreachable("the stale read lets it through");
+		lagging.catchUp();
+		expect(await s.app.get(tokens).verifyAccess(String(outcome.body.access_token))).toEqual({
+			kind: "invalid",
+			reason: "revoked",
+		});
 	});
 
 	it("answers a scope beyond the allowance before the revocation boundary", async () => {
@@ -379,7 +422,10 @@ describe("the authentication options route", () => {
 		const form = { "content-type": "application/x-www-form-urlencoded" };
 		expect((await s.ask()).status).toBe(200);
 		expect((await s.ask({ headers: form, body: "client_id=pub" })).status).toBe(200);
-		expect(s.requesters.asked).toEqual(["app", "pub"]);
+		expect(s.requesters.asked).toEqual([
+			{ by: "webauthn-login", id: "app" },
+			{ by: "webauthn-login", id: "pub" },
+		]);
 	});
 
 	it("refuses a missing client_id, and one that is not one non-empty string, making no challenge", async () => {

@@ -7,14 +7,29 @@
 	"scripts": {
 		"check": "node src/main.ts",
 		"bundles": "node src/bundles.ts",
-		"release-check": "node src/release-check.ts"
+		"release-check": "node src/release-check/check.ts",
+		"release-pack": "node src/release/pack.ts",
+		"release-published": "node src/release/check-published.ts",
+		"release-evidence-fetch": "node src/release-evidence/fetch.ts",
+		"release-evidence-judge": "node src/release-evidence/judge.ts",
+		"release-sbom": "node src/release-sbom/make.ts",
+		"release-listed": "node src/release-listed/listed.ts",
+		"release-notes": "node src/release-notes/write.ts"
 	},
 	"exports": {
 		".": "./src/contract.ts"
 	},
 	"dependencies": {
+		"@mod/combinations": "workspace:*",
 		"@mod/create-app": "workspace:*",
+		"@mod/docker-client": "workspace:*",
 		"@mod/trial": "workspace:*",
-		"typescript": "6.0.3"
+		"typescript": "6.0.3",
+		"yaml": "2.9.1"
+	},
+	"devDependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/outbound": "workspace:*",
+		"@mod/tls-options": "workspace:*"
 	}
 }

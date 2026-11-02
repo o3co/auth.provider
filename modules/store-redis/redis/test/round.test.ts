@@ -9,6 +9,7 @@ import {
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces } from "@mod/store";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
 import { fakeRedis } from "./fake-redis.ts";
@@ -19,7 +20,7 @@ afterEach(async () => {
 	app = undefined;
 });
 
-const replicated = defineModule({ name: "replicated-owner" }, (m) => [
+const replicated = defineModule({ name: "replicated-owner", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] })),
 ]);
 
@@ -34,14 +35,14 @@ function primary() {
 async function boot(port: number, replication?: "replicas" | "none") {
 	const recorded = recordingLog();
 	let context: BuildContext<unknown> | undefined;
-	const asker = defineModule({ name: "asker" }, (m) => [
+	const asker = defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(contract<object>("asker")).by((c) => {
 			context = c;
 			return {};
 		}),
 	]);
 	app = await assemble({
-		modules: [redisModule, asker, ...(replication ? [replicated] : [])],
+		modules: [redisModule, tlsOptionsForTests, asker, ...(replication ? [replicated] : [])],
 		config: {
 			...kernelConfig(),
 			redis: { url: `redis://127.0.0.1:${port}`, ...(replication ? { replication } : {}) },
@@ -121,6 +122,22 @@ describe("a store script, run once", () => {
 		const redis = primary();
 		redis.storeScripts.fail = true;
 		expect(await refusal(await redis.listen())).toMatch(/the server fails a store script/);
+		redis.down();
+	});
+
+	it("refuses boot, naming batchAcross, where the server runs the read script and not the batch across", async () => {
+		const redis = primary();
+		redis.storeScripts.failWhere = "local marks = {}";
+		expect(await refusal(await redis.listen())).toMatch(
+			/the server fails a store script \(batchAcross\)/,
+		);
+		redis.down();
+	});
+
+	it("refuses boot, naming it, where the server splits keys across nodes and refuses a script over two partitions", async () => {
+		const redis = primary();
+		redis.storeScripts.splitsKeys = true;
+		expect(await refusal(await redis.listen())).toMatch(/splits keys across nodes/);
 		redis.down();
 	});
 

@@ -5,13 +5,15 @@ import { httpConfig } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
+import { type FactorBinding, factorBinding } from "@mod/mfa-binding";
 import { factorKinds } from "@mod/mfa-extensions";
+import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { resealing, seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, expect, it } from "vitest";
-import { enforcers, factors, proofSteps } from "../src/contract.ts";
+import { enforcers, proofSteps } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
 import type { StoredFactors } from "../src/store.ts";
 import { mfaConfig } from "../src/testing.ts";
@@ -28,7 +30,7 @@ const listKey = (subject: string) =>
 	`s-${createHash("sha256").update(subject).digest("base64url")}`;
 
 /** A counting kind whose proof is the secret and a counter that must go up. */
-const code = defineModule({ name: "kind-code" }, (m) => [
+const code = defineModule({ name: "kind-code", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -48,7 +50,7 @@ const code = defineModule({ name: "kind-code" }, (m) => [
 		},
 	})),
 ]);
-const step = defineModule({ name: "step" }, (m) => [
+const step = defineModule({ name: "step", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
 /** A seal over a ring of its own, to write what another key sealed. */
@@ -56,7 +58,7 @@ const sealOver = async (ring: Readonly<Record<string, unknown>>) =>
 	(await assemble({ modules: [sealModule], config: { ...kernelConfig(), seal: ring } })).get(seal);
 
 /** A module holding sessions to the factors, as `mfa-entry` does in an app. */
-const enforcer = defineModule({ name: "enforcer" }, (m) => [
+const enforcer = defineModule({ name: "enforcer", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(enforcers).by(() => ({ name: "enforcer" })),
 ]);
 
@@ -86,7 +88,11 @@ async function rotated() {
 		runtime,
 	});
 	stop = () => app.stop(1000);
-	const decided = app.get(factors);
+	// mfa's faces the test binds and proves through, as one.
+	const decided: FactorReading & FactorBinding = {
+		...app.get(factorReading),
+		...app.get(factorBinding),
+	};
 	const read = async (subject: string) =>
 		(await place.factors.read(listKey(subject))) as unknown as Held;
 	const aged = async (subject: string, by: { id: string; key: string }) => {

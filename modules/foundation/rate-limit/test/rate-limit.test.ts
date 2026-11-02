@@ -3,7 +3,7 @@ import { listening, routes, use } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { metrics } from "@mod/metrics";
 import metricsModule from "@mod/metrics/module";
 import { store } from "@mod/store";
@@ -514,7 +514,7 @@ describe("releasing a lockout under terms", () => {
 
 const window = { limit: 2, ms: 60_000 };
 /** Routes counted by each policy under the name `test`, two to a window. */
-const routed = defineModule({ name: "routed" }, (m) => [
+const routed = defineModule({ name: "routed", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(routes).by(() => ({
 		method: "GET",
 		path: "/attempts",
@@ -573,7 +573,7 @@ const limitedAnswer = async (res: Response) => [
 ];
 
 describe("the policies for routes", () => {
-	it("limits attempts per IPv4 address and per IPv6 /64, answering 429 with the wait", async () => {
+	it("limits attempts per IPv4 address and per IPv6 /64, answering 429 with the wait [guarantee-10-a]", async () => {
 		const { from, statuses } = await serving();
 		expect(await statuses("/attempts", "198.51.100.1", 2)).toEqual([204, 204]);
 		expect(await limitedAnswer(await from("/attempts", "198.51.100.1"))).toEqual([
@@ -591,7 +591,7 @@ describe("the policies for routes", () => {
 		expect(await statuses("/attempts", "2001:db8:0:1::1", 1)).toEqual([204]);
 	});
 
-	it("refuses a source it cannot tell with 503, logged as a deployment error", async () => {
+	it("refuses a source it cannot tell with 503, logged as a deployment error [guarantee-10-a]", async () => {
 		const { from, recorded } = await serving();
 		for (const path of ["/attempts", "/requests"]) {
 			const unknown = await from(path);
@@ -617,7 +617,7 @@ describe("the policies for routes", () => {
 		expect(await statuses("/attempts", "198.51.100.4", 2)).toEqual([204, 429]);
 	});
 
-	it("limits requests per source apart from attempts, answering 429 with the wait", async () => {
+	it("limits requests per source apart from attempts, answering 429 with the wait [guarantee-10-a]", async () => {
 		const { from, statuses } = await serving();
 		expect(await statuses("/requests", "198.51.100.1", 2)).toEqual([204, 204]);
 		expect(await limitedAnswer(await from("/requests", "198.51.100.1"))).toEqual([
@@ -696,6 +696,23 @@ describe("the policies for routes", () => {
 		]);
 	});
 
+	it("warns at every start where the section says open, and not where it says closed", async () => {
+		const warned = async (section?: Record<string, unknown>) => {
+			const { recorded } = await serving(section);
+			await stop();
+			stop = async () => {};
+			return recorded.lines().filter((line) => line.level === "warn");
+		};
+		expect(await warned({ "fail-mode": "open" })).toEqual([
+			{
+				level: "warn",
+				event: "rate-limit.fail_open",
+				fields: { reason: "a request limit lets requests through while the store cannot count" },
+			},
+		]);
+		expect(await warned()).toEqual([]);
+	});
+
 	it("refuses boot on a fail mode other than open or closed", async () => {
 		await expect(serving({ "fail-mode": "half" })).rejects.toBeInstanceOf(BootRefused);
 	});
@@ -711,4 +728,9 @@ it("counts attempts by any key in counts kept through a failover, apart from rat
 	expect(await attempts.hit("guess", "bob", window)).toEqual({ kind: "allowed" });
 	simulated.unreachable(true);
 	await expect(attempts.hit("guess", "carol", window)).rejects.toSatisfy(isUnavailable);
+});
+
+it("takes every handle its takes name", async () => {
+	const modules = [rateLimitModule, simulatedStore().module, auditStandIn().module];
+	expect((await takesUnused({ modules, config: kernelConfig() }))["rate-limit"]).toBeUndefined();
 });

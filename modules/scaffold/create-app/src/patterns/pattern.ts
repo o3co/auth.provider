@@ -40,9 +40,6 @@ const common = [
 	"@mod/subject-tokens",
 ];
 
-/** The store kept in this process: safe on one instance only. */
-const memoryStore = "@mod/store";
-
 /** The pattern's selection with the operator's choice; a group not known is refused, naming it. */
 export function selectionOf(pattern: Pattern, choice: Choice = {}): Selection {
 	const unknown = Object.keys(choice.features ?? {}).filter((group) => !isGroup(group));
@@ -55,6 +52,3 @@ export function selectionOf(pattern: Pattern, choice: Choice = {}): Selection {
 		add: choice.add ?? [],
 	};
 }
-
-/** Whether the selection's store lives in the process, so the deployment runs as one instance. */
-export const oneInstance = (selection: Selection) => selection.axes?.[memoryStore] === memoryStore;

@@ -33,7 +33,7 @@ afterEach(() => stop());
 /** A grant that records what it is handed, and issues once with a cap and a session. */
 const recording = () => {
 	const seen: unknown[] = [];
-	const module = defineModule({ name: "recording" }, (m) => [
+	const module = defineModule({ name: "recording", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(grants).by(() => ({
 			grantType: "urn:test:record",
 			readsAmbient: "none",
@@ -76,7 +76,7 @@ it("hands a grant what the token endpoint hands it, for the same client, paramet
 			rateLimitStandIn,
 			auditStandIn().module,
 			real.module,
-			defineModule({ name: "binding" }, (m) => [
+			defineModule({ name: "binding", replicaSafe: true, takes: [] }, (m) => [
 				m.contribute(senderBindings).by(() => ({
 					member: "one",
 					tokenType: "ONE",
@@ -132,7 +132,7 @@ it("hands a grant what the token endpoint hands it, for the same client, paramet
 it("hands a grant that takes JSON its members as the token endpoint does", async () => {
 	const seen: unknown[] = [];
 	const jsonGrant = () =>
-		defineModule({ name: "json-grant" }, (m) => [
+		defineModule({ name: "json-grant", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:record",
 				readsAmbient: "none",
@@ -186,7 +186,7 @@ it("hands a grant that takes JSON its members as the token endpoint does", async
 
 it("refuses an OAuth parameter sent in JSON as neither a string nor null before the grant runs, as the token endpoint does", async () => {
 	let ran = 0;
-	const grant = defineModule({ name: "json-grant" }, (m) => [
+	const grant = defineModule({ name: "json-grant", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(grants).by(() => ({
 			grantType: "urn:test:record",
 			readsAmbient: "none",
@@ -231,8 +231,9 @@ it("gives a test that calls a grant itself the input the harness hands the grant
 		readsAmbient: "none",
 		bodies: ["json"],
 		handle: async (input) => {
-			const { client, binding, request } = input;
-			seen.push({ client: client.id, s: input.param("s"), n: input.value("n"), binding, request });
+			const { client, binding, request, identified } = input;
+			const n = input.value("n");
+			seen.push({ client: client.id, s: input.param("s"), n, binding, request, identified });
 			return { kind: "error", error: "invalid_grant" };
 		},
 	};
@@ -244,19 +245,25 @@ it("gives a test that calls a grant itself the input the harness hands the grant
 			tokensStandIn(),
 			grantCaller,
 			clientAllowanceModule,
-			defineModule({ name: "direct" }, (m) => [m.contribute(grants).by(() => grant)]),
+			defineModule({ name: "direct", replicaSafe: false, takes: [] }, (m) => [
+				m.contribute(grants).by(() => grant),
+			]),
 		],
 		config: { ...kernelConfig(), ...httpConfig(), ...configured },
 		runtime,
 	});
 	const binding = { member: "one", confirmation: "thumb", tokenType: "ONE" };
 	const params = { grant_type: "urn:test:record", s: "x", n: 1 };
-	await harness.get(grantCalls).call("urn:test:record", "rec", params, { binding });
+	// What the grant's own `identify` answered, handed back as the endpoint does.
+	const identified = { checked: "a" };
+	await harness.get(grantCalls).call("urn:test:record", "rec", params, { binding, identified });
 	const client = await harness.get(clients).find("rec");
 	if (!client) throw new Error("no client");
-	await grant.handle(grantInput(harness.get(tokens), grant, client, params, { binding }));
+	const given = { binding, identified };
+	await grant.handle(grantInput(harness.get(tokens), grant, client, params, given));
 	expect(seen).toHaveLength(2);
 	expect(seen[1]).toEqual(seen[0]);
+	expect(seen[0]).toMatchObject({ identified });
 	// A request of the test's own replaces only the request; the parameters read as given.
 	const own = testRequest();
 	const input = grantInput(harness.get(tokens), grant, client, params, { request: own });
@@ -265,7 +272,7 @@ it("gives a test that calls a grant itself the input the harness hands the grant
 
 it("answers a refusal of the issuance policies as the token endpoint does, asked under the grant type and session", async () => {
 	const asked: IssuanceRequest[] = [];
-	const refusing = defineModule({ name: "refusing" }, (m) => [
+	const refusing = defineModule({ name: "refusing", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(issuancePolicies).by(() => ({
 			name: "test-policy",
 			judge: async (request) => {
@@ -302,7 +309,7 @@ it("answers a refusal of the issuance policies as the token endpoint does, asked
 it("tells each session issuance of a token issued from a session, and one that fails revokes the token and throws on", async () => {
 	const told: unknown[] = [];
 	let failing = false;
-	const telling = defineModule({ name: "telling" }, (m) => [
+	const telling = defineModule({ name: "telling", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(sessionIssuances).by(() => ({
 			issued: async (session, access) => {
 				told.push({ session, access });
@@ -345,7 +352,7 @@ it("tells each session issuance of a token issued from a session, and one that f
 
 it("refuses to boot with two rules for a request's audience, as the token endpoint does", async () => {
 	const rule = (name: string) =>
-		defineModule({ name }, (m) => [
+		defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
 			})),
@@ -373,7 +380,7 @@ it("refuses to boot with two rules for a request's audience, as the token endpoi
 
 it("refuses an audience asked of a grant that takes none before the grant runs, as the token endpoint does", async () => {
 	const handled: string[] = [];
-	const twoGrants = defineModule({ name: "two-grants" }, (m) => [
+	const twoGrants = defineModule({ name: "two-grants", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(grants).by(() => ({
 			grantType: "urn:test:record",
 			readsAmbient: "none",
@@ -392,7 +399,7 @@ it("refuses an audience asked of a grant that takes none before the grant runs, 
 			},
 		})),
 	]);
-	const strict = defineModule({ name: "strict" }, (m) => [
+	const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(targetRules).by(() => ({
 			target: ({ audience }) => ({ kind: "audience", audience }),
 			untargeted: ({ param }) =>

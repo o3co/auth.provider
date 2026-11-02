@@ -16,4 +16,4 @@ Internal module of `token-control`: the handler of `POST /oauth/revoke` (RFC 700
 - What it answers and records is the package's (its card).
 
 ## Depends on
-- `audit`, `clients`, `http`, `kernel` (the build context), `request-source`, `token-endpoint` (client authentication, error answers), `tokens`; the package's contract and audit events
+- `audit`, `clients`, `http`, `kernel` (the build context), `request-source`, `token-endpoint` (client authentication, error answers), `tokens`; the package's contract, audit events and `tokenOf` (the token asked about)

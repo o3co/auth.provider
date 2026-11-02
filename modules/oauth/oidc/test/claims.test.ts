@@ -1,3 +1,4 @@
+import { claimsSelections, type Target } from "@mod/claims-selection";
 import { defineModule, isUnavailable, type Module } from "@mod/kernel";
 import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { type AuthContext, type Sessions, sessions } from "@mod/session";
@@ -30,14 +31,17 @@ const released = async (attributes: Record<string, unknown>, scope: readonly str
 /** As `released`, from a users that hands over its attributes unchecked, so oidc's own checks are what is seen. */
 const unchecked = async (attributes: Record<string, unknown>, scope: readonly string[]) => {
 	// Named users and taking any section, so it stands where users is configured.
-	const standIn = defineModule({ name: "users", section: z.unknown() }, (m) => [
-		m.provide(users).by(
-			() =>
-				({
-					bySubject: async (subject: string) => ({ kind: "user", user: { subject, attributes } }),
-				}) as unknown as Users,
-		),
-	]);
+	const standIn = defineModule(
+		{ name: "users", replicaSafe: true, section: z.unknown(), takes: [] },
+		(m) => [
+			m.provide(users).by(
+				() =>
+					({
+						bySubject: async (subject: string) => ({ kind: "user", user: { subject, attributes } }),
+					}) as unknown as Users,
+			),
+		],
+	);
 	return (await boot({}, standIn)).get(releasedClaims).of("s-alice", scope);
 };
 
@@ -65,9 +69,11 @@ describe("the claim table", () => {
 	});
 
 	it("reads email_verified from users' attribute of that name alone", async () => {
-		const verified = { [userAttribute.emailVerified]: true };
-		expect(await released(verified, ["email"])).toEqual({ email_verified: true });
-		expect(await released({ emailVerified: true }, ["email"])).toEqual({});
+		// Beside the email, where users takes a verification.
+		const email = "alice@example.com";
+		const verified = { email, [userAttribute.emailVerified]: true };
+		expect(await released(verified, ["email"])).toEqual({ email, email_verified: true });
+		expect(await released({ email, emailVerified: true }, ["email"])).toEqual({ email });
 	});
 
 	it("releases groups for groups", async () => {
@@ -107,12 +113,18 @@ describe("the claim table", () => {
 		]);
 	});
 
-	it("lists in claims_supported every claim it releases", async () => {
+	it("lists in claims_supported every claim it releases, each OpenID Connect's or one registered beside them [oidc-core-5.1.2-a]", async () => {
 		const app = await boot(full);
 		const all = await app.get(releasedClaims).of("s-alice", ["profile", "email", "groups"]);
 		const supported = app.get(published).find((item) => item.name === "claims_supported");
 		expect(Object.keys(all)).toHaveLength(5);
 		expect(supported?.value).toEqual(expect.arrayContaining(Object.keys(all)));
+		// The table is fixed: OpenID Connect Core's standard claims, and groups, registered for JWTs
+		// (RFC 7643's attribute, in IANA's JSON Web Token Claims registry).
+		const standard = ["sub", "name", "picture", "email", "email_verified"];
+		for (const claim of (supported?.value ?? []) as string[]) {
+			expect([...standard, "groups"], claim).toContain(claim);
+		}
 	});
 
 	it("counts only whole scope words, so a word joined by a tab or other blank releases nothing", async () => {
@@ -128,7 +140,7 @@ describe("released claims", () => {
 
 	it("reads the attributes from users on each request", async () => {
 		let name = "Alice";
-		const ledger = defineModule({ name: "ledger" }, (m) => [
+		const ledger = defineModule({ name: "ledger", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(ledgers).by(() => ({
 				verify: async () => ({ kind: "none" }),
 				bySubject: async (subject) => ({
@@ -201,5 +213,77 @@ describe("released claims where users cannot look the subject up", () => {
 		await expect(app.get(releasedClaims).of("s-alice", scope, "u")).rejects.toSatisfy(
 			isUnavailable,
 		);
+	});
+});
+
+describe("claims asked by name, and their constraints", () => {
+	const target = (names: readonly string[], constraints: Target["constraints"] = []): Target => ({
+		names: names.map((name) => ({ name, scope: "any" })),
+		constraints,
+	});
+	const of = async (scope: readonly string[], asked: Target) =>
+		(await boot(full)).get(releasedClaims).of("s-alice", scope, undefined, asked);
+
+	it("tells claims-selection each table claim's scope, and none for a claim outside the table", async () => {
+		const claims = (await boot(full)).get(claimsSelections);
+		expect(["name", "picture", "email", "email_verified", "groups"].map(claims.scopeOf)).toEqual([
+			"profile",
+			"profile",
+			"email",
+			"email",
+			"groups",
+		]);
+		for (const outside of ["sub", "acr", "auth_time", "nonce", "constructor", "openid", ""]) {
+			expect(claims.scopeOf(outside), outside).toBeUndefined();
+		}
+	});
+
+	it("releases the table claims asked by name beside the scope's, and never one outside the table", async () => {
+		expect(await of(["openid"], target(["name", "email_verified"]))).toEqual({
+			name: "Alice",
+			email_verified: true,
+		});
+		expect(await of(["profile"], target(["groups", "sub", "constructor"]))).toEqual({
+			name: "Alice",
+			picture: "https://pic.example/a",
+			groups: ["admins", "staff"],
+		});
+	});
+
+	it("leaves out a released claim its constraint does not hold, whether its scope or its name released it", async () => {
+		const mismatch = [{ name: "email", value: "other@example.com" }];
+		// Released by the scope, held back by the constraint.
+		expect(await of(["email"], target([], mismatch))).toEqual({ email_verified: true });
+		// Released by name, held back the same.
+		expect(await of(["openid"], target(["email"], mismatch))).toEqual({});
+		// A value, or one of the values, that holds keeps it.
+		expect(
+			await of(["email"], target([], [{ name: "email", value: "alice@example.com" }])),
+		).toEqual({
+			email: "alice@example.com",
+			email_verified: true,
+		});
+		expect(
+			await of(["profile"], target([], [{ name: "name", values: ["Bob", "Alice"] }])),
+		).toMatchObject({ name: "Alice" });
+	});
+
+	it("compares a constraint by type too, and holds back a list claim any constraint names", async () => {
+		expect(await of(["email"], target([], [{ name: "email_verified", value: "true" }]))).toEqual({
+			email: "alice@example.com",
+		});
+		expect(
+			await of(["email"], target([], [{ name: "email_verified", value: true }])),
+		).toMatchObject({
+			email_verified: true,
+		});
+		expect(
+			await of(["groups"], target([], [{ name: "groups", values: ["admins", "staff"] }])),
+		).toEqual({});
+		// A constraint on a claim not released changes nothing.
+		expect(await of(["profile"], target([], [{ name: "email", value: "x" }]))).toEqual({
+			name: "Alice",
+			picture: "https://pic.example/a",
+		});
 	});
 });

@@ -1,5 +1,5 @@
+import { hostEntry } from "@mod/host-entries";
 import { setting } from "@mod/kernel";
-import { hostEntryOf } from "@mod/outbound-policy";
 import { z } from "zod";
 import type { RevocationPolicy } from "./pki/contract.ts";
 import { isCertificate } from "./pki/pki.ts";
@@ -30,14 +30,7 @@ const revocation = z.discriminatedUnion("mode", [
 			.enum(["reject", "allow"])
 			.describe("Required: whether an outage refuses the binding, or binds with a warning."),
 		hosts: z
-			.array(
-				z
-					.string()
-					.refine(
-						(entry) => hostEntryOf(entry) !== undefined,
-						"not a host, or a name led by a dot",
-					),
-			)
+			.array(hostEntry)
 			.min(1)
 			.describe(
 				"Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it.",

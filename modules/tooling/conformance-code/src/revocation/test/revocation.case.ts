@@ -159,7 +159,11 @@ describe.runIf(areaTarget().can(ledgerRevocation))("a subject the ledger revokes
 			{ grant_type: "session", scope: "read" },
 			hers.cookie,
 		);
-		expect([granted.status, granted.body.error]).toEqual([401, "unauthorized"]);
+		expect([granted.status, granted.body.error]).toEqual(
+			areaTarget().differs("session-grant-invalid-grant")
+				? [401, "unauthorized"]
+				: [400, "invalid_grant"],
+		);
 		expect(await letsIn(bob)).toBe("code");
 		expect(await active(his.tokens.access_token ?? "")).toBe(true);
 		expect(await active(his.sessionToken)).toBe(true);

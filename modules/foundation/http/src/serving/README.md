@@ -16,7 +16,7 @@ Internal module of `http`: the server that answers each request with the route i
 ## Invariants
 - Paths: a middle `*` segment takes exactly one non-empty segment, and a last `/*` everything under it; of the declared paths reaching a path, the one with a literal at the first segment they differ comes first, and a middle `*` before a last.
 - A handler reads the URL parser's path (dot segments resolved, percent-encoding kept as sent).
-- A GET route also answers HEAD, with the same headers and no body.
+- A GET route that changes no state also answers HEAD, with the same headers and no body; for one that changes state, HEAD is `405`.
 - A path no route reaches gets `404`, and a path whose routes take other methods gets `405` naming them in `Allow`.
 - A preflight to a cross-origin route is answered before the policies.
 - A body the route does not take is refused only after the route's policies have seen the request.
@@ -26,6 +26,7 @@ Internal module of `http`: the server that answers each request with the route i
 - Any other failure is answered `500` and logged as a warning, `http.unexpected_failure`, by the route reached (when known) and its kind only, never its message.
 - A request target that is not a URL, or whose query is not well-formed UTF-8, gets `400` before any route.
 - An answer whose headers cannot be written gets `500`, with none of its own headers.
+- A JSON answer with a member whose value is null, at any depth, gets `500`, with none of its own headers; `http.failed` names the members' key paths (`null_member`), never their values.
 - An answer's length is stated in bytes, so a HEAD answer carries the length its GET would.
 - A request's headers must arrive within `headers-timeout` and the whole request within `request-timeout`, else it is answered `408` and its connection closed; a connection past `max-connections` is closed as it arrives.
 - Stop refuses new connections and closes idle ones.

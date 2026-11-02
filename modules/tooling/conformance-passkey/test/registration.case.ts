@@ -58,8 +58,12 @@ type Offered = CreationOptions & { excludeCredentials: { id: string }[] };
 /** POSTs `body` as JSON, the way the passkey routes take it. */
 const postJson = (b: Browser, path: string, body: Record<string, unknown> = {}) =>
 	b.send("POST", path, body, {}, "json");
-/** The creation options the browser's session is offered. */
-const offeredTo = async (b: Browser) => (await postJson(b, options)).body as unknown as Offered;
+/** The creation options the browser's session is offered; any other answer fails here, as itself. */
+const offeredTo = async (b: Browser) => {
+	const answered = await postJson(b, options);
+	expect(answered, "the creation options").toMatchObject({ status: 200 });
+	return answered.body as unknown as Offered;
+};
 /** A client framed by the page at `topOrigin`. */
 const framedBy = (topOrigin: string): Client => ({ ...at, crossOrigin: true, topOrigin });
 

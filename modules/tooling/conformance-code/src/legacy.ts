@@ -44,16 +44,29 @@ onLegacy(codeArea, {
 		"store-fault:session-grant",
 	],
 	differs: [
+		// Ours answers a POST to the authorization endpoint with a 303 to the GET with the same
+		// parameters, where the session's SameSite=Lax cookie is read; the legacy build reads the form in place.
+		"authorize-post-read-in-place",
 		// A fresh login a client asks for: max_age=0 asks a new one, and a return that dropped its demand is refused.
 		"max-age-zero-asks-a-new-login",
 		"return-keeps-its-demand",
+		// The legacy build counts max_age from the password, so a second factor slower than max_age is refused.
+		"max-age-from-the-second-factor",
 		// An acr no way of logging in can meet is dropped at boot, and answered as one not known.
 		"unmeetable-acr-entry",
+		// Ours passes over an acr asked by acr_values and not met, and reads the acr a claims parameter asks for.
+		"voluntary-acr",
+		"claims-acr",
+		// Ours releases the claims a claims request names beyond its scope, held to the values it asks,
+		// checks a sub value it asks, and says so in its metadata; the legacy build reads only its acr.
+		"claims-names",
 		// Ours issues a session grant only to a request with same-origin evidence for its own origin.
 		"session-grant-same-origin-only",
 		"session-grant-needs-origin-evidence",
 		// The session grant issues no scope when none is asked, whatever the client's defaults.
 		"session-grant-scope-left-out-without-defaults",
+		// Ours refuses a session grant without a session as RFC 6749's 400 invalid_grant; the legacy build answers 401 unauthorized.
+		"session-grant-invalid-grant",
 		// A back channel on plain http at loopback is allowed by its host alone, whatever its port.
 		"back-channel-by-host-and-port",
 		// An expired logout hint is refused; and an old one on a GET gets a page that asks to confirm.
@@ -65,5 +78,24 @@ onLegacy(codeArea, {
 		"userinfo-needs-openid",
 		// Ours takes a front-channel URL only at an origin one of the client's redirect URIs has.
 		"frontchannel-within-redirect-origins",
+		// Ours refuses a logout whose return the hint's client did not register, leaving the session;
+		// the legacy build drops the return and logs out.
+		"logout-unregistered-return-refused",
+		// Ours refuses a logout whose client_id is not the client the hint was issued to.
+		"logout-client-id-checked",
+		// Ours refuses a logout request that sends any parameter more than once.
+		"logout-repeated-parameter-refused",
+		// Ours asks the person to confirm a logout without a hint, on a page of its own, and never returns
+		// from it, whatever return the request names; the legacy build refuses one without a hint.
+		"logout-confirmed-without-hint",
+		// Ours asks the person where a hint names a session the browser does not hold, or none, and carries
+		// a hinted POST on to its GET; the legacy build closes the session the hint names.
+		"logout-asked-for-another-session",
+		// Ours issues a code only for the End-User an id_token_hint names, and refuses one it did not
+		// issue; the legacy build reads no hint at authorization.
+		"authorize-reads-id-token-hint",
+		// Ours refuses prompt=select_account, having no page to choose an account by; the legacy build
+		// refuses the word as one it does not know.
+		"select-account-refused",
 	],
 });

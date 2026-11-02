@@ -1,17 +1,29 @@
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { assemble, type BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { issuer, type MetadataItem, metadata } from "../src/contract.ts";
+import { endpointOrigin, issuer, type MetadataItem, metadata } from "../src/contract.ts";
 import issuerModule from "../src/module.ts";
 import { issuerConfig } from "../src/testing.ts";
 
-const boot = (url: unknown, origin?: string) =>
+const boot = (
+	url: unknown,
+	origin?: string,
+	environment: "production" | "development" = "production",
+) =>
 	assemble({
 		modules: [http, issuerModule],
 		config: {
-			...kernelConfig(),
-			...httpConfig(origin ? { "public-origin": origin } : {}),
+			...kernelConfig({ environment }),
+			...httpConfig(
+				origin
+					? {
+							"public-origin": origin,
+							...(origin.startsWith("http:") ? { "insecure-origin": true } : {}),
+						}
+					: {},
+			),
 			issuer: { url },
 		},
 	});
@@ -32,7 +44,7 @@ it("builds a test configuration on https://issuer.example by default", async () 
 	expect(built.get(issuer).url).toBe("https://issuer.example");
 });
 
-it("refuses an issuer URL the section does not take, as written", async () => {
+it("refuses an issuer URL the section does not take, as written [oidc-discovery-3-a] [rfc8414-2-a] [rfc9207-2-b]", async () => {
 	const refused: Record<string, unknown> = {
 		"another scheme": "ftp://issuer.example",
 		"a trailing /": "https://issuer.example/",
@@ -57,11 +69,21 @@ it("refuses an origin other than the public origin, and takes a path under it", 
 	);
 });
 
+it("names its endpoints on the issuer's origin: the public origin where one is written, the issuer's own where none is", async () => {
+	expect(endpointOrigin({ url: "https://as.example/tenant" })).toBe("https://as.example");
+	const withOrigin = (await boot("https://as.example/t", "https://as.example")).get(issuer);
+	expect(endpointOrigin(withOrigin)).toBe("https://as.example");
+	const without = (await boot("https://login.example")).get(issuer);
+	expect(endpointOrigin(without)).toBe("https://login.example");
+});
+
 it("collects the items this server names itself by, refusing two contributions of one item or one of the issuer item", async () => {
 	const named = contract<readonly MetadataItem[]>("named");
 	const item = (module: string, name: string, value: unknown) =>
-		defineModule({ name: module }, (m) => [m.contribute(metadata).by(() => ({ name, value }))]);
-	const reader = defineModule({ name: "reader" }, (m) => [
+		defineModule({ name: module, replicaSafe: true, takes: [] }, (m) => [
+			m.contribute(metadata).by(() => ({ name, value })),
+		]);
+	const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 		m.provide(named).by((c) => c.collect(metadata)),
 	]);
 	const bootWith = (...modules: ReturnType<typeof item>[]) =>
@@ -87,4 +109,47 @@ it("collects the items this server names itself by, refusing two contributions o
 			"issuer.metadata:issuer",
 		]);
 	}
+});
+
+it("takes all it names, with a public origin and without one", async () => {
+	for (const origin of [{ "public-origin": "https://issuer.example" }, {}]) {
+		const input = {
+			modules: [http, issuerModule],
+			config: { ...kernelConfig(), ...httpConfig(origin), ...issuerConfig() },
+		};
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused(input))["issuer"], JSON.stringify(origin)).toBeUndefined();
+	}
+});
+
+it("takes a plain-http issuer only beside the same plain-http public origin, which http takes only when told", async () => {
+	expect(await refusedAt(boot("http://issuer.example", undefined, "development"))).toEqual([
+		"issuer.url",
+	]);
+	const plain = await boot("http://as.example", "http://as.example", "development");
+	expect(plain.get(issuer).url).toBe("http://as.example");
+});
+
+it("refuses an issuer on another origin than the public origin, saying to give it the same", async () => {
+	const refused = await boot("https://elsewhere.example", "https://as.example").catch(
+		(error: BootRefused) => error.refusals,
+	);
+	expect(refused).toEqual([
+		{
+			where: "issuer.url",
+			reason:
+				"the issuer origin differs from http.public-origin: give issuer.url the same scheme, host and port",
+		},
+	]);
+});
+
+it("refuses a plain-http issuer in a production deployment [oidc-discovery-3-a] [rfc8414-2-a] [rfc8414-3-b] [rfc9207-2-b]", async () => {
+	const refused = await boot("http://as.example", "http://as.example").catch(
+		(error: BootRefused) => error.refusals,
+	);
+	expect(refused).toContainEqual({
+		where: "issuer.url",
+		reason:
+			"is plain http, which a production deployment does not take; set kernel.environment = development to try one",
+	});
 });

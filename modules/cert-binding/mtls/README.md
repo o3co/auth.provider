@@ -21,12 +21,12 @@
 ## Invariants
 - The binding is the base64url SHA-256 of the leaf's DER, the same at issuance and at a resource.
 - A certificate the proxy forwarded unreadable is refused.
-- Self-signed: any certificate that parses binds.
-- PKI: a path to an anchor whose revocation is confirmed binds.
-- A refusal answers `invalid_certificate` at issuance and `invalid_token` at a resource (RFC 8705 §3); its reason is only logged.
-- An outage answers unavailable under `on-unavailable` reject, and binds with a warning under allow.
+- Self-signed: any certificate that parses binds, which every start warns of (`mtls.self_signed`).
+- PKI: a path to an anchor whose revocation is confirmed binds; with `revocation.mode = disabled`, any path to an anchor binds, which every start warns of (`mtls.revocation_unchecked`).
+- A refusal answers `invalid_client` at issuance, a code RFC 6749 §5.2 registers, and `invalid_token` at a resource (RFC 8705 §3); its reason is only logged.
+- An outage answers unavailable under `on-unavailable` reject, and binds with a warning under allow, which every start also warns of (`mtls.binds_during_outage`).
 - Boot is refused when `client-certificate` names no form certificates are forwarded in.
-- Revocation material is fetched through `outbound.signed`, from the named hosts alone, read as `outbound` reads a host list (`.name` for the name and the names under it).
+- Revocation material is fetched through `outbound.signed`, from the named hosts alone, read as `host-entries` reads a host list (`.name` for the name and the names under it).
 - A source failing (5xx), busy (429), timed out (408), or not answering in time and size is an outage.
 - A destination not allowed, or any other answer, is a refusal.
 - An answer's content is used only after `pki` checks its signature.
@@ -35,4 +35,4 @@
 - Revocation caches in the process, held by `pki`'s internal module `revocation`; nothing is stored.
 
 ## Depends on
-- `kernel`, `client-certificate`, `issuer`, `sender-binding`, `outbound`, `outbound-policy`
+- `kernel`, `client-certificate`, `issuer`, `sender-binding`, `outbound`, `host-entries` (the hosts list read as an operator writes hosts)

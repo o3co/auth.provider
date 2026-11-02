@@ -3,10 +3,10 @@ import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 
 export const section = z.strictObject({
-	page: urlSetting({ schemes: ["https"] })
+	page: urlSetting({ schemes: ["https"], loopbackHttp: true })
 		.optional()
 		.describe(
-			"The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked.",
+			"The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked, and the authorization endpoint serves only first-party clients. An https URL (http only on a loopback host, with `kernel.environment = development`, as authorize's login page).",
 		),
 	"challenge-lifetime": setting
 		.duration("s")

@@ -13,12 +13,13 @@
 ## Offers
 - `pnpm distribution`: prints each problem and exits 1, or prints `distribution: ok`.
 - `pnpm bundles`: builds each shipped bundle into `dist/bundles/<concern directory>` at the workspace's `version`: its members compiled to JS and declarations (tests and test tools, a trial file among them, left out), named publicly, with their other files, and its manifest. Prints each problem and exits 1, or how many it built.
-- `pnpm release:check`: packs every bundle and entrance, makes an app of each pattern with the packed `create-auth-provider`, installs it from the tarballs alone, type-checks it, and boots it to `/readyz` or to its refusals, each told. It also assembles an app by hand, as one keeping its own composition root does: `combinations`' full names, made published, installed from the tarballs, each module imported, and assembled to the kernel's refusals. Exits 1 on any problem.
+- `pnpm release:pack`, `pnpm release:published` and `pnpm release:check`: packing the release with its index sealed, checking it before anything is published, and checking it as an operator meets it; see the internal modules `release` and `release-check`.
+- `pnpm release:evidence-fetch <fetched>` and `pnpm release:evidence-judge <fetched> <dir>`: before anything is published, the evidence of the CI run that tested the tag's tree, fetched with a token and judged without one, or the release stopped; see the internal module `release-evidence`.
+- `pnpm release:sbom <tarballs> <dir>`: before anything is published, the release's lists of what it ships, made from its tarballs; see the internal module `release-sbom`.
+- `pnpm release:listed <tarballs> <tarballs.json>`: where the release publishes, the tarballs held to those the lists were made of; see the internal module `release-listed`.
+- `pnpm release:notes <version> <file>`: where the release publishes, its notes from the version's section of the changelog; see the internal module `release-notes`.
 
 ## Invariants
-- The release check refuses a tarball without its `LICENSE`.
-- The release check boots each app in the image its Dockerfile builds; only the `deps` stage is replaced, by the same `--prod` install from the tarballs in the `base` stage, as the registry has none of them yet.
-- Without Docker, the release check exits 1 at once: no boot is skipped.
 - Bundles come only from the directory structure and the bundle manifests.
 - A bundle and an entrance carry the workspace's `license` and `engines` in their manifest, and its `LICENSE` file beside it, so npm and pnpm alike ship it.
 - A bundle's and an entrance's manifest carry the description its declaration states, and the workspace's `keywords` followed by its own, each once; a shipped bundle or an entrance without a description is refused.
@@ -32,10 +33,10 @@
 - An outside package a member requires as a peer is a required peer, in that range, of every bundle depending on it, not a dependency: the app then holds the one copy the public types name, where a bundle's own copy beside the app's would make two types of one name and fail the app's type check.
 
 ## Depends on
-- `create-app` (its patterns, for the release check), `trial` (the layer the release check boots each image on); it asks pnpm for the workspace packages, reads their manifests, and compiles with TypeScript; the release check builds and runs images with Docker.
+- `create-app` (its patterns, for the release check), `trial` (the layer the release check boots each image on), `combinations` (the features that opt in, for the release's lists); it asks pnpm for the workspace packages, reads their manifests, and compiles with TypeScript; the release check builds and runs images with Docker, through `docker-client`. Sealing reads the lockfile with `yaml` and tarballs with `tar`; the publish check asks the registry with `npm view`.
 
 ## Vocabulary
 - bundle: the distribution unit of one concern directory.
 - concern directory: the parent directory of the packages the workspace definition places.
 - bundle manifest: the `package.json` directly in the concern directory; `"private": false` ships the bundle, `description` and `keywords` say what it is on the registry, `index` asks for the index at a path in it, and `entrances` declares packages of their own name, each a command (`bin`) that calls the `run` of a member (`runs`) with its arguments, its answer the exit status, and its own `description` and `keywords`.
-- index: every shipped member's manifest as written, its public package and entry, its section's example (`config.example`), whether it ships its section's defaults (`reference.conf`), and whether its card has a `## Deployment` section, with the release's version and repository, for a module that composes them from a bundle.
+- index: every shipped member's manifest as written, its public package and entry, its section's example (`config.example`), its entry sample (`entry.example`), whether it ships its section's defaults (`reference.conf`), and whether its card has a `## Deployment` section, with the release's version and repository, for a module that composes them from a bundle; sealed, the other bundles' and zod's integrity too.

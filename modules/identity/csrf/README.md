@@ -15,13 +15,14 @@
 - Origin evidence (`sameOrigin(request)`), for routes that take no token. It is true only when `Origin` is the public origin or `Sec-Fetch-Site` is `same-origin`.
   - A request with neither is false.
 - Route `GET /session/csrf`: the token and its cookie, not cacheable. A valid token the request already holds is reused.
+- `formTokens`: the same token for a form the server draws itself, with the field it is posted in (`csrf_token`) and its cookie; a valid token the request holds is reused. The stand-in hands them out too.
 - Test stand-in (`./testing`): the policy and the origin evidence, decided by the module's own code. It serves no route.
   - Without a public origin it boots and refuses every unsafe request.
 
 ## Invariants
 - The policy needs same-origin evidence (Origin and Referer) or the double-submit token.
 - The token is 43 base64url characters. It comes in the cookie and the header, or else in the request's `csrf_token` field (as `http` reads fields), sent once.
-- Any single piece of cross-origin evidence means refusal.
+- In the policy, an `Origin` or a `Referer` naming another origin means refusal, even with the token; the policy reads no `Sec-Fetch-Site`.
 - Origin evidence also counts any `Sec-Fetch-Site` other than `same-origin` as cross-origin.
 - `Origin: null` and an unreadable Referer count as no evidence, so the policy falls through to the token.
 - The origin compared against is `http`'s public origin. Without one, boot is refused.

@@ -21,6 +21,7 @@ import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import senderBindingModule from "@mod/sender-binding/module";
 import { sessions } from "@mod/session";
+import { openedOf } from "@mod/session/testing";
 import sessionLifecycle from "@mod/session-lifecycle/module";
 import { sessionLifecycleConfig } from "@mod/session-lifecycle/testing";
 import sessionParticipants from "@mod/session-participants/module";
@@ -43,7 +44,7 @@ const runtime = quietRuntime();
 const verifier = "v".repeat(43);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
 
-it("redeems a code once through code-grant wired to records, and revokes what it gave when it comes again", async () => {
+it("redeems a code once through code-grant wired to records, and revokes what it gave when it comes again [rfc6749-4.1.2-d] [rfc6749-4.1.2-e]", async () => {
 	const app = await assemble({
 		modules: [
 			http,
@@ -94,11 +95,14 @@ it("redeems a code once through code-grant wired to records, and revokes what it
 	});
 	await app.start();
 	try {
-		const { session } = await app.get(sessions).complete(testRequest(), {
-			subject: "alice",
-			amr: ["pwd"],
-			authenticatedAt: runtime.clock.now(),
-		});
+		const { session } = openedOf(
+			await app.get(sessions).open(testRequest(), {
+				subject: "alice",
+				amr: ["pwd"],
+				authenticatedAt: runtime.clock.now(),
+				provenSince: runtime.clock.now(),
+			}),
+		);
 		const code = await app.get(codes).issue({
 			clientId: "app",
 			redirectUri: "https://app.example/cb",

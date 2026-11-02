@@ -3,7 +3,7 @@ import { areaTarget, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Browser, browser as openBrowser, probeClient } from "../../../test/browser.ts";
 import { type Authorized, fakeUpstream } from "../../../test/upstream.ts";
-import { federationScene } from "../../main.ts";
+import { federationScene, landedStatus } from "../../main.ts";
 
 const origin = "https://issuer.example";
 const start = "/session/oauth/federation/corp";
@@ -105,10 +105,10 @@ function handedOn(location: string) {
 describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 	"federation logins meeting a client's demand for a fresh login",
 	() => {
-		it("meets prompt=login only with a login the upstream says came after the demand, never one it says is older", async () => {
+		it("meets prompt=login only with a login the upstream says came after the demand, never one it says is older [oidc-core-3.1.2.3-b] [oidc-core-3.1.2.1-l] [oidc-core-3.1.2.1-m] [guarantee-2-c]", async () => {
 			const b = browser();
 			const hourAgo = { subject: "u-alice", authTime: seconds() - 3600 };
-			expect((await federated(b, hourAgo)).status).toBe(302);
+			expect((await federated(b, hourAgo)).status).toBe(landedStatus());
 			const back = sentToLogIn((await authorize(b, { prompt: "login" })).location);
 			// The upstream still holds its own session, and says the user logged in an hour ago.
 			const again = await federated(b, hourAgo, back);
@@ -126,11 +126,20 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
 		});
 
-		it("meets prompt=login in one trip through an upstream whose clock is a little behind, within its allowance", async () => {
+		it("meets prompt=login in one trip through an upstream whose clock is a little behind, within its allowance, and never with a login past it [guarantee-2-c]", async () => {
 			const b = browser();
 			expect((await federated(b, { subject: "u-alice", authTime: seconds() - 3600 })).status).toBe(
-				302,
+				landedStatus(),
 			);
+			// A minute before the demand is past the allowance, the IdP's clock-skew of 30 seconds by default.
+			const past = (await authorize(b, { prompt: "login" })).location;
+			const behind = sentToLogIn(past);
+			await federated(b, { subject: "u-alice", authTime: seconds() - 60 }, behind, handedOn(past));
+			const refused = new URL((await b.get(behind.slice(origin.length))).location);
+			expect([refused.searchParams.get("error"), refused.searchParams.has("code")]).toEqual([
+				"login_required",
+				false,
+			]);
 			const sent = (await authorize(b, { prompt: "login" })).location;
 			const back = sentToLogIn(sent);
 			// The login page hands on what it was told; the upstream's clock says ten seconds before our start.
@@ -145,7 +154,7 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
 		});
 
-		it("tells the login page the prompt=login and max_age asked, which reach the upstream through it", async () => {
+		it("tells the login page the prompt=login and max_age asked, which reach the upstream through it [oidc-core-3.1.3.7-n]", async () => {
 			const b = browser();
 			const sent = (await authorize(b, { prompt: "login", max_age: "600" })).location;
 			expect(handedOn(sent)).toEqual({ prompt: "login", max_age: "600" });
@@ -162,7 +171,7 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
 		});
 
-		it("meets a max age only with a login the upstream says when it made", async () => {
+		it("meets a max age only with a login the upstream says when it made [oidc-core-3.1.3.7-n] [guarantee-2-b] [guarantee-2-c]", async () => {
 			const b = browser();
 			const back = sentToLogIn((await authorize(b, { max_age: "600" })).location);
 			const silent = await federated(b, { subject: "u-alice" }, back);
@@ -176,6 +185,31 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 			const again = sentToLogIn((await authorize(b, { max_age: "600" })).location);
 			const said = await federated(b, { subject: "u-alice", authTime: seconds() }, again);
 			expect(said.location).toBe(again);
+			const answered = await b.get(again.slice(origin.length));
+			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
+		});
+
+		it("takes at the callback a login older than a max age by less than the allowance, and refuses it login_required when the code would be issued [guarantee-2-b] [guarantee-2-c]", async () => {
+			const b = browser();
+			const sent = (await authorize(b, { max_age: "60" })).location;
+			const back = sentToLogIn(sent);
+			// 75 seconds ago is past the max age of 60 and within it plus the IdP's clock-skew of 30 seconds
+			// by default, and too far before the start to be lifted to it.
+			const between = await federated(
+				b,
+				{ subject: "u-alice", authTime: seconds() - 75 },
+				back,
+				handedOn(sent),
+			);
+			expect(between.location).toBe(back);
+			const refused = new URL((await b.get(back.slice(origin.length))).location);
+			expect([refused.searchParams.get("error"), refused.searchParams.has("code")]).toEqual([
+				"login_required",
+				false,
+			]);
+			// A login within the max age meets it.
+			const again = sentToLogIn((await authorize(b, { max_age: "60" })).location);
+			await federated(b, { subject: "u-alice", authTime: seconds() }, again);
 			const answered = await b.get(again.slice(origin.length));
 			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
 		});
@@ -211,13 +245,15 @@ async function idTokenClaims(b: Browser) {
 describe.skipIf(areaTarget().differs("federation-auth-time-from-upstream"))(
 	"the ID token after a federation login",
 	() => {
-		it("says when the user logged in only as the upstream says it, and nothing where the upstream says nothing", async () => {
+		it("says when the user logged in only as the upstream says it, and nothing where the upstream says nothing [oidc-core-15.1-e]", async () => {
 			const said = browser();
 			const at = seconds() - 60;
-			expect((await federated(said, { subject: "u-alice", authTime: at })).status).toBe(302);
+			expect((await federated(said, { subject: "u-alice", authTime: at })).status).toBe(
+				landedStatus(),
+			);
 			expect((await idTokenClaims(said)).auth_time).toBe(at);
 			const silent = browser();
-			expect((await federated(silent, { subject: "u-alice" })).status).toBe(302);
+			expect((await federated(silent, { subject: "u-alice" })).status).toBe(landedStatus());
 			expect(await idTokenClaims(silent)).not.toHaveProperty("auth_time");
 		});
 	},

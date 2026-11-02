@@ -113,7 +113,7 @@ function answering(username: string, kind: keyof typeof bodies) {
 }
 
 describe("consent: the page's answer", () => {
-	it("is taken as a JSON body as it is as a form, for a refusal and an acceptance", async () => {
+	it("is taken as a JSON body as it is as a form, for a refusal and an acceptance [oidc-core-3.1.2.4-a] [oidc-core-3.1.2.6-c] [oidc-core-3.1.2.6-d] [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g]", async () => {
 		const outcomes = async (answer: ReturnType<typeof answering>) => [
 			await answer("deny"),
 			await answer("accept"),

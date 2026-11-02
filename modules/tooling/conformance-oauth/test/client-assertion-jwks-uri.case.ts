@@ -87,7 +87,7 @@ describe("client authentication by private_key_jwt, with keys at the client's jw
 		expect((await token(signed)).status).toBe(200);
 	});
 
-	it("refuses an assertion signed with a key its jwks_uri does not publish", async () => {
+	it("refuses an assertion signed with a key its jwks_uri does not publish [rfc7523-3-u] [rfc7521-5.2-n]", async () => {
 		const stranger = generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey;
 		const signed = await new SignJWT(claims())
 			.setProtectedHeader({ alg: "ES256", kid: "k1" })

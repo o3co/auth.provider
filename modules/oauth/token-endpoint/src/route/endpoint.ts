@@ -1,29 +1,16 @@
-import { type Audit, audit, declaredAudit } from "@mod/audit";
+import { type Audit, declaredAudit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
-import { type Client, type Clients, clients } from "@mod/clients";
-import {
-	type Grant,
-	type GrantInput,
-	type SessionIssuance,
-	sessionIssuances,
-	type TargetRule,
-	targets,
-} from "@mod/grants";
+import { type Client, type Clients, recordRefusedAuthentication } from "@mod/clients";
+import type { Grant, GrantInput, GrantOutcome, SessionIssuance, TargetRule } from "@mod/grants";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Route } from "@mod/http";
-import type { BuildContext } from "@mod/kernel";
+import { Unavailable } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
-import {
-	type Binding,
-	type ClientBindings,
-	clientBindings,
-	type SenderBindings,
-	senderBinding,
-} from "@mod/sender-binding";
-import { type Tokens, tokens } from "@mod/tokens";
+import type { Binding, ClientBindings, SenderBindings } from "@mod/sender-binding";
+import type { Tokens } from "@mod/tokens";
+import { challenged, oauthError, refusedAuthenticationAnswer } from "../answers/answers.ts";
 import events from "../audit-events.ts";
-import { authenticateClient, oauthError } from "../contract.ts";
+import { identifiedClient, identifierOf } from "../identified/identified.ts";
 import { answeredBody } from "./answer.ts";
-import { challenged } from "./challenges.ts";
 import { issuanceFor, refusedAnswer } from "./issuance.ts";
 
 export const tokenPath = "/oauth/token";
@@ -67,8 +54,10 @@ export function grantInputOf(parts: {
 	readonly told: readonly SessionIssuance[];
 	/** Told the names of the claims the grant added to each token issued. */
 	readonly added?: (names: readonly string[]) => void;
+	/** What the grant's own `identify` answered with the client; none for a client that authenticated. */
+	readonly identified?: unknown;
 }): GrantInput {
-	const { request, client, grantType, binding, targets, tokens, told, added } = parts;
+	const { request, client, grantType, binding, targets, tokens, told, added, identified } = parts;
 	const { param, value } = readerOf(request);
 	return {
 		request,
@@ -77,22 +66,10 @@ export function grantInputOf(parts: {
 		value,
 		target: (audience, within) => targets.target({ param, audience, within }),
 		...(binding ? { binding } : {}),
+		...(identified === undefined ? {} : { identified }),
 		...issuanceFor(tokens, grantType, binding, told, added),
 	};
 }
-
-/** The endpoint's handler over the contracts the assembly gives, dispatching to the grants composed. */
-export const endpointIn = async (c: BuildContext<unknown>, composed: readonly Grant[]) =>
-	tokenEndpoint(
-		await c.get(clients),
-		await c.get(tokens),
-		await c.collect(sessionIssuances),
-		await c.get(senderBinding),
-		await c.get(clientBindings),
-		new Map(composed.map((g) => [g.grantType, g])),
-		await c.get(targets),
-		await c.get(audit),
-	);
 
 /** The longest list of added claims' names an audit event holds. */
 const namesLimit = 2048;
@@ -114,22 +91,47 @@ const namesOf = (names: ReadonlySet<string>) => {
 	return { claims: written };
 };
 
+/** What the endpoint is built over, from the assembly's contracts and the grants composed. */
+export interface EndpointParts {
+	readonly clients: Clients;
+	readonly tokens: Tokens;
+	readonly told: readonly SessionIssuance[];
+	readonly bindings: SenderBindings;
+	readonly required: ClientBindings;
+	readonly grants: ReadonlyMap<string, Grant>;
+	readonly targets: TargetRule;
+	readonly audit: Audit;
+}
+
 /** The endpoint's handler and its answer to Unavailable. */
-export function tokenEndpoint(
-	clients: Clients,
-	tokens: Tokens,
-	told: readonly SessionIssuance[],
-	bindings: SenderBindings,
-	required: ClientBindings,
-	grants: ReadonlyMap<string, Grant>,
-	targets: TargetRule,
-	audit: Audit,
-): Pick<Route, "handle" | "unavailable"> {
+export function tokenEndpoint(parts: EndpointParts): Pick<Route, "handle" | "unavailable"> {
+	const { clients, tokens, told, bindings, required, grants, targets, audit } = parts;
 	const recorded = declaredAudit(audit, events);
+	/** A grant's error as answered; a `401` carries the challenges given. */
+	const grantError = (
+		outcome: Extract<GrantOutcome, { readonly kind: "error" }>,
+		challenges: readonly string[],
+	) => {
+		// A status but 400 or 401 is answered as if the grant named none.
+		const named = outcome.status === 400 || outcome.status === 401 ? outcome.status : undefined;
+		const status = named ?? (outcome.error === "invalid_client" ? 401 : 400);
+		const response = oauthError(status, outcome.error, outcome.description, outcome.members);
+		return status === 401 ? challenged(response, challenges) : response;
+	};
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
-		const authenticated = await authenticateClient(clients, request, audit);
-		if (authenticated.kind === "refused") return authenticated.response;
-		const client = authenticated.client;
+		const authenticated = await clients.authenticate(request);
+		const named = readerOf(request).param("grant_type");
+		const identifier = identifierOf(clients, grants, authenticated, request, named);
+		// Any other refusal is answered and recorded as `authenticateClient` does; a request a grant
+		// identifies the client of has not tried to authenticate, so no failure is recorded.
+		if (authenticated.kind === "refused" && !identifier) {
+			recordRefusedAuthentication(audit, request, authenticated);
+			return refusedAuthenticationAnswer(authenticated);
+		}
+		let client = authenticated.kind === "authenticated" ? authenticated.client : undefined;
+		const { challenges } = authenticated;
+		// Every record of a request whose client a grant identifies says so, the client once it is known.
+		const identified = identifier ? { identified: "grant" } : {};
 		const source = determinedSource(request);
 		// Once the client is known, each answer but an unavailable one is recorded; a known grant type is named.
 		// The claims grants added to the tokens issued for this request, by name; never their values.
@@ -139,9 +141,10 @@ export function tokenEndpoint(
 			failure?: { reason: string; error: string; policy?: string; refusal?: string },
 		) => {
 			const attributes = {
-				client: client.id,
+				...(client === undefined ? {} : { client: client.id }),
 				...(source === undefined ? {} : { source }),
 				...(grantType === undefined ? {} : { grant_type: grantType }),
+				...identified,
 			};
 			if (failure)
 				recorded.record("token.issued.failure", { attributes: { ...attributes, ...failure } });
@@ -158,85 +161,113 @@ export function tokenEndpoint(
 			record(failure.grantType, { reason: failure.reason, error: failure.error });
 			return oauthError(400, failure.error, failure.description);
 		};
-		const repeated = request.fields.repeated();
-		if (repeated.length > 0) {
-			// A parameter the rule reads, sent twice, is the rule's to answer (RFC 8707 §2's invalid_target).
-			const ruled = repeated.map((name) => targets.repeated?.(name)).find((r) => r !== undefined);
-			if (ruled) {
-				const { error, description } = ruled;
-				return refuse({ reason: "repeated_parameter", error, description });
+		/** The refusals before any grant runs, in their order; a request they all let by goes on to its grant. */
+		const admitted = async (request: HttpRequest) => {
+			const repeated = request.fields.repeated();
+			if (repeated.length > 0) {
+				// A parameter the rule reads, sent twice, is the rule's to answer (RFC 8707 §2's invalid_target).
+				const ruled = repeated.map((name) => targets.repeated?.(name)).find((r) => r !== undefined);
+				if (ruled) {
+					const { error, description } = ruled;
+					return refuse({ reason: "repeated_parameter", error, description });
+				}
+				const description = "repeated parameter";
+				return refuse({ reason: "repeated_parameter", error: "invalid_request", description });
 			}
-			const description = "repeated parameter";
-			return refuse({ reason: "repeated_parameter", error: "invalid_request", description });
-		}
-		const mistyped = mistypedRefusal(request);
-		if (mistyped) return refuse({ reason: "mistyped_parameter", ...mistyped });
-		const { param } = readerOf(request);
-		const grantType = param("grant_type");
-		if (!grantType) {
-			const description = "grant_type is required";
-			return refuse({ reason: "missing_grant_type", error: "invalid_request", description });
-		}
-		const grant = grants.get(grantType);
-		// An unsupported grant type is the client's own input, so it is not named.
-		if (!grant)
-			return refuse({ reason: "unsupported_grant_type", error: "unsupported_grant_type" });
-		// A request with no body is read as a form, the body RFC 6749 §3.2 defines.
-		const body = request.json ? "json" : "form";
-		if (!(grant.bodies ?? ["form"]).includes(body)) {
-			return refuse({
-				grantType,
-				reason: "unsupported_body",
-				error: "invalid_request",
-				description: `no ${body} body for this grant`,
-			});
-		}
-		if (!clientAllowance.allowsGrant(client, grantType)) {
-			return refuse({ grantType, reason: "grant_type_not_allowed", error: "unauthorized_client" });
-		}
-		const bound = await bindings.bindingOf(request, { kind: "issue" });
-		if (bound.kind === "multiple_bindings") {
-			return refuse({
-				grantType,
-				reason: "multiple_bindings",
-				error: "invalid_request",
-				description: "use one sender binding",
-			});
-		}
-		if (bound.kind === "refused") {
-			// Like any unavailable answer, an unavailable binding is not recorded.
-			if (!bound.unavailable) record(grantType, { reason: "binding_refused", error: bound.error });
-			const response = oauthError(bound.unavailable ? 503 : 400, bound.error, bound.description);
-			return { ...response, headers: { ...response.headers, ...bound.headers } };
-		}
-		const binding = bound.kind === "bound" ? bound.binding : undefined;
-		const unmet = required.refusalOf(client, binding);
-		if (unmet === "required") {
-			const description = "this client must bind its token";
-			return refuse({
-				grantType,
-				reason: "binding_required",
-				error: "invalid_request",
-				description,
-			});
-		}
-		if (unmet === "kind") {
-			const description = "a binding of a kind this client does not name";
-			const failure = {
-				reason: "binding_kind_not_named",
-				error: "unauthorized_client",
-				description,
-			};
-			return refuse({ grantType, ...failure });
-		}
-		// Asked before the grant runs, so a grant that would ignore the audience asked uses nothing up.
-		const untargeted = grant.targets ? undefined : targets.untargeted?.({ param });
-		if (untargeted) {
-			const { error, description } = untargeted;
-			return refuse({ grantType, reason: "untargeted", error, description });
-		}
+			const mistyped = mistypedRefusal(request);
+			if (mistyped) return refuse({ reason: "mistyped_parameter", ...mistyped });
+			const { param } = readerOf(request);
+			const grantType = param("grant_type");
+			if (!grantType) {
+				const description = "grant_type is required";
+				return refuse({ reason: "missing_grant_type", error: "invalid_request", description });
+			}
+			const grant = grants.get(grantType);
+			// An unsupported grant type is the client's own input, so it is not named.
+			if (!grant)
+				return refuse({ reason: "unsupported_grant_type", error: "unsupported_grant_type" });
+			// A request with no body is read as a form, the body RFC 6749 §3.2 defines.
+			const body = request.json ? "json" : "form";
+			if (!(grant.bodies ?? ["form"]).includes(body)) {
+				return refuse({
+					grantType,
+					reason: "unsupported_body",
+					error: "invalid_request",
+					description: `no ${body} body for this grant`,
+				});
+			}
+			let identifiedBy: unknown;
+			if (identifier) {
+				const identity = await identifiedClient(clients, identifier, {
+					request,
+					...readerOf(request),
+				});
+				if (identity.kind === "error") {
+					record(grantType, { reason: "client_not_identified", error: identity.error });
+					return grantError(identity, challenges);
+				}
+				client = identity.client;
+				identifiedBy = identity.identified;
+			}
+			// Cannot come: a request is past here authenticated, or its client identified just above.
+			if (client === undefined) throw new Unavailable("token-endpoint");
+			if (!clientAllowance.allowsGrant(client, grantType)) {
+				return refuse({
+					grantType,
+					reason: "grant_type_not_allowed",
+					error: "unauthorized_client",
+				});
+			}
+			const bound = await bindings.bindingOf(request, { kind: "issue" });
+			if (bound.kind === "multiple_bindings") {
+				return refuse({
+					grantType,
+					reason: "multiple_bindings",
+					error: "invalid_request",
+					description: "use one sender binding",
+				});
+			}
+			if (bound.kind === "refused") {
+				// Like any unavailable answer, an unavailable binding is not recorded.
+				if (!bound.unavailable)
+					record(grantType, { reason: "binding_refused", error: bound.error });
+				const response = oauthError(bound.unavailable ? 503 : 400, bound.error, bound.description);
+				return { ...response, headers: { ...response.headers, ...bound.headers } };
+			}
+			const binding = bound.kind === "bound" ? bound.binding : undefined;
+			const unmet = required.refusalOf(client, binding);
+			if (unmet === "required") {
+				const description = "this client must bind its token";
+				return refuse({
+					grantType,
+					reason: "binding_required",
+					error: "invalid_request",
+					description,
+				});
+			}
+			if (unmet === "kind") {
+				const description = "a binding of a kind this client does not name";
+				const failure = {
+					reason: "binding_kind_not_named",
+					error: "unauthorized_client",
+					description,
+				};
+				return refuse({ grantType, ...failure });
+			}
+			// Asked before the grant runs, so a grant that would ignore the audience asked uses nothing up.
+			const untargeted = grant.targets ? undefined : targets.untargeted?.({ param });
+			if (untargeted) {
+				const { error, description } = untargeted;
+				return refuse({ grantType, reason: "untargeted", error, description });
+			}
+			return { grant, grantType, client, binding, identifiedBy };
+		};
+		const admission = await admitted(request);
+		if (!("grant" in admission)) return admission;
+		const { grant, grantType, binding, identifiedBy } = admission;
+		client = admission.client;
 		const input = grantInputOf({
-			...{ request, client, grantType, binding, targets, tokens, told },
+			...{ request, client, grantType, binding, targets, tokens, told, identified: identifiedBy },
 			added: (names) => {
 				for (const name of names) addedNames.add(name);
 			},
@@ -251,11 +282,7 @@ export function tokenEndpoint(
 		}
 		if (outcome.kind === "error") {
 			record(grantType, { reason: "grant_refused", error: outcome.error });
-			// A status but 400 or 401 is answered as if the grant named none.
-			const named = outcome.status === 400 || outcome.status === 401 ? outcome.status : undefined;
-			const status = named ?? (outcome.error === "invalid_client" ? 401 : 400);
-			const response = oauthError(status, outcome.error, outcome.description, outcome.members);
-			return status === 401 ? challenged(response, authenticated.challenges) : response;
+			return grantError(outcome, challenges);
 		}
 		record(grantType);
 		return jsonAnswer(200, answeredBody(outcome.body));

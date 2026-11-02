@@ -10,6 +10,8 @@ Internal module of `conformance`: the new system's driver, composed from a scene
 
 ## Invariants
 - Does not rely on logs to tell that start-up is done.
+- A start given an audit sink (a deployment's instance) sends its events there and leaves the sink running when the app stops; otherwise it starts a sink of its own and stops it with the app.
+- A start's `trustedCertificates` reach the app as one bundle named by `NODE_EXTRA_CA_CERTS`, its only variable from the start's options; a file that cannot be read, holds no certificate, holds anything but whole PEM certificate blocks and whitespace (a block cut short, a key, a note), or a block that is no X.509 certificate, refuses the start before the app or its store and sinks run, and stops the parties started for it. Nothing else of the runner's environment reaches the app.
 - The driver picks the port and waits until it is reachable over HTTP.
 - Composes `audit` with `audit-http` (through `outbound`) into every scene, sending each event to the `audit` sink, named in outbound's `allow` and as a plain-http loopback destination.
 - A pattern's app boots on `trial`'s layer for the keys each scene leaves unset, but none in a section a set-up marks `whole`.
@@ -23,6 +25,7 @@ Internal module of `conformance`: the new system's driver, composed from a scene
 - A pattern's app composing `mail-smtp` sends its mail to a fake relay at loopback, started and stopped with it, unless the scene sets that section.
 - On a pattern's app, a scene whose modules the app lacks is skipped with that reason.
 - On a pattern's app, a scene about a Store the app did not choose (it pauses the Store on a memory one, or refuses a volatile Store on Redis) is left out as an alternative, even with `full+opt-ins`.
+- A scene's Redis fsyncs every write (`appendfsync always`), as a deployment's does; its app waits five seconds on a command, so a shared Docker VM's slow fsync is no `503`, except where the scene pauses the store, which keeps the default second.
 - On a pattern's app, a scene about the absence of a module the app composes (a set-up's `without`) is left out with that reason, even with `full+opt-ins`.
 - On a pattern's app, each scene left out or failed is a line in the file `CONFORMANCE_NOT_IN_PATTERN_FILE` names, when set, which `patterns` reads.
 

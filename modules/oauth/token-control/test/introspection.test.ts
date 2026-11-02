@@ -5,10 +5,10 @@ import { senderBindings } from "@mod/sender-binding";
 import { type AccessCondition, accessConditions } from "@mod/tokens";
 import { describe, expect, it } from "vitest";
 import { section } from "../src/section.ts";
-import { serve } from "./serve.ts";
+import { clockNow, later, serve } from "./serve.ts";
 
 describe("introspection", () => {
-	it("tells a resource server sharing the audience about an active token", async () => {
+	it("tells a resource server sharing the audience about an active token [rfc7662-2.2-a]", async () => {
 		const s = await serve();
 		const answer = await s.post("/oauth/introspect", "api", { token: await s.issue() });
 		expect(answer.status).toBe(200);
@@ -22,9 +22,52 @@ describe("introspection", () => {
 		});
 	});
 
+	it("never answers the token it introspects, nor its signature, only what it tells of it [oidc-core-16.4-a]", async () => {
+		const s = await serve();
+		const token = await s.issue();
+		const answer = await s.post("/oauth/introspect", "api", { token });
+		expect(answer.json.active).toBe(true);
+		for (const part of [token, token.split(".")[2] ?? token]) {
+			expect(JSON.stringify(answer.json)).not.toContain(part);
+		}
+		const told = [
+			"active",
+			"iss",
+			"sub",
+			"client_id",
+			"aud",
+			"scope",
+			"exp",
+			"iat",
+			"token_type",
+			"cnf",
+		];
+		for (const name of Object.keys(answer.json)) expect(told).toContain(name);
+	});
+
+	it("finds an access token whatever type its hint names [rfc7662-2.1-b]", async () => {
+		const s = await serve();
+		const token = await s.issue();
+		for (const token_type_hint of ["access_token", "refresh_token", "id_token", "unknown"]) {
+			const answer = await s.post("/oauth/introspect", "api", { token, token_type_hint });
+			expect(answer.json, token_type_hint).toMatchObject({ active: true, sub: "app" });
+		}
+	});
+
+	it("answers an access token active only before its expiry [rfc7662-4-b]", async () => {
+		const s = await serve();
+		const token = await s.issue({ notAfter: clockNow() + 60_000 });
+		const exp = Number((await s.post("/oauth/introspect", "app", { token })).json.exp);
+		expect(exp * 1000).toBeGreaterThan(clockNow());
+		later(exp * 1000 - 1 - clockNow());
+		expect(await s.active(token)).toBe(true);
+		later(1);
+		expect(await s.active(token)).toBe(false);
+	});
+
 	it("tells a resource server how an access token is bound", async () => {
 		/** The binding kind the bound token is issued with, so tokens reads its member back. */
-		const keyed = defineModule({ name: "keyed-binding" }, (m) => [
+		const keyed = defineModule({ name: "keyed-binding", replicaSafe: true, takes: [] }, (m) => [
 			m
 				.contribute(senderBindings)
 				.by(() => ({ member: "key", tokenType: "Keyed", read: async () => ({ kind: "absent" }) })),
@@ -38,7 +81,7 @@ describe("introspection", () => {
 		expect(bearer.json.cnf).toBeUndefined();
 	});
 
-	it("answers inactive for tokens the caller may not see, broken tokens and nothing more", async () => {
+	it("answers inactive for tokens the caller may not see, broken tokens and nothing more [rfc7662-2.2-b] [rfc7662-2.2-c] [rfc7662-4-f] [rfc7662-5-a]", async () => {
 		const s = await serve();
 		const token = await s.issue();
 		const inactive = { active: false };
@@ -49,7 +92,7 @@ describe("introspection", () => {
 		expect(await answer("api", "garbage"), "no token at all").toEqual(inactive);
 	});
 
-	it("refuses public clients, missing tokens, repeated parameters and bad client credentials, recording only the credentials' refusal", async () => {
+	it("refuses public clients, missing tokens, repeated parameters and bad client credentials, recording only the credentials' refusal [rfc7662-2.1-a] [rfc7662-2.1-d]", async () => {
 		const s = await serve();
 		const token = await s.issue();
 		expect((await s.post("/oauth/introspect", undefined, { token, client_id: "pub" })).status).toBe(
@@ -77,9 +120,9 @@ describe("introspection", () => {
 		]);
 	});
 
-	it("answers 503 when a condition on access tokens cannot tell, never inactive, recording and warning so", async () => {
+	it("answers 503 when a condition on access tokens cannot tell, never inactive, recording and warning so [rfc7662-4-a]", async () => {
 		const down = unavailableSwitch<AccessCondition>();
-		const condition = defineModule({ name: "condition" }, (m) => [
+		const condition = defineModule({ name: "condition", replicaSafe: false, takes: [] }, (m) => [
 			m
 				.contribute(accessConditions)
 				.by(() => down.wrap({ name: "test", holds: async () => "holds" as const })),
@@ -104,7 +147,7 @@ describe("introspection", () => {
 });
 
 describe("rate limit", () => {
-	it("limits requests per source on each route apart, before any client is authenticated", async () => {
+	it("limits requests per source on each route apart, before any client is authenticated [rfc7009-5-a] [rfc6749-2.3.1-c] [guarantee-10-a]", async () => {
 		const s = await serve({ limit: { requests: 2, window: "1m" } });
 		const wrong = { token: await s.issue(), client_id: "api", client_secret: "wrong" };
 		for (let i = 0; i < 2; i++) {

@@ -13,6 +13,8 @@ export interface Authorized {
 	readonly nonce?: string;
 	/** When the user logged in, in epoch seconds, as `auth_time` says. */
 	readonly authTime?: number;
+	/** Claims the id_token carries besides the ones it always does. */
+	readonly claims?: Readonly<Record<string, unknown>>;
 	/** What its token endpoint says of the tokens, where a scene sets it; with a refresh token unless told not to. */
 	readonly tokens?: {
 		readonly accessToken?: string;
@@ -40,7 +42,12 @@ export interface UpstreamShape {
 	readonly userinfo?: string;
 }
 
-const ownShape: UpstreamShape = { authorize: "/authorize", token: "/token", jwks: "/jwks" };
+const ownShape: UpstreamShape = {
+	authorize: "/authorize",
+	token: "/token",
+	jwks: "/jwks",
+	userinfo: "/userinfo",
+};
 /** Google's paths, on its fixed issuer. */
 export const googleShape: UpstreamShape = {
 	issuer: "https://accounts.google.com",
@@ -51,7 +58,7 @@ export const googleShape: UpstreamShape = {
 };
 
 /**
- * An upstream OpenID Connect IdP on plain http at loopback, for the scenes: it publishes its
+ * An upstream OpenID Connect IdP on plain http at loopback, or behind the https front at `origin`, for the scenes: it publishes its
  * description (when it is its own issuer) and keys, hands out codes for the authorizations the
  * scene makes, and answers its token endpoint as a real one would, checking the client (by HTTP
  * Basic or in the form), the redirect URI and the PKCE verifier. It answers refreshes as the scene
@@ -59,7 +66,14 @@ export const googleShape: UpstreamShape = {
  */
 export async function fakeUpstream(
 	client: { id: string; secret: string },
-	options: { readonly shape?: UpstreamShape; readonly endSession?: boolean } = {},
+	options: {
+		readonly shape?: UpstreamShape;
+		readonly endSession?: boolean;
+		/** The origin it is reached by, an https front before it say, in place of its own base. */
+		readonly origin?: string;
+		/** The origin its description names UserInfo at, where not the one it is reached by. */
+		readonly userinfoOrigin?: string;
+	} = {},
 ) {
 	const shape = options.shape ?? ownShape;
 	const signing = await generateKeyPair("RS256", { extractable: true });
@@ -78,6 +92,9 @@ export async function fakeUpstream(
 	const refreshAnswers: Scripted[] = [];
 	const refreshCalls: string[] = [];
 	const idTokens: string[] = [];
+	/** What the next UserInfo requests answer, in turn, each as given or when it comes; past them, the subject and its name. */
+	const userinfoAnswers: (Scripted | (() => Promise<Scripted>))[] = [];
+	const userinfoCalls: string[] = [];
 	let n = 0;
 	const refresh = (form: URLSearchParams): Scripted => {
 		const presented = form.get("refresh_token") ?? "";
@@ -127,6 +144,7 @@ export async function fakeUpstream(
 			? ["ES256", "up-ec", ec.privateKey]
 			: ["RS256", "up-1", granted.forged ? forger.privateKey : signing.privateKey];
 		const idToken = await new SignJWT({
+			...granted.claims,
 			nonce: granted.nonce ?? granted.asked,
 			...(granted.authTime === undefined ? {} : { auth_time: granted.authTime }),
 		})
@@ -155,7 +173,8 @@ export async function fakeUpstream(
 			},
 		};
 	};
-	const fake = await fakeHttp((asked, base) => {
+	const fake = await fakeHttp((asked, own) => {
+		const base = options.origin ?? own;
 		if (asked.path === "/.well-known/openid-configuration" && !shape.issuer) {
 			return {
 				json: {
@@ -170,6 +189,9 @@ export async function fakeUpstream(
 					token_endpoint_auth_methods_supported: ["client_secret_basic"],
 					authorization_response_iss_parameter_supported: true,
 					...(options.endSession ? { end_session_endpoint: `${base}/logout` } : {}),
+					...(shape.userinfo
+						? { userinfo_endpoint: `${options.userinfoOrigin ?? base}${shape.userinfo}` }
+						: {}),
 				},
 			};
 		}
@@ -179,13 +201,15 @@ export async function fakeUpstream(
 		}
 		if (asked.path === shape.userinfo) {
 			const subject = accessed.get((asked.headers.authorization ?? "").replace(/^Bearer /, ""));
-			return subject === undefined
-				? { status: 401, json: { error: "invalid_token" } }
-				: { json: { sub: subject } };
+			userinfoCalls.push(subject ?? "");
+			if (subject === undefined) return { status: 401, json: { error: "invalid_token" } };
+			const next = userinfoAnswers.shift();
+			if (typeof next === "function") return next();
+			return next ?? { json: { sub: subject, name: `${subject} upstream` } };
 		}
 		return { status: 404, json: { error: "not_found" } };
 	});
-	const issuer = shape.issuer ?? fake.base;
+	const issuer = shape.issuer ?? options.origin ?? fake.base;
 	return {
 		/** Where it listens. */
 		base: fake.base,
@@ -197,6 +221,12 @@ export async function fakeUpstream(
 		refreshCalls,
 		/** The id_tokens it gave, in order. */
 		idTokens,
+		/** The UserInfo requests made, by the subject of the access token they carried. */
+		userinfoCalls,
+		/** The next UserInfo answers as given, before any already set. */
+		answerUserinfo: (...answers: (Scripted | (() => Promise<Scripted>))[]) => {
+			userinfoAnswers.push(...answers);
+		},
 		/** The next refresh answers as given, before any already set. */
 		answerRefresh: (...answers: Scripted[]) => {
 			refreshAnswers.push(...answers);

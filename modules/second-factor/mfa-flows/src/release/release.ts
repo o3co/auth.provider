@@ -1,13 +1,13 @@
 import type { Audit } from "@mod/audit";
 import { jsonAnswer } from "@mod/http";
 import type { Log } from "@mod/kernel";
-import type { Factors } from "@mod/mfa";
+import type { FactorReading } from "@mod/mfa-reading";
 import type { LockoutPolicy, Lockouts, Released, ReleaseTerms } from "@mod/rate-limit";
 import { longestRecentMs, refusedEntry, type Sessions } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
 import type { PermitResult, Permits } from "../permits/permits.ts";
 import { auditedBy } from "../recording/recording.ts";
-import { type Handler, unavailable } from "../routing.ts";
+import { type Handler, unavailable } from "../requests/requests.ts";
 import { lockoutName } from "../section.ts";
 
 export interface ReleaseParts {
@@ -15,7 +15,7 @@ export interface ReleaseParts {
 	readonly permits: Pick<Permits, "of" | "use">;
 	readonly lockouts: Pick<Lockouts, "standing" | "releaseUnder">;
 	readonly revocation: Pick<SubjectRevocation, "check">;
-	readonly factors: Pick<Factors, "guessableBoundAfter">;
+	readonly factors: Pick<FactorReading, "guessableBoundAfter">;
 	readonly policy: LockoutPolicy;
 	readonly now: () => number;
 	readonly audit: Pick<Audit, "record">;

@@ -1,7 +1,8 @@
 import { assemble, BootRefused, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { expect, it } from "vitest";
 import { externalJwt } from "../src/contract.ts";
 import externalJwtModule from "../src/module.ts";
@@ -9,7 +10,7 @@ import { testSigner } from "../src/testing.ts";
 
 it("offers verifiers to a composition with outbound, knowing the asymmetric algorithms only", async () => {
 	const app = await assemble({
-		modules: [outboundModule, externalJwtModule],
+		modules: [outboundModule, tlsOptionsForTests, externalJwtModule],
 		config: { ...kernelConfig(), outbound: {} },
 	});
 	const jwt = app.get(externalJwt);
@@ -40,7 +41,7 @@ async function composed(section: Record<string, unknown> | undefined) {
 	const signer = await testSigner("EdDSA", "k1");
 	let now = 1_800_000_000_000;
 	let up = true;
-	const fake = defineModule({ name: "fake-outbound" }, (m) => [
+	const fake = defineModule({ name: "fake-outbound", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(outbound).by(() => ({
 			fetch: async () => {
 				if (!up) throw new Unavailable("outbound");
@@ -105,10 +106,25 @@ it("refuses a section outside its bounds", async () => {
 	]) {
 		await expect(
 			assemble({
-				modules: [outboundModule, externalJwtModule],
+				modules: [outboundModule, tlsOptionsForTests, externalJwtModule],
 				config: { ...kernelConfig(), outbound: {}, "external-jwt": refused },
 			}),
 			JSON.stringify(refused),
 		).rejects.toBeInstanceOf(BootRefused);
 	}
+});
+
+it("takes every handle its takes name", async () => {
+	const fake = defineModule({ name: "fake-outbound", replicaSafe: true, takes: [] }, (m) => [
+		m.provide(outbound).by(() => ({
+			fetch: async () => {
+				throw new Unavailable("outbound");
+			},
+		})),
+	]);
+	expect(
+		(await takesUnused({ modules: [fake, externalJwtModule], config: kernelConfig() }))[
+			"external-jwt"
+		],
+	).toBeUndefined();
 });

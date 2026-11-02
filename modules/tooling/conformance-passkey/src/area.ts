@@ -18,6 +18,18 @@ export interface PasskeyPart {
 	readonly login?: { readonly requests: number; readonly windowSeconds: number };
 	/** WebAuthn as a second factor, beside the second-factor area's, for the same relying party. */
 	readonly secondFactor?: boolean;
+	/** Logging in with a passkey into a browser session, and what it asks of password logins. */
+	readonly session?: {
+		/** Requests a source may make on each of its two routes, in `windowSeconds`. */
+		readonly attempts?: number;
+		readonly windowSeconds?: number;
+		/** Whether a passkey login of a verified user proves a second factor; the target's default when left out. */
+		readonly countsAsMfa?: boolean;
+		/** Whether a password login of a subject holding a passkey is refused. */
+		readonly password?: "allowed" | "refused-when-held";
+		/** passkey-witness-http's section, pointing at a ledger the scene runs: the passkey witness, which refusing a password needs. */
+		readonly witness?: Readonly<Record<string, unknown>>;
+	};
 }
 
 export const passkeyArea = area<PasskeyPart>("passkey");

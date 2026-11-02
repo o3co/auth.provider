@@ -23,6 +23,7 @@ function usersYaml(part: IdentityPart): string {
 			...(u.upstream ? { token: legacyToken(u.upstream) } : {}),
 			...(u.email ? { email: u.email } : {}),
 			...(u.emailVerified === undefined ? {} : { emailVerified: u.emailVerified }),
+			...(u.name ? { name: u.name } : {}),
 		},
 	]);
 	return `${JSON.stringify(Object.fromEntries(entries))}\n`;

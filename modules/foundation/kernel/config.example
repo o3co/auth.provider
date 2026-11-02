@@ -1,4 +1,5 @@
 kernel {
 	deployment = single
+	environment = production
 	stop-deadline = 30s
 }

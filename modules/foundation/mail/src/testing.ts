@@ -1,5 +1,5 @@
 import { inspect } from "node:util";
-import { BootRefused, defineModule, type Module, Unavailable } from "@mod/kernel";
+import { BootRefused, defineModule, isUnavailable, type Module } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { type Mail, type Message, mailPurposes, mailTemplates, plainText } from "./contract.ts";
@@ -13,22 +13,25 @@ export function mailConfig(settings: Partial<MailSettings> = {}) {
 }
 
 /** Declares the purposes the contract tests send, with their templates. */
-export const contractTemplates: Module = defineModule({ name: "mail-contract" }, (m) => [
-	m.contribute(mailPurposes).by(() => ({ purpose: "contract.notice" })),
-	m.contribute(mailPurposes).by(() => ({ purpose: "contract.broken" })),
-	m.contribute(mailPurposes).by(() => ({ purpose: "contract.broken-text" })),
-	m
-		.contribute(mailTemplates)
-		.by(() => plainText("contract.notice", { subject: "Notice", text: "Value: {value}\n" })),
-	m.contribute(mailTemplates).by(() => ({
-		purpose: "contract.broken",
-		render: () => ({ subject: "two\nlines", text: "" }),
-	})),
-	m.contribute(mailTemplates).by(() => ({
-		purpose: "contract.broken-text",
-		render: () => ({ subject: "Notice", text: "one\rtwo" }),
-	})),
-]);
+export const contractTemplates: Module = defineModule(
+	{ name: "mail-contract", replicaSafe: false, takes: [] },
+	(m) => [
+		m.contribute(mailPurposes).by(() => ({ purpose: "contract.notice" })),
+		m.contribute(mailPurposes).by(() => ({ purpose: "contract.broken" })),
+		m.contribute(mailPurposes).by(() => ({ purpose: "contract.broken-text" })),
+		m
+			.contribute(mailTemplates)
+			.by(() => plainText("contract.notice", { subject: "Notice", text: "Value: {value}\n" })),
+		m.contribute(mailTemplates).by(() => ({
+			purpose: "contract.broken",
+			render: () => ({ subject: "two\nlines", text: "" }),
+		})),
+		m.contribute(mailTemplates).by(() => ({
+			purpose: "contract.broken-text",
+			render: () => ({ subject: "Notice", text: "one\rtwo" }),
+		})),
+	],
+);
 
 /** What a refusing remote side says; no failure may carry it. */
 export const remoteWords = "mail-contract-remote-words";
@@ -70,7 +73,7 @@ export function mailContract(name: string, harness: MailHarness): void {
 
 		it("is unavailable once the message has expired", async () => {
 			const sender = await open();
-			await expect(sender.send(notice({ expiresAt: 1 }))).rejects.toBeInstanceOf(Unavailable);
+			await expect(sender.send(notice({ expiresAt: 1 }))).rejects.toSatisfy(isUnavailable);
 		});
 
 		it("refuses anything but one address", async () => {
@@ -157,16 +160,17 @@ export function mailContract(name: string, harness: MailHarness): void {
 				};
 				await expect((await refusing("limit")).send(notice())).resolves.toBe("limited");
 				const failure = await (await refusing("down")).send(notice()).catch((e: unknown) => e);
-				expect(failure).toBeInstanceOf(Unavailable);
+				expect(isUnavailable(failure)).toBe(true);
 				expect(inspect(failure)).not.toContain(remoteWords);
 			},
 		);
 
 		it("refuses to boot when a declared purpose has no template", async () => {
-			const bare = defineModule({ name: "mail-contract-bare" }, (m) => [
-				m.contribute(mailPurposes).by(() => ({ purpose: "contract.bare" })),
-			]);
-			await expect(harness.boot([bare])).rejects.toBeInstanceOf(BootRefused);
+			const bare = defineModule(
+				{ name: "mail-contract-bare", replicaSafe: true, takes: [] },
+				(m) => [m.contribute(mailPurposes).by(() => ({ purpose: "contract.bare" }))],
+			);
+			await expect(harness.boot([bare])).rejects.toSatisfy(BootRefused.is);
 		});
 	});
 }

@@ -1,0 +1,7 @@
+{
+	"type": "apple",
+	"client-id": "REPLACE-SERVICES-ID",
+	"team-id": "REPLACE-TEAM-ID",
+	"key-id": "REPLACE-KEY-ID",
+	"private-key": "REPLACE-PRIVATE-KEY-PEM"
+}

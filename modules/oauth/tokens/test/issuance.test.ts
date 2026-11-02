@@ -1,7 +1,7 @@
 import { isUnavailable } from "@mod/kernel";
 import { expect, it } from "vitest";
 import type { IssuancePolicy } from "../src/contract.ts";
-import { judging } from "../src/issuance.ts";
+import { judging } from "../src/issuance/issuance.ts";
 import { section } from "../src/section.ts";
 
 const request = {

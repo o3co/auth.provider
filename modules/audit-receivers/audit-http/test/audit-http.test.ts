@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { type AuditReceiver, audit, auditReceivers } from "@mod/audit";
 import auditModule from "@mod/audit/module";
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import {
 	DestinationRefused,
 	type Narrower,
@@ -30,7 +32,7 @@ beforeEach(() => {
 const elsewhere = "elsewhere.example";
 /** An outbound that keeps each request and answers as the test says. */
 const outboundAnswering = (answer: () => Promise<OutboundResponse>) =>
-	defineModule({ name: "outbound" }, (m) => [
+	defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(outbound).by(() => ({
 			fetch: async (url, request, narrower) => {
 				sent.push({ url, request, ...(narrower ? { narrower } : {}) });
@@ -160,6 +162,21 @@ it("refuses a secret Authorization value with a URL outbound will not send a cre
 	await expect(boot(status(204), local)).resolves.toBeDefined();
 });
 
+it("takes outbound's credential policy only with an Authorization value, its takes naming it either way", async () => {
+	const unused = async (section: unknown) =>
+		(
+			await takesUnused({
+				modules: [auditModule, outboundAnswering(status(204)), auditHttp],
+				config: { ...kernelConfig(), audit: { receivers: ["http"] }, "audit-http": section },
+				runtime,
+			})
+		)["audit-http"];
+	expect(await unused({ url, authorization: "Bearer s3cr3t-token" })).toBeUndefined();
+	// The takes are static: outbound provides the policy beside the refusals the module always
+	// takes, so wherever it boots the policy is there, and without a value it is left untaken.
+	expect(await unused({ url })).toEqual(["outbound.credentials"]);
+});
+
 it("refuses boot on a URL outbound's policy refuses, saying why", async () => {
 	const booting = boot(status(204), { url: `https://${elsewhere}/events` });
 	await expect(booting).rejects.toMatchObject({
@@ -179,7 +196,7 @@ const receiverOf = async (answer: () => Promise<OutboundResponse>, section: unkn
 		modules: [
 			outboundAnswering(answer),
 			auditHttp,
-			defineModule({ name: "peek" }, (m) => [
+			defineModule({ name: "peek", replicaSafe: true, takes: [auditReceivers] }, (m) => [
 				m.provide(receivers).by((c) => c.collect(auditReceivers)),
 			]),
 		],
@@ -240,4 +257,16 @@ it("refuses to start without a URL, or with one it could not post to as written"
 	for (const [name, section] of Object.entries(refused)) {
 		await expect(boot(status(204), section), name).rejects.toBeInstanceOf(BootRefused);
 	}
+});
+
+it("registers under the name its manifest declares (`registersAs`), the one `audit.receivers` names", async () => {
+	const { registersAs } = JSON.parse(
+		readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8"),
+	) as { registersAs: string };
+	const booted = assemble({
+		modules: [auditModule, outboundAnswering(status(204)), auditHttp],
+		config: { ...kernelConfig(), audit: { receivers: [registersAs] }, "audit-http": { url } },
+		runtime,
+	});
+	await expect(booted).resolves.toBeDefined();
 });

@@ -26,6 +26,8 @@ export interface Acr {
 	known(asked: string): readonly string[];
 	/** The first of these acr the amr meet, if any. */
 	met(known: readonly string[], amr: readonly string[]): string | undefined;
+	/** The session's current acr: the first in the table's order the amr meet, if any. */
+	current(amr: readonly string[]): string | undefined;
 }
 
 export const acr = contract<Acr>("acr");

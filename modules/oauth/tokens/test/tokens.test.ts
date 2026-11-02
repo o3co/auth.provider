@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { type MetadataItem, metadata } from "@mod/issuer";
@@ -13,33 +13,38 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
-import { accessTokenSigning } from "@mod/keys";
+import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
+import { type AccessTokenSigning, accessTokenSigning } from "@mod/keys";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import { senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-	type AccessCondition,
-	type AccessGrant,
-	accessConditions,
-	type IssueLimits,
-	subjectChecks,
-	type Tokens,
-	tokens,
-} from "../src/contract.ts";
+import { type AccessCondition, accessConditions, subjectChecks, tokens } from "../src/contract.ts";
 import { defaultLifetimeSeconds } from "../src/limits.ts";
 import tokensModule from "../src/module.ts";
 import { section } from "../src/section.ts";
+import { issueFor } from "./composed.ts";
 import { revokedInMemory } from "./revoked.ts";
 
 const start = 1_800_000_000_000;
 let now = start;
 beforeEach(() => {
 	now = start;
+	drawn.length = 0;
 });
-const runtime = quietRuntime({ clock: { now: () => now } });
+/** A copy of every draw of 16 bytes the composition made, as base64url, so a test can tell what an id was made from. */
+const drawn: string[] = [];
+const runtime = quietRuntime({
+	clock: { now: () => now },
+	random: {
+		bytes: (n) => {
+			const bytes = new Uint8Array(randomBytes(n));
+			if (n === 16) drawn.push(Buffer.from(bytes).toString("base64url"));
+			return bytes;
+		},
+	},
+});
 const privateKey = generateKeyPairSync("ed25519")
 	.privateKey.export({ format: "pem", type: "pkcs8" })
 	.toString();
@@ -51,48 +56,61 @@ async function boot(...args: Parameters<typeof assembled>) {
 /** The grant most tests issue for; a test that is about the grant writes its own. */
 const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: [] };
 
-/** Issues through `issue`, which nothing here refuses, and answers what it issued. */
-async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
-	const issued = await t.issue({ grant, grantType: "test" }, limits);
-	if (issued.kind !== "issued") throw new Error(`refused by ${issued.policy}`);
-	return issued.access;
-}
 const claimsOf = (token: string) =>
 	JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString());
 
-async function assembled(
+/** The assembly the tests boot: keys, issuer, sender binding and tokens, with this tokens section. */
+const assembly = (
 	section: Record<string, unknown>,
 	{
 		extra = [],
 		origin,
 		issuerUrl = "https://issuer.example",
-	}: { readonly extra?: Module[]; readonly origin?: string; readonly issuerUrl?: string } = {},
-) {
-	return assemble({
-		modules: [
-			http,
-			keysModule,
-			issuerModule,
-			senderBindingModule,
-			tokensModule,
-			revokedInMemory(() => runtime.clock.now()).module,
-			...extra,
-		],
-		config: {
-			...kernelConfig(),
-			...httpConfig(origin ? { "public-origin": origin } : {}),
-			// One key across boots, so a token from one boot can be read by another.
-			...keysConfig({ signing: { kid: "k", alg: "EdDSA", "private-key": privateKey } }),
-			...issuerConfig({ url: issuerUrl }),
-			// Most tests compose no subject check, so the section states none unless a test says otherwise.
-			tokens: { "subject-check": "none", ...section },
-		},
-		runtime,
+		keys = keysModule,
+	}: {
+		readonly extra?: Module[];
+		readonly origin?: string;
+		readonly issuerUrl?: string;
+		readonly keys?: Module;
+	} = {},
+) => ({
+	modules: [
+		http,
+		keys,
+		issuerModule,
+		senderBindingModule,
+		tokensModule,
+		revokedInMemory(() => runtime.clock.now()).module,
+		...extra,
+	],
+	config: {
+		...kernelConfig(),
+		...httpConfig(origin ? { "public-origin": origin } : {}),
+		// One key across boots, so a token from one boot can be read by another.
+		...keysConfig({ signing: { kid: "k", alg: "EdDSA", "private-key": privateKey } }),
+		...issuerConfig({ url: issuerUrl }),
+		// Most tests compose no subject check, so the section states none unless a test says otherwise.
+		tokens: { "subject-check": "none", ...section },
+	},
+	runtime,
+});
+
+/** The lines naming `event` that booting this assembly logs. */
+async function warnedOf(event: string, ...args: Parameters<typeof assembly>) {
+	const recorded = recordingLog();
+	await assemble({
+		...assembly(...args),
+		runtime: quietRuntime({ ...runtime, log: recorded.log }),
 	});
+	return recorded.lines().filter((line) => line.event === event);
+}
+
+async function assembled(...args: Parameters<typeof assembly>) {
+	return assemble(assembly(...args));
 }
 
 describe("tokens", () => {
-	it("issues access tokens that verify until they expire", async () => {
+	it("issues access tokens that verify until they expire [rfc6750-5.2-f]", async () => {
 		const t = await boot({
 			"access-token-lifetime": "1m",
 			revocation: "unsupported",
@@ -105,6 +123,7 @@ describe("tokens", () => {
 			id: issued.id,
 			grant,
 			expiresAt: now + 60_000,
+			standingAt: now,
 			tokenType: "Bearer",
 		});
 		now = start + 60_000;
@@ -121,7 +140,7 @@ describe("tokens", () => {
 	});
 
 	it("stamps a binding into cnf, and takes the token type from the kind that writes the member", async () => {
-		const kind = defineModule({ name: "binding-one" }, (m) => [
+		const kind = defineModule({ name: "binding-one", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(senderBindings).by(() => ({
 				member: "one",
 				tokenType: "ONE",
@@ -159,6 +178,19 @@ describe("tokens", () => {
 		expect(t.revocable()).toBe(false);
 	});
 
+	it("warns at every start where revocation is unsupported, and not where it is a denylist", async () => {
+		const warned = (revocation: string) =>
+			warnedOf("tokens.revocation_unsupported", { revocation });
+		expect(await warned("unsupported")).toEqual([
+			{
+				level: "warn",
+				event: "tokens.revocation_unsupported",
+				fields: { reason: "an access token issued cannot be revoked before it expires" },
+			},
+		]);
+		expect(await warned("denylist")).toEqual([]);
+	});
+
 	it("refuses to start until revocation is decided", async () => {
 		await expect(boot({})).rejects.toBeInstanceOf(BootRefused);
 	});
@@ -168,7 +200,7 @@ it("refuses a valid access token that a contributed condition no longer holds fo
 	const seen: { id: string; subject: string; issuedAt: number }[] = [];
 	let answer: "holds" | "revoked" = "holds";
 	const down = unavailableSwitch<AccessCondition>();
-	const condition = defineModule({ name: "condition" }, (m) => [
+	const condition = defineModule({ name: "condition", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(accessConditions).by(() =>
 			down.wrap({
 				name: "test",
@@ -182,7 +214,8 @@ it("refuses a valid access token that a contributed condition no longer holds fo
 	const t = await boot({ revocation: "unsupported" }, { extra: [condition] });
 	const issued = await issueFor(t, grant);
 	expect((await t.verifyAccess(issued.token)).kind).toBe("valid");
-	expect(seen).toEqual([{ id: issued.id, subject: "s", issuedAt: Math.floor(now / 1000) * 1000 }]);
+	const second = Math.floor(now / 1000) * 1000;
+	expect(seen).toEqual([{ id: issued.id, subject: "s", issuedAt: second, standingAt: second }]);
 	answer = "revoked";
 	expect(await t.verifyAccess(issued.token)).toEqual({ kind: "invalid", reason: "revoked" });
 	down.unavailable("holds");
@@ -191,7 +224,7 @@ it("refuses a valid access token that a contributed condition no longer holds fo
 
 it("asks the subject check whether a token's subject was revoked since it was issued", async () => {
 	let answer: "holds" | "revoked" = "holds";
-	const check = defineModule({ name: "check" }, (m) => [
+	const check = defineModule({ name: "check", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(subjectChecks).by(() => ({ holds: async () => answer })),
 	]);
 	const t = await boot(
@@ -206,7 +239,7 @@ it("asks the subject check whether a token's subject was revoked since it was is
 
 it("refuses to start unless exactly one module checks subjects, or the section states that none does", async () => {
 	const check = (name: string) =>
-		defineModule({ name }, (m) => [
+		defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(subjectChecks).by(() => ({ holds: async () => "holds" as const })),
 		]);
 	const unchecked = {
@@ -222,6 +255,34 @@ it("refuses to start unless exactly one module checks subjects, or the section s
 	await boot(stated);
 });
 
+it("warns at every start where the section states that no module checks subjects", async () => {
+	const check = defineModule({ name: "check", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(subjectChecks).by(() => ({ holds: async () => "holds" as const })),
+	]);
+	const warned = (section: Record<string, unknown>, extra: Module[] = []) =>
+		warnedOf("tokens.subjects_unchecked", section, { extra });
+	expect(await warned({ revocation: "denylist" })).toEqual([
+		{
+			level: "warn",
+			event: "tokens.subjects_unchecked",
+			fields: { reason: "a revoked subject's access tokens are taken until they expire" },
+		},
+	]);
+	expect(await warned({ revocation: "denylist", "subject-check": undefined }, [check])).toEqual([]);
+});
+
+it("says whether subjects are checked: false only where the section states none [guarantee-4-e]", async () => {
+	const check = defineModule({ name: "check", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(subjectChecks).by(() => ({ holds: async () => "holds" as const })),
+	]);
+	const checked = await boot(
+		{ revocation: "unsupported", "subject-check": undefined },
+		{ extra: [check] },
+	);
+	expect(checked.subjectsChecked()).toBe(true);
+	expect((await boot({ revocation: "unsupported" })).subjectsChecked()).toBe(false);
+});
+
 it("names and stamps the issuer that issuer owns", async () => {
 	const t = await boot(
 		{ revocation: "unsupported" },
@@ -232,9 +293,9 @@ it("names and stamps the issuer that issuer owns", async () => {
 	expect((await t.verifyAccess(issued.token)).kind).toBe("valid");
 });
 
-it("names among the issuer's metadata where the keys its tokens are signed with are published, on the public origin", async () => {
+it("names among the issuer's metadata where the keys its tokens are signed with are published, on the public origin, or on the issuer's where none is written [oidc-discovery-3-j]", async () => {
 	let seen: readonly MetadataItem[] = [];
-	const reader = defineModule({ name: "reader" }, (m) => [
+	const reader = defineModule({ name: "reader", replicaSafe: false, takes: [metadata] }, (m) => [
 		m.provide(contract<readonly MetadataItem[]>("seen")).by(async (c) => {
 			seen = await c.collect(metadata);
 			return seen;
@@ -248,8 +309,8 @@ it("names among the issuer's metadata where the keys its tokens are signed with 
 		issuerUrl: "https://as.example/tenant",
 	});
 	expect(jwks(seen)).toBe("https://as.example/.well-known/jwks.json");
-	await boot(section, { extra: [reader] });
-	expect(jwks(seen)).toBeUndefined();
+	await boot(section, { extra: [reader], issuerUrl: "https://login.example/tenant" });
+	expect(jwks(seen)).toBe("https://login.example/.well-known/jwks.json");
 });
 
 it("writes the actor chain as act, and amr, auth_time and acr, only when the grant gives them", async () => {
@@ -318,14 +379,41 @@ it("writes one audience as a string and more as a list, an empty scope not at al
 	expect(claimsOf(two.token)).toMatchObject({ aud: ["a", "b"], scope: "read" });
 });
 
-it("issues a token already at its end when the cap has passed", async () => {
+// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
+// Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
+it("issues access tokens none can make without its signing key, a changed claim or signature, another key or none refused, each with its own 128-bit id [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c] [rfc6749-10.3-b] [rfc6750-5.2-b]", async () => {
 	const t = await boot({ revocation: "unsupported" });
-	const issued = await issueFor(t, grant, { notAfter: now - 10_000 });
-	expect([issued.expiresIn, issued.expiresAt]).toEqual([0, Math.floor(now / 1000) * 1000]);
+	const [one, two] = [await issueFor(t, grant), await issueFor(t, grant)];
+	for (const { id } of [one, two]) expect(drawn).toContain(id);
+	expect(one.id).not.toBe(two.id);
+	expect((await t.verifyAccess(one.token)).kind).toBe("valid");
+	const [header = "", payload = "", signature = ""] = one.token.split(".");
+	const encoded = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+	const changedClaim = `${header}.${encoded({ ...claimsOf(one.token), sub: "mallory" })}.${signature}`;
+	const flipped = Buffer.from(signature, "base64url");
+	flipped[0] = (flipped[0] ?? 0) ^ 1;
+	const changedSignature = `${header}.${payload}.${flipped.toString("base64url")}`;
+	const otherKey = generateKeyPairSync("ed25519").privateKey;
+	const otherSignature = sign(null, Buffer.from(`${header}.${payload}`), otherKey);
+	const anotherKey = `${header}.${payload}.${otherSignature.toString("base64url")}`;
+	const unsigned = `${encoded({ alg: "none", typ: "JWT" })}.${payload}.`;
+	for (const forged of [changedClaim, changedSignature, anotherKey, unsigned]) {
+		expect((await t.verifyAccess(forged)).kind, forged).toBe("invalid");
+	}
+});
+
+it("refuses a token whose cap has passed, handing none out", async () => {
+	const t = await boot({ revocation: "unsupported" });
+	expect(await t.issue({ grant, grantType: "test" }, { notAfter: now - 10_000 })).toEqual({
+		kind: "refused",
+		policy: "tokens",
+		reason: "no_lifetime_left",
+		description: "expired",
+	});
 });
 
 it("refuses a token another issuer stamped, and one bound by two members", async () => {
-	const kinds = defineModule({ name: "two-kinds" }, (m) =>
+	const kinds = defineModule({ name: "two-kinds", replicaSafe: true, takes: [] }, (m) =>
 		["one", "two"].map((member) =>
 			m.contribute(senderBindings).by(() => ({
 				member,
@@ -355,17 +443,93 @@ it("answers unsupported to any revocation where revocation is not configured, a 
 	expect(await t.revokeAccess("garbage")).toEqual({ kind: "unsupported" });
 });
 
-it("reads the access token's lifetime with its unit, in whole seconds, an hour unless set", () => {
+it("reads the access token's lifetime with its unit, in whole seconds, an hour by default, which an operator may set up to a day [rfc6750-5.3-b]", () => {
 	const lifetimeOf = (settings: object) =>
 		section.safeParse({ revocation: "unsupported", ...settings }).data?.["access-token-lifetime"];
-	expect([{}, { "access-token-lifetime": "2h" }].map(lifetimeOf)).toEqual([
-		defaultLifetimeSeconds,
-		7200,
-	]);
+	// The default is an hour, the most RFC 6750 §5.3 asks; a longer one, for any client, is the operator's choice.
+	expect(defaultLifetimeSeconds).toBe(3600);
+	expect(
+		[{}, { "access-token-lifetime": "2h" }, { "access-token-lifetime": "2s" }].map(lifetimeOf),
+	).toEqual([defaultLifetimeSeconds, 7200, 2]);
+	// A second's lifetime, its iat cut to the second, leaves less than a second once signed: never issued.
 	const refused = [
 		{ "access-token-lifetime-seconds": 60 },
 		{ "access-token-lifetime": 3600 },
 		{ "access-token-lifetime": "1500ms" },
+		{ "access-token-lifetime": "1s" },
 	];
-	expect(refused.map(lifetimeOf)).toEqual([undefined, undefined, undefined]);
+	expect(refused.map(lifetimeOf)).toEqual([undefined, undefined, undefined, undefined]);
+});
+
+it("takes all it names under either revocation, the denylist only where it keeps one", async () => {
+	for (const revocation of ["denylist", "unsupported"]) {
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused(assembly({ revocation }))).tokens, revocation).toBeUndefined();
+	}
+});
+
+/** keys, its signing of an access token taking `signing.ms` on the kernel's clock: a remote signer, say. */
+const signing = { ms: 0 };
+const slowKeys: Module = {
+	...keysModule,
+	provides: (keysModule.provides ?? []).map((part) =>
+		part.contract !== accessTokenSigning
+			? part
+			: {
+					contract: part.contract,
+					create: async (context: Parameters<typeof part.create>[0]) => {
+						const real = (await part.create(context)) as AccessTokenSigning;
+						return {
+							...real,
+							sign: async (claims: Readonly<Record<string, unknown>>) => {
+								const token = await real.sign(claims);
+								now += signing.ms;
+								return token;
+							},
+						};
+					},
+				},
+	),
+};
+
+describe("the lifetime answered, after the signing", () => {
+	beforeEach(() => {
+		signing.ms = 0;
+	});
+	const slow = () =>
+		boot({ "access-token-lifetime": "1m", revocation: "unsupported" }, { keys: slowKeys });
+
+	it("answers expiresIn from when the token is signed, its expiry as it was set", async () => {
+		const t = await slow();
+		expect(await issueFor(t, grant)).toMatchObject({ expiresIn: 60, expiresAt: start + 60_000 });
+		now = start;
+		signing.ms = 2500;
+		// Rounded up to whole seconds: 57.5 left is 58.
+		const late = await issueFor(t, grant);
+		expect(late).toMatchObject({ expiresIn: 58, expiresAt: start + 60_000 });
+		expect(claimsOf(late.token)).toMatchObject({ iat: start / 1000, exp: start / 1000 + 60 });
+	});
+
+	it("refuses a token its signing leaves less than a second, and answers what is left, rounded up, for one it does not", async () => {
+		const t = await slow();
+		const capped = { notAfter: start + 2000 };
+		for (const ms of [3000, 2000, 1500]) {
+			now = start;
+			signing.ms = ms;
+			expect(await t.issue({ grant, grantType: "test" }, capped), String(ms)).toMatchObject({
+				kind: "refused",
+				policy: "tokens",
+				reason: "no_lifetime_left",
+			});
+		}
+		for (const [ms, left] of [
+			[1000, 1],
+			[0, 2],
+		] as const) {
+			now = start;
+			signing.ms = ms;
+			const issued = await issueFor(t, grant, capped);
+			expect([issued.expiresIn, issued.expiresAt], String(ms)).toEqual([left, start + 2000]);
+		}
+	});
 });

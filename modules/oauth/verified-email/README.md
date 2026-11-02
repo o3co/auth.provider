@@ -21,4 +21,4 @@
 - When the attributes cannot be read, it is unavailable, never a refusal.
 
 ## Depends on
-- `kernel`, `tokens`, `subject-attributes`, `users` (attribute names), `token-endpoint` (the client credentials grant's name)
+- `kernel`, `tokens`, `subject-attributes`, `users` (attribute names)

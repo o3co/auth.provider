@@ -2,19 +2,15 @@ import { Unavailable } from "@mod/kernel";
 import type { FactorKind, Opened, Verified } from "@mod/mfa-extensions";
 import type { SubjectAttributes } from "@mod/subject-attributes";
 import { userAttribute } from "@mod/users";
-import {
-	type Ceremonies,
-	type Credential,
-	credentialOf,
-	freshHandle,
-	type Verification,
-} from "@mod/webauthn";
+import { type Ceremonies, credentialOf, freshHandle, type Verification } from "@mod/webauthn";
 import { z } from "zod";
 import { showable } from "./name.ts";
 
-/** RFC 8176: a key the authenticator keeps on the device, or one it may copy elsewhere. */
-const hardware = "hwk";
-const software = "swk";
+/**
+ * A key's proof of possession, how the key is kept unsaid (OpenID Connect EAP ACR Values): no
+ * attestation is asked, so nothing tells a key kept in hardware from one kept in software.
+ */
+const possession = "pop";
 
 /**
  * What a factor keeps in its secret: the subject's user handle, and the challenge its binding answers
@@ -50,7 +46,6 @@ const stored = <T>(value: T | undefined): T => {
 	return value;
 };
 const credentialIn = (state: unknown) => stored(credentialOf(state));
-const amrOf = (credential: Credential) => [credential.backupEligible ? software : hardware];
 
 export interface KindParts {
 	readonly ceremonies: Ceremonies;
@@ -76,7 +71,7 @@ export function webauthnKind(p: KindParts): FactorKind {
 		const { challenge, handle, until } = stored(secretOf(secret));
 		const attested = await p.ceremonies.attest(response, challenge, handle, p.verification, until);
 		if (attested.kind !== "attested") return { kind: "invalid" };
-		return { kind: "valid", state: attested.credential, amr: amrOf(attested.credential) };
+		return { kind: "valid", state: attested.credential, amr: [possession] };
 	};
 	/** Any later proof answers the request the factor's last challenge kept. */
 	const assertion = async (state: unknown, response: unknown, kept?: string): Promise<Verified> => {
@@ -92,14 +87,14 @@ export function webauthnKind(p: KindParts): FactorKind {
 			until,
 		);
 		if (asserted.kind === "asserted") {
-			return { kind: "valid", state: asserted.credential, amr: amrOf(asserted.credential) };
+			return { kind: "valid", state: asserted.credential, amr: [possession] };
 		}
 		// A count that did not go up is an assertion older than one already used.
 		return { kind: asserted.reason === "sign-count" ? "replayed" : "invalid" };
 	};
 	return {
 		kind: "webauthn",
-		amr: [hardware, software],
+		amr: [possession],
 		addsSecondFactor: true,
 		guessable: false,
 		counts: true,

@@ -1,5 +1,5 @@
 import { needed } from "@mod/combinations";
-import { type AreaScene, newPartsOf, registerDriver } from "../areas.ts";
+import { type AreaScene, newPartsOf, registerDriver, type StartOptions } from "../areas.ts";
 import { generated, type StoreKind, sectionsOf, started, stores, workspace } from "./app.ts";
 import { patternDriver } from "./pattern.ts";
 
@@ -39,10 +39,10 @@ export function composition(scene: AreaScene) {
 const composedDriver = {
 	can: () => true,
 	differs: () => false,
-	async start(scene: AreaScene) {
+	async start(scene: AreaScene, options?: StartOptions) {
 		const { modules, config, layers, store } = composition(scene);
 		const dir = await generated(modules.join(","), (target) => ({ target, modules, workspace }));
-		return started(dir, config, scene, store, undefined, layers);
+		return started(dir, config, scene, store, undefined, layers, options);
 	},
 };
 

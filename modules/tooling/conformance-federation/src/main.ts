@@ -10,4 +10,7 @@ export {
 	type GrantsPart,
 	grantsLoginPage,
 	type IdpScene,
+	landedStatus,
+	linkStepUpPage,
+	readsUserinfo,
 } from "./area.ts";

@@ -1,5 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
+import { claimsSelections, type Selection, selectionConsents } from "@mod/claims-selection";
+import claimsSelectionModule from "@mod/claims-selection/module";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import { type Client, clients } from "@mod/clients";
@@ -10,7 +13,7 @@ import {
 	confidentialClient,
 	publicClient,
 } from "@mod/clients/testing";
-import { additions, codes } from "@mod/code-grant";
+import { additions, codes, redemptionHooks, sessionRedemptions } from "@mod/code-grant";
 import codeGrantModule from "@mod/code-grant/module";
 import { codeGrantConfig } from "@mod/code-grant/testing";
 import codeGrantStore from "@mod/code-grant-store/module";
@@ -28,12 +31,13 @@ import {
 	isUnavailable,
 	kernelConfig,
 	type Module,
+	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, switchedModule, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionParticipants from "@mod/session-participants/module";
 import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
@@ -51,6 +55,7 @@ import {
 	type AccessGrant,
 	type IssueLimits,
 	issuancePolicies,
+	referenceOf,
 	type Tokens,
 	tokens,
 } from "@mod/tokens";
@@ -58,7 +63,7 @@ import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { lineage } from "../src/contract.ts";
 import refreshModule from "../src/module.ts";
-import { toStored, toStoredRedemption } from "../src/record.ts";
+import { liveFamily, toStored, toStoredRedemption } from "../src/record.ts";
 import { section } from "../src/section.ts";
 import { refreshConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
@@ -67,13 +72,17 @@ import { memoryStores } from "./stores.ts";
 let shift = 0;
 /** Bytes the next draw of 16 takes, so a test can know the name of the next family. */
 let forced: Uint8Array | undefined;
+/** Every draw of 32 bytes the composition made, as base64url, so a test can tell what a secret was made from. */
+const drawn: string[] = [];
 const runtime = quietRuntime({
 	clock: { now: () => Date.now() + shift },
 	random: {
 		bytes: (n) => {
 			const next = n === 16 ? forced : undefined;
 			if (next) forced = undefined;
-			return next ?? new Uint8Array(randomBytes(n));
+			const bytes = next ?? new Uint8Array(randomBytes(n));
+			if (n === 32) drawn.push(Buffer.from(bytes).toString("base64url"));
+			return bytes;
 		},
 	},
 });
@@ -82,6 +91,7 @@ afterEach(async () => {
 	vi.useRealTimers();
 	shift = 0;
 	forced = undefined;
+	drawn.length = 0;
 	await stop();
 });
 const verifier = "v".repeat(43);
@@ -94,7 +104,9 @@ function collecting<T>(name: string, point: ExtensionPoint<T>) {
 	const seen = contract<readonly T[]>(name);
 	return {
 		seen,
-		module: defineModule({ name }, (m) => [m.provide(seen).by((c) => c.collect(point))]),
+		module: defineModule({ name, replicaSafe: false, takes: [point] }, (m) => [
+			m.provide(seen).by((c) => c.collect(point)),
+		]),
 	};
 }
 const grantsSeen = collecting("grants-seen", grants);
@@ -107,33 +119,69 @@ const issuedAccess = async (t: Tokens, grant: AccessGrant, limits?: IssueLimits)
 	if (issued.kind !== "issued") throw new Error(issued.reason);
 	return issued.access;
 };
-async function serve(
-	options: {
-		revocation?: "denylist" | "unsupported";
-		lifetime?: number;
-		/** An access token's own lifetime, in seconds, when not tokens' default. */
-		accessLifetime?: number;
-		/** Whether a confidential client's families are bound too. */
-		bindConfidential?: boolean;
-		extra?: Module[];
-		caps?: { sessionFamilies: number; issuedAccess: number };
-	} = {},
-) {
+type Options = {
+	revocation?: "denylist" | "unsupported";
+	lifetime?: number;
+	/** An access token's own lifetime, in seconds, when not tokens' default. */
+	accessLifetime?: number;
+	/** Whether a confidential client's families are bound too. */
+	bindConfidential?: boolean;
+	extra?: Module[];
+	caps?: { sessionFamilies: number; issuedAccess: number };
+};
+
+/** Real references to revoke: each the first access token of a family of its own, which lives, so only the denylist ends it. */
+async function othersOf(s: Awaited<ReturnType<typeof serve>>, n: number) {
+	const found: { readonly reference: string; readonly access: string | undefined }[] = [];
+	for (let i = 0; i < n; i++) {
+		const other = await s.redeem();
+		const [listed] = await s.stores.byFamily.members(familyNameOf(other.refresh_token));
+		found.push({ reference: listed?.member ?? "", access: other.access_token });
+	}
+	return found;
+}
+
+/** A family whose cap of two pushed out its first access token, whose revocation failed: the token's reference. */
+async function pushedOutFamily() {
+	const s = await serve({
+		lifetime: 86_400,
+		accessLifetime: 600,
+		caps: { sessionFamilies: 1000, issuedAccess: 2 },
+	});
+	const first = await s.redeem();
+	shift += 1000;
+	const second = await s.refresh(first.refresh_token);
+	shift += 1000;
+	referenced.length = 0;
+	s.down.tokens.failNext("revokeReferenced");
+	expect((await s.refresh(second.body.refresh_token)).status).toBe(503);
+	const [pushed] = referenced;
+	expect(pushed?.done).toBe(false);
+	return { s, first, second, pushed: pushed?.reference ?? "" };
+}
+
+/** What `serve` assembles, with the stand-ins it reaches into. */
+function assembly(options: Options = {}) {
 	const simulated = simulatedStore();
 	const audited = auditStandIn();
 	const stores = memoryStores(options.caps);
+	const selections = selectionStores();
 	const down = { tokens: unavailableSwitch<Tokens>("tokens") };
 	const both = ["authorization_code", "refresh_token"];
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			switchedModule(
-				tokensStandIn({
-					revocable: (options.revocation ?? "denylist") === "denylist",
-					...(options.accessLifetime ? { lifetimeSeconds: options.accessLifetime } : {}),
-				}),
+				switchedModule(
+					tokensStandIn({
+						revocable: (options.revocation ?? "denylist") === "denylist",
+						...(options.accessLifetime ? { lifetimeSeconds: options.accessLifetime } : {}),
+					}),
+					tokens,
+					down.tokens,
+				),
 				tokens,
-				down.tokens,
+				capturing,
 			),
 			issuerModule,
 			clientsModule,
@@ -154,6 +202,10 @@ async function serve(
 			codeGrantStore,
 			refreshModule,
 			stores.module,
+			claimsSelectionModule,
+			selections.module,
+			judging,
+			meanwhile.module,
 			grantsSeen.module,
 			tiesSeen.module,
 			...(options.extra ?? []),
@@ -177,14 +229,23 @@ async function serve(
 			}),
 		},
 		runtime,
-	});
+	};
+	return { input, audited, stores, down, selections };
+}
+
+async function serve(options: Options = {}) {
+	const { input, audited, stores, down, selections } = assembly(options);
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
-	const { session } = await app.get(sessions).complete(testRequest(), {
-		subject: "alice",
-		amr: ["pwd"],
-		authenticatedAt: runtime.clock.now(),
-	});
+	const { session } = openedOf(
+		await app.get(sessions).open(testRequest(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		}),
+	);
 	const post = async (path: string, as: string, form: Record<string, string>) => {
 		const credentials: Record<string, string> =
 			as === "pub" ? { client_id: as } : { client_id: as, client_secret: clientSecret(as) };
@@ -227,10 +288,11 @@ async function serve(
 	const redeem = async (
 		as = "app",
 		extra: Record<string, string> = {},
-		facts: { readonly acr?: string } = {},
+		facts: { readonly acr?: string; readonly selection?: Selection } = {},
 	) => {
+		const { selection, ...kept } = facts;
 		const code = await app.get(codes).issue({
-			...facts,
+			...kept,
 			clientId: as,
 			redirectUri: "https://app.example/cb",
 			challenge,
@@ -239,6 +301,8 @@ async function serve(
 			session: session.id,
 			subject: "alice",
 		});
+		const redemption = app.get(codes).redemptionOf(code);
+		if (selection) await app.get(claimsSelections).keepForCode(redemption, selection, 600_000);
 		const exchange = async () =>
 			(
 				await grant("authorization_code", as, {
@@ -248,7 +312,7 @@ async function serve(
 					...extra,
 				})
 			).body;
-		return Object.assign(await exchange(), { again: exchange });
+		return Object.assign(await exchange(), { again: exchange, redemption });
 	};
 	const refresh = (token: string | undefined, as = "app", extra: Record<string, string> = {}) =>
 		grant("refresh_token", as, { refresh_token: token ?? "", ...extra });
@@ -265,11 +329,295 @@ async function serve(
 		refresh,
 		active,
 		audited: audited.events,
+		selections,
 	};
 }
 
+/** The scopes the subject agreed to, which a test may change. */
+const agreed = new Set(["read", "write"]);
+const judging = defineModule({ name: "judging", replicaSafe: false, takes: [] }, (m) => [
+	m.contribute(selectionConsents).by(() => ({
+		consented: async (_c: Client, _s: string, scope: string) => agreed.has(scope),
+	})),
+]);
+/** claims-selection's store in memory; a family's record fails to be written while `failFamilies`. */
+function selectionStores() {
+	const state = {
+		failFamilies: false,
+		failTokens: false,
+		/** Runs before each read, with the name read. */
+		beforeRead: undefined as ((name: string) => void) | undefined,
+		/** Runs after each save, with the name saved; the save answers once it has. */
+		afterSave: undefined as ((name: string) => void | Promise<void>) | undefined,
+	};
+	const { module } = claimsSelectionInMemory({
+		around: (records) => ({
+			read: async (name) => {
+				state.beforeRead?.(name);
+				return records.read(name);
+			},
+			save: async (name, value, ms) => {
+				if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
+				if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
+				const saved = await records.save(name, value, ms);
+				await state.afterSave?.(name);
+				return saved;
+			},
+		}),
+	});
+	return { module, state };
+}
+/** The access tokens issued, in order, as tokens issued them. */
+const issuedTokens: string[] = [];
+/** The references each revocation was asked for, in order, and whether tokens put each on its denylist. */
+const referenced: { readonly reference: string; readonly done: boolean }[] = [];
+/** Runs once, as the next revocation is asked for, before it is carried out. */
+let duringRevoke: (() => Promise<void>) | undefined;
+const capturing = {
+	// Over an empty target: the tokens handed in are frozen, so their own members cannot be swapped.
+	wrap: (inner: Tokens) =>
+		new Proxy({} as Tokens, {
+			get: (_target, prop) => {
+				if (prop === "revokeReferenced") {
+					return async (reference: string) => {
+						const during = duringRevoke;
+						duringRevoke = undefined;
+						if (during) await during();
+						const out = await inner.revokeReferenced(reference).catch((error: unknown) => {
+							referenced.push({ reference, done: false });
+							throw error;
+						});
+						referenced.push({ reference, done: out.kind === "revoked" });
+						return out;
+					};
+				}
+				if (prop !== "issue") {
+					const member = Reflect.get(inner, prop);
+					return typeof member === "function" ? member.bind(inner) : member;
+				}
+				return async (...args: Parameters<Tokens["issue"]>) => {
+					const out = await inner.issue(...args);
+					if (out.kind === "issued") issuedTokens.push(out.access.token);
+					return out;
+				};
+			},
+		}),
+} as never;
+/** Runs `during` once a code's token is issued, before the ID token, the additions and the hooks. */
+const meanwhile = (() => {
+	const state = { during: undefined as (() => void) | undefined };
+	const module = defineModule({ name: "meanwhile", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(sessionRedemptions).by(() => ({
+			name: "meanwhile",
+			redeemed: async () => {
+				state.during?.();
+			},
+		})),
+	]);
+	return { module, state };
+})();
+const selected: Selection = {
+	idToken: { names: [], constraints: [] },
+	userinfo: {
+		names: [
+			{ name: "name", scope: "read" },
+			{ name: "email", scope: "write" },
+		],
+		constraints: [{ name: "email", value: "a@example.com" }],
+	},
+};
+const idOf = async (s: Awaited<ReturnType<typeof serve>>, token: string | undefined) => {
+	const checked = await s.app.get(tokens).verifyAccess(token ?? "");
+	if (checked.kind !== "valid") throw new Error("not a valid token");
+	return checked.id;
+};
+
+/** The family a redemption started, as its record names it; none where none was named. */
+const familyOf = async (s: Awaited<ReturnType<typeof serve>>, redemption: string) => {
+	const kept = (await s.stores.marks.records.read(redemption)) as { family?: string } | undefined;
+	return kept?.family;
+};
+
+describe("a code's selection through its family", () => {
+	afterEach(() => {
+		agreed.clear();
+		for (const scope of ["read", "write"]) agreed.add(scope);
+	});
+
+	it("keeps for each refreshed token the family's selection, its names cut to what is agreed to now", async () => {
+		const s = await serve();
+		const first = await s.redeem("app", {}, { selection: selected });
+		const read = s.app.get(claimsSelections);
+		expect(await read.forToken(await idOf(s, first.access_token))).toEqual(selected.userinfo);
+		const once = await s.refresh(first.refresh_token);
+		expect(await read.forToken(await idOf(s, once.body.access_token))).toEqual(selected.userinfo);
+		agreed.delete("write");
+		const twice = await s.refresh(once.body.refresh_token);
+		expect(await read.forToken(await idOf(s, twice.body.access_token))).toEqual({
+			names: [{ name: "name", scope: "read" }],
+			constraints: selected.userinfo.constraints,
+		});
+		// Agreed to again: the family's selection was never cut, so the name comes back.
+		agreed.add("write");
+		const thrice = await s.refresh(twice.body.refresh_token);
+		expect(await read.forToken(await idOf(s, thrice.body.access_token))).toEqual(selected.userinfo);
+	});
+
+	it("keeps nothing for the tokens of a family whose code had no selection", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const once = await s.refresh(first.refresh_token);
+		expect(
+			await s.app.get(claimsSelections).forToken(await idOf(s, once.body.access_token)),
+		).toBeUndefined();
+	});
+
+	it("voids the code, revoking its token and ending its family, when the family's selection cannot be kept", async () => {
+		const s = await serve();
+		s.selections.state.failFamilies = true;
+		issuedTokens.length = 0;
+		const answer = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.failFamilies = false;
+		expect(answer).toMatchObject({ error: "temporarily_unavailable" });
+		expect(issuedTokens).toHaveLength(1);
+		expect(await s.active(issuedTokens[0])).toBe(false);
+		const family = await familyOf(s, answer.redemption);
+		expect(family).toEqual(expect.any(String));
+		expect(liveFamily(await s.stores.kept.records.read(family ?? ""))).toBeUndefined();
+		expect(await answer.again()).toMatchObject({ error: "invalid_grant" });
+	});
+
+	it("ends a family whose session closes while its selection is kept, before its session lists it, giving no refresh token", async () => {
+		const s = await serve();
+		s.selections.state.afterSave = async (name) => {
+			if (name.startsWith("f.")) await s.app.get(sessions).close(s.session.id);
+		};
+		const answer = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.afterSave = undefined;
+		expect(answer.refresh_token).toBeUndefined();
+		const family = (await familyOf(s, answer.redemption)) ?? "";
+		expect(liveFamily(await s.stores.kept.records.read(family))).toBeUndefined();
+		expect(await s.active(answer.access_token)).toBe(false);
+	});
+
+	it("lists no family under its session whose selection cannot be kept", async () => {
+		const s = await serve();
+		s.selections.state.failFamilies = true;
+		const answer = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.failFamilies = false;
+		expect(answer).toMatchObject({ error: "temporarily_unavailable" });
+		const family = await familyOf(s, answer.redemption);
+		const listed = (await s.stores.bySession.members(s.session.id)).map((m) => m.member);
+		expect(listed).not.toContain(family);
+	});
+
+	it("never pushes a session's families out of its list, however often a new family's selection cannot be kept", async () => {
+		const s = await serve({ caps: { sessionFamilies: 2, issuedAccess: 1000 } });
+		const kept = [await s.redeem(), await s.redeem()];
+		s.selections.state.failFamilies = true;
+		for (let i = 0; i < 3; i++) {
+			expect(await s.redeem("app", {}, { selection: selected })).toMatchObject({
+				error: "temporarily_unavailable",
+			});
+		}
+		s.selections.state.failFamilies = false;
+		for (const family of kept) expect((await s.refresh(family.refresh_token)).status).toBe(200);
+	});
+
+	it("fails the round, revoking the token it issued and leaving the refresh token usable, when a refreshed token's selection cannot be kept", async () => {
+		const s = await serve();
+		const first = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.failTokens = true;
+		issuedTokens.length = 0;
+		expect((await s.refresh(first.refresh_token)).status).toBe(503);
+		s.selections.state.failTokens = false;
+		expect(issuedTokens).toHaveLength(1);
+		expect(await s.active(issuedTokens[0])).toBe(false);
+		const again = await s.refresh(first.refresh_token);
+		expect(again.status).toBe(200);
+		expect(
+			await s.app.get(claimsSelections).forToken(await idOf(s, again.body.access_token)),
+		).toEqual(selected.userinfo);
+	});
+
+	it("never lets a family outlive its selection, however late the family is written after its selection", async () => {
+		const s = await serve({ lifetime: 600 });
+		// The family's record is written 130 seconds after its selection, past the two minutes' allowance.
+		s.selections.state.afterSave = (name) => {
+			if (name.startsWith("f.")) shift += 130_000;
+		};
+		const first = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.afterSave = undefined;
+		// Ten seconds before the family's end, which leaves its access token time.
+		shift += 600_000 - 130_000 - 10_000;
+		const live = await s.refresh(first.refresh_token);
+		expect(live.status).toBe(200);
+		expect(
+			await s.app.get(claimsSelections).forToken(await idOf(s, live.body.access_token)),
+		).toEqual(selected.userinfo);
+		// 725 seconds in: past the selection's end (600 and the 120 allowance), before the end a family
+		// written 130 seconds late would have had. The family ends with its selection, never after.
+		shift += 135_000;
+		expect((await s.refresh(live.body.refresh_token)).body.error).toBe("invalid_grant");
+	});
+});
+
+describe("a redemption whose selection runs out between its steps", () => {
+	afterEach(() => {
+		meanwhile.state.during = undefined;
+	});
+
+	it("refuses a code its pin found past its life, before any family or token selection is kept", async () => {
+		const s = await serve();
+		// A stall between the code's use and its pin, past the code's ten minutes and the selection's minute more.
+		s.selections.state.beforeRead = (name) => {
+			if (name.startsWith("c.")) shift += 11 * 60_000;
+		};
+		const answer = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.beforeRead = undefined;
+		expect(answer).toMatchObject({ error: "invalid_grant" });
+		expect(answer).not.toHaveProperty("access_token");
+		expect(await familyOf(s, answer.redemption)).toBeUndefined();
+	});
+
+	it("keeps the pinned selection for the family and the token once the code's own selection is gone", async () => {
+		const s = await serve();
+		// Pinned near the code's end, at 9.5 minutes; then past the code's selection (11 minutes), within the pin.
+		s.selections.state.beforeRead = (name) => {
+			if (name.startsWith("c.")) shift += 9.5 * 60_000;
+		};
+		meanwhile.state.during = () => {
+			shift += 2 * 60_000;
+		};
+		const first = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.beforeRead = undefined;
+		meanwhile.state.during = undefined;
+		expect(await s.app.get(claimsSelections).forCode(first.redemption)).toEqual(selected);
+		expect(first).toHaveProperty("access_token");
+		const read = s.app.get(claimsSelections);
+		expect(await read.forToken(await idOf(s, first.access_token))).toEqual(selected.userinfo);
+		const once = await s.refresh(first.refresh_token);
+		expect(await read.forToken(await idOf(s, once.body.access_token))).toEqual(selected.userinfo);
+	});
+
+	it("voids the code, revoking its token and ending its family, once the pin itself is gone", async () => {
+		const s = await serve();
+		// Between the token's issuing and the additions: past the pin's five minutes.
+		meanwhile.state.during = () => {
+			shift += 5 * 60_000 + 1000;
+		};
+		issuedTokens.length = 0;
+		const answer = await s.redeem("app", {}, { selection: selected });
+		meanwhile.state.during = undefined;
+		expect(answer).toMatchObject({ error: "temporarily_unavailable" });
+		expect(await s.active(issuedTokens[0])).toBe(false);
+		const family = await familyOf(s, answer.redemption);
+		if (family) expect(liveFamily(await s.stores.kept.records.read(family))).toBeUndefined();
+	});
+});
+
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
-const narrowing = defineModule({ name: "narrowing" }, (m) => [
+const narrowing = defineModule({ name: "narrowing", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
 		target: ({ param, audience, within }) => {
 			const asked = param("resource");
@@ -321,7 +669,7 @@ describe("refresh tokens", () => {
 	});
 
 	// One outside the family but within the client is refused in conformance-code's resource scenes.
-	it("refuse an audience neither the family nor the client holds, keeping the token usable, and take the family's own", async () => {
+	it("refuse an audience neither the family nor the client holds, keeping the token usable, and take the family's own [rfc9700-4.14.2-b]", async () => {
 		const s = await serve({ extra: [narrowing] });
 		const { refresh_token: token } = await s.redeem();
 		expect((await s.refresh(token, "app", { resource: "https://two" })).body).toEqual({
@@ -449,6 +797,40 @@ describe("refresh tokens", () => {
 		expect(read?.kind).toBe("issued");
 	});
 
+	it("keep no access token in refresh's own record and lists, a family's tokens by their reference alone [rfc6749-10.3-a]", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const second = await s.refresh(first.refresh_token);
+		const issued = [first.access_token ?? "", String(second.body.access_token)];
+		const ids: string[] = [];
+		const references: string[] = [];
+		for (const token of issued) {
+			const checked = await s.app.get(tokens).verifyAccess(token);
+			if (checked.kind !== "valid") throw new Error("not valid");
+			ids.push(checked.id);
+			references.push(referenceOf(checked));
+		}
+		const family = familyNameOf(first.refresh_token);
+		const listed = (await s.stores.byFamily.members(family)).map((m) => m.member);
+		// The family's record, each token's link to it, the family's tokens, the session's families, and
+		// what its redemption and the settle list were given.
+		const kept = JSON.stringify([
+			s.stores.given,
+			s.stores.kept.peek(family),
+			ids.map((id) => s.stores.links.peek(id)),
+			listed,
+			await s.stores.bySession.members(s.session.id),
+		]);
+		// The code's redemption was written, so its record is searched too.
+		expect(s.stores.given).toContainEqual([
+			expect.any(String),
+			expect.objectContaining({ family }),
+		]);
+		for (const token of issued) expect(kept).not.toContain(token);
+		// The family's tokens, each by its id and end, the reference tokens revokes by.
+		expect([...listed].sort()).toEqual([...references].sort());
+	});
+
 	it("record the family a reuse revokes, with its subject and client, and never a token", async () => {
 		const s = await serve();
 		const first = await s.redeem();
@@ -483,7 +865,7 @@ describe("refresh tokens", () => {
 		}
 	});
 
-	it("narrow scope for one access token, never widen it, and keep the original grant for the family", async () => {
+	it("narrow scope for one access token, never widen it, and keep the original grant for the family [rfc6749-6-a] [rfc6749-6-e] [rfc9700-4.14.2-b]", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem();
 		const narrowed = await s.refresh(token, "app", { scope: "read" });
@@ -496,7 +878,7 @@ describe("refresh tokens", () => {
 		expect(back.body.scope).toBe("read write");
 	});
 
-	it("keep the original grant for an empty scope, as for none, and refuse a malformed one", async () => {
+	it("keep the original grant for an empty scope, as for none, and refuse a malformed one [rfc6749-3.2-b]", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem();
 		const malformed = await s.refresh(token, "app", { scope: "read  write" });
@@ -505,7 +887,7 @@ describe("refresh tokens", () => {
 		expect([empty.status, empty.body.scope]).toEqual([200, "read write"]);
 	});
 
-	it("refuse another client without spending the token", async () => {
+	it("refuse another client without spending the token [rfc6749-6-c] [rfc6749-10.4-b] [rfc6749-10.4-c]", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem();
 		expect((await s.refresh(token, "other")).body.error).toBe("invalid_grant");
@@ -532,14 +914,17 @@ describe("refresh tokens", () => {
 
 	it("stop working while the session falls short of a requirement to be used, as a closed one does", async () => {
 		const short = { now: false };
-		const requirement = defineModule({ name: "short-to-use" }, (m) => [
-			m.contribute(entryRequirements).by(() => ({
-				name: "mfa",
-				judges: ["use"],
-				admits: async () =>
-					short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
-			})),
-		]);
+		const requirement = defineModule(
+			{ name: "short-to-use", replicaSafe: false, takes: [] },
+			(m) => [
+				m.contribute(entryRequirements).by(() => ({
+					name: "mfa",
+					judges: ["use"],
+					admits: async () =>
+						short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+				})),
+			],
+		);
 		const s = await serve({ extra: [requirement] });
 		const first = await s.redeem();
 		short.now = true;
@@ -554,7 +939,41 @@ describe("refresh tokens", () => {
 		expect((await s.refresh(first.refresh_token)).body.error).toBe("invalid_grant");
 	});
 
-	it("refuse a token with anything after it, without spending the token", async () => {
+	it("are kept only as a hash of their secret, never the token or the secret itself [rfc6749-10.4-a]", async () => {
+		const s = await serve();
+		/** The family's record as kept now holds the hash of this token's secret, and neither the token nor the secret. */
+		const keptAsHash = (token: string | undefined) => {
+			const [family = "", secret = ""] = (token ?? "").split(".");
+			const kept = s.stores.kept.peek(family) as { current?: string } | undefined;
+			expect(kept?.current).toBe(createHash("sha256").update(secret).digest("base64url"));
+			expect(JSON.stringify(kept)).not.toContain(secret);
+		};
+		const first = await s.redeem();
+		keptAsHash(first.refresh_token);
+		const second = await s.refresh(first.refresh_token);
+		keptAsHash(second.body.refresh_token);
+	});
+
+	// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
+	// Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
+	it("carry a secret of 32 fresh random bytes, and refuse one whose family is none, or whose secret is changed, as a reuse that ends the family [rfc6749-10.4-e] [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c]", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const second = await s.refresh(first.refresh_token);
+		const secrets = [first.refresh_token, second.body.refresh_token].map(
+			(token) => token?.split(".")[1] ?? "",
+		);
+		for (const secret of secrets) expect(drawn).toContain(secret);
+		expect(secrets[0]).not.toBe(secrets[1]);
+		const token = second.body.refresh_token ?? "";
+		const [family = "", secret = ""] = token.split(".");
+		expect((await s.refresh(`${"z".repeat(22)}.${secret}`)).body.error).toBe("invalid_grant");
+		const changed = `${secret.startsWith("A") ? "B" : "A"}${secret.slice(1)}`;
+		expect((await s.refresh(`${family}.${changed}`)).body.error).toBe("invalid_grant");
+		expect((await s.refresh(token)).body.error).toBe("invalid_grant");
+	});
+
+	it("refuse a token with anything after it, without spending the token [rfc6749-6-d]", async () => {
 		const s = await serve();
 		const first = await s.redeem();
 		expect((await s.refresh(`${first.refresh_token}x`)).body.error).toBe("invalid_grant");
@@ -579,7 +998,7 @@ describe("refresh tokens", () => {
 
 	it("issue nothing a contributed policy refuses, and leave the token usable once it allows again", async () => {
 		const denying = { on: false };
-		const policy = defineModule({ name: "deny-alice" }, (m) => [
+		const policy = defineModule({ name: "deny-alice", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
@@ -600,7 +1019,7 @@ describe("refresh tokens", () => {
 
 	it("tell the policies a refresh continues a grant they already let through", async () => {
 		const seen: { grantType: string; continuing?: true }[] = [];
-		const watching = defineModule({ name: "watching" }, (m) => [
+		const watching = defineModule({ name: "watching", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "watching",
 				judge: async (request) => {
@@ -623,7 +1042,7 @@ describe("refresh tokens", () => {
 		);
 	});
 
-	it("are revoked with their family by the issuing client only", async () => {
+	it("are revoked with their family by the issuing client only [rfc7009-2-a] [rfc7009-2.1-c]", async () => {
 		const s = await serve();
 		const first = await s.redeem();
 		const token = first.refresh_token ?? "";
@@ -634,6 +1053,44 @@ describe("refresh tokens", () => {
 		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
 		expect((await s.refresh(next.refresh_token)).body.error).toBe("invalid_grant");
 		expect(await s.active(next.access_token)).toBe(false);
+	});
+
+	it("answer a revocation stopped halfway 503 on each retry, and 200 only once the family's access tokens are revoked [guarantee-3-g]", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const id = familyNameOf(first.refresh_token);
+		const hinted = { token: first.refresh_token ?? "", token_type_hint: "refresh_token" };
+		s.down.tokens.unavailable("revokeReferenced");
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
+		// Marked revoked, its access tokens not yet on the denylist: the mark names no client, so
+		// every retry finishes the revocation before it answers.
+		expect(s.stores.kept.peek(id)).toEqual({ format: 1, revoked: true });
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
+		expect((await s.post("/oauth/revoke", "other", hinted)).status).toBe(503);
+		expect(s.stores.kept.pending()).toEqual([id]);
+		s.down.tokens.restore();
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
+		expect(s.stores.kept.pending()).toEqual([]);
+		// Once finished, a retry has nothing left to do.
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
+	});
+
+	it("answer a revocation the sweep finished 200, and none before, its pushed-out token revoked with the rest [guarantee-3-g]", async () => {
+		const { s, second, pushed } = await pushedOutFamily();
+		const hinted = { token: second.body.refresh_token ?? "", token_type_hint: "refresh_token" };
+		s.down.tokens.unavailable("revokeReferenced");
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
+		// Marked, so refused at once, whatever the denylist holds yet.
+		expect(await s.active(second.body.access_token)).toBe(false);
+		expect((await s.refresh(second.body.refresh_token)).body.error).toBe("invalid_grant");
+		await new Promise((resolve) => setTimeout(resolve, 1300));
+		// Its sweep failed as well: still pending, so still not answered revoked.
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
+		s.down.tokens.restore();
+		await new Promise((resolve) => setTimeout(resolve, 1300));
+		expect(s.stores.kept.pending()).toEqual([]);
+		expect(referenced).toContainEqual({ reference: pushed, done: true });
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
 	});
 
 	it("answer 503 when the store cannot be reached, never invalid_grant", async () => {
@@ -656,7 +1113,7 @@ describe("refresh tokens", () => {
 		).toBe("invalid_grant");
 	});
 
-	it("take a spent token as a reuse before looking at its binding", async () => {
+	it("take a spent token as a reuse before looking at its binding [rfc9700-2.2.2-a]", async () => {
 		const s = await serve();
 		const { refresh_token: first = "" } = await s.redeem("pub", { bind: "k1" });
 		const next = await s.refresh(first, "pub", { bind: "k1" });
@@ -680,7 +1137,7 @@ describe("refresh tokens", () => {
 		expect((await s.refresh(confidential.refresh_token)).status).toBe(200);
 	});
 
-	it("revoke what an expired family issued when its refresh token is revoked", async () => {
+	it("revoke what an expired family issued when its refresh token is revoked [rfc7009-2.1-c]", async () => {
 		const s = await serve({ lifetime: 2 });
 		const first = await s.redeem();
 		shift += 200_000;
@@ -703,7 +1160,7 @@ describe("refresh tokens", () => {
 	/** Serves with the refresh addition at hand, and the redemptions codes started. */
 	const takingBack = async () => {
 		const redemptions: string[] = [];
-		const spy = defineModule({ name: "spy" }, (m) => [
+		const spy = defineModule({ name: "spy", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(additions).by(() => ({
 				field: "spy",
 				issue: async (redeemed) => {
@@ -713,16 +1170,20 @@ describe("refresh tokens", () => {
 			})),
 		]);
 		const added = collecting("added", additions);
-		const s = await serve({ extra: [spy, added.module] });
+		const hooked = collecting("hooked", redemptionHooks);
+		const s = await serve({ extra: [spy, added.module, hooked.module] });
 		const addition = s.app.get(added.seen).find((a) => a.field === "refresh_token");
+		const pins = s.app.get(hooked.seen);
 		const { token: _, ...issued } = await issuedAccess(s.app.get(tokens), {
 			subject: "alice",
 			issuedTo: "app",
 			audience: ["https://api"],
 			scope: ["read"],
 		});
-		const start = (redemption: string, unknown?: true) =>
-			addition?.issue({
+		// Pinned first, as code-grant pins every redemption before the additions run.
+		const start = async (redemption: string, unknown?: true) => {
+			for (const hook of pins) await hook.pin(redemption);
+			return addition?.issue({
 				...(unknown ? { authenticatedAtUnknown: unknown } : {}),
 				redemption,
 				client: {
@@ -740,6 +1201,7 @@ describe("refresh tokens", () => {
 				amr: ["pwd"],
 				access: issued,
 			});
+		};
 		return { s, redemptions, addition, start };
 	};
 
@@ -815,6 +1277,74 @@ describe("refresh tokens", () => {
 		expect((await s.refresh(second.body.refresh_token)).status).toBe(503);
 		expect(await s.active(first.access_token)).toBe(false);
 		expect(await s.active(second.body.access_token)).toBe(true);
+	});
+
+	it("revoke with their family the access token a cap pushed out and failed to revoke [guarantee-3-g]", async () => {
+		const { s, second, pushed } = await pushedOutFamily();
+		const hinted = { token: second.body.refresh_token ?? "", token_type_hint: "refresh_token" };
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
+		expect(referenced).toContainEqual({ reference: pushed, done: true });
+		expect(s.stores.kept.pending()).toEqual([]);
+	});
+
+	it("revoke a pushed-out token with the rest before a retry is answered, one revocation failing first [guarantee-3-g]", async () => {
+		const { s, second, pushed } = await pushedOutFamily();
+		const hinted = { token: second.body.refresh_token ?? "", token_type_hint: "refresh_token" };
+		s.down.tokens.failNext("revokeReferenced");
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
+		expect(referenced).toContainEqual({ reference: pushed, done: true });
+		expect(s.stores.kept.pending()).toEqual([]);
+	});
+
+	it("leave awaiting, never settled, a token a cap pushed out while the family is revoked, and refuse the family's tokens all the same [guarantee-3-g]", async () => {
+		const s = await serve({ caps: { sessionFamilies: 1000, issuedAccess: 2 } });
+		const first = await s.redeem();
+		const second = await s.refresh(first.refresh_token);
+		const id = familyNameOf(first.refresh_token);
+		const [short, long] = await othersOf(s, 2);
+		const hinted = { token: second.body.refresh_token ?? "", token_type_hint: "refresh_token" };
+		// A refresh begun before the mark lists two tokens as this pass revokes: the first ends soonest,
+		// so the second pushes it out, and it awaits, neither held nor read by this pass.
+		duringRevoke = async () => {
+			await s.stores.byFamily.add(id, short?.reference ?? "", 1000);
+			await s.stores.byFamily.add(id, long?.reference ?? "", 86_400_000);
+		};
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
+		// Its cleanup left for later, never settled unrevoked: it still awaits.
+		expect(await s.stores.byFamily.awaiting(id)).toContain(short?.reference);
+		expect(await s.active(second.body.access_token)).toBe(false);
+		expect((await s.refresh(second.body.refresh_token)).body.error).toBe("invalid_grant");
+	});
+
+	it("revoke at a session's close the families its cap pushed out of its list [guarantee-3-g]", async () => {
+		const s = await serve({ caps: { sessionFamilies: 1, issuedAccess: 1000 } });
+		const [pushed, kept] = ["p".repeat(22), "k".repeat(22)];
+		await s.stores.bySession.add(s.session.id, pushed, 60_000);
+		await s.stores.bySession.add(s.session.id, kept, 120_000);
+		await s.app.get(sessions).close(s.session.id);
+		expect(s.stores.kept.peek(pushed)).toEqual({ format: 1, revoked: true });
+		expect(s.stores.kept.peek(kept)).toEqual({ format: 1, revoked: true });
+	});
+
+	it("issue no first token from a family its session's cap pushed out and revoked as it started [guarantee-3-g]", async () => {
+		const s = await serve({ caps: { sessionFamilies: 1, issuedAccess: 1000 } });
+		let started = "";
+		// Saved, and before its first token is listed, another code of the session pushes it out.
+		s.stores.landingBeforeAccess(async (id) => {
+			started = id;
+			await s.redeem();
+		});
+		referenced.length = 0;
+		const first = await s.redeem();
+		expect(first.refresh_token).toBeUndefined();
+		expect(s.stores.kept.peek(started)).toEqual({ format: 1, revoked: true });
+		const listed = await s.stores.byFamily.members(started);
+		expect(listed.length).toBe(1);
+		for (const { member } of listed) {
+			expect(referenced).toContainEqual({ reference: member, done: true });
+		}
+		expect(s.stores.kept.pending()).toEqual([]);
 	});
 
 	it("tell a refresh token it does not know from one it revoked, and written only when it revokes", async () => {
@@ -1071,17 +1601,18 @@ describe("lineage", () => {
 		expect((await s.refresh(next.body.refresh_token)).body.error).toBe("invalid_grant");
 	});
 
-	it("refuses a family's token at exactly the family's end, and takes it a millisecond before", async () => {
+	it("refuses a family's token at exactly the family's end, and takes it two seconds before", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		const s = await serve();
 		// A family bound to no session, so only the family's own end can refuse it.
 		const token = await s.app.get(lineage).start(await beginning(s, "app"));
 		const stored = await s.stores.kept.records.read(familyNameOf(token));
 		const end = (stored as unknown as { expiresAt: number }).expiresAt;
-		shift = end - Date.now() - 1;
+		// Two seconds before: the access token, cut to the family's end in whole seconds, still has over one.
+		shift = end - Date.now() - 2000;
 		const before = await s.refresh(token);
-		expect(before.status).toBe(200);
-		shift += 1;
+		expect([before.status, before.body.expires_in]).toEqual([200, 2]);
+		shift += 2000;
 		expect((await s.refresh(before.body.refresh_token)).body.error).toBe("invalid_grant");
 	});
 
@@ -1170,4 +1701,12 @@ it("reads a family's lifetime with its unit, in whole seconds, a day unless set"
 	expect([{}, { lifetime: "2h" }].map(lifetimeOf)).toEqual([86_400, 7200]);
 	const refused = [{ "lifetime-seconds": 60 }, { lifetime: 3600 }, { "sweep-interval": 30 }];
 	expect(refused.map(lifetimeOf)).toEqual([undefined, undefined, undefined]);
+});
+
+it("takes all its module names, its confidential clients' families bound or not", async () => {
+	for (const bindConfidential of [false, true]) {
+		const { input } = assembly({ bindConfidential });
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused(input))["refresh"], String(bindConfidential)).toBeUndefined();
+	}
 });

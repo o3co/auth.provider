@@ -16,4 +16,4 @@ Internal module of `token-control`: the handler of `POST /oauth/introspect` (RFC
 - What it answers and records is the package's (its card).
 
 ## Depends on
-- `audit`, `client-allowance`, `clients`, `http`, `issuer`, `kernel` (the build context), `request-source`, `token-endpoint` (client authentication, error answers), `tokens`; the package's audit events
+- `audit`, `client-allowance`, `clients`, `http`, `issuer`, `kernel` (the build context), `request-source`, `token-endpoint` (client authentication, error answers), `tokens`; the package's audit events and `tokenOf` (the token asked about)

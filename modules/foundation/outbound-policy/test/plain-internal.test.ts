@@ -7,7 +7,13 @@ import {
 	policySettings,
 	type RefusalReason,
 } from "../src/contract.ts";
-import { admitAddresses, admitUrl, credentialRefusal, type Rules } from "../src/policy.ts";
+import {
+	admitAddresses,
+	admitUrl,
+	credentialRefusal,
+	type Rules,
+	remedyOf,
+} from "../src/policy.ts";
 
 const rules: Rules = {
 	allow: [],
@@ -113,6 +119,12 @@ describe("the addresses of a plain-internal pair", () => {
 		}
 	});
 
+	it("tell, refused as plain-public, to name the pair in plain-ipv4 where its name answers an IPv6 address that does not reach", () => {
+		const remedy = remedyOf("plain-public", "http://ledger.internal:9092/verify", rules);
+		expect(remedy).toContain("write the URL with https, or point the name at the private network");
+		expect(remedy).toContain("outbound.plain-ipv4");
+	});
+
 	it("are refused as plain-public where one is public, in either order, beside loopback too", () => {
 		expect(addresses(["10.1.2.3", "93.184.216.34"])).toBe("plain-public");
 		expect(addresses(["93.184.216.34", "10.1.2.3"])).toBe("plain-public");
@@ -155,7 +167,7 @@ describe("plain-internal in the settings", () => {
 		expect(policySettings.parse({ "allow-any-public": true })["plain-internal"]).toEqual([]);
 		const both = policySettings.safeParse({
 			"allow-any-public": true,
-			"plain-loopback": ["LOCALHOST.:8080"],
+			"plain-loopback": ["LOCALHOST:8080"],
 			"plain-internal": ["localhost:8080"],
 		});
 		expect(both.success).toBe(false);

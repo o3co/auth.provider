@@ -8,7 +8,7 @@ import { type MetadataItem, metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, contract, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { grantCaller } from "@mod/token-endpoint/testing";
@@ -19,61 +19,68 @@ import tokenControl from "../src/module.ts";
 
 const runtime = quietRuntime();
 
-const refreshKind = defineModule({ name: "refresh-kind" }, (m) => [
+const refreshKind = defineModule({ name: "refresh-kind", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(revocableKinds).by(() => ({ hint: "refresh_token", revoke: async () => "unknown" })),
 ]);
 
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 
+/** What `documentOf` assembles: tokens revocable or not, the public origin if one is written. */
+const assembly = (revocable: boolean, origin?: string, extra: Module[] = []) => ({
+	modules: [
+		http,
+		tokensStandIn({ revocable }),
+		issuerModule,
+		clientsModule,
+		secretHashModule,
+		grantCaller,
+		clientAllowanceModule,
+		tokenControl,
+		rateLimitStandIn,
+		auditStandIn().module,
+		reader,
+		...extra,
+	],
+	config: {
+		...kernelConfig(),
+		...httpConfig(origin ? { "public-origin": origin } : {}),
+		...issuerConfig({ url: origin ?? "https://issuer.example" }),
+	},
+	runtime,
+});
+
 /** The metadata items with a value of a deployment reached at `origin` if one is written. */
 async function documentOf(revocable: boolean, origin?: string, extra: Module[] = []) {
-	const app = await assemble({
-		modules: [
-			http,
-			tokensStandIn({ revocable }),
-			issuerModule,
-			clientsModule,
-			secretHashModule,
-			grantCaller,
-			clientAllowanceModule,
-			tokenControl,
-			rateLimitStandIn,
-			auditStandIn().module,
-			reader,
-			...extra,
-		],
-		config: {
-			...kernelConfig(),
-			...httpConfig(origin ? { "public-origin": origin } : {}),
-			...issuerConfig({ url: origin ?? "https://issuer.example" }),
-		},
-		runtime,
-	});
+	const app = await assemble(assembly(revocable, origin, extra));
 	const items = app.get(published).filter((item) => item.value !== undefined);
 	return Object.fromEntries(items.map((item) => [item.name, item.value]));
 }
 
-it("publishes where it introspects and revokes, on the public origin", async () => {
+it("publishes where it introspects and revokes, as absolute https URLs on the public origin with no fragment [rfc7009-2-c] [rfc7009-2-d] [rfc7662-2-a]", async () => {
 	const document = await documentOf(true, "https://as.example");
 	expect(document.introspection_endpoint).toBe("https://as.example/oauth/introspect");
 	expect(document.revocation_endpoint).toBe("https://as.example/oauth/revoke");
+	for (const endpoint of [document.introspection_endpoint, document.revocation_endpoint]) {
+		const url = new URL(endpoint as string);
+		expect([url.protocol, url.hash], String(endpoint)).toEqual(["https:", ""]);
+	}
 });
 
-it("publishes revocation only where some token can be revoked, and nothing without a public origin", async () => {
+it("publishes revocation only where some token can be revoked, and both on the issuer's origin where no public origin is written", async () => {
 	expect(await documentOf(false, "https://as.example")).not.toHaveProperty("revocation_endpoint");
 	expect((await documentOf(false, "https://as.example", [refreshKind])).revocation_endpoint).toBe(
 		"https://as.example/oauth/revoke",
 	);
 	const unplaced = await documentOf(true);
-	expect(unplaced).not.toHaveProperty("introspection_endpoint");
-	expect(unplaced).not.toHaveProperty("revocation_endpoint");
+	expect(unplaced.introspection_endpoint).toBe("https://issuer.example/oauth/introspect");
+	expect(unplaced.revocation_endpoint).toBe("https://issuer.example/oauth/revoke");
 });
 
 /** A signed method, as client-assertion contributes one. */
-const signed = defineModule({ name: "signed-method" }, (m) => [
+const signed = defineModule({ name: "signed-method", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(authMethods).by(() => ({
 		name: "private_key_jwt",
 		signingAlgorithms: ["ES256"],
@@ -82,7 +89,7 @@ const signed = defineModule({ name: "signed-method" }, (m) => [
 	})),
 ]);
 
-it("publishes how a client authenticates at each: no public client at introspection, and the algorithms of signed methods", async () => {
+it("publishes how a client authenticates at each: no public client at introspection, and the algorithms of signed methods as they take them [rfc8414-2-l] [rfc8414-2-n]", async () => {
 	const plain = await documentOf(true, "https://as.example");
 	expect(plain.introspection_endpoint_auth_methods_supported).toEqual([
 		"client_secret_basic",
@@ -99,8 +106,22 @@ it("publishes how a client authenticates at each: no public client at introspect
 	expect(withSigned.introspection_endpoint_auth_methods_supported).toContain("private_key_jwt");
 	expect(withSigned.introspection_endpoint_auth_signing_alg_values_supported).toEqual(["ES256"]);
 	expect(withSigned.revocation_endpoint_auth_signing_alg_values_supported).toEqual(["ES256"]);
+	// Published as the signed methods take them, unfiltered.
 	// Where revocation is not published, neither is how to authenticate there.
 	const unrevocable = await documentOf(false, "https://as.example", [signed]);
 	expect(unrevocable).not.toHaveProperty("revocation_endpoint_auth_methods_supported");
 	expect(unrevocable).not.toHaveProperty("revocation_endpoint_auth_signing_alg_values_supported");
+});
+
+it("takes all its module names, tokens revocable or not, a kind contributed or not, with an origin or none", async () => {
+	for (const revocable of [true, false])
+		for (const extra of [[], [refreshKind]])
+			for (const origin of ["https://as.example", undefined]) {
+				const input = assembly(revocable, origin, extra);
+				// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+				expect(
+					(await takesUnused(input))["token-control"],
+					`${revocable} ${extra.length} ${origin}`,
+				).toBeUndefined();
+			}
 });

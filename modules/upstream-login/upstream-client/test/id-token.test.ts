@@ -61,14 +61,13 @@ describe("upstream-client's id_token reader", () => {
 
 	it("reads the subject, the login time and the claims of an id_token that holds", async () => {
 		const { read } = readerOf(valid({ auth_time: seconds - 60, amr: ["pwd"] }));
-		expect(await read("t", "n")).toEqual({
+		const { login, claims: given } = await read("t", "n");
+		expect({ login, claims: given }).toEqual({
 			login: { subject: "alice", authenticatedAt: (seconds - 60) * 1000 },
 			claims: { ...claims, auth_time: seconds - 60, amr: ["pwd"] },
 		});
 		const atAllowance = readerOf(valid({ auth_time: seconds + 30 }));
 		expect((await atAllowance.read("t", "n")).login.authenticatedAt).toBe(now + 30_000);
-		const shared = readerOf(valid({ aud: ["cid", "other"], azp: "cid" }));
-		expect((await shared.read("t", "n")).login.subject).toBe("alice");
 	});
 
 	/** An id_token's text with the header naming `alg`; the stand-in external-jwt reads no more of it. */
@@ -112,7 +111,7 @@ describe("upstream-client's id_token reader", () => {
 		expect(await outcome(readerOf({ kind: "unavailable" }).read("t", "n"))).toBe("idp-x");
 	});
 
-	it("refuses an id_token that does not hold", async () => {
+	it("refuses an id_token that does not hold [oidc-core-2-v] [oidc-core-3.1.3.7-f] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-k]", async () => {
 		const cases: Record<string, Verified> = {
 			"a reason external-jwt gives": { kind: "invalid", reason: "signature" },
 			"no subject": valid({ sub: undefined }),
@@ -121,6 +120,10 @@ describe("upstream-client's id_token reader", () => {
 			"an issue time as text": valid({ iat: String(seconds) }),
 			"two audiences without the client as azp": valid({ aud: ["cid", "other"] }),
 			"two audiences, another party authorized": valid({ aud: ["cid", "other"], azp: "other" }),
+			"another audience beside the client, the client authorized": valid({
+				aud: ["cid", "other"],
+				azp: "cid",
+			}),
 			"one audience, another party authorized": valid({ azp: "other" }),
 			"a login time as text": valid({ auth_time: "yesterday" }),
 			"a login time before the epoch": valid({ auth_time: -1 }),
@@ -166,5 +169,31 @@ describe("upstream-client's id_token reader", () => {
 			name: "Alice",
 		});
 		expect(await profileOf({})).toBeUndefined();
+	});
+
+	it("completes the login's profile from a UserInfo answer for its own subject, the id_token first", async () => {
+		const { read } = readerOf(valid({ name: "Token", email_verified: true }));
+		const checked = await read("t", "n");
+		const answer = (body: Record<string, unknown>) => ({
+			status: 200,
+			headers: new Map([["content-type", "application/json"]]),
+			body: new TextEncoder().encode(JSON.stringify(body)),
+		});
+		expect(
+			checked.withUserinfo(
+				answer({ sub: "alice", name: "Info", email: "a@x.test", email_verified: true }),
+			),
+		).toEqual({
+			subject: "alice",
+			profile: { name: "Token", email: "a@x.test", emailVerified: true },
+		});
+		expect(() => checked.withUserinfo(answer({ sub: "bob", name: "Info" }))).toThrow(
+			UpstreamRefused,
+		);
+		expect((await readerOf(valid()).read("t", "n")).withUserinfo(answer({ sub: "alice" }))).toEqual(
+			{
+				subject: "alice",
+			},
+		);
 	});
 });

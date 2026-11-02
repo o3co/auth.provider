@@ -12,7 +12,7 @@ import {
 	isUnavailable,
 	kernelConfig,
 } from "@mod/kernel";
-import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import { type SenderBinding, senderBinding, senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
@@ -33,7 +33,7 @@ function spentInMemory() {
 	const stand = memoryRecords<true>(() => runtime.clock.now(), { shards: 1, perShard: 1 });
 	const lifetimes: number[] = [];
 	const down = unavailableSwitch<SpentProofs>("spent proofs");
-	const module = defineModule({ name: "spent-proofs" }, (m) => [
+	const module = defineModule({ name: "spent-proofs", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(spentProofs).by(() =>
 			down.wrap({
 				save: (name: string, lifetimeMs: number) => {
@@ -48,23 +48,28 @@ function spentInMemory() {
 
 const published = contract<readonly MetadataItem[]>("published");
 const kinds = contract<readonly SenderBinding[]>("kinds");
-const reader = defineModule({ name: "reader" }, (m) => [
-	m.provide(published).by((c) => c.collect(metadata)),
-	m.provide(kinds).by((c) => c.collect(senderBindings)),
-]);
+const reader = defineModule(
+	{ name: "reader", replicaSafe: true, takes: [metadata, senderBindings] },
+	(m) => [
+		m.provide(published).by((c) => c.collect(metadata)),
+		m.provide(kinds).by((c) => c.collect(senderBindings)),
+	],
+);
+
+/** The assembly of a composition with dpop, its section where given (else asking no nonce), and the issuer at `at`. */
+const assembly = (dpopSection?: unknown, spent = spentInMemory(), at = issuer) => ({
+	modules: [http, issuerModule, senderBindingModule, dpop, reader, spent.module],
+	config: {
+		...kernelConfig(),
+		...httpConfig(),
+		...issuerConfig({ url: at }),
+		dpop: dpopSection ?? { nonce: { required: "never" } },
+	},
+	runtime,
+});
 
 /** A composition with dpop, its section where given, and the issuer at `at`. */
-const boot = (dpopSection?: unknown, spent = spentInMemory(), at = issuer) =>
-	assemble({
-		modules: [http, issuerModule, senderBindingModule, dpop, reader, spent.module],
-		config: {
-			...kernelConfig(),
-			...httpConfig(),
-			...issuerConfig({ url: at }),
-			...(dpopSection === undefined ? {} : { dpop: dpopSection }),
-		},
-		runtime,
-	});
+const boot = (...given: Parameters<typeof assembly>) => assemble(assembly(...given));
 
 const publishedAlgorithms = async (dpopSection?: unknown) =>
 	(await boot(dpopSection))
@@ -115,17 +120,15 @@ describe("dpop", () => {
 	});
 
 	it("names among the issuer's metadata the algorithms it takes proofs in", async () => {
-		expect(await publishedAlgorithms({ algorithms: ["ES256", "EdDSA"] })).toEqual([
-			"ES256",
-			"EdDSA",
-		]);
+		const section = { algorithms: ["ES256", "EdDSA"], nonce: { required: "never" } };
+		expect(await publishedAlgorithms(section)).toEqual(["ES256", "EdDSA"]);
 	});
 
 	it("names all four algorithms by default", async () => {
 		expect(await publishedAlgorithms()).toEqual(["ES256", "ES384", "EdDSA", "RS256"]);
 	});
 
-	it("refuses a section outside its bounds", async () => {
+	it("refuses a section outside its bounds [rfc9449-11.6-a] [rfc9449-11.6-b]", async () => {
 		for (const refused of [
 			{ algorithms: ["HS256"] },
 			{ algorithms: [] },
@@ -137,7 +140,15 @@ describe("dpop", () => {
 		]) {
 			await expect(boot(refused), JSON.stringify(refused)).rejects.toThrow();
 		}
-		expect((await boot({ "proof-window": "5m" })).get(senderBinding)).toBeDefined();
+		const never = { required: "never" };
+		expect((await boot({ "proof-window": "5m", nonce: never })).get(senderBinding)).toBeDefined();
+	});
+
+	it("asks a nonce at the token endpoint by default, so boot needs the nonce's secret", async () => {
+		const refused = await boot({}).catch((error: unknown) => error);
+		expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual(["dpop.nonce.secret"]);
+		const secret = randomBytes(32).toString("base64");
+		await expect(boot({ nonce: { secret } })).resolves.toBeDefined();
 	});
 
 	it("reads none from a request without a proof, spending nothing", async () => {
@@ -192,11 +203,34 @@ describe("dpop", () => {
 		expect(await token(early)).toEqual(replayed);
 	});
 
-	it("keeps a proof spent for twice its window and an allowance for the store's clock", async () => {
+	it("keeps a proof spent for twice the widest window and an allowance for the store's clock, whatever is set", async () => {
 		const spent = spentInMemory();
 		const token = await serve(spent);
 		await token(await proof());
-		expect(spent.lifetimes).toEqual([2 * 60_000 + 60_000]);
+		expect(spent.lifetimes).toEqual([2 * 300_000 + 60_000]);
+	});
+
+	it("keeps a proof spent past the widest window, so one widened on the same store takes it no more [guarantee-5-e]", async () => {
+		const spent = spentInMemory();
+		const at = async (window: string, dpopProof: string) =>
+			(await boot({ "proof-window": window, nonce: { required: "never" } }, spent))
+				.get(senderBinding)
+				.bindingOf(
+					testRequest({
+						method: "POST",
+						path: "/oauth/token",
+						headers: new Map([["dpop", dpopProof]]),
+					}),
+					{ kind: "issue" },
+				);
+		const once = await proof();
+		expect(await at("1s", once)).toMatchObject(bound);
+		// Started again on the same store with the widest window, the very proof still within it.
+		shift += 299_000;
+		expect(await at("5m", once)).toEqual(replayed);
+		// A fresh proof of the same iat is taken: the window still holds, so the refusal is the record's.
+		const iat = Math.floor((runtime.clock.now() - 299_000) / 1000);
+		expect(await at("5m", await proof({ iat }))).toMatchObject(bound);
 	});
 
 	it("does not use up a proof refused for its ath", async () => {
@@ -228,8 +262,11 @@ describe("server nonces (RFC 9449 §8)", () => {
 	const secret = randomBytes(32).toString("base64");
 	const bucketMs = 300_000;
 	/** A composition asking nonces where `required` says, reading at issuance or at a resource. */
-	async function asking(required: "never" | "as" | "as+rs") {
-		const app = await boot({ nonce: { required, ttl: `${bucketMs / 1000}s`, secret } });
+	const asking = (required: "never" | "as" | "as+rs") =>
+		reading({ nonce: { required, ttl: `${bucketMs / 1000}s`, secret } });
+	/** A composition with this dpop section, reading at issuance or at a resource. */
+	async function reading(dpopSection: unknown) {
+		const app = await boot(dpopSection);
 		return (dpopProof: string, scene: { kind: "issue" } | { kind: "resource"; token: string }) =>
 			app.get(senderBinding).bindingOf(
 				testRequest({
@@ -246,8 +283,18 @@ describe("server nonces (RFC 9449 §8)", () => {
 	const ath = createHash("sha256").update(token).digest("base64url");
 	const toResource = () => proof({ htu: `${issuer}/api`, ath });
 	const askedAgain = { kind: "refused", error: "use_dpop_nonce" };
+	/** A nonce given, forged, or written otherwise than it was given: padded, with a stray character, a leading zero, a space. */
+	const notGiven = (given: string) => [
+		"forged",
+		`${given.split(".")[0]}.AAAA`,
+		`${given} `,
+		`${given}=`,
+		`${given}!`,
+		`0${given}`,
+		given.replace(".", ". "),
+	];
 
-	it("refuses a proof without the current nonce as use_dpop_nonce, giving it, and spends no jti", async () => {
+	it("refuses a proof without the current nonce as use_dpop_nonce, giving it, and spends no jti [rfc9449-4.2-e] [rfc9449-4.3-h]", async () => {
 		// Starts at a bucket's edge, so the clock never crosses one by chance within the test.
 		shift = bucketMs - (Date.now() % bucketMs) + 1;
 		const read = await asking("as");
@@ -257,8 +304,8 @@ describe("server nonces (RFC 9449 §8)", () => {
 		const given = first.headers?.["dpop-nonce"] ?? "";
 		expect(given).toMatch(/^\d+\.[A-Za-z0-9_-]+$/);
 		expect(await read(await proof({ jti, nonce: given }), issue)).toMatchObject(bound);
-		for (const wrong of ["forged", `${given.split(".")[0]}.AAAA`]) {
-			expect(await read(await proof({ nonce: wrong }), issue)).toMatchObject({
+		for (const wrong of notGiven(given)) {
+			expect(await read(await proof({ nonce: wrong }), issue), wrong).toMatchObject({
 				...askedAgain,
 				headers: { "dpop-nonce": given },
 			});
@@ -270,12 +317,75 @@ describe("server nonces (RFC 9449 §8)", () => {
 		expect(await read(await proof({ nonce: given }), issue)).toMatchObject(askedAgain);
 	});
 
+	it("by default asks a nonce at the token endpoint, refusing a proof without one as use_dpop_nonce and giving one, and none at a resource [rfc9449-4.2-e]", async () => {
+		// The section gives the nonce's secret alone, so `required` is its default.
+		const read = await reading({ nonce: { secret } });
+		expect(await read(await proof(), issue)).toMatchObject({
+			...askedAgain,
+			headers: { "dpop-nonce": expect.any(String) },
+		});
+		expect(await read(await toResource(), atResource)).toMatchObject(bound);
+	});
+
+	it("takes at a resource under as+rs only the very nonce it gave [rfc9449-4.3-t]", async () => {
+		shift = bucketMs - (Date.now() % bucketMs) + 1;
+		const read = await asking("as+rs");
+		const first = await read(await toResource(), atResource);
+		if (first.kind !== "refused" || first.error !== "use_dpop_nonce") throw new Error(first.kind);
+		const given = first.headers?.["dpop-nonce"] ?? "";
+		const withNonce = (nonce: string) => proof({ htu: `${issuer}/api`, ath, nonce });
+		expect(await read(await withNonce(given), atResource)).toMatchObject(bound);
+		for (const wrong of notGiven(given)) {
+			expect(await read(await withNonce(wrong), atResource), wrong).toMatchObject({
+				...askedAgain,
+				headers: { "dpop-nonce": given },
+			});
+		}
+	});
+
 	it("asks no nonce at a resource under as", async () => {
 		expect(await (await asking("as"))(await toResource(), atResource)).toMatchObject(bound);
 	});
 
 	it("asks one at a resource too under as+rs", async () => {
 		expect(await (await asking("as+rs"))(await toResource(), atResource)).toMatchObject(askedAgain);
+	});
+
+	it("challenges a resource's request without the nonce in the DPoP scheme as use_dpop_nonce, giving a fresh one [rfc9449-4.2-l]", async () => {
+		shift = bucketMs - (Date.now() % bucketMs) + 1;
+		const app = await boot({ nonce: { required: "as+rs", ttl: `${bucketMs / 1000}s`, secret } });
+		const jkt = await calculateJwkThumbprint(await exportJWK(holder.publicKey));
+		const tokens = {
+			verifyAccess: async () =>
+				({
+					kind: "valid",
+					binding: { member: "jkt", confirmation: jkt, tokenType: "DPoP" },
+				}) as const,
+		};
+		const presenting = async (nonce?: string) =>
+			app.get(senderBinding).admitted(
+				testRequest({
+					method: "POST",
+					path: "/api",
+					headers: new Map([
+						["authorization", `DPoP ${token}`],
+						["dpop", await proof({ htu: `${issuer}/api`, ath, nonce })],
+					]),
+				}),
+				tokens,
+			);
+		const first = await presenting();
+		expect(first).toEqual({
+			kind: "refused",
+			status: 401,
+			error: "use_dpop_nonce",
+			headers: {
+				"www-authenticate": 'DPoP error="use_dpop_nonce"',
+				"dpop-nonce": expect.stringMatching(/^\d+\.[A-Za-z0-9_-]+$/),
+			},
+		});
+		const given = first.kind === "refused" ? first.headers["dpop-nonce"] : undefined;
+		expect((await presenting(given)).kind).toBe("admitted");
 	});
 
 	it("asks none anywhere under never", async () => {
@@ -307,4 +417,29 @@ describe("server nonces (RFC 9449 §8)", () => {
 		}
 		await expect(boot({ nonce: { required: "never" } })).resolves.toBeDefined();
 	});
+});
+
+it("warns at every start where no nonce is asked, and not where one is", async () => {
+	const warned = async (nonce: Record<string, unknown>) => {
+		const recorded = recordingLog();
+		await assemble({ ...assembly({ nonce }), runtime: quietRuntime({ log: recorded.log }) });
+		return recorded.lines().filter((line) => line.event === "dpop.nonce_not_asked");
+	};
+	expect(await warned({ required: "never" })).toEqual([
+		{
+			level: "warn",
+			event: "dpop.nonce_not_asked",
+			fields: { reason: "no nonce is asked, so a proof made ahead is taken within its window" },
+		},
+	]);
+	const secret = randomBytes(32).toString("base64");
+	expect(await warned({ required: "as", secret })).toEqual([]);
+});
+
+it("takes all it names, asking nonces or not", async () => {
+	const nonce = { required: "as", ttl: "300s", secret: randomBytes(32).toString("base64") };
+	for (const section of [undefined, { nonce }]) {
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused(assembly(section)))["dpop"], JSON.stringify(section)).toBeUndefined();
+	}
 });

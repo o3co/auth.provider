@@ -1,6 +1,7 @@
 import type { HttpRequest } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, type Module, Unavailable } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { testScryptHash } from "@mod/secret-hash/testing";
 import { describe, expect, it } from "vitest";
@@ -14,7 +15,6 @@ import {
 	type Clients,
 	clientSources,
 	clients,
-	type DocumentSource,
 	metadataSections,
 	type Section,
 } from "../src/contract.ts";
@@ -26,7 +26,7 @@ const grants: Section<{ allowed: string[] }> = {
 	name: "grants",
 	schema: z.strictObject({ allowed: z.array(z.string()).default([]) }),
 };
-const grantsModule = defineModule({ name: "grants-owner" }, (m) => [
+const grantsModule = defineModule({ name: "grants-owner", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(metadataSections).by(() => grants),
 ]);
 
@@ -55,7 +55,7 @@ async function boot(extra: readonly Module[] = [], list = registered): Promise<C
 }
 
 const method = (name: string, parts: Partial<AuthMethod> = {}) =>
-	defineModule({ name }, (m) => [
+	defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(authMethods).by(() => ({
 			name,
 			claimed: () => undefined,
@@ -64,7 +64,7 @@ const method = (name: string, parts: Partial<AuthMethod> = {}) =>
 		})),
 	]);
 const source = (find: (id: string) => unknown) =>
-	defineModule({ name: "source" }, (m) => [
+	defineModule({ name: "source", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id: string) => find(id) as ClientRecord | undefined,
 		})),
@@ -87,7 +87,7 @@ const bootRefusal = async (list: unknown[]) =>
 	(await refusalsOf(boot([], list))).map((r) => r.where).sort();
 
 describe("clients", () => {
-	it("authenticates each built-in method and hands out the owner's section", async () => {
+	it("authenticates each built-in method and hands out the owner's section [rfc6749-2.3.1-a]", async () => {
 		const c = await boot();
 		expect(clientOf(await outcome(c, basic("conf", "s3cret"), {})).section(grants)).toEqual({
 			allowed: ["x"],
@@ -100,6 +100,13 @@ describe("clients", () => {
 		});
 	});
 
+	it("lists the clients the operator registered, in the order the settings give them", async () => {
+		const c = await boot();
+		expect(c.registered().map((client) => [client.id, client.registered])).toEqual(
+			(registered as readonly { readonly id: string }[]).map((r) => [r.id, true]),
+		);
+	});
+
 	it("throws for a section no module contributed, never answering undefined", async () => {
 		const c = await boot();
 		const client = clientOf(await outcome(c, basic("conf", "s3cret"), {}));
@@ -110,7 +117,7 @@ describe("clients", () => {
 		expect(() => client.section(stray)).toThrow(/stray/);
 	});
 
-	it("form-decodes the Basic id and secret", async () => {
+	it("form-decodes the Basic id and secret [rfc6749-2.3.1-a]", async () => {
 		const id = "a+b %c";
 		const c = await boot(
 			[],
@@ -132,7 +139,7 @@ describe("clients", () => {
 		});
 	});
 
-	it("refuses each way the credentials do not fit the client", async () => {
+	it("refuses each way the credentials do not fit the client [rfc6749-2.3-b] [rfc6749-2.2-a] [rfc6749-2.3.2-a] [oidc-core-3.1.3.1-a] [rfc9700-2.5-a]", async () => {
 		const c = await boot();
 		expect(await outcome(c, basic("conf", "nope"), {})).toMatchObject({
 			reason: "bad_credentials",
@@ -153,7 +160,7 @@ describe("clients", () => {
 		expect(await outcome(c, {}, { client_id: ["conf"] })).toMatchObject({ reason: "wrong_method" });
 	});
 
-	it("refuses a confidential client whose method is none", async () => {
+	it("refuses a confidential client whose method is none, never taking it as public [rfc6749-2.2-a] [rfc6749-2.1-a]", async () => {
 		const c = await boot([], [{ id: "conf-none", kind: "confidential", method: "none" }]);
 		expect(await outcome(c, {}, { client_id: ["conf-none"] })).toMatchObject({
 			reason: "bad_credentials",
@@ -178,7 +185,7 @@ describe("clients", () => {
 
 	describe("a section's boot check", () => {
 		const checked = (seen: unknown[], holders: unknown[] = []) =>
-			defineModule({ name: "checked-owner" }, (m) => [
+			defineModule({ name: "checked-owner", replicaSafe: false, takes: [] }, (m) => [
 				m.contribute(metadataSections).by(() => ({
 					name: "checked",
 					schema: z.strictObject({ allowed: z.array(z.string()).default([]) }),
@@ -304,6 +311,60 @@ describe("clients", () => {
 		expect(clientOf(await outcome(c, {}, { client_id: ["pub"] })).id).toBe("pub");
 	});
 
+	it("marks a refusal an assertion method is part of, with the challenges of the methods tried", async () => {
+		const assertion = method("test_assertion", {
+			assertion: true,
+			signingAlgorithms: ["ES256"],
+			// Any part of it sent: the request uses the assertion.
+			claimed: (r) =>
+				r.form.get("test_assertion")?.[0] ?? (r.form.has("test_assertion_type") ? "" : undefined),
+			// Empty, or its type alone: malformed.
+			malformed: (r) =>
+				r.form.get("test_assertion")?.[0] === "" ||
+				(r.form.has("test_assertion_type") && !r.form.has("test_assertion")),
+		});
+		const half = method("half", {
+			claimed: (r) => r.form.get("half_id")?.[0],
+			malformed: (r) => r.form.has("half_id") !== r.form.has("half_proof"),
+		});
+		const c = await boot([assertion, half]);
+		expect(await outcome(c, basic("conf", "s3cret"), { test_assertion: ["conf"] })).toEqual({
+			kind: "refused",
+			reason: "multiple_methods",
+			assertion: true,
+			challenges: ['Basic realm="client"'],
+		});
+		expect(await outcome(c, {}, { test_assertion: [""] })).toEqual({
+			kind: "refused",
+			reason: "malformed_credentials",
+			assertion: true,
+			challenges: [],
+		});
+		// Two other methods beside an assertion only malformed, which claims nothing: still the assertion's.
+		const secret = { client_id: ["conf"], client_secret: ["s3cret"] };
+		expect(
+			await outcome(c, basic("conf", "s3cret"), { ...secret, test_assertion_type: ["t"] }),
+		).toEqual({
+			kind: "refused",
+			reason: "multiple_methods",
+			assertion: true,
+			challenges: ['Basic realm="client"'],
+		});
+		// A whole assertion beside credentials another method finds malformed but does not claim.
+		expect(await outcome(c, {}, { test_assertion: ["conf"], half_proof: ["p"] })).toEqual({
+			kind: "refused",
+			reason: "malformed_credentials",
+			assertion: true,
+			challenges: [],
+		});
+		// No assertion among them: refused as a malformed request, unmarked and unchallenged.
+		expect(await outcome(c, basic("conf", "s3cret"), { client_secret: ["p0st"] })).toEqual({
+			kind: "refused",
+			reason: "multiple_methods",
+			challenges: [],
+		});
+	});
+
 	it("takes a client_id beside another method's credentials as that method's, never none as well", async () => {
 		const half = method("half", { claimed: (r) => r.form.get("half_id")?.[0] });
 		const c = await boot([half]);
@@ -360,7 +421,7 @@ describe("clients", () => {
 		expect(await outcome(c, {}, { client_id: [""] })).toMatchObject({ reason: "no_credentials" });
 	});
 
-	it("refuses two methods' credentials as two methods, even when malformed", async () => {
+	it("refuses two methods' credentials as two methods, even when malformed [rfc6749-2.3-b]", async () => {
 		const c = await boot();
 		const undecodable = { authorization: `Basic ${Buffer.from("conf").toString("base64")}` };
 		expect(
@@ -369,6 +430,67 @@ describe("clients", () => {
 		expect(await outcome(c, basic("conf", "s3cret"), { client_secret: ["p0st"] })).toMatchObject({
 			reason: "multiple_methods",
 		});
+	});
+
+	it("tells a request that carries nothing a client authenticates with from one that carries anything, whichever methods are composed", async () => {
+		const c = await boot();
+		const grant = { grant_type: ["urn:test:grant"], assertion: ["a.b.c"] };
+		expect(c.bare(request({}, grant))).toBe(true);
+		expect(c.bare(testRequest({ method: "POST", json: { grant_type: "urn:test:grant" } }))).toBe(
+			true,
+		);
+		// Each of these is answered as today by `authenticate`; `bare` is false for all of them.
+		const carrying: [Record<string, string>, Record<string, string[]>][] = [
+			[{ authorization: "Bearer abc" }, grant],
+			[basic("conf", "s3cret"), grant],
+			[{}, { ...grant, client_id: ["pub"] }],
+			[{}, { ...grant, client_id: [""] }],
+			[{}, { ...grant, client_id: ["pub", "pub"] }],
+			[{}, { ...grant, client_secret: ["p0st"] }],
+			// The assertion method is not composed here: its fields still count.
+			[{}, { ...grant, client_assertion: ["x.y.z"] }],
+			[
+				{},
+				{
+					...grant,
+					client_assertion_type: ["urn:ietf:params:oauth:client-assertion-type:jwt-bearer"],
+				},
+			],
+		];
+		for (const [headers, form] of carrying) {
+			expect(c.bare(request(headers, form)), JSON.stringify([headers, form])).toBe(false);
+		}
+		await expect(
+			c.authenticate(request({}, { ...grant, client_assertion: ["x.y.z"] })),
+		).resolves.toMatchObject({
+			reason: "no_credentials",
+		});
+		for (const sent of [1, ["pub"], { id: "pub" }]) {
+			const json = testRequest({ method: "POST", json: { client_id: sent } });
+			expect(c.bare(json), JSON.stringify(sent)).toBe(false);
+		}
+		for (const clientCertificate of [
+			{ kind: "certificate" as const, leaf: new Uint8Array([1]), chain: [] },
+			{ kind: "malformed" as const },
+		]) {
+			const certified = testRequest({
+				method: "POST",
+				form: new Map(Object.entries(grant)),
+				source: { clientCertificate },
+			});
+			expect(c.bare(certified), clientCertificate.kind).toBe(false);
+		}
+	});
+
+	it("takes what a composed method claims, or finds malformed, as carrying credentials", async () => {
+		const claims = method("header-key", {
+			claimed: (r) => r.headers.get("x-client-key") ?? undefined,
+		});
+		const malformed = method("odd-key", { malformed: (r) => r.headers.has("x-odd-key") });
+		const c = await boot([claims, malformed]);
+		expect(c.bare(request({}, {}))).toBe(true);
+		expect(c.bare(request({ "x-client-key": "k" }, {}))).toBe(false);
+		expect(c.bare(request({ "x-odd-key": "k" }, {}))).toBe(false);
 	});
 
 	it("reads a Basic header only in canonical base64 of UTF-8", async () => {
@@ -529,34 +651,6 @@ describe("clients", () => {
 		).rejects.toThrow("unreadable");
 	});
 
-	it("takes a section's copy from a client's metadata document, and the fields it reads, as optional parts", async () => {
-		const named: Section<{ name: string }> = {
-			name: "named",
-			schema: z.strictObject({ name: z.string().default("") }),
-			reads: ["client_name"],
-			fromDocument: (document, from) =>
-				typeof document.client_name === "string"
-					? { value: { name: `${document.client_name} at ${from.host}` } }
-					: { refused: "client_name" },
-		};
-		const from: DocumentSource = { id: "https://app.example/c", host: "app.example" };
-		expect(named.fromDocument?.({ client_name: "App" }, from)).toEqual({
-			value: { name: "App at app.example" },
-		});
-		expect(named.fromDocument?.({}, from)).toEqual({ refused: "client_name" });
-		const owner = defineModule({ name: "named-owner" }, (m) => [
-			m.contribute(metadataSections).by(() => named),
-		]);
-		const c = await boot([owner]);
-		const record = {
-			id: "x",
-			kind: "public",
-			method: "none",
-			sections: { named: { name: "App" } },
-		};
-		expect(await c.checkRecord(record as ClientRecord)).toBeUndefined();
-	});
-
 	it("answers an authenticated client with its method's challenge, or every method's when it has none", async () => {
 		const challenged = method("challenged", {
 			challenge: 'Challenged realm="x"',
@@ -637,6 +731,50 @@ describe("clients", () => {
 		expect(c.signingAlgorithms()).toEqual(["ES256", "RS256", "EdDSA"]);
 	});
 
+	it("refuses at boot a method signing with the JWS algorithm none, in any case, so discovery's *_auth_signing_alg_values_supported never names none [rfc8414-2-j] [rfc8414-2-m] [rfc8414-2-o]", async () => {
+		// The three discovery fields read the registry's signingAlgorithms() alone, so a registry that cannot hold none never lists it.
+		for (const alg of ["none", "NONE", "None"]) {
+			const refused = await refusalsOf(
+				boot([method("signer", { signingAlgorithms: ["ES256", alg] })]),
+			);
+			expect(
+				refused.map((r) => [r.where, r.reason]),
+				alg,
+			).toEqual([
+				["clients.methods.signer", "names the JWS algorithm none among its signing algorithms"],
+			]);
+		}
+		// The authentication method named none, a public client's, still composes.
+		const c = await boot();
+		expect(c.methods()).toContain("none");
+		expect(c.signingAlgorithms()).toEqual([]);
+	});
+
+	it("refuses at boot an assertion method naming no signing algorithms, so discovery names the algorithms of every assertion method it lists [rfc8414-2-h]", async () => {
+		// Without the list, and with an empty one.
+		for (const named of [{}, { signingAlgorithms: [] }]) {
+			const refused = await refusalsOf(boot([method("asserted", { assertion: true, ...named })]));
+			expect(
+				refused.map((r) => [r.where, r.reason]),
+				JSON.stringify(named),
+			).toEqual([
+				[
+					"clients.methods.asserted",
+					"names no signing algorithms, though it authenticates by an assertion",
+				],
+			]);
+		}
+		const c = await boot([method("asserted", { assertion: true, signingAlgorithms: ["ES256"] })]);
+		expect(c.signingAlgorithms()).toEqual(["ES256"]);
+	});
+
+	it("refuses at boot a method naming an empty list of signing algorithms", async () => {
+		const refused = await refusalsOf(boot([method("signer", { signingAlgorithms: [] })]));
+		expect(refused.map((r) => [r.where, r.reason])).toEqual([
+			["clients.methods.signer", "names an empty list of signing algorithms"],
+		]);
+	});
+
 	it("says whether the operator registered a client, or a source named it", async () => {
 		const remote = { kind: "public", method: "none", sections: {} };
 		const c = await boot([source((id) => (id === "remote" ? { id, ...remote } : undefined))]);
@@ -658,7 +796,7 @@ describe("clients", () => {
 
 	it("asks the sources in turn until one names the client", async () => {
 		const remote = { kind: "public" as const, method: "none", sections: {} };
-		const later = defineModule({ name: "later" }, (m) => [
+		const later = defineModule({ name: "later", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(clientSources).by(() => ({
 				find: async (id: string) => (id === "later" ? { id, ...remote } : undefined),
 			})),
@@ -683,4 +821,10 @@ it("registers no clients, and a client no sections, that the operator leaves out
 	expect(clientsModule.section?.parse({})).toEqual({ registered: [] });
 	const written = { id: "c", kind: "public", method: "none" };
 	expect(clientRecord.parse(written)).toEqual({ ...written, sections: {} });
+});
+
+it("takes every handle its takes name", async () => {
+	const modules = [clientsModule, secretHashModule, grantsModule];
+	const config = { ...kernelConfig(), clients: { registered } };
+	expect((await takesUnused({ modules, config })).clients).toBeUndefined();
 });

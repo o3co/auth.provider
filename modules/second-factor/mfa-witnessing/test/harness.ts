@@ -2,17 +2,13 @@ import { randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
-import {
-	enforcers,
-	type FactorStore,
-	factorStore,
-	factors,
-	proofSteps,
-	type StoredFactors,
-} from "@mod/mfa";
+import { enforcers, type FactorStore, factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
-import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
+import { type MfaSettings, mfaConfig, updatingTogether } from "@mod/mfa/testing";
+import { type FactorBinding, factorBinding } from "@mod/mfa-binding";
 import { factorKinds } from "@mod/mfa-extensions";
+import { type FactorManaging, factorManaging } from "@mod/mfa-managing";
+import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
@@ -24,7 +20,7 @@ import bridge from "../src/module.ts";
  * counting kind `code` (the proof is the secret and a counter that must go up) and a way back
  * `backup`. A copy of mfa's own harness, cut to what the witness needs.
  */
-const code = defineModule({ name: "kind-code" }, (m) => [
+const code = defineModule({ name: "kind-code", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -45,7 +41,7 @@ const code = defineModule({ name: "kind-code" }, (m) => [
 		},
 	})),
 ]);
-const backup = defineModule({ name: "kind-backup" }, (m) => [
+const backup = defineModule({ name: "kind-backup", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "backup",
 		amr: [],
@@ -56,10 +52,10 @@ const backup = defineModule({ name: "kind-backup" }, (m) => [
 		verify: async () => ({ kind: "invalid" as const }),
 	})),
 ]);
-const step = defineModule({ name: "step" }, (m) => [
+const step = defineModule({ name: "step", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
-const enforcer = defineModule({ name: "enforcer" }, (m) => [
+const enforcer = defineModule({ name: "enforcer", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(enforcers).by(() => ({ name: "enforcer" })),
 ]);
 
@@ -68,24 +64,26 @@ function memoryFactors() {
 	const fresh = () => memoryRecords<StoredFactors>(() => 0, { shards: 1, perShard: 1 });
 	let stand = fresh();
 	const down = unavailableSwitch<FactorStore>("factor-store");
-	const hooks: { beforeSave?: (key: string) => Promise<void> } = {};
 	const store = down.wrap({
-		save: async (key, record) => {
-			await hooks.beforeSave?.(key);
-			return stand.records.create(key, record, "endless");
-		},
+		save: (key, record) => stand.records.create(key, record, "endless"),
 		read: (key) => stand.records.read(key),
 		update: (key, change) => stand.records.change(key, change),
 		scan: (...given: Parameters<typeof stand.records.scan>) => stand.records.scan(...given),
+		updateTogether: (...given: Parameters<ReturnType<typeof updatingTogether>>) =>
+			updatingTogether(stand.records)(...given),
 	});
-	const module = defineModule({ name: "factor-store" }, (m) => [
+	const module = defineModule({ name: "factor-store", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(factorStore).by(() => store),
 	]);
 	return {
 		module,
 		down,
-		/** `beforeSave` runs before each save, as a request racing it would. */
-		hooks,
+		/** Loses every claim on a unique value, as 0.18 left a binding whose claim was never made. */
+		loseClaims: async () => {
+			for (const key of (await stand.records.scan()).keys) {
+				if (key.startsWith("u-")) await stand.records.remove(key);
+			}
+		},
 		wipe: () => {
 			stand = fresh();
 		},
@@ -98,7 +96,7 @@ export async function witnessed(settings: Partial<MfaSettings> = {}, extra: Modu
 	const audit = auditStandIn();
 	const place = memoryFactors();
 	const witness = witnessStandIn();
-	const app = await assemble({
+	const input = {
 		modules: [
 			audit.module,
 			place.module,
@@ -114,8 +112,14 @@ export async function witnessed(settings: Partial<MfaSettings> = {}, extra: Modu
 		],
 		config: { ...kernelConfig(), ...sealConfig(), ...mfaConfig(settings) },
 		runtime: quietRuntime(),
-	});
-	const decided = app.get(factors);
+	};
+	const app = await assemble(input);
+	// mfa's three faces, as one for the scenes.
+	const decided: FactorReading & FactorBinding & FactorManaging = {
+		...app.get(factorReading),
+		...app.get(factorBinding),
+		...app.get(factorManaging),
+	};
 	const provedCode = async (subject: string) => {
 		const begun = await decided.begin(subject, "code", undefined, "t");
 		if (begun.kind !== "begun") throw new Error(begun.kind);
@@ -137,6 +141,7 @@ export async function witnessed(settings: Partial<MfaSettings> = {}, extra: Modu
 		(await decided.held(subject)).filter((f) => f.kind === "code").length;
 	return {
 		app,
+		input,
 		decided,
 		provedCode,
 		bindCode,

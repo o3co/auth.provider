@@ -23,8 +23,21 @@ export type Hash = SecretHash &
 const bcryptShape =
 	/^\$2[aby]\$(\d{2})\$[./A-Za-z0-9]{21}[.Oeu][./A-Za-z0-9]{30}[.CGKOSWaeimquy26]$/;
 const scryptShape = /^\$scrypt\$ln=(\d+),r=(\d+),p=(\d+)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/;
+/** The lowest bcrypt cost read, legacy's own. */
+const bcryptCostFloor = 4;
 /** The highest bcrypt cost read, so a stored hash cannot make each check or the boot take too long. */
 const bcryptMaxCost = 14;
+/** The lowest scrypt ln read; legacy read no scrypt. */
+const scryptLnFloor = 10;
+/** Node's scrypt refuses an N of 2^(16·r) or more: ln stays below this many times r. */
+const nodeLnPerR = 16;
+/** The most scrypt p read. */
+const scryptMostP = 2;
+/** The bytes a scrypt salt and key may each be. */
+const saltBytes = { least: 16, most: 64 } as const;
+const keyBytes = { least: 32, most: 64 } as const;
+/** scrypt's large buffer is this many bytes for each N and r. */
+const scryptMemoryBase = 128;
 /** The most bytes of scrypt's large buffer read, for the same reason. */
 const scryptMaxBytes = 128 * 1024 * 1024;
 const within = (n: number, min: number, max: number) => n >= min && n <= max;
@@ -35,7 +48,7 @@ const unpaddedBase64Bytes = (text: string) => {
 };
 
 /** The bytes of scrypt's large buffer, 128·N·r; the card's limit per run is on this. */
-export const scryptBytes = (ln: number, r: number) => 128 * 2 ** ln * r;
+export const scryptBytes = (ln: number, r: number) => scryptMemoryBase * 2 ** ln * r;
 
 /** The hash behind a SecretHash; every SecretHash is made by readHash. */
 export const hashOf = (hash: SecretHash) => hash as Hash;
@@ -45,7 +58,7 @@ export function readHash(text: string): Hash | undefined {
 	const b = bcryptShape.exec(text);
 	if (b) {
 		const cost = Number(b[1]);
-		if (cost < 4 || cost > bcryptMaxCost) return undefined;
+		if (cost < bcryptCostFloor || cost > bcryptMaxCost) return undefined;
 		return { format: "bcrypt", text, cost, work: `bcrypt:${cost}` } as Hash;
 	}
 	const s = scryptShape.exec(text);
@@ -53,11 +66,19 @@ export function readHash(text: string): Hash | undefined {
 	const [ln, r, p] = [Number(s[1]), Number(s[2]), Number(s[3])];
 	const salt = unpaddedBase64Bytes(s[4] ?? "");
 	const key = unpaddedBase64Bytes(s[5] ?? "");
-	// Node's scrypt rejects an N of 2^(16·r) or more.
-	const runs = ln < 16 * r;
-	const fits = ln >= 10 && r >= 1 && p >= 1 && p <= 2 && scryptBytes(ln, r) <= scryptMaxBytes;
+	const runs = ln < nodeLnPerR * r;
+	const fits =
+		ln >= scryptLnFloor &&
+		r >= 1 &&
+		p >= 1 &&
+		p <= scryptMostP &&
+		scryptBytes(ln, r) <= scryptMaxBytes;
 	// scrypt's time grows with the salt and key length, and every check pays for each work in use.
-	const sized = salt && key && within(salt.length, 16, 64) && within(key.length, 32, 64);
+	const sized =
+		salt &&
+		key &&
+		within(salt.length, saltBytes.least, saltBytes.most) &&
+		within(key.length, keyBytes.least, keyBytes.most);
 	if (!runs || !fits || !sized) return undefined;
 	const work = `scrypt:${ln},${r},${p},${key.length}`;
 	return { format: "scrypt", ln, r, p, salt, key, work } as Hash;

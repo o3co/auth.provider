@@ -5,7 +5,7 @@ import { metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import { afterEach, expect, it } from "vitest";
@@ -16,21 +16,24 @@ let stop = async () => {};
 afterEach(() => stop());
 
 const item = (name: string, value: unknown) =>
-	defineModule({ name: `item-${name}` }, (m) => [
+	defineModule({ name: `item-${name}`, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(metadata).by(() => ({ name, value })),
 	]);
 
+/** discovery beside http, keys and issuer, with these modules besides. */
+const composition = (extra: Module[], url = "https://as.example", corsOrigins: string[] = []) => ({
+	modules: [http, keysModule, issuerModule, discovery, ...extra],
+	config: {
+		...kernelConfig(),
+		...httpConfig(corsOrigins.length > 0 ? { "cors-origins": corsOrigins } : {}),
+		...keysConfig(),
+		...issuerConfig({ url }),
+	},
+	runtime,
+});
+
 async function serve(extra: Module[], url = "https://as.example", corsOrigins: string[] = []) {
-	const app = await assemble({
-		modules: [http, keysModule, issuerModule, discovery, ...extra],
-		config: {
-			...kernelConfig(),
-			...httpConfig(corsOrigins.length > 0 ? { "cors-origins": corsOrigins } : {}),
-			...keysConfig(),
-			...issuerConfig({ url }),
-		},
-		runtime,
-	});
+	const app = await assemble(composition(extra, url, corsOrigins));
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -39,13 +42,14 @@ async function serve(extra: Module[], url = "https://as.example", corsOrigins: s
 		const res = await fetch(`${base}${path}`, { method, headers });
 		return {
 			status: res.status,
+			type: res.headers.get("content-type"),
 			allowed: res.headers.get("access-control-allow-origin"),
 			body: res.status === 200 ? await res.json() : undefined,
 		};
 	};
 }
 
-it("serves one document at both well-known names, the configured issuer first and each contributed member", async () => {
+it("serves one document at both well-known names, 200 as application/json, the configured issuer first and each contributed member [oidc-discovery-3-a] [oidc-discovery-4-a] [oidc-discovery-4.1-a] [oidc-discovery-4.3-a] [rfc8414-2-a] [rfc8414-3.1-a] [rfc8414-3.3-a] [oidc-discovery-4-c] [oidc-discovery-4.2-a] [rfc8414-3.2-a] [rfc9207-2.3-a]", async () => {
 	const get = await serve([
 		item("b_supported", ["x"]),
 		item("a_endpoint", "https://as.example/a"),
@@ -64,6 +68,7 @@ it("serves one document at both well-known names, the configured issuer first an
 	]) {
 		const res = await get(path);
 		expect(res.status).toBe(200);
+		expect(res.type).toMatch(/^application\/json(;|$)/);
 		expect(res.body).toEqual(expected);
 		expect(Object.keys(res.body as object)[0]).toBe("issuer");
 	}
@@ -71,7 +76,21 @@ it("serves one document at both well-known names, the configured issuer first an
 	expect((await get("/.well-known/openid-configuration/x")).status).toBe(404);
 });
 
-it("answers for an issuer with a path where RFC 8414 inserts the well-known name and where OpenID appends it, and not at the root", async () => {
+it("serves the document under the registered well-known names alone [rfc8414-3-c]", async () => {
+	const get = await serve([]);
+	for (const path of [
+		"/.well-known/openid-config",
+		"/.well-known/oauth-authorization-server-x",
+		"/.well-known/oauth-protected-resource",
+		"/.well-known/openid-federation",
+		"/.well-known/configuration",
+		"/openid-configuration",
+	]) {
+		expect((await get(path)).status, path).toBe(404);
+	}
+});
+
+it("answers for an issuer with a path where RFC 8414 inserts the well-known name and where OpenID appends it, and not at the root [oidc-discovery-4-a] [oidc-discovery-4.3-a] [rfc8414-3-a] [rfc8414-3.1-a] [rfc8414-3.3-a]", async () => {
 	const get = await serve([], "https://as.example/tenant/a");
 	for (const path of [
 		"/.well-known/oauth-authorization-server/tenant/a",
@@ -89,6 +108,27 @@ it("answers for an issuer with a path where RFC 8414 inserts the well-known name
 	expect((await get("/tenant/a/.well-known/oauth-authorization-server")).status).toBe(404);
 });
 
+it("leaves out a member whose value is absent or a list with no elements, whichever module gives it [oidc-discovery-4.2-b] [rfc8414-3.2-b]", async () => {
+	const get = await serve([
+		item("absent", undefined),
+		item("none_supported", []),
+		item("one_supported", ["x"]),
+		item("flag", false),
+		item("empty_text", ""),
+	]);
+	for (const path of [
+		"/.well-known/openid-configuration",
+		"/.well-known/oauth-authorization-server",
+	]) {
+		expect((await get(path)).body, path).toEqual({
+			issuer: "https://as.example",
+			one_supported: ["x"],
+			flag: false,
+			empty_text: "",
+		});
+	}
+});
+
 it("refuses to start when two modules contribute one member", async () => {
 	const refused = (extra: Module[]) =>
 		serve(extra).then(
@@ -98,14 +138,14 @@ it("refuses to start when two modules contribute one member", async () => {
 	expect(
 		await refused([
 			item("same", 1),
-			defineModule({ name: "again" }, (m) => [
+			defineModule({ name: "again", replicaSafe: true, takes: [] }, (m) => [
 				m.contribute(metadata).by(() => ({ name: "same", value: 2 })),
 			]),
 		]),
 	).toBe(true);
 });
 
-it("lets a listed origin's page read the document at each of its names, and no other origin's", async () => {
+it("lets a listed origin's page read the document at each of its names, and no other origin's [oidc-discovery-4-d]", async () => {
 	const get = await serve([], "https://as.example", ["https://app.example"]);
 	for (const path of [
 		"/.well-known/openid-configuration",
@@ -115,5 +155,12 @@ it("lets a listed origin's page read the document at each of its names, and no o
 			"https://app.example",
 		);
 		expect((await get(path, "GET", "https://evil.example")).allowed, path).toBeNull();
+	}
+});
+
+it("takes all it names, with items and with none", async () => {
+	for (const extra of [[], [item("a_endpoint", "https://as.example/a")]]) {
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused(composition(extra)))["discovery"]).toBeUndefined();
 	}
 });

@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Pkg } from "@mod/guard-imports";
 import type { Budget } from "../src/contract.ts";
-import type { Pkg } from "../src/workspace.ts";
 
 /** A budget for the tests' workspaces, close to the repository's. */
 export const budget: Budget = {
@@ -27,10 +27,12 @@ export const budget: Budget = {
 	laidOutValues: 2,
 	testFile: "(^|/)test/|\\.test\\.ts$",
 	fixtureFile: "(^|/)test/fixtures/|\\.vectors\\.ts$",
+	generatedFile: "\\.bundled\\.mjs$",
 	commonKind: "common",
+	protocolKind: "protocol",
 	runtimeFromKernel: ["foundation", "capability", "feature", "adapter"],
 	kindOrder: [
-		["common"],
+		["common", "protocol"],
 		["foundation"],
 		["capability"],
 		["feature"],

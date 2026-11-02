@@ -1,11 +1,11 @@
-import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
+import { deepFreeze, type Log, Unavailable } from "@mod/kernel";
+import { usersWire } from "@mod/ledger-wire";
 import {
-	DestinationRefused,
-	isOutboundUnavailable,
 	jsonObjectOf,
 	type Narrower,
 	type Outbound,
 	type OutboundResponse,
+	postJson,
 } from "@mod/outbound";
 import type { ConfiguredUrl } from "@mod/url-setting";
 import { isWellFormedSubject, userAttribute, type Verified } from "@mod/users";
@@ -15,7 +15,7 @@ export interface CallParts {
 	readonly out: Outbound;
 	readonly credential: string | undefined;
 	readonly narrowerOf: (url: ConfiguredUrl) => Narrower;
-	readonly warn: (event: string, fields: LogFields) => void;
+	readonly warn: Log["warn"];
 }
 
 /** The ledger's calls: the password call, and a lookup that posts what it looks up. */
@@ -25,8 +25,6 @@ export interface Calls {
 }
 
 const none: Verified = deepFreeze({ kind: "none" });
-/** What a lookup's 404 and 410 must say in their body to mean no such user. */
-const noneSaid: Readonly<Record<number, string>> = { 404: "not_found", 410: "gone" };
 /** The ledger's fields kept as given, each with users' name for it. */
 const keptFields = [
 	["email", userAttribute.email],
@@ -43,13 +41,6 @@ function challengesBearer(value: string | undefined): boolean {
 	// After the scheme: the end, a comma, or a space then token68 or parameters; `bearer=` is a
 	// parameter of another scheme (RFC 9110 §11.6.1).
 	return /(?:^|,)[ \t]*bearer(?:[ \t]*(?:,|$)|[ \t]+(?![ \t=]))/i.test(unquoted);
-}
-
-/** The kind outbound gives a failure to send, or no-answer for anything else. */
-function kindOf(error: unknown): string {
-	if (DestinationRefused.is(error)) return error.reason;
-	if (isOutboundUnavailable(error)) return error.failure;
-	return "no-answer";
 }
 
 /** The ledger's user `{id, ...}` as a new frozen user, or undefined when it is not one. */
@@ -73,14 +64,10 @@ export function calls(parts: CallParts): Calls {
 		warn("users-http.ledger_failed", why);
 		return new Unavailable("users-http");
 	};
-	const headers = deepFreeze({ accept: "application/json", "content-type": "application/json" });
-	const sent = credential === undefined ? {} : { credential: `Bearer ${credential}` };
 	const post = (url: ConfiguredUrl, body: unknown) =>
-		out
-			.fetch(url, { method: "POST", headers, body: JSON.stringify(body), ...sent }, narrowerOf(url))
-			.catch((error: unknown) => {
-				throw failed({ reason: kindOf(error) });
-			});
+		postJson(out, { url, body, credential, narrower: narrowerOf(url) }, (reason) =>
+			failed({ reason }),
+		);
 	/** A `200` read once into a user, or unavailable. */
 	const userIn = (answer: OutboundResponse, wanted: (user: object) => boolean) => {
 		if (answer.status !== 200) throw failed({ status: answer.status });
@@ -89,31 +76,38 @@ export function calls(parts: CallParts): Calls {
 		if (!user) throw failed({ reason: "malformed" });
 		return user;
 	};
+	/**
+	 * None where the ledger says it knows no such user, unavailable where a 404 or 410 does not say
+	 * so (a bare 404 may be a wrong path, a gateway or a ledger hiding itself), undefined otherwise.
+	 */
+	const noUserIn = (answer: OutboundResponse) => {
+		const said = usersWire.noUser[answer.status];
+		if (said === undefined) return undefined;
+		const read = jsonObjectOf(answer, answer.status);
+		if (read.kind === "object" && read.value.error === said) return none;
+		throw failed({ status: answer.status, reason: "unmarked" });
+	};
 	return {
 		async verify(url, identifier, password) {
 			// The identifier under the name the ledger's password call reads.
-			const answer = await post(url, { email: identifier, password });
-			// A 401 alone refuses the user: a 403 may come from a proxy before the ledger while it fails, and
-			// read as a wrong password it would hold the account's logins back.
-			if (answer.status === 401) {
+			const answer = await post(url, usersWire.verify(identifier, password));
+			// A 401, or a 404 or 410 saying so as a lookup's does, refuses the user: a 403 may come from a
+			// proxy before the ledger while it fails, and read as a wrong password it would hold the
+			// account's logins back.
+			if (answer.status === usersWire.refused) {
 				// A challenge refuses the credential; with none sent, it can only refuse the user.
 				const challenged = challengesBearer(answer.headers.get("www-authenticate"));
 				if (credential === undefined || !challenged) return none;
 				throw failed({ reason: "credential-refused" });
 			}
-			return userIn(answer, (user) => isName((user as { username?: unknown }).username));
+			return (
+				noUserIn(answer) ??
+				userIn(answer, (user) => isName((user as { username?: unknown }).username))
+			);
 		},
 		async lookup(url, asked) {
 			const answer = await post(url, asked);
-			// Not known, or known and refused, only where the ledger says so: a bare 404 may be a wrong
-			// path, a gateway or a ledger hiding itself, never no such user.
-			const said = noneSaid[answer.status];
-			if (said !== undefined) {
-				const read = jsonObjectOf(answer, answer.status);
-				if (read.kind === "object" && read.value.error === said) return none;
-				throw failed({ status: answer.status, reason: "unmarked" });
-			}
-			return userIn(answer, () => true);
+			return noUserIn(answer) ?? userIn(answer, () => true);
 		},
 	};
 }

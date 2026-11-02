@@ -26,7 +26,10 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 	const byFamily = memoryRecords<never>(now, size).keyedSets(caps.issuedAccess);
 	const down = { families: unavailableSwitch<FamilyStore>("family store") };
 	let meanwhile: ((id: string) => Promise<void>) | undefined;
-	const module = defineModule({ name: "refresh-stores" }, (m) => [
+	let beforeAccess: ((id: string) => Promise<void>) | undefined;
+	/** What redemptions and the settle list were given, as written. */
+	const given: unknown[] = [];
+	const module = defineModule({ name: "refresh-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(familyStore).by((c) => {
 			clock = c.clock.now;
 			const { create: save, read, change } = kept.records;
@@ -41,17 +44,49 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 			return down.families.wrap({ save, read, update });
 		}),
 		m.provide(redemptionStore).by(() => ({
-			save: marks.records.create,
+			save: (redemption, record, lifetimeMs) => {
+				given.push([redemption, record]);
+				return marks.records.create(redemption, record, lifetimeMs);
+			},
 			read: marks.records.read,
 		})),
 		m.provide(sessionFamilies).by(() => bySession),
-		m.provide(issuedAccess).by(() => byFamily),
+		m.provide(issuedAccess).by(() => ({
+			...byFamily,
+			add: async (key: string, member: string, lifetimeMs: number) => {
+				const first = beforeAccess;
+				beforeAccess = undefined;
+				if (first) await first(key);
+				return byFamily.add(key, member, lifetimeMs);
+			},
+		})),
 		m.provide(tokenFamilies).by(() => ({ save: links.records.create, read: links.records.read })),
-		m.provide(settleList).by(() => kept.deferred),
+		m.provide(settleList).by(() => ({
+			...kept.deferred,
+			add: (id: string) => {
+				given.push(id);
+				return kept.deferred.add(id);
+			},
+		})),
 	]);
 	/** The next update that finds no record is followed by this write. */
 	const landing = (write: (id: string) => Promise<void>) => {
 		meanwhile = write;
 	};
-	return { module, kept, marks, links, bySession, byFamily, down, landing };
+	/** The next access token a family lists is preceded by this write, by the family's name. */
+	const landingBeforeAccess = (write: (id: string) => Promise<void>) => {
+		beforeAccess = write;
+	};
+	return {
+		module,
+		kept,
+		marks,
+		links,
+		bySession,
+		byFamily,
+		down,
+		landing,
+		landingBeforeAccess,
+		given,
+	};
 }

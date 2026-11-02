@@ -17,7 +17,7 @@ type Call = (log: Log) => void;
 
 /** A sink module keeping what it gets under `name`. */
 function sink(name: string, got: (string | LogLine)[], write?: LogSink["write"]): Module {
-	return defineModule({ name }, (m) => [
+	return defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(logSinks).by(() => ({
 			write:
 				write ??
@@ -30,7 +30,7 @@ function sink(name: string, got: (string | LogLine)[], write?: LogSink["write"])
 
 /** A module whose provision logs `call` once built. */
 function speaker(call: Call, name = "speaker"): Module {
-	return defineModule({ name }, (m) => [
+	return defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 		m.provide(contract<object>(name)).by((c) => {
 			call(c.log);
 			return {};
@@ -113,11 +113,37 @@ describe("log threshold", () => {
 });
 
 describe("log sinks", () => {
+	it("runs a sink's stop hooks after those of every module its build does not take, as sinks are built first", async () => {
+		const order: string[] = [];
+		// Listed first, so it is the build order, not the list's, that puts the sink's hook last.
+		const provider = defineModule({ name: "provider", replicaSafe: false, takes: [] }, (m) => [
+			m.provide(contract<void>("provided")).by((c) => {
+				c.onStop(() => {
+					order.push("stop provision");
+				});
+			}),
+		]);
+		const stopping = defineModule({ name: "stopping-sink", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(logSinks).by((c) => {
+				c.onStop(() => {
+					order.push("stop sink");
+				});
+				return { write: () => {} };
+			}),
+		]);
+		const app = await assemble({
+			modules: [provider, stopping],
+			config: config(),
+		});
+		await app.stop(1000);
+		expect(order).toEqual(["stop provision", "stop sink"]);
+	});
+
 	it("hands each sink the level, event, kernel time and fields, the fields never replacing the others", async () => {
 		vi.useFakeTimers({ now: 1_700_000_000_000, toFake: ["Date"] });
-		const lines = await linesOf((log) =>
-			log.warn("e", { level: "error", event: "x", at: 1, n: 2 }),
-		);
+		// Fields a JavaScript caller may pass, past the type that refuses these names.
+		const forged: Record<string, string | number> = { level: "error", event: "x", at: 1, n: 2 };
+		const lines = await linesOf((log) => log.warn("e", forged));
 		expect(lines).toEqual([
 			{
 				level: "warn",
@@ -167,14 +193,14 @@ describe("log sinks", () => {
 	it("builds the sinks before the other parts and drops the lines logged while they build", async () => {
 		const got: (string | LogLine)[] = [];
 		const needed = contract<object>("needed");
-		const logging = defineModule({ name: "logging" }, (m) => [
+		const logging = defineModule({ name: "logging", replicaSafe: false, takes: [needed] }, (m) => [
 			m.contribute(logSinks).by(async (c) => {
 				c.log.error("from the sink");
 				await c.get(needed);
 				return { write: (line: LogLine) => void got.push(line) };
 			}),
 		]);
-		const before = defineModule({ name: "before" }, (m) => [
+		const before = defineModule({ name: "before", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(needed).by((c) => {
 				c.log.error("while sinks build");
 				return {};
@@ -190,7 +216,7 @@ describe("log sinks", () => {
 	it("hands a failed periodic run's line to the sinks", async () => {
 		vi.useFakeTimers();
 		const got: (string | LogLine)[] = [];
-		const failing = defineModule({ name: "failing" }, (m) => [
+		const failing = defineModule({ name: "failing", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(contract<object>("failing")).by((c: BuildContext<unknown>) => {
 				c.every(100, async () => {
 					throw new Error("once");
@@ -215,7 +241,7 @@ describe("log sinks", () => {
 	it("keeps running a failing periodic task when its warn line meets a throwing sink or log", async () => {
 		vi.useFakeTimers();
 		let runs = 0;
-		const failing = defineModule({ name: "failing" }, (m) => [
+		const failing = defineModule({ name: "failing", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(contract<object>("failing")).by((c: BuildContext<unknown>) => {
 				c.every(100, async () => {
 					runs++;

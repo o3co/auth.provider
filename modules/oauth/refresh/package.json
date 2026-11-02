@@ -4,6 +4,9 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
+	"grantTypes": [
+		"refresh_token"
+	],
 	"storeWiring": true,
 	"exports": {
 		".": "./src/contract.ts",
@@ -13,6 +16,7 @@
 	},
 	"dependencies": {
 		"@mod/audit": "workspace:*",
+		"@mod/claims-selection": "workspace:*",
 		"@mod/client-allowance": "workspace:*",
 		"@mod/clients": "workspace:*",
 		"@mod/code-grant": "workspace:*",

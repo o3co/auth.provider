@@ -1,5 +1,6 @@
 import { connect as netConnect, type Socket } from "node:net";
 import { isLoopbackAddress } from "@mod/address-reach";
+import { heldToFloor, type TlsOptions } from "@mod/tls-options";
 import addressparser from "nodemailer/lib/addressparser";
 import MailComposer from "nodemailer/lib/mail-composer";
 import SMTPConnection from "nodemailer/lib/smtp-connection";
@@ -22,6 +23,8 @@ export interface RelaySettings {
 	readonly account?: { readonly user: string; readonly pass: string } | undefined;
 	/** For the whole send; connecting and the greeting get a quarter each, a silence half. */
 	readonly deadlineMs: number;
+	/** The floor every TLS connection holds to (`tls-options`): its own keys, copied last. */
+	readonly floor: TlsOptions;
 }
 
 /** What one send carries: one address, already checked and in mail's canonical form, and the rendered text. */
@@ -45,6 +48,7 @@ export function mailboxOf(from: string): Mailbox | undefined {
 const beyondAscii = /[^\p{ASCII}]/u;
 /** The longest wait for the relay to end the connection after QUIT. */
 const QUIT_MS = 1000;
+const sendSteps = { connect: 1, greeting: 1, idle: 2 } as const;
 
 /** `To` written here, alone and in angle brackets; the library composes the rest. */
 async function compose(to: string, from: Mailbox, letter: Letter): Promise<Buffer> {
@@ -157,15 +161,20 @@ function quit(connection: SMTPConnection, ms: number): Promise<void> {
 }
 
 /**
- * One connection per send, never reused. The certificate is always checked against `host`
- * (TLS 1.2 or later); `starttls` sends nothing more when STARTTLS is missing or fails.
+ * One connection per send, never reused. The certificate is always checked against `host`, at the
+ * floor's versions and suites; `starttls` sends nothing more when STARTTLS is missing or fails.
  */
 export function relayOver(
 	settings: RelaySettings,
 	open: Open = (host, port) => netConnect({ host, port }),
 ): (letter: Letter) => Promise<"sent" | "limited"> {
 	const { host, port, security, deadlineMs } = settings;
-	const stepMs = Math.max(1, Math.floor(deadlineMs / 4));
+	// Held to the floor once, its own keys last, as `tls-options` knows them, so nothing loosens it.
+	const tls = Object.freeze(heldToFloor(settings.floor, {}));
+	const stepMs = Math.max(
+		1,
+		Math.floor(deadlineMs / (sendSteps.connect + sendSteps.greeting + sendSteps.idle)),
+	);
 	const converse = async (held: Held, to: string, message: Buffer) => {
 		const socket = await openSocket(settings, open, stepMs, held);
 		const connection = new SMTPConnection({
@@ -175,10 +184,11 @@ export function relayOver(
 			secure: security === "tls",
 			requireTLS: security === "starttls",
 			ignoreTLS: security === "none",
-			tls: { minVersion: "TLSv1.2", rejectUnauthorized: true },
-			connectionTimeout: stepMs,
-			greetingTimeout: stepMs,
-			socketTimeout: stepMs * 2,
+			// A copy per connection: the library may write into what it is given.
+			tls: { ...tls },
+			connectionTimeout: stepMs * sendSteps.connect,
+			greetingTimeout: stepMs * sendSteps.greeting,
+			socketTimeout: stepMs * sendSteps.idle,
 			logger: false,
 			debug: false,
 			transactionLog: false,

@@ -8,12 +8,15 @@
 		".": "./src/main.ts"
 	},
 	"scripts": {
-		"conformance": "vitest run --config vitest.config.ts"
+		"conformance": "vitest run --config vitest.config.ts",
+		"conformance:faults": "SPEC_EVIDENCE_RUN=faults vitest run --config vitest.faults.config.ts",
+		"evidence-runs": "node -p \"JSON.stringify([{ entry: '@mod/conformance-passkey#faults', kind: 'faults', matrix: '@mod/conformance-passkey', files: '.faults.case.ts', noSkip: true }])\""
 	},
 	"dependencies": {
 		"@mod/conformance": "workspace:*",
 		"@mod/conformance-legacy": "workspace:*",
 		"@mod/conformance-oauth": "workspace:*",
+		"@mod/ledger-fakes": "workspace:*",
 		"vitest": "5.0.5"
 	},
 	"devDependencies": {
@@ -21,7 +24,8 @@
 		"@mod/conformance-identity": "workspace:*",
 		"@mod/conformance-keys": "workspace:*",
 		"@mod/conformance-second-factor": "workspace:*",
+		"@mod/spec-checklist": "workspace:*",
 		"@mod/webauthn": "workspace:*",
-		"jose": "6.2.12"
+		"jose": "6.2.13"
 	}
 }

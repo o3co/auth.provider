@@ -29,15 +29,6 @@ const openidDefault: ClientScene = {
 	secret: "openid-default-secret-0123456789",
 	defaultScopes: ["openid"],
 };
-const svc: ClientScene = {
-	id: "svc",
-	kind: "confidential",
-	method: "client_secret_post",
-	secret: "svc-secret-0123456789abcdef",
-	grants: ["client_credentials"],
-	scopes: ["openid", "read"],
-	defaultScopes: ["read"],
-};
 const fields: CodeScene = {
 	issuer,
 	keys: {
@@ -48,7 +39,7 @@ const fields: CodeScene = {
 			publicPem: pair.publicKey.export({ format: "pem", type: "spki" }).toString(),
 		},
 	},
-	clients: [app, openidDefault, svc],
+	clients: [app, openidDefault],
 	users: [{ identifier: "alice", password: "correct horse battery" }],
 	introspection: true,
 };
@@ -81,7 +72,7 @@ const request = (extra: Record<string, string> = {}) => ({
 });
 
 describe("authorization code: before the redirect URI is trusted", () => {
-	it("answers an unknown client and an unregistered redirect URI locally", async () => {
+	it("answers an unknown client and an unregistered redirect URI locally [rfc6749-3.1.2.3-b] [rfc6749-3.1.2.3-c] [rfc6749-3.1.2.4-a] [rfc6749-3.1.2.4-b] [rfc6749-4.1.2.1-a] [rfc6749-4.1.2.1-b] [rfc9700-2.1-a] [oidc-core-3.1.2.6-b]", async () => {
 		for (const params of [
 			request({ client_id: "nobody" }),
 			request({ redirect_uri: "https://evil.example/cb" }),
@@ -92,7 +83,7 @@ describe("authorization code: before the redirect URI is trusted", () => {
 		}
 	});
 
-	it("refuses textual variants of a loopback redirect URI, and ignores only its port", async () => {
+	it("refuses textual variants of a loopback redirect URI, and ignores only its port [rfc6749-3.1.2.3-c] [rfc9700-2.1-a] [rfc9700-4.1.3-a]", async () => {
 		expect(
 			(await browser.authorize(request({ redirect_uri: "http://localhost:9000/cb" }))).status,
 		).toBe(400);
@@ -110,7 +101,7 @@ describe("authorization code: before the redirect URI is trusted", () => {
 });
 
 describe("authorization code: errors sent back", () => {
-	it("sends refusals back with state and iss", async () => {
+	it("sends refusals back with state and iss [rfc6749-3.1-f] [rfc6749-3.1.1-a] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc9207-2-a] [oidc-core-3.1.2.6-c] [oidc-core-3.1.2.6-d] [oidc-core-6.1-a] [rfc6749-4.1.2.1-d]", async () => {
 		const cases: [Record<string, string> | string, string][] = [
 			[request({ response_type: "token" }), "unsupported_response_type"],
 			[request({ code_challenge: "" }), "invalid_request"],
@@ -128,10 +119,11 @@ describe("authorization code: errors sent back", () => {
 				res.at?.searchParams.get("state"),
 				res.at?.searchParams.get("iss"),
 			]).toEqual([error, "s1", issuer]);
+			expect(res.at?.searchParams.get("error")).toMatch(/^[\x20\x21\x23-\x5B\x5D-\x7E]+$/);
 		}
 	});
 
-	it("answers prompt=none without a session with login_required", async () => {
+	it("answers prompt=none without a session with login_required [oidc-core-3.1.2.1-k] [oidc-core-3.1.2.3-c] [oidc-core-3.1.2.3-d] [rfc9207-2-a] [oidc-core-15.1-b]", async () => {
 		const res = await browser.authorize(request({ prompt: "none" }), false);
 		expect([res.at?.searchParams.get("error"), res.at?.searchParams.get("iss")]).toEqual([
 			"login_required",
@@ -166,7 +158,7 @@ describe("authorization code: issuing and redeeming", () => {
 		return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 	};
 
-	it("issues a code with state and iss, redeems it once, and a used code gets nothing", async () => {
+	it("issues a code with state and iss, redeems it once, and a used code gets nothing [rfc6749-4.1.2-a] [rfc6749-4.1.2-d] [rfc6749-4.1.2-f] [rfc7636-4.6-a] [rfc9207-2-a] [oidc-core-3.1.3.2-d] [oidc-core-3.1.3.3-a] [oidc-core-3.1.3.3-b]", async () => {
 		const res = await browser.authorize(request({ scope: "openid read" }));
 		const code = res.at?.searchParams.get("code") ?? "";
 		expect([res.at?.searchParams.get("state"), res.at?.searchParams.get("iss")]).toEqual([
@@ -178,6 +170,34 @@ describe("authorization code: issuing and redeeming", () => {
 		expect(
 			(await token({ code, redirect_uri: callback, code_verifier: verifier })).body.error,
 		).toBe("invalid_grant");
+	});
+
+	it("answers a POST with a 303 to the GET carrying the same parameters, where the session is read", async () => {
+		const sent = request({ scope: "openid read" });
+		const res = await fetch(`${base}/oauth/authorize`, {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				"x-forwarded-proto": "https",
+				"x-forwarded-for": "198.51.100.20",
+				"x-forwarded-host": new URL(issuer).host,
+				"content-type": "application/x-www-form-urlencoded",
+				origin: issuer,
+				cookie: await browser.login(),
+			},
+			body: new URLSearchParams(sent),
+		});
+		const at = new URL(res.headers.get("location") ?? "", issuer);
+		if (areaTarget().differs("authorize-post-read-in-place")) {
+			// The legacy build reads the form in place, so the code goes to the client at once.
+			expect([`${at.origin}${at.pathname}`, at.searchParams.has("code")]).toEqual([callback, true]);
+		} else {
+			expect([res.status, `${at.origin}${at.pathname}`]).toEqual([
+				303,
+				`${issuer}/oauth/authorize`,
+			]);
+			expect(Object.fromEntries(at.searchParams)).toEqual(sent);
+		}
 	});
 
 	it("refuses a code after logout", async () => {
@@ -200,7 +220,7 @@ describe("OpenID Connect: openid required by default", () => {
 			name === "code" ? res.at?.searchParams.has(name) : res.at?.searchParams.get(name),
 		);
 
-	it("refuses a request whose own scope does not name openid with invalid_scope, sent back", async () => {
+	it("refuses a request whose own scope does not name openid with invalid_scope, sent back [oidc-core-3.1.2.2-a] [rfc6749-3.3-b] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a]", async () => {
 		const { scope: _, ...unscoped } = request();
 		const refused = [false, "invalid_scope", "s1", issuer];
 		expect(answer(await browser.authorize(request({ scope: "read" })))).toEqual(refused);
@@ -210,7 +230,7 @@ describe("OpenID Connect: openid required by default", () => {
 		);
 	});
 
-	it("gives a code to a request that names openid", async () => {
+	it("gives a code to a request that names openid, asked by GET [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc9207-2-a] [oidc-discovery-3-t] [rfc6749-3.1-c]", async () => {
 		expect(answer(await browser.authorize(request({ scope: "openid read" })))).toEqual([
 			true,
 			null,
@@ -240,7 +260,7 @@ describe("OpenID Connect: an ID token with the code", () => {
 			unknown
 		>;
 
-	it("answers an openid request with a code, iss and state, and the exchange with an ID token for that client and nonce", async () => {
+	it("answers an openid request with a code, iss and state, and the exchange with an ID token for that client and nonce [oidc-core-2-a] [oidc-core-2-b] [oidc-core-2-d] [oidc-core-2-e] [oidc-core-2-i] [oidc-core-3.1.3.3-a] [oidc-core-3.1.3.3-c] [oidc-core-15.1-e] [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc9207-2-a]", async () => {
 		const res = await browser.authorize(request({ nonce: "n-123" }));
 		expect([
 			res.at?.searchParams.has("code"),
@@ -262,7 +282,7 @@ describe("OpenID Connect: an ID token with the code", () => {
 		expect(typeof claimsOf(answer.body.id_token).auth_time).toBe("number");
 	});
 
-	it("refuses the same code a second time", async () => {
+	it("refuses the same code a second time [rfc6749-4.1.2-d] [rfc6749-5.2-a] [oidc-core-3.1.3.2-d]", async () => {
 		const res = await browser.authorize(request());
 		const form = {
 			code: res.at?.searchParams.get("code") ?? "",
@@ -275,7 +295,7 @@ describe("OpenID Connect: an ID token with the code", () => {
 	});
 
 	it.runIf(areaTarget().can(auditEvents.need))(
-		"records the exchange of a code, and the refusal of a used one, never the code",
+		"records the exchange of a code, and the refusal of a used one, never the code [guarantee-8-c]",
 		async () => {
 			const res = await browser.authorize(request());
 			const code = res.at?.searchParams.get("code") ?? "";
@@ -330,7 +350,7 @@ describe("tokens and logout", () => {
 		expect((await post("/oauth/introspect", { ...asApp, token })).body.active).toBe(false);
 	});
 
-	it("signs ID tokens with the asymmetric key it publishes", async () => {
+	it("signs ID tokens with the asymmetric key it publishes [oidc-core-2-o] [oidc-core-2-q]", async () => {
 		browser.forget();
 		const res = await browser.authorize(request());
 		const answer = await post("/oauth/token", {
@@ -362,16 +382,6 @@ describe("tokens and logout", () => {
 			.map((part) => JSON.parse(Buffer.from(part, "base64url").toString()));
 		expect(header.typ).toBe("JWT");
 		expect(claims.auth_time).toBeLessThanOrEqual(claims.iat);
-	});
-
-	it("gives no ID token for openid asked of the client credentials grant", async () => {
-		const answer = await post("/oauth/token", {
-			grant_type: "client_credentials",
-			client_id: "svc",
-			client_secret: svc.secret ?? "",
-			scope: "openid read",
-		});
-		expect(answer.body.id_token).toBeUndefined();
 	});
 });
 

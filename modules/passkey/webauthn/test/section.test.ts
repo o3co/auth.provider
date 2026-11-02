@@ -1,5 +1,9 @@
+import { assemble, kernelConfig } from "@mod/kernel";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
+import webauthnModule from "../src/module.ts";
 import { section } from "../src/section.ts";
+import { webauthnConfig } from "../src/testing.ts";
 
 const accepts = (rpId: string, origins: string[]) =>
 	section.safeParse({ "rp-id": rpId, "rp-name": "RP", origins }).success;
@@ -75,15 +79,60 @@ it("takes a challenge lifetime from 10s to 10m, written with its unit", () => {
 	]);
 });
 
-it("frames nothing, prefers verification, keeps 10 passkeys and a challenge 2m where nothing is set", () => {
-	expect(parsed({}).data).toMatchObject({
+it("frames nothing, keeps a challenge 2m and takes every algorithm where nothing is set", () => {
+	expect(parsed({}).data).toEqual({
+		"rp-id": "rp.example",
+		"rp-name": "RP",
+		origins: ["https://rp.example"],
 		"top-origins": [],
 		"challenge-lifetime": 120,
-		"user-verification": "preferred",
-		"max-credentials": 10,
+		algorithms: ["EdDSA", "ES256", "RS256"],
 	});
+});
+
+it("takes the algorithms named, in their order, and refuses none, one it cannot verify, or one named twice", () => {
+	expect(parsed({ algorithms: ["RS256", "ES256"] }).data?.algorithms).toEqual(["RS256", "ES256"]);
+	for (const algorithms of [[], ["ES384"], ["es256"], [-7], ["ES256", "ES256"]]) {
+		expect(parsed({ algorithms }).success, JSON.stringify(algorithms)).toBe(false);
+	}
+});
+
+it("refuses the keys passkeys keeps now, naming each", () => {
+	for (const key of ["user-verification", "max-credentials"]) {
+		expect(parsed({ [key]: key === "max-credentials" ? 10 : "preferred" }).success, key).toBe(
+			false,
+		);
+	}
 });
 
 it("refuses the challenge lifetime by its name in seconds", () => {
 	expect(parsed({ "challenge-seconds": 120 }).success).toBe(false);
+});
+
+it("refuses in production an origin over plain http on localhost, in either list", () => {
+	const ask = (origins: string[], top: string[] = []) =>
+		webauthnModule
+			.refusedInProduction?.({ origins, "top-origins": top } as never)
+			?.map((r) => r.key);
+	expect(ask(["http://localhost:3000"], ["http://localhost:4000"])).toEqual([
+		"origins",
+		"top-origins",
+	]);
+	expect(ask(["https://as.example"], ["https://top.example"])).toEqual([]);
+});
+
+it("warns at every start where other origins' pages may frame a ceremony, by their count alone", async () => {
+	const warned = async (top: string[]) => {
+		const recorded = recordingLog();
+		await assemble({
+			modules: [webauthnModule],
+			config: { ...kernelConfig(), ...webauthnConfig({ "top-origins": top }) },
+			runtime: quietRuntime({ log: recorded.log }),
+		});
+		return recorded.lines();
+	};
+	expect(await warned(["https://shop.example", "https://news.example"])).toEqual([
+		{ level: "warn", event: "webauthn.framed_by_other_origins", fields: { count: 2 } },
+	]);
+	expect(await warned([])).toEqual([]);
 });

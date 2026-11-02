@@ -2,8 +2,15 @@ import { createHmac, generateKeyPairSync } from "node:crypto";
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import { DestinationRefused, type Outbound, type OutboundResponse } from "@mod/outbound";
 import { configuredUrl } from "@mod/url-setting/testing";
+import { SignJWT } from "jose";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { Algorithm, KeySource, Policy, Reason } from "../src/contract.ts";
+import {
+	type Algorithm,
+	type KeySource,
+	type Policy,
+	type Reason,
+	typOf,
+} from "../src/contract.ts";
 import { testSigner } from "../src/testing.ts";
 import { externalJwtOver } from "../src/verifier.ts";
 
@@ -21,6 +28,8 @@ const unreached = {
 	},
 } as unknown as Outbound;
 const invalid = (reason: Reason) => ({ kind: "invalid", reason });
+/** A refusal found once the signature held: it says so. */
+const signedInvalid = (reason: Reason) => ({ kind: "invalid", reason, signed: true });
 const verifierOf = (keys: KeySource, rules: Policy) =>
 	externalJwtOver({ clock, outbound: unreached, keySetMaxAgeMs: 86_400_000 }).verifierOf(
 		keys,
@@ -117,6 +126,24 @@ describe("headers and keys", () => {
 		}
 	});
 
+	it("reads a header's type as it compares one, for a caller to sort tokens by before verifying", async () => {
+		expect(typOf({ typ: "application/OAuth-ID-JAG+JWT" })).toBe("oauth-id-jag+jwt");
+		expect(typOf({ typ: "oauth-id-jag+jwt" })).toBe("oauth-id-jag+jwt");
+		expect(typOf({ typ: "JWT" })).toBe("jwt");
+		// Its parameters and the space around it are no part of a type.
+		expect(typOf({ typ: "application/AT+JWT; charset=UTF-8" })).toBe("at+jwt");
+		expect(typOf({ typ: " oauth-id-jag+jwt ;q=1" })).toBe("oauth-id-jag+jwt");
+		for (const header of [{}, { typ: 1 }, { typ: ["JWT"] }, { typ: null }])
+			expect(typOf(header), JSON.stringify(header)).toBeUndefined();
+		// One reading for both: a type typOf tells apart, a policy naming it tells apart the same way.
+		const signer = await testSigner("ES256");
+		const verifier = verifierOf({ inline: [signer.jwk] }, { ...policy, typ: "at+jwt" });
+		for (const typ of ["at+jwt", "AT+JWT", "application/at+jwt", "jwt", "application/jwt"]) {
+			const valid = (await verifier.verify(await signer.sign(fresh(), { typ }))).kind === "valid";
+			expect(valid, typ).toBe(typOf({ typ }) === typOf({ typ: "at+jwt" }));
+		}
+	});
+
 	it("picks a key by its kind, use, operations, algorithm and id, exactly one", async () => {
 		const signer = await testSigner("ES256", "k1");
 		const other = await testSigner("ES256", "k2");
@@ -145,6 +172,44 @@ describe("headers and keys", () => {
 		const unnamed = await signer.sign(fresh(), { kid: undefined });
 		const both = verifierOf({ inline: [signer.jwk, other.jwk] }, policy);
 		expect(await both.verify(unnamed)).toEqual(invalid("ambiguous-key"));
+	});
+
+	it("reads each key under one algorithm: its own `alg`, or the one the caller allows for its kind", async () => {
+		const rsa = await testSigner("RS256", "k1");
+		const token = await rsa.sign(fresh());
+		const judged = async (keys: Record<string, unknown>[], algorithms: Algorithm[]) =>
+			verifierOf({ inline: keys }, { ...policy, algorithms }).verify(token);
+		// One RSA algorithm allowed, so a key naming no alg is read under it; named twice, still one.
+		expect((await judged([rsa.jwk], ["RS256"])).kind).toBe("valid");
+		expect((await judged([rsa.jwk], ["RS256", "RS256", "ES256"])).kind).toBe("valid");
+		// Two allowed for its kind: a key naming no alg is used under neither, whatever the header says.
+		expect(await judged([rsa.jwk], ["RS256", "PS256"])).toEqual(invalid("no-key"));
+		expect(await judged([rsa.jwk], ["PS256", "RS256", "ES256"])).toEqual(invalid("no-key"));
+		// A key naming its alg is read under that one alone.
+		expect((await judged([{ ...rsa.jwk, alg: "RS256" }], ["RS256", "PS256"])).kind).toBe("valid");
+		expect(await judged([{ ...rsa.jwk, alg: "PS256" }], ["RS256", "PS256"])).toEqual(
+			invalid("no-key"),
+		);
+		// An EC key's curve gives its one algorithm, so the three may be allowed together.
+		const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-384" });
+		const p384 = { ...publicKey.export({ format: "jwk" }), kid: "e1" };
+		const signed = await new SignJWT(fresh())
+			.setProtectedHeader({ alg: "ES384", kid: "e1" })
+			.sign(privateKey);
+		const ec = verifierOf(
+			{ inline: [p384] },
+			{ ...policy, algorithms: ["ES256", "ES384", "ES512"] },
+		);
+		expect((await ec.verify(signed)).kind).toBe("valid");
+		// A PEM key is read under the algorithm it is given for.
+		const pem = verifierOf(
+			{ pem: [{ pem: rsa.pem, alg: "RS256", kid: "k1" }] },
+			{
+				...policy,
+				algorithms: ["RS256", "PS256"],
+			},
+		);
+		expect((await pem.verify(token)).kind).toBe("valid");
 	});
 
 	it("takes a key id only as a string, in the header and in a key", async () => {
@@ -247,12 +312,14 @@ describe("claims", () => {
 
 	it("needs a JSON object with an expiry", async () => {
 		const { exp: _, ...lasting } = fresh();
-		expect(await signed(lasting)).toEqual(invalid("malformed"));
-		expect(await signed(fresh({ exp: "soon" }))).toEqual(invalid("malformed"));
-		expect(await signed(fresh({ nbf: "now" }))).toEqual(invalid("malformed"));
-		expect(await signed(fresh({ iat: "then" }))).toEqual(invalid("malformed"));
+		expect(await signed(lasting)).toEqual(signedInvalid("malformed"));
+		expect(await signed(fresh({ exp: "soon" }))).toEqual(signedInvalid("malformed"));
+		expect(await signed(fresh({ nbf: "now" }))).toEqual(signedInvalid("malformed"));
+		expect(await signed(fresh({ iat: "then" }))).toEqual(signedInvalid("malformed"));
 		for (const payload of [null, "x", [fresh()]]) {
-			expect(await signed(payload as never), JSON.stringify(payload)).toEqual(invalid("malformed"));
+			expect(await signed(payload as never), JSON.stringify(payload)).toEqual(
+				signedInvalid("malformed"),
+			);
 		}
 	});
 
@@ -262,7 +329,7 @@ describe("claims", () => {
 		for (const claim of ["exp", "nbf", "iat"]) {
 			const text = JSON.stringify(fresh()).replace("}", `,"${claim}":1e400}`);
 			expect(await verifier.verify(await signer.signBytes(Buffer.from(text))), claim).toEqual(
-				invalid("malformed"),
+				signedInvalid("malformed"),
 			);
 		}
 	});
@@ -275,26 +342,39 @@ describe("claims", () => {
 			"valid",
 		);
 		const broken = Buffer.from(text("\u0000")).map((byte) => (byte === 0 ? 0xff : byte));
-		expect(await verifier.verify(await signer.signBytes(broken))).toEqual(invalid("malformed"));
+		expect(await verifier.verify(await signer.signBytes(broken))).toEqual(
+			signedInvalid("malformed"),
+		);
 	});
 
 	it("judges its times on the caller's clock, allowing the caller's skew", async () => {
 		const at = seconds(now);
 		expect((await signed(fresh({ exp: at - 29 }))).kind).toBe("valid");
-		expect(await signed(fresh({ exp: at - 30 }))).toEqual(invalid("expired"));
+		expect(await signed(fresh({ exp: at - 30 }))).toEqual(signedInvalid("expired"));
 		expect((await signed(fresh({ nbf: at + 30 }))).kind).toBe("valid");
-		expect(await signed(fresh({ nbf: at + 31 }))).toEqual(invalid("not-yet"));
+		expect(await signed(fresh({ nbf: at + 31 }))).toEqual(signedInvalid("not-yet"));
 		expect((await signed(fresh({ iat: at + 30 }))).kind).toBe("valid");
-		expect(await signed(fresh({ iat: at + 31 }))).toEqual(invalid("future-iat"));
+		expect(await signed(fresh({ iat: at + 31 }))).toEqual(signedInvalid("future-iat"));
 	});
 
 	it("refuses a token that lives, or was issued, longer than the caller allows", async () => {
 		const at = seconds(now);
 		const rules = { maxLifetimeMs: 3_600_000 };
-		expect((await signed(fresh({ exp: at + 3630 }), rules)).kind).toBe("valid");
-		expect(await signed(fresh({ exp: at + 3631 }), rules)).toEqual(invalid("too-long"));
-		expect((await signed(fresh({ iat: at - 3630 }), rules)).kind).toBe("valid");
-		expect(await signed(fresh({ iat: at - 3631 }), rules)).toEqual(invalid("too-long"));
+		// Its `exp` ahead, with the caller's skew, where it names no `iat`.
+		const noIat = { iat: undefined };
+		expect((await signed(fresh({ ...noIat, exp: at + 3630 }), rules)).kind).toBe("valid");
+		expect(await signed(fresh({ ...noIat, exp: at + 3631 }), rules)).toEqual(
+			signedInvalid("too-long"),
+		);
+		// Its `exp` less its `iat`, with no skew: each within reach, the two further apart than allowed.
+		expect((await signed(fresh({ iat: at - 1800, exp: at + 1800 }), rules)).kind).toBe("valid");
+		expect(await signed(fresh({ iat: at - 1801, exp: at + 1800 }), rules)).toEqual(
+			signedInvalid("too-long"),
+		);
+		expect(await signed(fresh({ iat: at - 1810, exp: at + 1810 }), rules)).toEqual(
+			signedInvalid("too-long"),
+		);
+		expect(await signed(fresh({ iat: at - 3631 }), rules)).toEqual(signedInvalid("too-long"));
 		expect((await signed(fresh({ exp: at + 86_400 }))).kind).toBe("valid");
 	});
 
@@ -304,7 +384,7 @@ describe("claims", () => {
 			"valid",
 		);
 		expect(await signed(fresh(), expecting({ iss: "https://other.example" }))).toEqual(
-			invalid("issuer"),
+			signedInvalid("issuer"),
 		);
 		expect((await signed(fresh(), expecting({ aud: ["https://as.example"] }))).kind).toBe("valid");
 		const audiences = fresh({ aud: ["https://rs.example", "https://as.example"] });
@@ -317,18 +397,22 @@ describe("claims", () => {
 			).kind,
 		).toBe("valid");
 		expect(await signed(audiences, expecting({ aud: ["https://as.example/token"] }))).toEqual(
-			invalid("audience"),
+			signedInvalid("audience"),
 		);
 		expect(
 			await signed(
 				fresh({ aud: [1, "https://as.example"] }),
 				expecting({ aud: ["https://as.example"] }),
 			),
-		).toEqual(invalid("audience"));
-		expect(await signed(fresh({ aud: 7 }), expecting({ aud: ["7"] }))).toEqual(invalid("audience"));
+		).toEqual(signedInvalid("audience"));
+		expect(await signed(fresh({ aud: 7 }), expecting({ aud: ["7"] }))).toEqual(
+			signedInvalid("audience"),
+		);
 		expect((await signed(fresh(), expecting({ sub: "s-1" }))).kind).toBe("valid");
-		expect(await signed(fresh(), expecting({ sub: "s-2" }))).toEqual(invalid("subject"));
-		expect(await signed(fresh({ sub: 1 }), expecting({ sub: "1" }))).toEqual(invalid("subject"));
+		expect(await signed(fresh(), expecting({ sub: "s-2" }))).toEqual(signedInvalid("subject"));
+		expect(await signed(fresh({ sub: 1 }), expecting({ sub: "1" }))).toEqual(
+			signedInvalid("subject"),
+		);
 	});
 });
 
@@ -577,6 +661,72 @@ describe("a key set at a URL", () => {
 			// Each fetched its own set, and only the configured one asks to reach as the operator's.
 			expect(s.asked.map((a) => a.internal)).toEqual(order.map((own) => (own ? url : undefined)));
 		}
+	});
+
+	it("binds a key of a shared set to an algorithm by each verifier's policy, fetching nothing more for it", async () => {
+		const rsa = await testSigner("RS256", "k1");
+		const s = served();
+		s.serve([rsa.jwk]);
+		const jwt = externalJwtOver({ clock, outbound: s.outbound, keySetMaxAgeMs: 86_400_000 });
+		const source = { jwks: { url: "https://issuer.example/jwks", hosts: ["issuer.example"] } };
+		const token = await rsa.sign(fresh());
+		const one = jwt.verifierOf(source, { ...policy, algorithms: ["RS256"] });
+		const two = jwt.verifierOf(source, { ...policy, algorithms: ["RS256", "PS256"] });
+		expect((await one.verify(token)).kind).toBe("valid");
+		// The set holds the key; it is unused here, so the answer is no key, not a fetch or an outage,
+		// however long since the last fetch: a fresh set would read the key no other way.
+		expect(await two.verify(token)).toEqual(invalid("no-key"));
+		expect(s.asked).toHaveLength(1);
+		now += 61_000;
+		expect(await two.verify(token)).toEqual(invalid("no-key"));
+		expect(await two.verify(token)).toEqual(invalid("no-key"));
+		expect(s.asked).toHaveLength(1);
+		expect((await one.verify(token)).kind).toBe("valid");
+		// A key the set lacks is still fetched for, past the minute.
+		const unknown = await (await testSigner("RS256", "k2")).sign(fresh());
+		expect(await two.verify(unknown)).toEqual(invalid("no-key"));
+		expect(s.asked).toHaveLength(2);
+	});
+
+	it("takes a key of the set naming another alg as no key for the token, fetching nothing past the minute", async () => {
+		const rsa = await testSigner("RS256", "k1");
+		const s = served();
+		s.serve([{ ...rsa.jwk, alg: "RS256" }]);
+		const jwt = externalJwtOver({ clock, outbound: s.outbound, keySetMaxAgeMs: 86_400_000 });
+		const source = { jwks: { url: "https://issuer.example/jwks", hosts: ["issuer.example"] } };
+		const both = jwt.verifierOf(source, { ...policy, algorithms: ["RS256", "PS256"] });
+		expect((await both.verify(await rsa.sign(fresh()))).kind).toBe("valid");
+		// The header asks PS256 of the key the set names RS256: no key, and a fresh set would not change it.
+		const asked = await rsa.sign(fresh(), { alg: "PS256" });
+		expect(await both.verify(asked)).toEqual(invalid("no-key"));
+		now += 61_000;
+		expect(await both.verify(asked)).toEqual(invalid("no-key"));
+		expect(s.asked).toHaveLength(1);
+		// A key the set lacks is still fetched for.
+		expect(await both.verify(await rsa.sign(fresh(), { alg: "PS256", kid: "k9" }))).toEqual(
+			invalid("no-key"),
+		);
+		expect(s.asked).toHaveLength(2);
+	});
+
+	it("fetches again, past the minute, for a token naming no kid that only a key named for another alg fits", async () => {
+		const rsa = await testSigner("RS256", "k1");
+		const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+		const pss = { ...publicKey.export({ format: "jwk" }), kid: "k2", alg: "PS256" };
+		const s = served();
+		s.serve([{ ...rsa.jwk, alg: "RS256" }]);
+		const jwt = externalJwtOver({ clock, outbound: s.outbound, keySetMaxAgeMs: 86_400_000 });
+		const source = { jwks: { url: "https://issuer.example/jwks", hosts: ["issuer.example"] } };
+		const both = jwt.verifierOf(source, { ...policy, algorithms: ["RS256", "PS256"] });
+		expect((await both.verify(await rsa.sign(fresh()))).kind).toBe("valid");
+		// The issuer moves to PS256 under a new key; a token naming no kid cannot say the cached one is meant.
+		s.serve([{ ...rsa.jwk, alg: "RS256" }, pss]);
+		const moved = await new SignJWT(fresh()).setProtectedHeader({ alg: "PS256" }).sign(privateKey);
+		expect(await both.verify(moved)).toEqual(invalid("no-key"));
+		expect(s.asked).toHaveLength(1);
+		now += 61_000;
+		expect((await both.verify(moved)).kind).toBe("valid");
+		expect(s.asked).toHaveLength(2);
 	});
 
 	it("keeps one set for a URL and its hosts, whichever verifier asks", async () => {

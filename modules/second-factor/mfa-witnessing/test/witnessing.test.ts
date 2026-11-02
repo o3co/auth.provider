@@ -8,14 +8,15 @@ import {
 	kernelConfig,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { type Factors, factors, type Witnessing, witnessing } from "@mod/mfa";
+import { type Witnessing, witnessing } from "@mod/mfa-extensions";
+import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { expect, it } from "vitest";
 import { witnessBackfill } from "../src/contract.ts";
 import bridge from "../src/module.ts";
 
 const seen = contract<readonly Witnessing[]>("seen");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [witnessing] }, (m) => [
 	m.provide(seen).by(async (c) => c.collect(witnessing)),
 ]);
 /**
@@ -24,17 +25,17 @@ const reader = defineModule({ name: "reader" }, (m) => [
  */
 const holding = (held: Record<string, string[]>, afterRead?: (n: number) => void) => {
 	let reads = 0;
-	return defineModule({ name: "factors-stand-in" }, (m) => [
-		m.provide(factors).by(
+	return defineModule({ name: "factors-stand-in", replicaSafe: false, takes: [] }, (m) => [
+		m.provide(factorReading).by(
 			() =>
 				({
-					countingWritten: async (subject: string) => {
-						const answer = (held[subject] ?? []).includes("code");
+					writtenStanding: async (subject: string) => {
+						const answer = (held[subject] ?? []).includes("code") ? "counting" : "none";
 						reads += 1;
 						afterRead?.(reads);
 						return answer;
 					},
-				}) as unknown as Factors,
+				}) as unknown as FactorReading,
 		),
 	]);
 };
@@ -82,7 +83,7 @@ it("contributes mfa's witnessing over the witness: a mark beside nothing countin
 	]);
 	await told.settle("cid", async () => true);
 	expect(witness.marks.has("cid")).toBe(true);
-	await told.cleared("cid");
+	await told.cleared("cid", async () => "none");
 	expect(witness.marks.has("cid")).toBe(false);
 });
 
@@ -116,7 +117,8 @@ it("leaves no mark when a reset takes the factors while it fills one, and clears
 
 it("marks anew when its clear takes the mark a new binding set after a reset", async () => {
 	const held: Record<string, string[]> = { ann: ["code"] };
-	const stand = witnessStandIn();
+	// A witness with no withdraw, whose own clear may take any mark.
+	const stand = witnessStandIn("enrollment-witness", { withdraw: false });
 	// After the late read that sees the reset, a new binding writes its factor and marks it.
 	const { app } = await boot(held, [stand], (n) => {
 		if (n !== 2) return;
@@ -134,7 +136,8 @@ it("marks anew when its clear takes the mark a new binding set after a reset", a
 
 it("checks the last mark it may make, and clears it where a reset took the factors meanwhile", async () => {
 	const held: Record<string, string[]> = { ann: ["code"] };
-	const stand = witnessStandIn();
+	// A witness with no withdraw, whose own clear may take any mark.
+	const stand = witnessStandIn("enrollment-witness", { withdraw: false });
 	// Each late read that sees a reset is followed by a binding; each read after its clear, by a reset.
 	const { app } = await boot(held, [stand], (n) => {
 		if (n < 2 || n > 7) return;

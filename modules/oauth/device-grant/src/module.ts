@@ -1,18 +1,22 @@
 import { csrfChecked } from "@mod/csrf";
 import { grants, sessionIssuances } from "@mod/grants";
-import { routes, site, use } from "@mod/http";
-import { metadata } from "@mod/issuer";
+import { routes, use } from "@mod/http";
+import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
-import { authorizationOver } from "./authorization/authorization.ts";
-import { grantOver } from "./grant/grant.ts";
+import { authorizationOver, authorizationTakes } from "./authorization/authorization.ts";
+import { grantOver, grantTakes } from "./grant/grant.ts";
 import { section } from "./section.ts";
-import { verificationOver } from "./verification/verification.ts";
+import { verificationOver, verificationTakes } from "./verification/verification.ts";
 
 export const authorizationPath = "/oauth/device_authorization";
 export const verificationPath = "/oauth/device/verification";
 
-export default defineModule({ name: "device-grant", section }, (m) => [
+const takes = [...authorizationTakes, ...verificationTakes, ...grantTakes, sessionIssuances];
+
+// Safe on many instances: a code's expiry and polling interval are judged by the instance's clock, kept in
+// step with the others' by the operator (deployment-guarantees, Several instances).
+export default defineModule({ name: "device-grant", replicaSafe: true, section, takes }, (m) => [
 	m.contribute(routes).by(async (c) => {
 		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		return {
@@ -33,13 +37,10 @@ export default defineModule({ name: "device-grant", section }, (m) => [
 			"Every action counts against the subject in rate-limit's attempt limit, in the handler.",
 		...(await verificationOver(c)),
 	})),
-	m.contribute(metadata).by(async (c) => {
-		const { origin } = await c.get(site);
-		return {
-			name: "device_authorization_endpoint",
-			value: origin === undefined ? undefined : new URL(authorizationPath, origin).href,
-		};
-	}),
+	m.contribute(metadata).by(async (c) => ({
+		name: "device_authorization_endpoint",
+		value: new URL(authorizationPath, endpointOrigin(await c.get(issuer))).href,
+	})),
 	m.contribute(grants).by(async (c) => {
 		// Its tokens are bound to the session that approved them: unrecorded, a logout could not end them.
 		if ((await c.collect(sessionIssuances)).length === 0) {

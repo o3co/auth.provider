@@ -11,22 +11,38 @@ import {
 	type EntryLevel,
 	entryJudge,
 	type LoginFacts,
+	type Opened,
 	type Session,
 	type Sessions,
 	sessionRules,
 	sessions,
 } from "./contract.ts";
+import {
+	authenticatedAtOf,
+	checkAuthenticatedAt,
+	checkProvenSince,
+} from "./rules/authenticated.ts";
+
+/** The session and cookies an `open` answered, for a test that opens one: a refused one throws. */
+export function openedOf(answer: Opened): {
+	readonly session: Session;
+	readonly cookies: readonly string[];
+} {
+	if (answer.kind !== "opened") throw new Error(`session: the login was ${answer.kind}`);
+	return { session: answer.session, cookies: answer.cookies };
+}
 
 export function stubSessions(parts: Partial<Sessions> = {}): Sessions {
 	return {
 		enter: async () => undefined,
 		enterFor: async () => ({ kind: "absent" }),
 		raise: async () => undefined,
-		complete: async () => {
+		open: async () => {
 			throw new Error("not in this test");
 		},
 		close: async () => ({ kind: "closed", cookies: [] }),
 		closeRequest: async () => ({ kind: "closed", cookies: [] }),
+		handleOf: async () => undefined,
 		entryOf: async () => ({ kind: "absent" }),
 		recent: () => false,
 		...parts,
@@ -74,18 +90,50 @@ export function sessionsContract(
 		subject,
 		amr: ["pwd"],
 		authenticatedAt: place.now(),
+		provenSince: place.now(),
 	});
 	describe(`sessions' contract: ${name}`, () => {
 		it("lets a session change credentials, where nothing judges that, only after a recent sign-in at a known time", async () => {
 			const place = await open({ credentialsJudged: false });
 			const entering = async (authenticatedAt: number | "unknown") => {
-				const at = { subject: "alice", amr: ["pwd"], authenticatedAt };
-				const done = await place.sessions.complete(place.request(), at);
+				const at = { subject: "alice", amr: ["pwd"], authenticatedAt, provenSince: place.now() };
+				const done = openedOf(await place.sessions.open(place.request(), at));
 				return (await place.sessions.enterFor(place.request(done.cookies), "credentials")).kind;
 			};
 			expect(await entering("unknown")).toBe("short");
 			expect(await entering(place.now() - 301_000)).toBe("short");
 			expect(await entering(place.now())).toBe("entered");
+		});
+
+		it("opens through open, telling it opened, and refuses a login stating no proof's start, or one of no epoch milliseconds, before anything", async () => {
+			const place = await open();
+			const opening = (...args: Parameters<Sessions["open"]>) => place.sessions.open(...args);
+			const done = await opening(place.request(), facts(place));
+			if (done.kind !== "opened") expect.unreachable("nothing is revoked");
+			expect((await place.sessions.enter(place.request(done.cookies)))?.id).toBe(done.session.id);
+			const { provenSince: _, ...stating } = facts(place);
+			for (const over of [stating, { ...facts(place), provenSince: "then" }] as never[]) {
+				await expect(opening(place.request(done.cookies), over)).rejects.toThrow(TypeError);
+			}
+			expect((await place.sessions.enter(place.request(done.cookies)))?.id).toBe(done.session.id);
+		});
+
+		it("refuses a login whose proof began at or before its subject's revocation, closing its session before any cookie, and opens one whose proof began after it", async () => {
+			const place = await open();
+			const opening = (...args: Parameters<Sessions["open"]>) => place.sessions.open(...args);
+			const provenSince = place.now();
+			await place.revokeSubject("carol");
+			const refused = await opening(place.request(), { ...facts(place, "carol"), provenSince });
+			expect(refused).toEqual({ kind: "revoked" });
+			// Its record was saved, so it is closed as any session is, its participants called.
+			expect(place.closed).toContain("carol");
+			place.advance(60_000);
+			const later = { ...facts(place, "carol"), provenSince: place.now() };
+			const opened = await opening(place.request(), later);
+			if (opened.kind !== "opened") expect.unreachable("the proof began after the revocation");
+			expect((await place.sessions.enter(place.request(opened.cookies)))?.id).toBe(
+				opened.session.id,
+			);
 		});
 
 		it("tells whether a time is recent by one window, 300 seconds unless set otherwise", async () => {
@@ -100,7 +148,7 @@ export function sessionsContract(
 
 		it("opens a session on login behind a new cookie, which enters it", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const entered = await place.sessions.enter(place.request(done.cookies));
 			expect(entered?.id).toBe(done.session.id);
 			expect(entered?.context).toMatchObject({
@@ -114,10 +162,9 @@ export function sessionsContract(
 
 		it("closes the session a request carried when a login completes over it", async () => {
 			const place = await open();
-			const first = await place.sessions.complete(place.request(), facts(place));
-			const second = await place.sessions.complete(
-				place.request(first.cookies),
-				facts(place, "bob"),
+			const first = openedOf(await place.sessions.open(place.request(), facts(place)));
+			const second = openedOf(
+				await place.sessions.open(place.request(first.cookies), facts(place, "bob")),
 			);
 			expect(second.session.id).not.toBe(first.session.id);
 			expect(await place.sessions.enter(place.request(first.cookies))).toBeUndefined();
@@ -126,16 +173,15 @@ export function sessionsContract(
 
 		it("keeps a session's subject for as long as it lives, a raise included, and never names another session by its handle", async () => {
 			const place = await open();
-			const first = await place.sessions.complete(place.request(), facts(place));
+			const first = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const raised = await place.sessions.raise(place.request(first.cookies), ["strong"]);
 			expect(raised?.session.context.subject).toBe("alice");
 			expect(await place.sessions.entryOf(first.session.id)).toMatchObject({
 				kind: "entered",
 				session: { context: { subject: "alice" } },
 			});
-			const second = await place.sessions.complete(
-				place.request(raised?.cookies),
-				facts(place, "bob"),
+			const second = openedOf(
+				await place.sessions.open(place.request(raised?.cookies), facts(place, "bob")),
 			);
 			expect((await place.sessions.entryOf(first.session.id)).kind).toBe("absent");
 			expect(await place.sessions.entryOf(second.session.id)).toMatchObject({
@@ -146,8 +192,8 @@ export function sessionsContract(
 
 		it("ends a session at its lifetime, and when its subject is revoked", async () => {
 			const place = await open();
-			const lived = await place.sessions.complete(place.request(), facts(place));
-			const revoked = await place.sessions.complete(place.request(), facts(place, "bob"));
+			const lived = openedOf(await place.sessions.open(place.request(), facts(place)));
+			const revoked = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
 			await place.revokeSubject("bob");
 			expect(await place.sessions.enter(place.request(revoked.cookies))).toBeUndefined();
 			expect((await place.sessions.entryOf(revoked.session.id)).kind).toBe("absent");
@@ -161,7 +207,7 @@ export function sessionsContract(
 
 		it("answers by handle the entry its cookie would get: entered with its end, short at a level it falls short of, absent once closed or revoked", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const endsAt = done.session.context.authenticatedAt + place.lifetimeMs;
 			expect(await place.sessions.entryOf(done.session.id)).toMatchObject({
 				kind: "entered",
@@ -172,7 +218,7 @@ export function sessionsContract(
 				kind: "short",
 			});
 			expect((await place.sessions.entryOf(done.session.id, "none")).kind).toBe("entered");
-			const revoked = await place.sessions.complete(place.request(), facts(place, "bob"));
+			const revoked = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
 			await place.revokeSubject("bob");
 			expect(await place.sessions.entryOf(revoked.session.id)).toEqual({ kind: "absent" });
 			await place.sessions.close(done.session.id);
@@ -182,7 +228,7 @@ export function sessionsContract(
 
 		it("tells an entered session when it ends: its opening and the lifetime in force", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			place.advance(1000);
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			const asked = place.request(raised?.cookies);
@@ -208,7 +254,7 @@ export function sessionsContract(
 
 		it("asks the entry requirements at the level asked, and admits once a raise meets them", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const asked = place.request(done.cookies);
 			expect((await place.sessions.enterFor(asked, "use")).kind).toBe("entered");
 			expect(await place.sessions.enterFor(asked, "credentials")).toMatchObject({
@@ -231,7 +277,7 @@ export function sessionsContract(
 				async (asked: HttpRequest) =>
 					(await place.sessions.enterFor(asked, "credentials")).kind !== "absent",
 			]) {
-				const done = await place.sessions.complete(place.request(), facts(place));
+				const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 				const asked = place.request(done.cookies);
 				let raised: Awaited<ReturnType<Sessions["raise"]>>;
 				between(async () => {
@@ -245,7 +291,7 @@ export function sessionsContract(
 
 		it("raises under a new cookie, keeping the session and its authentication time", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			place.advance(1000);
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			expect(raised?.session.id).toBe(done.session.id);
@@ -264,17 +310,21 @@ export function sessionsContract(
 
 		it("keeps the authentication time a login reports, or that it is unknown, across a raise", async () => {
 			const place = await open();
-			const known = await place.sessions.complete(place.request(), {
-				...facts(place),
-				authenticatedAt: place.now() - 500,
-			});
+			const known = openedOf(
+				await place.sessions.open(place.request(), {
+					...facts(place),
+					authenticatedAt: place.now() - 500,
+				}),
+			);
 			expect(known.session.context.authenticatedAt).toBe(place.now() - 500);
 			expect(known.session.context.authenticatedAtUnknown).toBeUndefined();
 			const opened = place.now();
-			const unknown = await place.sessions.complete(place.request(), {
-				...facts(place, "bob"),
-				authenticatedAt: "unknown",
-			});
+			const unknown = openedOf(
+				await place.sessions.open(place.request(), {
+					...facts(place, "bob"),
+					authenticatedAt: "unknown",
+				}),
+			);
 			place.advance(1000);
 			const raised = await place.sessions.raise(place.request(unknown.cookies), ["strong"]);
 			const entered = await place.sessions.enter(place.request(raised?.cookies));
@@ -288,10 +338,12 @@ export function sessionsContract(
 			await place.revokeSubject("alice");
 			place.advance(60_000);
 			const opened = place.now();
-			const done = await place.sessions.complete(place.request(), {
-				...facts(place),
-				authenticatedAt: opened - 120_000,
-			});
+			const done = openedOf(
+				await place.sessions.open(place.request(), {
+					...facts(place),
+					authenticatedAt: opened - 120_000,
+				}),
+			);
 			expect(done.session.context.authenticatedAt).toBe(opened - 120_000);
 			const endsAt = opened + place.lifetimeMs;
 			const asked = place.request(done.cookies);
@@ -309,18 +361,33 @@ export function sessionsContract(
 		it("takes an authentication time later than the opening as the opening", async () => {
 			const place = await open();
 			const opened = place.now();
-			const done = await place.sessions.complete(place.request(), {
-				...facts(place),
-				authenticatedAt: opened + 60_000,
-			});
+			const done = openedOf(
+				await place.sessions.open(place.request(), {
+					...facts(place),
+					authenticatedAt: opened + 60_000,
+				}),
+			);
 			expect(done.session.context.authenticatedAt).toBe(opened);
+		});
+
+		it("takes a login naming its authentication time the opening as authenticated when the session opens, known", async () => {
+			const place = await open();
+			const opened = place.now();
+			const done = openedOf(
+				await place.sessions.open(place.request(), {
+					...facts(place),
+					authenticatedAt: "opening",
+				}),
+			);
+			expect(done.session.context.authenticatedAt).toBe(opened);
+			expect(done.session.context.authenticatedAtUnknown).toBeUndefined();
 		});
 
 		it("throws a TypeError, naming no value, for an authentication time that is no time, closing nothing", async () => {
 			const place = await open();
-			const carried = await place.sessions.complete(place.request(), facts(place));
+			const carried = openedOf(await place.sessions.open(place.request(), facts(place)));
 			for (const at of [-1, Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1]) {
-				const opened = place.sessions.complete(place.request(carried.cookies), {
+				const opened = place.sessions.open(place.request(carried.cookies), {
 					...facts(place),
 					authenticatedAt: at,
 				});
@@ -334,7 +401,7 @@ export function sessionsContract(
 
 		it("says what a raise added once each, however often it was given", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const raised = await place.sessions.raise(place.request(done.cookies), [
 				"strong",
 				"pwd",
@@ -348,7 +415,7 @@ export function sessionsContract(
 
 		it("closes a session past its lifetime without calling the participants, its cookie gone with it", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			place.advance(place.lifetimeMs);
 			for (const cookies of [done.cookies, raised?.cookies]) {
@@ -362,7 +429,7 @@ export function sessionsContract(
 
 		it("hands out every session frozen", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const entered = await place.sessions.enter(place.request(done.cookies));
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			const entry = await place.sessions.enterFor(place.request(raised?.cookies), "use");
@@ -377,7 +444,7 @@ export function sessionsContract(
 
 		it("closes once every participant is done, and lets nobody in meanwhile", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			expect(await place.sessions.entryOf(done.session.id)).toMatchObject({
 				kind: "entered",
 				session: { context: { subject: "alice" } },
@@ -395,8 +462,8 @@ export function sessionsContract(
 
 		it("destroys the cookie on close by handle only when it opens that session", async () => {
 			const place = await open();
-			const mine = await place.sessions.complete(place.request(), facts(place));
-			const other = await place.sessions.complete(place.request(), facts(place, "bob"));
+			const mine = openedOf(await place.sessions.open(place.request(), facts(place)));
+			const other = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
 			const asked = place.request(other.cookies);
 			expect((await place.sessions.close(mine.session.id, asked)).cookies).toEqual([]);
 			expect((await place.sessions.close(other.session.id, asked)).cookies).toEqual([
@@ -414,10 +481,12 @@ export function sessionsContract(
 				groups: ["staff", "ops"],
 			};
 			const given = { source: "users", values };
-			const done = await place.sessions.complete(place.request(), {
-				...facts(place),
-				attributes: given,
-			});
+			const done = openedOf(
+				await place.sessions.open(place.request(), {
+					...facts(place),
+					attributes: given,
+				}),
+			);
 			values.groups.push("admin");
 			values.name = "Mallory";
 			const kept = {
@@ -432,7 +501,7 @@ export function sessionsContract(
 			expect(raised?.session.context.attributes).toEqual(kept);
 			const entry = await place.sessions.entryOf(done.session.id);
 			expect(entry.kind === "entered" && entry.session.context.attributes).toEqual(kept);
-			const bare = await place.sessions.complete(place.request(), facts(place, "bob"));
+			const bare = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
 			expect(bare.session.context).not.toHaveProperty("attributes");
 		});
 
@@ -440,10 +509,12 @@ export function sessionsContract(
 			const place = await open();
 			const keptOf = async (given: unknown) => {
 				const attributes = given as SourcedAttributes;
-				const done = await place.sessions.complete(place.request(), {
-					...facts(place),
-					attributes,
-				});
+				const done = openedOf(
+					await place.sessions.open(place.request(), {
+						...facts(place),
+						attributes,
+					}),
+				);
 				const entered = await place.sessions.enter(place.request(done.cookies));
 				expect(entered?.context.attributes).toEqual(done.session.context.attributes);
 				return done.session.context.attributes;
@@ -460,9 +531,28 @@ export function sessionsContract(
 			}
 		});
 
+		it("answers the handle a request's cookie opens, and none for a cookie that opens nothing", async () => {
+			const place = await open();
+			const handleOf = (request: HttpRequest) => place.sessions.handleOf(request);
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
+			expect(await handleOf(place.request(done.cookies))).toBe(done.session.id);
+			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
+			expect(await handleOf(place.request(raised?.cookies))).toBe(done.session.id);
+			const once = raised?.cookies[0] as string;
+			const forged = once.replace(/=[^;]*/, `=${"A".repeat(43)}`);
+			// No cookie, one the raise retired, a forged one, and one sent twice: none opens a session.
+			for (const cookies of [undefined, done.cookies, [forged], [once, once]])
+				expect(await handleOf(place.request(cookies))).toBeUndefined();
+			// It reads no session: the participants were not called, and the session still enters.
+			expect(place.closed).toEqual([]);
+			expect((await place.sessions.enter(place.request(raised?.cookies)))?.id).toBe(
+				done.session.id,
+			);
+		});
+
 		it("closes the session a request's cookie points to, and destroys the cookie", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const closed = await place.sessions.closeRequest(place.request(done.cookies));
 			expect(closed.kind).toBe("closed");
 			expect(closed.cookies.some((cookie) => /Max-Age=0/i.test(cookie))).toBe(true);
@@ -471,7 +561,7 @@ export function sessionsContract(
 
 		it("destroys a session cookie sent twice, reading neither and closing no session for it", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const once = done.cookies[0] as string;
 			const twice = place.request([once, once]);
 			expect(await place.sessions.enter(twice)).toBeUndefined();
@@ -486,7 +576,7 @@ export function sessionsContract(
 
 		it("destroys a cookie that opens nothing, and closes no session for it", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			const forged = (done.cookies[0] as string).replace(/=[^;]*/, `=${"A".repeat(43)}`);
 			for (const stale of [done.cookies, [forged]]) {
@@ -506,9 +596,9 @@ export function sessionsContract(
 
 		it("closes every live session of a revoked subject, calling the participants, and no one else's", async () => {
 			const place = await open();
-			await place.sessions.complete(place.request(), facts(place));
-			await place.sessions.complete(place.request(), facts(place));
-			const other = await place.sessions.complete(place.request(), facts(place, "bob"));
+			openedOf(await place.sessions.open(place.request(), facts(place)));
+			openedOf(await place.sessions.open(place.request(), facts(place)));
+			const other = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
 			await place.revokeSubject("alice");
 			expect(place.closed).toEqual(["alice", "alice"]);
 			expect((await place.sessions.entryOf(other.session.id)).kind).toBe("entered");
@@ -516,7 +606,7 @@ export function sessionsContract(
 
 		it("answers a revocation incomplete while a close it made is left pending, and complete once finished", async () => {
 			const place = await open();
-			await place.sessions.complete(place.request(), facts(place));
+			openedOf(await place.sessions.open(place.request(), facts(place)));
 			place.failClosing(true);
 			expect(await place.revokeSubject("alice")).toEqual({ complete: false });
 			place.failClosing(false);
@@ -526,11 +616,11 @@ export function sessionsContract(
 
 		it("closes a session its subject's full listing pushes out, calling the participants", async () => {
 			const place = await open();
-			const first = await place.sessions.complete(place.request(), facts(place));
-			const others = await place.sessions.complete(place.request(), facts(place, "bob"));
+			const first = openedOf(await place.sessions.open(place.request(), facts(place)));
+			const others = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
 			for (let n = 0; n < place.listingCap; n++) {
 				place.advance(1000);
-				await place.sessions.complete(place.request(), facts(place));
+				openedOf(await place.sessions.open(place.request(), facts(place)));
 			}
 			expect(place.closed).toEqual(["alice"]);
 			expect((await place.sessions.entryOf(first.session.id)).kind).toBe("absent");
@@ -540,16 +630,16 @@ export function sessionsContract(
 		it("fails a login whose session cannot be listed under its subject", async () => {
 			const place = await open();
 			place.failNextListing();
-			await expect(place.sessions.complete(place.request(), facts(place))).rejects.toSatisfy(
+			await expect(place.sessions.open(place.request(), facts(place))).rejects.toSatisfy(
 				isUnavailable,
 			);
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			expect((await place.sessions.entryOf(done.session.id)).kind).toBe("entered");
 		});
 
 		it("names a closed session for the lifetime from its last close", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const named = { id: done.session.id, subject: "alice" };
 			for (let n = 0; n < 3; n++) {
 				expect((await place.sessions.close(done.session.id)).session).toEqual(named);
@@ -559,7 +649,7 @@ export function sessionsContract(
 
 		it("says the state each close found the record in: open, closing while left pending, then closed", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			place.failClosing(true);
 			expect((await place.sessions.close(done.session.id)).from).toBe("open");
 			expect((await place.sessions.close(done.session.id)).from).toBe("closing");
@@ -572,11 +662,11 @@ export function sessionsContract(
 		it("names the session a close ended or left pending, by its handle and subject", async () => {
 			const place = await open();
 			const named = (done: { session: Session }) => ({ id: done.session.id, subject: "alice" });
-			const asked = await place.sessions.complete(place.request(), facts(place));
+			const asked = openedOf(await place.sessions.open(place.request(), facts(place)));
 			expect((await place.sessions.closeRequest(place.request(asked.cookies))).session).toEqual(
 				named(asked),
 			);
-			const pending = await place.sessions.complete(place.request(), facts(place));
+			const pending = openedOf(await place.sessions.open(place.request(), facts(place)));
 			place.failClosing(true);
 			expect(await place.sessions.close(pending.session.id)).toMatchObject({
 				kind: "pending",
@@ -606,18 +696,6 @@ function keptAtLogin(given: unknown, log: Log): SourcedAttributes | undefined {
 	return kept;
 }
 
-/** The authentication time the stand-in keeps from a login: the one reported, at most the opening. */
-function authenticatedAtOf(
-	facts: LoginFacts,
-	openedAt: number,
-	log: Log,
-): Pick<AuthContext, "authenticatedAt" | "authenticatedAtUnknown"> {
-	const reported = facts.authenticatedAt;
-	if (reported === "unknown") return { authenticatedAt: openedAt, authenticatedAtUnknown: true };
-	if (reported > openedAt) log.warn("session.authentication_time_capped");
-	return { authenticatedAt: Math.min(reported, openedAt) };
-}
-
 /** A session's amr once a raise adds `amr`, and what the raise added, each value once. */
 function raisedBy(held: readonly string[], amr: readonly string[]) {
 	const raisedAmr = [...new Set(amr)];
@@ -645,111 +723,117 @@ export function failStandInListing(stand: Sessions): void {
  * sessions as the contract has it, up to `standInListingCap`, and closes them through `close`
  * when the listing pushes one out or the subject is revoked.
  */
-export const sessionStandIn = defineModule({ name: "session" }, (m) => [
-	m.provide(sessions).by(async (c) => {
-		const jar = cookiesFor((await c.get(site)).secureCookies);
-		const revocation = await c.get(subjectRevocation);
-		// `session`'s seams, where a module keeps them; none is taken as no requirement and no participant.
-		const [judge] = await c.collect(entryJudge);
-		const [closing] = await c.collect(closingParticipants);
-		const recentMs = sessionRules.credentialsSecondsDefault * 1000;
-		const recent = (at: number) => c.clock.now() - at <= recentMs;
-		const shortOf = sessionRules.judgedShortOf(judge, recent);
-		const lifetimeMs = standInLifetimeSeconds * 1000;
-		type Kept = {
-			context: AuthContext;
-			state: "open" | "closing" | "closed";
-			openedAt: number;
-			until: number;
-		};
-		const kept = new Map<string, Kept>();
-		/** The handle each cookie's secret opens, until the cookie ends. */
-		const handles = new Map<string, { handle: string; until: number }>();
-		/** Each subject's listing: when each listed handle ends. */
-		const listing = new Map<string, Map<string, number>>();
-		let failListing = false;
-		const listedUnder = (subject: string) =>
-			[...(listing.get(subject) ?? [])].filter(([, until]) => until > c.clock.now());
-		/**
-		 * Lists the session being opened until it ends, answering those pushed out over the cap: the
-		 * others that end first. The session being opened is never pushed out.
-		 */
-		const list = (subject: string, handle: string, until: number) => {
-			if (failListing) {
-				failListing = false;
-				throw new Unavailable("session");
-			}
-			const byEnd = listedUnder(subject).sort(
-				([a, aEnds], [b, bEnds]) => aEnds - bEnds || (a < b ? -1 : a > b ? 1 : 0),
-			);
-			const over = Math.max(0, byEnd.length + 1 - standInListingCap);
-			listing.set(subject, new Map([...byEnd.slice(over), [handle, until]]));
-			return byEnd.slice(0, over).map(([pushed]) => pushed);
-		};
-		const random = () => Buffer.from(c.random.bytes(32)).toString("base64url");
-		const handleOf = (secret: string | undefined) => {
-			const found = secret === undefined ? undefined : handles.get(secret);
-			return found && found.until > c.clock.now() ? found.handle : undefined;
-		};
-		/** The session cookie's value, when the request carries it once where it may be read. */
-		const secretIn = (request: HttpRequest) => {
-			const carried = jar.lookup(request, "session");
-			return carried.kind === "found" ? carried.value : undefined;
-		};
-		const handleIn = (request: HttpRequest) => handleOf(secretIn(request));
-		const sessionOf = (handle: string, found: Kept): Session =>
-			Object.freeze({ id: handle, context: found.context });
-		const liveAt = async (handle: string | undefined) => {
-			const found = handle === undefined ? undefined : kept.get(handle);
-			if (found?.state !== "open" || found.until <= c.clock.now()) return undefined;
-			if ((await revocation.check(found.context.subject, found.openedAt)) === "revoked") {
-				return undefined;
-			}
-			return found;
-		};
-		const enterAt = async (handle: string | undefined, level: EntryLevel): Promise<Entry> => {
-			const found = await liveAt(handle);
-			if (!found || handle === undefined) return { kind: "absent" };
-			const short = await shortOf(found.context, level);
-			if (!(await liveAt(handle))) return { kind: "absent" };
-			if (short) return { kind: "short", ...short };
-			const endsAt = found.openedAt + lifetimeMs;
-			return { kind: "entered", session: sessionOf(handle, found), endsAt };
-		};
-		const enteredAt = async (handle: string | undefined) => {
-			const entry = await enterAt(handle, "use");
-			return entry.kind === "entered" ? entry : undefined;
-		};
-		const close = async (handle: string, request?: HttpRequest) => {
-			const removed = request && handleIn(request) === handle ? [jar.write("session", "", 0)] : [];
-			const found = kept.get(handle);
-			// A record past its lifetime is gone; a closing one is kept until it is closed.
-			if (!found || (found.state !== "closing" && found.until <= c.clock.now())) {
-				return { kind: "closed" as const, cookies: removed };
-			}
-			const session = { id: handle, subject: found.context.subject };
-			const from = found.state;
-			if (found.state !== "closed") {
-				found.state = "closing";
-				const failed = closing ? await closing.closing(sessionOf(handle, found)) : [];
-				for (const failure of failed) c.log.warn("session.participant_failed", failure);
-				if (failed.length > 0) return { kind: "pending" as const, cookies: removed, session, from };
-			}
-			// A closed record is kept for the lifetime from its last close, and no longer listed.
-			found.state = "closed";
-			found.until = c.clock.now() + lifetimeMs;
-			listing.get(found.context.subject)?.delete(handle);
-			return { kind: "closed" as const, cookies: removed, session, from };
-		};
-		const stand: Sessions = {
-			recent,
-			enter: async (request) => (await enteredAt(handleIn(request)))?.session,
-			enterFor: (request, level) => enterAt(handleIn(request), level),
-			entryOf: (handle, level = "use") => enterAt(handle, level),
-			complete: async (request, facts) => {
-				const at = facts.authenticatedAt;
-				if (at !== "unknown" && !(Number.isFinite(at) && at >= 0 && at <= 8.64e15))
-					throw new TypeError('authenticatedAt must be epoch milliseconds or "unknown"');
+export const sessionStandIn = defineModule(
+	{
+		name: "session",
+		replicaSafe: false,
+		takes: [site, closingParticipants, entryJudge, subjectRevocation],
+	},
+	(m) => [
+		m.provide(sessions).by(async (c) => {
+			const jar = cookiesFor((await c.get(site)).secureCookies);
+			const revocation = await c.get(subjectRevocation);
+			// `session`'s seams, where a module keeps them; none is taken as no requirement and no participant.
+			const [judge] = await c.collect(entryJudge);
+			const [closing] = await c.collect(closingParticipants);
+			const recentMs = sessionRules.credentialsSecondsDefault * 1000;
+			const recent = (at: number) => c.clock.now() - at <= recentMs;
+			const shortOf = sessionRules.judgedShortOf(judge, recent);
+			const lifetimeMs = standInLifetimeSeconds * 1000;
+			type Kept = {
+				context: AuthContext;
+				state: "open" | "closing" | "closed";
+				openedAt: number;
+				until: number;
+			};
+			const kept = new Map<string, Kept>();
+			/** The handle each cookie's secret opens, until the cookie ends. */
+			const handles = new Map<string, { handle: string; until: number }>();
+			/** Each subject's listing: when each listed handle ends. */
+			const listing = new Map<string, Map<string, number>>();
+			let failListing = false;
+			const listedUnder = (subject: string) =>
+				[...(listing.get(subject) ?? [])].filter(([, until]) => until > c.clock.now());
+			/**
+			 * Lists the session being opened until it ends, answering those pushed out over the cap: the
+			 * others that end first. The session being opened is never pushed out.
+			 */
+			const list = (subject: string, handle: string, until: number) => {
+				if (failListing) {
+					failListing = false;
+					throw new Unavailable("session");
+				}
+				const byEnd = listedUnder(subject).sort(
+					([a, aEnds], [b, bEnds]) => aEnds - bEnds || (a < b ? -1 : a > b ? 1 : 0),
+				);
+				const over = Math.max(0, byEnd.length + 1 - standInListingCap);
+				listing.set(subject, new Map([...byEnd.slice(over), [handle, until]]));
+				return byEnd.slice(0, over).map(([pushed]) => pushed);
+			};
+			const random = () => Buffer.from(c.random.bytes(32)).toString("base64url");
+			const handleOf = (secret: string | undefined) => {
+				const found = secret === undefined ? undefined : handles.get(secret);
+				return found && found.until > c.clock.now() ? found.handle : undefined;
+			};
+			/** The session cookie's value, when the request carries it once where it may be read. */
+			const secretIn = (request: HttpRequest) => {
+				const carried = jar.lookup(request, "session");
+				return carried.kind === "found" ? carried.value : undefined;
+			};
+			const handleIn = (request: HttpRequest) => handleOf(secretIn(request));
+			const sessionOf = (handle: string, found: Kept): Session =>
+				Object.freeze({ id: handle, context: found.context });
+			const liveAt = async (handle: string | undefined) => {
+				const found = handle === undefined ? undefined : kept.get(handle);
+				if (found?.state !== "open" || found.until <= c.clock.now()) return undefined;
+				if ((await revocation.check(found.context.subject, found.openedAt)) === "revoked") {
+					return undefined;
+				}
+				return found;
+			};
+			const enterAt = async (handle: string | undefined, level: EntryLevel): Promise<Entry> => {
+				const found = await liveAt(handle);
+				if (!found || handle === undefined) return { kind: "absent" };
+				const short = await shortOf(found.context, level);
+				if (!(await liveAt(handle))) return { kind: "absent" };
+				if (short) return { kind: "short", ...short };
+				const endsAt = found.openedAt + lifetimeMs;
+				return { kind: "entered", session: sessionOf(handle, found), endsAt };
+			};
+			const enteredAt = async (handle: string | undefined) => {
+				const entry = await enterAt(handle, "use");
+				return entry.kind === "entered" ? entry : undefined;
+			};
+			const close = async (handle: string, request?: HttpRequest) => {
+				const removed =
+					request && handleIn(request) === handle ? [jar.write("session", "", 0)] : [];
+				const found = kept.get(handle);
+				// A record past its lifetime is gone; a closing one is kept until it is closed.
+				if (!found || (found.state !== "closing" && found.until <= c.clock.now())) {
+					return { kind: "closed" as const, cookies: removed };
+				}
+				const session = { id: handle, subject: found.context.subject };
+				const from = found.state;
+				if (found.state !== "closed") {
+					found.state = "closing";
+					const failed = closing ? await closing.closing(sessionOf(handle, found)) : [];
+					for (const failure of failed) c.log.warn("session.participant_failed", failure);
+					if (failed.length > 0)
+						return { kind: "pending" as const, cookies: removed, session, from };
+				}
+				// A closed record is kept for the lifetime from its last close, and no longer listed.
+				found.state = "closed";
+				found.until = c.clock.now() + lifetimeMs;
+				listing.get(found.context.subject)?.delete(handle);
+				return { kind: "closed" as const, cookies: removed, session, from };
+			};
+			/**
+			 * A login's session, saved and listed behind a new cookie; a proof begun at or before its
+			 * subject's revocation closes it, saved, before any cookie, as an implementation does.
+			 */
+			const opening = async (request: HttpRequest, facts: LoginFacts): Promise<Opened> => {
+				checkAuthenticatedAt(facts);
+				checkProvenSince(facts);
 				const carried = handleIn(request);
 				if (carried !== undefined) await close(carried);
 				const handle = random();
@@ -759,66 +843,83 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 				const context = Object.freeze({
 					subject: facts.subject,
 					amr: Object.freeze([...facts.amr]),
-					...authenticatedAtOf(facts, openedAt, c.log),
+					...authenticatedAtOf(facts, openedAt, () =>
+						c.log.warn("session.authentication_time_capped"),
+					),
 					...(attributes === undefined ? {} : { attributes }),
 				});
 				const until = openedAt + lifetimeMs;
 				kept.set(handle, { context, state: "open", openedAt, until });
+				// Compared once saved: a boundary whose write landed before this is seen, and one after it
+				// is later than the opening, which every entry compares.
+				if ((await revocation.check(facts.subject, facts.provenSince)) === "revoked") {
+					await close(handle);
+					return { kind: "revoked" };
+				}
 				// Listed before its cookie is made; a session pushed out is closed through `close`.
 				for (const pushed of list(facts.subject, handle, until)) await close(pushed);
 				handles.set(secret, { handle, until });
 				return {
+					kind: "opened",
 					session: Object.freeze({ id: handle, context }),
 					cookies: [jar.write("session", secret, lifetimeMs / 1000)],
 				};
-			},
-			raise: async (request, amr) => {
-				const secret = secretIn(request);
-				const handle = handleOf(secret);
-				const found = await liveAt(handle);
-				if (!found || secret === undefined || handle === undefined) return undefined;
-				handles.delete(secret);
-				const next = random();
-				handles.set(next, { handle, until: found.until });
-				const raised = raisedBy(found.context.amr, amr);
-				found.context = Object.freeze({
-					...found.context,
-					amr: Object.freeze(raised.amr),
-					raisedAt: c.clock.now(),
-					raisedAmr: Object.freeze(raised.raisedAmr),
-				});
-				const left = Math.max(1, Math.floor((found.until - c.clock.now()) / 1000));
-				return {
-					session: sessionOf(handle, found),
-					cookies: [jar.write("session", next, left)],
-					raised: true,
-				};
-			},
-			closeRequest: async (request) => {
-				const handle = handleIn(request);
-				const carried = jar.lookup(request, "session").kind !== "absent";
-				const removed = carried ? [jar.write("session", "", 0)] : [];
-				if (handle === undefined) return { kind: "closed", cookies: removed };
-				return { ...(await close(handle)), cookies: removed };
-			},
-			close,
-		};
-		listingOf.set(stand, {
-			members: (subject) => listedUnder(subject).map(([handle]) => handle),
-			failNext: () => {
-				failListing = true;
-			},
-		});
-		return stand;
-	}),
-	m.contribute(revocationFollowers).by((c) => {
-		const lateSessions = c.late(sessions);
-		const members = async (subject: string) =>
-			(listingOf.get(lateSessions())?.members(subject) ?? []).map((member) => ({ member }));
-		return {
-			name: "session",
-			follow: (subject) =>
-				sessionRules.closeListed(subject, { members }, (handle) => lateSessions().close(handle)),
-		};
-	}),
-]);
+			};
+			const stand: Sessions = {
+				recent,
+				enter: async (request) => (await enteredAt(handleIn(request)))?.session,
+				enterFor: (request, level) => enterAt(handleIn(request), level),
+				entryOf: (handle, level = "use") => enterAt(handle, level),
+				open: (request, facts) => opening(request, facts),
+				raise: async (request, amr) => {
+					const secret = secretIn(request);
+					const handle = handleOf(secret);
+					const found = await liveAt(handle);
+					if (!found || secret === undefined || handle === undefined) return undefined;
+					handles.delete(secret);
+					const next = random();
+					handles.set(next, { handle, until: found.until });
+					const raised = raisedBy(found.context.amr, amr);
+					found.context = Object.freeze({
+						...found.context,
+						amr: Object.freeze(raised.amr),
+						raisedAt: c.clock.now(),
+						raisedAmr: Object.freeze(raised.raisedAmr),
+					});
+					const left = Math.max(1, Math.floor((found.until - c.clock.now()) / 1000));
+					return {
+						session: sessionOf(handle, found),
+						cookies: [jar.write("session", next, left)],
+						raised: true,
+					};
+				},
+				handleOf: async (request) => handleIn(request),
+				closeRequest: async (request) => {
+					const handle = handleIn(request);
+					const carried = jar.lookup(request, "session").kind !== "absent";
+					const removed = carried ? [jar.write("session", "", 0)] : [];
+					if (handle === undefined) return { kind: "closed", cookies: removed };
+					return { ...(await close(handle)), cookies: removed };
+				},
+				close,
+			};
+			listingOf.set(stand, {
+				members: (subject) => listedUnder(subject).map(([handle]) => handle),
+				failNext: () => {
+					failListing = true;
+				},
+			});
+			return stand;
+		}),
+		m.contribute(revocationFollowers).by((c) => {
+			const lateSessions = c.late(sessions);
+			const members = async (subject: string) =>
+				(listingOf.get(lateSessions())?.members(subject) ?? []).map((member) => ({ member }));
+			return {
+				name: "session",
+				follow: (subject) =>
+					sessionRules.closeListed(subject, { members }, (handle) => lateSessions().close(handle)),
+			};
+		}),
+	],
+);

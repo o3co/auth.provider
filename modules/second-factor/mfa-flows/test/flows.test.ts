@@ -2,8 +2,8 @@ import { listening } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { BootRefused, defineModule } from "@mod/kernel";
 import { openedAfterHold } from "@mod/login-gates";
-import { factors } from "@mod/mfa";
 import { type Enrolled, factorKinds } from "@mod/mfa-extensions";
+import { factorManaging } from "@mod/mfa-managing";
 import { sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,7 +16,7 @@ import {
 import { clock, during, serve } from "./harness.ts";
 
 /** A kind that sends a challenge, and takes what the challenge kept as the proof after it. */
-const sending = defineModule({ name: "kind-sending" }, (m) => [
+const sending = defineModule({ name: "kind-sending", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "sending",
 		amr: ["otp"],
@@ -34,7 +34,7 @@ const sending = defineModule({ name: "kind-sending" }, (m) => [
 
 /** How the told kind answers its next enrollment; its secret is the value no two factors may hold. */
 const told = { answer: undefined as Enrolled | undefined };
-const _toldKind = defineModule({ name: "kind-told" }, (m) => [
+const _toldKind = defineModule({ name: "kind-told", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "told",
 		amr: ["otp"],
@@ -132,7 +132,7 @@ describe("mfa at login", () => {
 		expect(info.body.attempts_remaining).toBe(5);
 	});
 
-	it("holds a subject after repeated failures even for the right proof, but a way back works and ends the run", async () => {
+	it("holds a subject after repeated failures even for the right proof, but a way back works and ends the run [rfc6749-10.10-d]", async () => {
 		const s = await serve({
 			lockout: { threshold: 2, backoff: "15m", budget: 10, "hard-limit": 100 },
 		});
@@ -171,12 +171,15 @@ describe("mfa at login", () => {
 
 	it("tells the caller a login came from once the proof opens it, and no one for a login from nowhere", async () => {
 		const told: [string, string][] = [];
-		const upstream = defineModule({ name: "upstream-stand-in" }, (m) => [
-			m.contribute(openedAfterHold).by(() => ({
-				caller: "upstream",
-				opened: async (session, carry) => void told.push([session.context.subject, carry]),
-			})),
-		]);
+		const upstream = defineModule(
+			{ name: "upstream-stand-in", replicaSafe: false, takes: [] },
+			(m) => [
+				m.contribute(openedAfterHold).by(() => ({
+					caller: "upstream",
+					opened: async (session, carry) => void told.push([session.context.subject, carry]),
+				})),
+			],
+		);
 		const s = await serve({}, [upstream]);
 		const { secret } = await s.enrollCode();
 		const verify = ({ tx, factor }: Awaited<ReturnType<typeof s.heldLogin>>, n: number) =>
@@ -613,7 +616,7 @@ const verifies = { guess: 0 };
 afterEach(() => {
 	verifies.guess = 0;
 });
-const slowOnce = defineModule({ name: "kind-slow-once" }, (m) => [
+const slowOnce = defineModule({ name: "kind-slow-once", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "once",
 		amr: ["hwk"],
@@ -634,7 +637,7 @@ const slowOnce = defineModule({ name: "kind-slow-once" }, (m) => [
 		},
 	})),
 ]);
-const slowGuess = defineModule({ name: "kind-slow-guess" }, (m) => [
+const slowGuess = defineModule({ name: "kind-slow-guess", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "guess",
 		amr: ["otp"],
@@ -711,7 +714,7 @@ describe("mfa under races and misuse", () => {
 		expect(answers.filter((r) => r.status === 200)).toHaveLength(1);
 	});
 
-	it("judges no more racing guesses than the lockout and the transaction allow", async () => {
+	it("judges no more racing guesses than the lockout and the transaction allow [rfc6749-10.10-d]", async () => {
 		const s = await serve(
 			{
 				"attempts-per-transaction": 2,
@@ -791,7 +794,7 @@ describe("mfa under races and misuse", () => {
 		const codes = done.body.recovery_codes as string[];
 		const one = await s.heldLogin("rex");
 		during.backup = async () => {
-			const decided = s.app.get(factors);
+			const decided = s.app.get(factorManaging);
 			const reissued = await decided.reissue("rex", await decided.fenceOf("rex"));
 			expect(reissued.kind).toBe("reissued");
 		};

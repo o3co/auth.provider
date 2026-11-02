@@ -4,11 +4,14 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
+	"sampleOf": "@mod/upstreams",
+	"narrower": "internal",
 	"exports": {
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
 		"@mod/external-jwt": "workspace:*",
+		"@mod/host-entries": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound": "workspace:*",
 		"@mod/outbound-policy": "workspace:*",
@@ -18,7 +21,8 @@
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
-		"jose": "6.2.12",
+		"@mod/tls-options": "workspace:*",
+		"jose": "6.2.13",
 		"vitest": "5.0.5"
 	}
 }

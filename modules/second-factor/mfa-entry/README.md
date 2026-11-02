@@ -4,7 +4,7 @@
 - Judges a session against second factors: the entry requirement `mfa` sets for using a session and for changing credentials, and whether a session proved a second factor recently.
 
 ## Not here
-- The subject's factors, and whether one counts or the witness agrees: `mfa`, asked through its decisions.
+- The subject's factors, and whether one counts or the witness agrees: `mfa`, asked through `mfa-reading`'s `factorReading`.
 - Proving a factor, raising a session or stepping up: `mfa-flows`. Sessions and their recent window: `session`.
 
 ## Offers
@@ -18,4 +18,4 @@
 - Comes once `mfa` and `session` are both composed, through `combinations`; an app composed by hand must compose it, or sessions are not held to second factors at all.
 
 ## Depends on
-- `kernel`, `session`, `session-requirements` (the entry requirements), `mfa` (its decisions), `mfa-extensions` (the kinds, and the `mfa` amr)
+- `kernel`, `session`, `session-requirements` (the entry requirements), `mfa` (composed with it, and its `enforcers`), `mfa-reading` (the reading of the factors), `mfa-extensions` (the kinds, and the `mfa` amr)

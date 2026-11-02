@@ -1,0 +1,39 @@
+{
+	"name": "@mod/federation-grants-connect",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"joins": [
+		"@mod/federation-grants"
+	],
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/federation-grants": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/request-source": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/upstream-round-trip": "workspace:*",
+		"@mod/upstreams": "workspace:*",
+		"@mod/url-setting": "workspace:*",
+		"@mod/users": "workspace:*",
+		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/clients": "workspace:*",
+		"@mod/cookies": "workspace:*",
+		"@mod/csrf": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/seal": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"vitest": "5.0.5"
+	}
+}

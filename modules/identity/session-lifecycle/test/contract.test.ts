@@ -4,7 +4,12 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { sessions } from "@mod/session";
-import { type PlaceOptions, type SessionsPlace, sessionsContract } from "@mod/session/testing";
+import {
+	openedOf,
+	type PlaceOptions,
+	type SessionsPlace,
+	sessionsContract,
+} from "@mod/session/testing";
 import { participants } from "@mod/session-participants";
 import sessionParticipants from "@mod/session-participants/module";
 import { entryRequirements } from "@mod/session-requirements";
@@ -26,7 +31,7 @@ async function placeOver(
 	let failing = false;
 	const closed: string[] = [];
 	const stores = memoryStores();
-	const around = defineModule({ name: "around" }, (m) => [
+	const around = defineModule({ name: "around", replicaSafe: false, takes: [] }, (m) => [
 		// Where credentials are judged, only a strong login changes them.
 		...(credentialsJudged
 			? [
@@ -97,12 +102,15 @@ sessionsContract(
 	(options) => placeOver([], options),
 );
 
-const login = (place: SessionsPlace) =>
-	place.sessions.complete(place.request(), {
-		subject: "alice",
-		amr: ["pwd"],
-		authenticatedAt: place.now(),
-	});
+const login = async (place: SessionsPlace) =>
+	openedOf(
+		await place.sessions.open(place.request(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: place.now(),
+			provenSince: place.now(),
+		}),
+	);
 
 describe("entry requirements", () => {
 	it("are asked in name order", async () => {
@@ -115,7 +123,7 @@ describe("entry requirements", () => {
 				return { kind: "admit" as const };
 			},
 		});
-		const unsorted = defineModule({ name: "unsorted" }, (m) => [
+		const unsorted = defineModule({ name: "unsorted", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(entryRequirements).by(() => requirement("b")),
 			m.contribute(entryRequirements).by(() => requirement("a")),
 		]);
@@ -145,7 +153,7 @@ describe("participants", () => {
 				if (fails) throw new Error("not yet");
 			},
 		});
-		const two = defineModule({ name: "two" }, (m) => [
+		const two = defineModule({ name: "two", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(participants).by(() => participant("b", true)),
 			m.contribute(participants).by(() => participant("a", false)),
 		]);

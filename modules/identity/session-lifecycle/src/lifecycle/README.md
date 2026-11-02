@@ -22,14 +22,14 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 - Entry at a level.
 - Entry by a request's cookie (`entryIn`, behind `enter` and `enterFor`) reads which session the cookie opens again once the entry is decided, and is absent unless it still opens it. A raise retires the old cookie before it writes the session, so a cookie a raise retired meanwhile never enters the raised session.
 - A read that finds an open record ended by the lifetime in force closes it there, calling no participants; a close that finds one calls them, as any close does.
-- `open` (as `complete`), `close` (as `close`) and `closeIn` (as `closeRequest`).
+- `open` (as `open`), `close` (as `close`) and `closeIn` (as `closeRequest`).
 - One sweep of pending closings, which goes on past a failing one.
 - A sweep ends at the stop signal, and the host waits for it.
 - A new secret indexed to a handle as a cookie for a given time, unavailable unless the index answers created.
 - Retiring a secret, and the session a record shows.
 - The record codec, to and from what the store keeps.
 - A close calls the participants through `session`'s `closingParticipants`, and logs each that failed by name and kind.
-- `authenticatedAtOf`: the authentication time a login reports, or that it is unknown. `checkAuthenticatedAt`: a `TypeError`, naming no value, for one neither epoch milliseconds (0 to 8.64e15) nor unknown, thrown before a login closes or opens anything.
+- A login's authentication time as `session`'s rules read it (`checkAuthenticatedAt`, thrown before a login closes or opens anything; `authenticatedAtOf`).
 - A reported time later than the opening is capped to the opening, and only the cap is logged.
 
 ## Invariants
@@ -37,7 +37,7 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 - Every state change is written, and a step answers that the state moved only after the confirmed write returns.
 - Without a record, a close writes a closed mark before it answers closed.
 - A handle to close is added to the closings first, and taken off once closed.
-- A closing whose participants keep failing is retried after half its age (at least the sweep interval, at most 1 hour), and that time is logged.
+- A closing whose participants keep failing is retried after half its age (at least the sweep interval, at most 1 hour), and the closing's age is logged (`session-lifecycle.closing_pending`).
 - A closing whose record a host cannot read is put off the same way, by that host alone.
 - The cookie secret is 256 random bits, checked for its shape before any lookup.
 - The index's place keeps the secret only as a name it cannot be had from.

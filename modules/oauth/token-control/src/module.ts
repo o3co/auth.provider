@@ -1,13 +1,13 @@
 import { type Clients, clients } from "@mod/clients";
-import { routes, site, use } from "@mod/http";
-import { metadata } from "@mod/issuer";
+import { routes, use } from "@mod/http";
+import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { type BuildContext, defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
 import { tokens } from "@mod/tokens";
 import type { z } from "zod";
 import { revocableKinds } from "./contract.ts";
-import { introspectionIn } from "./introspection/introspection.ts";
-import { revocationIn } from "./revocation/revocation.ts";
+import { introspectionIn, introspectionTakes } from "./introspection/introspection.ts";
+import { revocationIn, revocationTakes } from "./revocation/revocation.ts";
 import { section } from "./section.ts";
 
 const introspectPath = "/oauth/introspect";
@@ -18,11 +18,9 @@ const revokeCors = {
 	exposes: ["www-authenticate", "retry-after"],
 };
 
-/** Where a route answers, absolute on the public origin; nothing without one. */
-const located = async (c: BuildContext<unknown>, path: string) => {
-	const { origin } = await c.get(site);
-	return origin === undefined ? undefined : new URL(path, origin).href;
-};
+/** Where a route answers, absolute on the origin `issuer` names its endpoints on. */
+const located = async (c: BuildContext<unknown>, path: string) =>
+	new URL(path, endpointOrigin(await c.get(issuer))).href;
 
 /** Each route counts its own requests per source, in the window the section sets. */
 const limited = (c: BuildContext<z.output<typeof section>>, name: string) => {
@@ -30,7 +28,11 @@ const limited = (c: BuildContext<z.output<typeof section>>, name: string) => {
 	return [use(requestsPerSource, { name: `token-control.${name}`, window })];
 };
 
-export default defineModule({ name: "token-control", section }, (m) => [
+// `clients` is taken outright by two of the metadata items, so the two that take it only where some
+// token can be revoked need nothing of their own; `revocableKinds` is collected by the revoke route.
+const takes = [...introspectionTakes, ...revocationTakes, issuer, revocableKinds, clients, tokens];
+
+export default defineModule({ name: "token-control", replicaSafe: true, section, takes }, (m) => [
 	m.contribute(routes).by(async (c) => ({
 		method: "POST",
 		path: introspectPath,

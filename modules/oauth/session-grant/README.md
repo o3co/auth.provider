@@ -13,7 +13,7 @@
 - Composition definition only (the grant). A client may use it once its `client-allowance` section lists `session`; a public client too.
 - Answers `200` with `access_token`, `token_type`, `expires_in`, and `scope` when one is issued.
 - Refusals:
-  - No same-origin evidence, or no session to enter: `401 unauthorized`.
+  - No same-origin evidence, or no session to enter: `400 invalid_grant` (RFC 6749 §5.2), described as not authenticated.
   - A session short of an entry requirement: `invalid_grant`, with `step_up` naming the requirement.
   - A scope outside the client's allowance, or none asked where the client has no defaults: `invalid_scope`.
   - An issuance policy's refusal: `invalid_grant`, with the policy's description.

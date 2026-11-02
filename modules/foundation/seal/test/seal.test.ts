@@ -7,10 +7,11 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { resealers, resealing, seal } from "../src/contract.ts";
 import sealModule from "../src/module.ts";
+import { section } from "../src/section.ts";
 
 const runtime = quietRuntime({ clock: { now: () => 0 } });
 const key = () => randomBytes(32).toString("base64");
@@ -108,6 +109,16 @@ it("refuses to start without a key, with a key it cannot take, or with two keys 
 	await expect(boot([{ id: "a".repeat(32), key: key() }])).resolves.toBeDefined();
 });
 
+it("reads each key's algorithm, aes-256-gcm unless set, holds its key to the algorithm's size, and refuses one it does not know", async () => {
+	const named = await boot([{ id: "a", algorithm: "aes-256-gcm", key: key() }]);
+	expect(named.open(named.seal("plain", "ctx"), "ctx")).toEqual({ kind: "opened", plain: "plain" });
+	const short = { id: "a", algorithm: "aes-256-gcm", key: randomBytes(16).toString("base64") };
+	for (const keys of [[{ id: "a", algorithm: "aes-128-gcm", key: key() }], [short]]) {
+		await expect(boot(keys), JSON.stringify(keys[0]?.algorithm)).rejects.toThrow(BootRefused);
+	}
+	expect(section.parse({ current: { id: "a", key: key() } }).current.algorithm).toBe("aes-256-gcm");
+});
+
 it("refuses to start with a key of all one byte, or of fewer than 8 byte values, wherever it sits in the ring", async () => {
 	const bytes = (values: readonly number[]) =>
 		Buffer.from(Array.from({ length: 32 }, (_, i) => values[i % values.length] ?? 0)).toString(
@@ -168,7 +179,7 @@ it("refuses to start with keys beside current, with neither, or with an id twice
 it("reseals through each holder in name order, answering counts alone, past a holder that fails", async () => {
 	const ran: string[] = [];
 	const holder = (name: string, fails = false) =>
-		defineModule({ name: `holder-${name}` }, (m) => [
+		defineModule({ name: `holder-${name}`, replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(resealers).by(() => ({
 				name,
 				reseal: async () => {
@@ -192,4 +203,9 @@ it("reseals through each holder in name order, answering counts alone, past a ho
 	expect(
 		await (await bootWith({ current: { id: "a", key: key() } })).get(resealing).reseal(),
 	).toEqual([]);
+});
+
+it("takes every handle its takes name", async () => {
+	const config = { ...kernelConfig(), seal: { current: { id: "a", key: key() } } };
+	expect((await takesUnused({ modules: [sealModule], config })).seal).toBeUndefined();
 });

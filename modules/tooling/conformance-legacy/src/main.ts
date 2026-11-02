@@ -63,7 +63,9 @@ const baseline = (port: number, scratch: string) => ({
 	REPOSITORIES_CLIENT_YAML_PATH: join(scratch, "clients.yaml"),
 });
 /** The standalone build's entry, with the extra packages the parts ask for appended. */
-const composedEntry = fileURLToPath(new URL("../scripts/composed-entry.mjs", import.meta.url));
+const composedEntry = fileURLToPath(
+	new URL("../scripts/composed/composed-entry.mjs", import.meta.url),
+);
 
 /** The registries the baseline names, empty until a part writes its own. */
 const emptyFiles = { "users.yaml": "{}\n", "clients.yaml": "{}\n" };

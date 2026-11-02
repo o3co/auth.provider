@@ -39,14 +39,26 @@ function settingsOf(idp: IdpScene): Record<string, unknown> {
 				"jwks-uri": `${idp.issuer}/oauth2/v3/certs`,
 			};
 		default:
-			return { type: "oidc", issuer: idp.issuer, ...client };
+			return {
+				type: "oidc",
+				issuer: idp.issuer,
+				...client,
+				...(idp.readUserinfo ? { "read-userinfo": true } : {}),
+				...(idp.endpointHosts ? { "endpoint-hosts": idp.endpointHosts } : {}),
+				...(idp.acceptMissingIss ? { "accept-missing-iss": true } : {}),
+				...(idp.scopes ? { scopes: idp.scopes } : {}),
+			};
 	}
 }
 
-/** Federation grants' own section: the page, the connections and, where the scene sets it, the lodging limit. */
-const grantsSection = (at: GrantsPart) => ({
+/** The browser half's section: the page that asks the user and, where the scene sets it, the login page. */
+const browserSection = (at: GrantsPart) => ({
 	page: at.page,
 	...(at.loginPage ? { "login-page": at.loginPage } : {}),
+});
+
+/** Federation grants' own section: the connections and, where the scene sets it, the lodging limit. */
+const grantsSection = (at: GrantsPart) => ({
 	connections: Object.fromEntries(
 		at.connections.map((c) => [
 			c.name,
@@ -59,6 +71,7 @@ const grantsSection = (at: GrantsPart) => ({
 		]),
 	),
 	...(at.lodges ? { lodges: at.lodges.limit, "lodge-window": `${at.lodges.windowSeconds}s` } : {}),
+	...(at.keepOnSubjectRevocation ? { "keep-on-subject-revocation": true } : {}),
 });
 
 const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): NewPart => ({
@@ -71,8 +84,9 @@ const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): Ne
 		...(part.idps.some((idp) => idp.type === "google") ? ["@mod/idp-google"] : []),
 		...(part.idps.some((idp) => idp.type === "apple") ? ["@mod/idp-apple"] : []),
 		...(part.keepsUpstreamTokens ? ["@mod/federation-tokens"] : []),
-		...(part.grants ? ["@mod/federation-grants"] : []),
+		...(part.grants ? ["@mod/federation-grants", "@mod/federation-grants-connect"] : []),
 	],
+	...(part.without ? { without: part.without } : {}),
 	store: "volatile",
 	config: {
 		federation: {
@@ -84,14 +98,24 @@ const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): Ne
 		...(modules.includes("@mod/seal")
 			? { seal: { current: { id: "scene", key: randomBytes(32).toString("base64") } } }
 			: {}),
-		...(part.grants ? { "federation-grants": grantsSection(part.grants) } : {}),
+		...(part.grants
+			? {
+					"federation-grants": grantsSection(part.grants),
+					"federation-grants-connect": browserSection(part.grants),
+				}
+			: {}),
+		...(part.linkStepUpPage ? { "federation-link": { "step-up-page": part.linkStepUpPage } } : {}),
 		// Every upstream is named so outbound reaches it, and those on plain http at loopback as such.
 		outbound: {
-			allow: part.idps.map((idp) => new URL(idp.issuer).hostname),
-			"plain-loopback": part.idps
-				.map((idp) => new URL(idp.issuer))
+			allow: [
+				...part.idps.flatMap((idp) => [new URL(idp.issuer).hostname, ...(idp.endpointHosts ?? [])]),
+				...(part.ledgerUrls ?? []).map((url) => new URL(url).hostname),
+			],
+			"plain-loopback": [...part.idps.map((idp) => idp.issuer), ...(part.ledgerUrls ?? [])]
+				.map((url) => new URL(url))
 				.filter((url) => url.protocol === "http:")
 				.map((url) => url.host),
+			...(part.proxy ? { proxy: part.proxy } : {}),
 		},
 	},
 });

@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { areaTarget, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { federationScene } from "../src/main.ts";
+import { federationScene, landedStatus } from "../src/main.ts";
 import { type Browser, browser as openBrowser, probeClient } from "./browser.ts";
 import { fakeGithub } from "./github.ts";
 
@@ -68,10 +68,10 @@ async function authorized(b: Browser, id: number, query = "") {
 }
 
 describe.runIf(able)("federation through GitHub", () => {
-	it("logs a browser in by the user's numeric id", async () => {
+	it("logs a browser in by the user's numeric id, its token sent to the user lookup as a Bearer Authorization [rfc6750-2.1-b]", async () => {
 		const b = browser();
 		const back = await b.get(`${start}/callback?${await authorized(b, 583231)}`);
-		expect([back.status, back.location]).toEqual([302, landing]);
+		expect([back.status, back.location]).toEqual([landedStatus(), landing]);
 		expect(await b.session()).toBe(true);
 	});
 
@@ -83,7 +83,7 @@ describe.runIf(able)("federation through GitHub", () => {
 		expect(await b.session()).toBe(false);
 	});
 
-	it("refuses an answer naming another issuer before its code is used", async () => {
+	it("refuses an answer naming another issuer before its code is used [rfc9700-4.4.2.1-a] [rfc9700-2.1-e] [rfc9700-2.1-f]", async () => {
 		const b = browser();
 		const query = await authorized(b, 583231);
 		const code = query.get("code") ?? "";

@@ -7,10 +7,12 @@ Internal module of `conformance`: running every pattern's areas on its app.
 
 ## Offers
 - The script `patterns`: every pattern, `full` both ways, or one pattern on the areas named. `patterns --list` prints every run's pattern as JSON, for CI to run each in a job of its own.
+- The script `evidence-runs`: each area's run on each pattern's app, `@mod/conformance-<area>@<pattern>`, as the JSON runs `spec-checklist` reads (kind `pattern`, the pattern its matrix value); a pattern with no areas is the run `@mod/conformance@<pattern>`, which no area reports.
 - `full` (the full template) and `full+opt-ins` (with every feature that opts in), the names the package's drivers read.
 
 ## Invariants
 - Prints each area's tests line, and its scenes left out by reason.
+- A failed area prints why: vitest's failures from their heading on, at most 400 lines (a scene refused before its tests too, where none failed), or its last 60 lines; and keeps its whole output in a file it names, under the OS temp dir (`TMPDIR`) as `conformance-<pattern>-<area>-*/output.log`, which CI uploads.
 - A pattern with no areas fails.
 - Any failure exits non-zero.
 

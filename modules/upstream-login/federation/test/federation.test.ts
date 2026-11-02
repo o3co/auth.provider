@@ -14,7 +14,7 @@ import {
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { loginSource } from "@mod/login-attributes";
 import { type LoginFrom, loginGates, logins, openedAfterHold, returnPaths } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
@@ -26,9 +26,11 @@ import secretHashModule from "@mod/secret-hash/module";
 import { type LoginFacts, type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { simulatedStore } from "@mod/store/testing";
+import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { heldLoginStore, type StoredHeldLogin } from "@mod/upstream-handoff";
 import handoffModule from "@mod/upstream-handoff/module";
+import handoffSealModule from "@mod/upstream-handoff-seal/module";
 import { roundTripStore, type StoredRoundTrip } from "@mod/upstream-round-trip";
 import roundTripModule from "@mod/upstream-round-trip/module";
 import {
@@ -72,7 +74,11 @@ afterEach(() => stop());
 
 const origin = "https://as.example";
 const base = "/session/oauth/federation";
-const alice: UpstreamLogin = { subject: "u-alice", amr: ["mfa"], authenticatedAt: start };
+const alice: UpstreamLogin = {
+	subject: "u-alice",
+	amr: ["mfa"],
+	authenticatedAt: start,
+};
 /** How far behind ours the test IdP type lets an upstream's clock be. */
 const skewMs = 30_000;
 /** Headers as the trusted proxy forwards a request over https. */
@@ -122,7 +128,7 @@ async function serve(setup: Setup = {}) {
 	const idp = testIdpType(setup.answers ?? answering(["good", alice]), setup.more);
 	const saved: string[] = [];
 	const keptHeld = memoryRecords<StoredHeldLogin>(() => now, { shards: 1, perShard: 1 });
-	const held = defineModule({ name: "held" }, (m) => [
+	const held = defineModule({ name: "held", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(heldLoginStore).by(() => ({
 			save: async (key, value, lifetimeMs) => {
 				saved.push(JSON.stringify(value));
@@ -133,7 +139,7 @@ async function serve(setup: Setup = {}) {
 		})),
 	]);
 	const keptTrips = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
-	const trips = defineModule({ name: "trips" }, (m) => [
+	const trips = defineModule({ name: "trips", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(roundTripStore).by(() => ({
 			save: async (key, value, lifetimeMs) => {
 				saved.push(JSON.stringify(value));
@@ -144,7 +150,7 @@ async function serve(setup: Setup = {}) {
 	]);
 	const receiving = setup.receivers ?? [];
 	const audit = auditStandIn();
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			...(setup.withoutCsrf ? [] : [csrfStandIn]),
@@ -166,10 +172,13 @@ async function serve(setup: Setup = {}) {
 			roundTripModule,
 			setup.trips ?? trips,
 			...(setup.extra ?? []),
-			...(receiving.length > 0 ? [sealModule, ...receiving] : []),
+			...(receiving.length > 0 ? [sealModule, handoffSealModule, ...receiving] : []),
 		],
 		config: {
-			...kernelConfig(),
+			// A plain-http origin is one only a development deployment takes.
+			...kernelConfig({
+				environment: setup.origin?.startsWith("http:") ? "development" : "production",
+			}),
 			...(receiving.length > 0 ? sealConfig() : {}),
 			...httpConfig({
 				"trusted-proxies": ["127.0.0.1"],
@@ -187,7 +196,8 @@ async function serve(setup: Setup = {}) {
 			}),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const at = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -244,10 +254,16 @@ async function serve(setup: Setup = {}) {
 		(await app.get(logins)).resume(testRequest(), facts, "second", held.done, held.from);
 	/** Logs in through the gates for another caller, as a different way of logging in would. */
 	const login = async (from: LoginFrom) => {
-		const facts = { subject: "alice", amr: ["pwd"], authenticatedAt: runtime.clock.now() };
+		const facts = {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
 		return (await app.get(logins)).login(testRequest(), facts, {}, from);
 	};
 	return {
+		input,
 		saved,
 		declared: <T>(of: ReturnType<typeof contract<T>>) => app.get(of),
 		resume,
@@ -312,7 +328,7 @@ describe("federation", () => {
 		// Read, it is not lengthened: it ends where the first start put it.
 		now += 30_000;
 		const answered = await s.callback(`code=good&state=${first.state}`, first.cookie);
-		expect(answered.status).toBe(302);
+		expect(answered.status).toBe(303);
 		// A link from another site is still refused before anything else.
 		const linking = await s.get(`${base}/corp?link=1`, first.cookie, {
 			"sec-fetch-site": "cross-site",
@@ -345,7 +361,7 @@ describe("federation", () => {
 	it("begins anew where the browser's live round trip carries what federation does not read", async () => {
 		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
 		let garbled = false;
-		const trips = defineModule({ name: "trips" }, (m) => [
+		const trips = defineModule({ name: "trips", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(roundTripStore).by(() => ({
 				save: kept.records.create,
 				update: async (key, change) => {
@@ -371,7 +387,7 @@ describe("federation", () => {
 		 */
 		const earlier = ({ mixed = false, forced = false } = {}) => {
 			const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
-			return defineModule({ name: "trips" }, (m) => [
+			return defineModule({ name: "trips", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(roundTripStore).by(() => ({
 					save: async (key, value, lifetimeMs) => {
 						const { carried: was, ...rest } = value as unknown as {
@@ -413,7 +429,7 @@ describe("federation", () => {
 			const before = s.events.length;
 			const back = await s.callback(`code=good&state=${state}&iss=https://idp.example`, cookie);
 			// Alice holds that identity already: it ends in the link, which records nothing for it, never a login.
-			expect(back.status).toBe(302);
+			expect(back.status).toBe(303);
 			expect(s.events.slice(before).filter((e) => e.kind.startsWith("federation.login."))).toEqual(
 				[],
 			);
@@ -434,7 +450,7 @@ describe("federation", () => {
 
 	it("refuses a callback whose round trip goes on to a continuation not composed, clearing its cookie and warning", async () => {
 		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
-		const trips = defineModule({ name: "trips" }, (m) => [
+		const trips = defineModule({ name: "trips", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(roundTripStore).by(() => ({
 				save: async (key, value, lifetimeMs) => {
 					// Carried as if a continuation of another name had begun it.
@@ -522,7 +538,7 @@ describe("federation", () => {
 			`code=good&state=${state}&iss=https://idp.example`,
 			`${session}; ${cookie}`,
 		);
-		expect([back.status, back.location]).toEqual([302, `${origin}/`]);
+		expect([back.status, back.location]).toEqual([303, `${origin}/`]);
 		expect(back.cookies.filter((c) => !c.includes("federation.corp="))).toEqual([]);
 		expect(s.events.slice(before).filter((e) => e.kind.startsWith("federation.login."))).toEqual(
 			[],
@@ -581,7 +597,7 @@ describe("federation", () => {
 			`code=good&state=${started.state}&iss=https://idp.example`,
 			started.cookie,
 		);
-		expect([back.status, back.location]).toEqual([302, `${origin}/`]);
+		expect([back.status, back.location]).toEqual([303, `${origin}/`]);
 		const [exchange] = s.asked.exchanges;
 		expect(exchange?.iss).toBe("https://idp.example");
 		expect(
@@ -626,15 +642,15 @@ describe("federation", () => {
 		await expect(type.open({ issuer: "i", port: 1 }, at)).rejects.toThrow("i:1");
 	});
 
-	it("returns only to a target a login may return to", async () => {
+	it("returns only to a target a login may return to [rfc9700-4.1.3-b]", async () => {
 		const s = await serve({ extra: [returnTo("/oauth/authorize")] });
 		expect((await s.begin("?redirect_to=https://evil.example/")).status).toBe(400);
 		const target = `${origin}/oauth/authorize?client_id=app`;
 		const back = await s.roundTrip("code=good", `?redirect_to=${encodeURIComponent(target)}`);
-		expect([back.status, back.location]).toEqual([302, target]);
+		expect([back.status, back.location]).toEqual([303, target]);
 	});
 
-	it("takes a transaction only with its own state, once, so a request from elsewhere cannot spend it", async () => {
+	it("takes a transaction only with its own state, once, so a request from elsewhere cannot spend it [rfc9700-2.1-d] [rfc9700-2.1-g] [rfc9700-4.2.4-b] [rfc9700-4.7.1-c]", async () => {
 		const s = await serve();
 		const started = await s.begin();
 		const wrong = await s.callback("code=good&state=wrong", started.cookie);
@@ -655,14 +671,14 @@ describe("federation", () => {
 		expect(wrong.cookies).toEqual([]);
 		expect((await s.callback(`code=good&state=${started.state}`, "")).status).toBe(400);
 		const back = await s.callback(`code=good&state=${started.state}`, started.cookie);
-		expect(back.status).toBe(302);
+		expect(back.status).toBe(303);
 		// Once taken, the transaction's cookie is cleared with the answer.
 		expect(back.cookies).toContain(clearedOf(started.cookie));
 		expect((await s.callback(`code=good&state=${started.state}`, started.cookie)).status).toBe(400);
 		expect(s.asked.exchanges).toHaveLength(1);
 	});
 
-	it("never takes one IdP's transaction at another's callback", async () => {
+	it("never takes one IdP's transaction at another's callback [rfc9700-2.1-e] [rfc9700-4.4.2-a] [rfc9700-4.4.2.2-a]", async () => {
 		const s = await serve({
 			federation: {
 				idps: {
@@ -677,7 +693,7 @@ describe("federation", () => {
 			started.cookie.replace("federation.corp", "federation.other"),
 		);
 		expect(elsewhere.status).toBe(400);
-		expect((await s.callback(`code=good&state=${started.state}`, started.cookie)).status).toBe(302);
+		expect((await s.callback(`code=good&state=${started.state}`, started.cookie)).status).toBe(303);
 	});
 
 	it("takes no transaction from its cookie sent twice, and leaves it for the browser's own callback", async () => {
@@ -686,7 +702,7 @@ describe("federation", () => {
 		const query = `code=good&state=${started.state}`;
 		const twice = await s.callback(query, `${started.cookie}; ${started.cookie}`);
 		expect([twice.status, twice.body]).toEqual([400, { error: "invalid_state" }]);
-		expect((await s.callback(query, started.cookie)).status).toBe(302);
+		expect((await s.callback(query, started.cookie)).status).toBe(303);
 	});
 
 	it("ends a transaction at its lifetime", async () => {
@@ -728,6 +744,28 @@ describe("federation", () => {
 			// Refused by another copy of upstreams in the bundle: still a refusal.
 			'federation.exchange_failed {"idp":"corp","kind":"refused"}',
 		]);
+	});
+
+	it("finds the local user by the IdP and the upstream's subject alone, never by the profile it gives [oidc-core-5.7-b]", async () => {
+		const aliceSays = {
+			email: "alice@corp.example",
+			name: "Alice",
+			preferred_username: "alice",
+			phone_number: "+15550100",
+		};
+		const s = await serve({
+			answers: answering(
+				["alice", { ...alice, profile: { email: "someone@else.example" } } as UpstreamLogin],
+				["impostor", { subject: "u-other", amr: [], profile: aliceSays } as UpstreamLogin],
+			),
+		});
+		// Alice's subject logs in as alice, whatever profile comes with it.
+		const back = await s.roundTrip("code=alice");
+		expect(back.status).toBe(303);
+		expect(await s.amrOf(back.cookies)).toContain("fed");
+		// Another subject giving alice's email, name, username and phone is no one linked.
+		const impostor = await s.roundTrip("code=impostor");
+		expect([impostor.status, impostor.body]).toEqual([401, { error: "unknown_user" }]);
 	});
 
 	it("records a login with its subject, IdP and source, and one that failed with its reason", async () => {
@@ -790,12 +828,32 @@ describe("federation", () => {
 		expect(await prompted("none")).toBe(401);
 		expect(await prompted("before")).toBe(401);
 		// The upstream's clock may be behind ours by the allowance its type gives.
-		expect(await prompted("skewed")).toBe(302);
-		expect(await prompted("edge")).toBe(302);
-		expect(await prompted("after")).toBe(302);
+		expect(await prompted("skewed")).toBe(303);
+		expect(await prompted("edge")).toBe(303);
+		expect(await prompted("after")).toBe(303);
 		// Any other prompt asks nothing of the upstream login.
-		expect((await s.roundTrip("code=before", "?prompt=consent")).status).toBe(302);
+		expect((await s.roundTrip("code=before", "?prompt=consent")).status).toBe(303);
 		expect(s.asked.starts.at(-1)?.prompt).toBeUndefined();
+	});
+
+	it("refuses a login whose round trip began before its subject's revocation, however late its callback comes back", async () => {
+		const s = await serve({ answers: answering(["old", aliceAt(now)]) });
+		const started = await s.begin();
+		now += 1000;
+		await s.declared(subjectRevocation).revoke("alice");
+		now += 20_000;
+		const back = await s.callback(`code=old&state=${started.state}`, started.cookie);
+		expect(back.status).toBe(401);
+		expect(await s.contextOf(back.cookies)).toBeUndefined();
+	});
+
+	it("logs in a round trip begun after the subject's revocation, though the upstream's own login came before it", async () => {
+		const s = await serve({ answers: answering(["early", aliceAt(now - 60_000)]) });
+		await s.declared(subjectRevocation).revoke("alice");
+		now += 2000;
+		const back = await s.roundTrip("code=early");
+		expect(back.status).toBe(303);
+		expect(await s.contextOf(back.cookies)).toBeDefined();
 	});
 
 	it("compares an upstream login time in whole seconds with the start, as upstreams give it", async () => {
@@ -810,11 +868,11 @@ describe("federation", () => {
 		});
 		const prompted = async (code: string) =>
 			(await s.roundTrip(`code=${code}`, "?prompt=login")).status;
-		expect(await prompted("same-second")).toBe(302);
+		expect(await prompted("same-second")).toBe(303);
 		expect(await prompted("second-before")).toBe(401);
 	});
 
-	it("logs in a browser that set a max age only with an upstream login within it and the allowance, even one before the start, and needs the login time only under a max age or prompt=login", async () => {
+	it("logs in a browser that set a max age only with an upstream login within it and the allowance, even one before the start, and needs the login time only under a max age or prompt=login [guarantee-2-c]", async () => {
 		const s = await serve({
 			answers: answering(
 				["none", { subject: "u-alice", amr: [] }],
@@ -828,12 +886,107 @@ describe("federation", () => {
 		};
 		expect(await aged("none", 0)).toEqual([401, { error: "login_required" }]);
 		expect(await aged("old", 60)).toEqual([401, { error: "login_required" }]);
-		expect((await aged("recent", 60))[0]).toBe(302);
+		expect((await aged("recent", 60))[0]).toBe(303);
 		// Asked to log in again, an upstream that never says when the user did cannot satisfy it.
 		const again = await s.roundTrip("code=none", "?prompt=login");
 		expect([again.status, again.body]).toEqual([401, { error: "login_required" }]);
 		// Without prompt or max age, the upstream need not say when it logged in.
-		expect((await s.roundTrip("code=none")).status).toBe(302);
+		expect((await s.roundTrip("code=none")).status).toBe(303);
+	});
+
+	describe("a fresh login's allowance, set for each IdP apart from its clock allowance", () => {
+		const corp = (more: object) => ({
+			corp: { type: "test", issuer: "https://idp.example", ...more },
+		});
+
+		it("narrows what prompt=login and a max age allow to the one set, the type's clock allowance kept [guarantee-2-c]", async () => {
+			const s = await serve({
+				federation: { idps: corp({ "fresh-login-allowance": "5s" }) },
+				answers: answering(
+					["within", aliceAt(now - 5000)],
+					["beyond", aliceAt(now - 6000)],
+					["aged", aliceAt(now - 65_000)],
+					["older", aliceAt(now - 65_001)],
+				),
+			});
+			const status = async (code: string, query: string) =>
+				(await s.roundTrip(`code=${code}`, query)).status;
+			// Both lie within the type's 30 s: only the allowance set tells them apart.
+			expect(await status("within", "?prompt=login")).toBe(303);
+			expect(await status("beyond", "?prompt=login")).toBe(401);
+			// A max age is compared in milliseconds, the allowance added.
+			expect(await status("aged", "?max_age=60")).toBe(303);
+			expect(await status("older", "?max_age=60")).toBe(401);
+		});
+
+		it("with 0s, takes no login before the start's second, and still one in it, its time the start's", async () => {
+			now = start + 500;
+			const s = await serve({
+				federation: { idps: corp({ "fresh-login-allowance": "0s" }) },
+				answers: answering(
+					["same-second", aliceAt(start)],
+					["second-before", aliceAt(start - 1000)],
+					["ahead", aliceAt(now + 10_000)],
+					["unsaid", { subject: "u-alice", amr: [] }],
+				),
+			});
+			const back = await s.roundTrip("code=same-second", "?prompt=login");
+			expect(back.status).toBe(303);
+			expect((await s.contextOf(back.cookies))?.authenticatedAt).toBe(now);
+			expect((await s.roundTrip("code=second-before", "?prompt=login")).status).toBe(401);
+			// A time ahead of ours, which the type's clock allowance passes, is taken as the upstream says.
+			expect((await s.roundTrip("code=ahead", "?prompt=login")).status).toBe(303);
+			expect((await s.roundTrip("code=unsaid", "?prompt=login")).status).toBe(401);
+		});
+
+		it("keeps each IdP's allowance apart, each by default its type's clock allowance", async () => {
+			const s = await serve({
+				federation: {
+					idps: {
+						...corp({}),
+						other: { type: "test", issuer: "https://idp.example", "fresh-login-allowance": "0s" },
+					},
+				},
+				answers: answering(["earlier", aliceAt(now - 10_000)]),
+			});
+			const at = async (idp: string) => {
+				const started = await s.get(`${base}/${idp}?prompt=login`);
+				const state = new URL(started.location).searchParams.get("state") ?? "";
+				const cookie = started.cookies.find((c) => c.includes(`federation.${idp}`)) ?? "";
+				const back = await s.get(`${base}/${idp}/callback?code=earlier&state=${state}`, cookie);
+				return [back.status, back.body];
+			};
+			// The user is linked through corp alone: other's refusal is its allowance's, before the user is looked up.
+			expect((await at("corp"))[0]).toBe(303);
+			expect(await at("other")).toEqual([401, { error: "login_required" }]);
+		});
+
+		it("is taken from 0s to 5m, written with its unit, and never handed to the type", async () => {
+			const refusals = (allowance: unknown) =>
+				serve({ federation: { idps: corp({ "fresh-login-allowance": allowance }) } }).then(
+					() => [],
+					(error: BootRefused) => error.refusals.map((r) => r.where),
+				);
+			// The test type's settings are strict: a key handed on would be refused there.
+			expect(await refusals("5m")).toEqual([]);
+			expect(await refusals("301s")).toEqual(["federation.idps.corp.fresh-login-allowance"]);
+			expect(await refusals(5)).toEqual(["federation.idps.corp.fresh-login-allowance"]);
+		});
+	});
+
+	it("lets a login return to an IdP's start, and to nothing else under federation's path", async () => {
+		const s = await serve();
+		const gates = await s.declared(logins);
+		expect(gates.returnAllowed(`${origin}${base}/corp?link=1`)).toBe(true);
+		expect(gates.returnAllowed(`${origin}${base}/corp`)).toBe(true);
+		for (const other of [
+			`${origin}${base}?link=1`,
+			`${origin}${base}/corp/callback?code=x`,
+			`${origin}${base}/corp%2Fcallback`,
+			`https://other.example${base}/corp?link=1`,
+		]) {
+			expect(gates.returnAllowed(other), other).toBe(false);
+		}
 	});
 
 	it("adds an upstream's amr only as the operator maps it, and declares what it maps to", async () => {
@@ -874,7 +1027,7 @@ describe("federation", () => {
 		});
 		const attributesOf = async (code: string) => {
 			const back = await s.roundTrip(`code=${code}`);
-			expect(back.status).toBe(302);
+			expect(back.status).toBe(303);
 			return (await s.contextOf(back.cookies))?.attributes;
 		};
 		const source = loginSource.upstream("corp");
@@ -899,7 +1052,7 @@ describe("federation", () => {
 	});
 
 	it("answers a login a gate holds with the gate's answer, opening no session", async () => {
-		const gate = defineModule({ name: "gate" }, (m) => [
+		const gate = defineModule({ name: "gate", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(loginGates).by(() => ({
 				name: "second",
 				hold: async () => ({
@@ -923,8 +1076,8 @@ describe("federation", () => {
 		]);
 	});
 
-	it("sends a browser whose login a gate holds to the held page, by 303 with no query, and its cookies", async () => {
-		const gate = defineModule({ name: "gate" }, (m) => [
+	it("sends a browser whose login a gate holds to the held page, by 303 with no query, and its cookies [rfc9700-2.1-c]", async () => {
+		const gate = defineModule({ name: "gate", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(loginGates).by(() => ({
 				name: "second",
 				hold: async () => ({
@@ -978,7 +1131,7 @@ describe("federation", () => {
 		);
 	});
 
-	it("takes an answer in form_post only by POST, behind a cross-site cookie, and one in a query only by GET", async () => {
+	it("takes an answer in form_post only by POST, behind a cross-site cookie, landing it by 303 so the browser follows by GET, and one in a query only by GET [rfc9700-4.12-a]", async () => {
 		const s = await serve({
 			federation: {
 				idps: {
@@ -1003,7 +1156,8 @@ describe("federation", () => {
 			error: "repeated_parameter",
 		});
 		const back = await s.post(`${base}/corp/callback`, `code=good&state=${state}`, cookie);
-		expect(back.status).toBe(302);
+		// The posted answer carried the code: 303, never 307 or 308, which would post it again.
+		expect([back.status, back.location]).toEqual([303, `${origin}/`]);
 		expect((await s.post(`${base}/plain/callback`, "code=good&state=x")).status).toBe(405);
 		expect((await s.post(`${base}/corp`, "")).status).toBe(405);
 	});
@@ -1022,7 +1176,7 @@ describe("federation", () => {
 
 	it("answers a round trip carrying what it does not know as invalid_state, spent and its cookie cleared", async () => {
 		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
-		const odd = defineModule({ name: "trips" }, (m) => [
+		const odd = defineModule({ name: "trips", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(roundTripStore).by(() => ({
 				save: (key, value, lifetimeMs) =>
 					kept.records.create(
@@ -1043,7 +1197,7 @@ describe("federation", () => {
 	});
 
 	it("is unavailable when it cannot keep a round trip", async () => {
-		const alwaysExists = defineModule({ name: "trips" }, (m) => [
+		const alwaysExists = defineModule({ name: "trips", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(roundTripStore).by(() => ({
 				save: async () => "exists" as const,
 				update: async () => undefined,
@@ -1088,7 +1242,7 @@ describe("federation", () => {
 	it("declares its start and its callback apart, each with its own reason and its rate limit, and each reaches its own", async () => {
 		const declared = contract<readonly Route[]>("test.declared");
 		const reached: string[] = [];
-		const probe = defineModule({ name: "probe" }, (m) => [
+		const probe = defineModule({ name: "probe", replicaSafe: false, takes: [routes] }, (m) => [
 			m.provide(declared).by((c) => c.collect(routes)),
 			m.contribute(requestEnds).by(() => ({ ended: (end) => void reached.push(end.route ?? "") })),
 		]);
@@ -1128,7 +1282,7 @@ describe("federation", () => {
 
 	it("names each IdP to users with its upstream's issuer, so another route naming it for another issuer refuses boot", async () => {
 		const naming = (issuer: string) =>
-			defineModule({ name: "elsewhere" }, (m) => [
+			defineModule({ name: "elsewhere", replicaSafe: true, takes: [] }, (m) => [
 				m.contribute(upstreamNames).by(() => ({
 					declaredBy: "elsewhere",
 					names: [{ name: "corp", issuer }],
@@ -1230,7 +1384,9 @@ describe("a deployment with no IdP", () => {
 });
 
 const returnTo = (path: string) =>
-	defineModule({ name: `return-${path}` }, (m) => [m.contribute(returnPaths).by(() => ({ path }))]);
+	defineModule({ name: `return-${path}`, replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(returnPaths).by(() => ({ path })),
+	]);
 
 interface Held {
 	readonly facts: LoginFacts;
@@ -1241,7 +1397,7 @@ interface Held {
 /** A stand-in gate that holds every login, keeping what login-gates hands it, as a gate that resumes it would. */
 function holdingGate() {
 	const held: Held[] = [];
-	const module = defineModule({ name: "holding-gate" }, (m) => [
+	const module = defineModule({ name: "holding-gate", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "second",
 			hold: async (_request, facts, done, from) => {
@@ -1264,7 +1420,7 @@ interface Told {
 function receivers(names: readonly string[], failing: readonly string[] = []) {
 	const told: Told[] = [];
 	const modules = names.map((name) =>
-		defineModule({ name: `receiver-${name}` }, (m) => [
+		defineModule({ name: `receiver-${name}`, replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(upstreamLoginReceivers).by(() => ({
 				name,
 				received: async (at) => {
@@ -1293,7 +1449,7 @@ describe("upstream tokens", () => {
 		const told = receivers(["b", "a"]);
 		const s = await serve({ answers, receivers: told.modules });
 		const back = await s.roundTrip("code=tokens");
-		expect(back.status).toBe(302);
+		expect(back.status).toBe(303);
 		expect(told.told.map((t) => [t.receiver, t.idp, t.session.context.subject])).toEqual([
 			["a", "corp", "alice"],
 			["b", "corp", "alice"],
@@ -1353,7 +1509,7 @@ describe("upstream tokens", () => {
 	});
 
 	it("leaves a login another caller asked for alone", async () => {
-		const other = defineModule({ name: "other-caller" }, (m) => [
+		const other = defineModule({ name: "other-caller", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(openedAfterHold).by(() => ({ caller: "other", opened: async () => {} })),
 		]);
 		const told = receivers(["a"]);
@@ -1364,7 +1520,7 @@ describe("upstream tokens", () => {
 	it("keeps the login open when a receiver fails, telling the others and logging it by name and kind", async () => {
 		const told = receivers(["a", "b"], ["a"]);
 		const s = await serve({ answers, receivers: told.modules });
-		expect((await s.roundTrip("code=tokens")).status).toBe(302);
+		expect((await s.roundTrip("code=tokens")).status).toBe(303);
 		expect(told.told.map((t) => t.receiver)).toEqual(["a", "b"]);
 		expect(logged()).toContain(
 			'upstream-handoff.receiver_failed {"receiver":"a","kind":"RangeError"}',
@@ -1383,7 +1539,7 @@ describe("upstream tokens", () => {
 
 	it("is unavailable when it cannot keep the tokens of a held login", async () => {
 		const gate = holdingGate();
-		const full = defineModule({ name: "held" }, (m) => [
+		const full = defineModule({ name: "held", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(heldLoginStore).by(() => ({
 				save: async () => "exists" as const,
 				update: async () => undefined,
@@ -1396,4 +1552,14 @@ describe("upstream tokens", () => {
 		expect([res.status, res.body]).toEqual([503, { error: "temporarily_unavailable" }]);
 		expect(res.cookies).toContain(clearedOf(res.started.cookie));
 	});
+});
+
+it("takes all it names, a module receiving upstream tokens or none", async () => {
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused((await serve()).input)).federation).toBeUndefined();
+	await stop();
+	const { modules } = receivers(["a"]);
+	expect(
+		(await takesUnused((await serve({ receivers: modules })).input)).federation,
+	).toBeUndefined();
 });
