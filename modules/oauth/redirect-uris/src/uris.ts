@@ -35,7 +35,7 @@ export function registrable(uri: string): boolean {
 
 /** Where a redirect URI sends the user, as it is shown to them. */
 export interface RedirectShown {
-	/** The host as the URL parser writes it, with a port other than the scheme's default; a private-use scheme, alone. */
+	/** The host as the URL parser writes it, with a port other than the scheme's default where matching reads it; a private-use scheme, alone. */
 	readonly host: string;
 	readonly kind: "web" | "loopback" | "app";
 }
@@ -47,7 +47,9 @@ export function shownOf(uri: string): RedirectShown | undefined {
 	if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
 		return { host: parsed.protocol.slice(0, -1), kind: "app" };
 	}
-	return { host: parsed.host, kind: isLoopbackName(parsed.hostname) ? "loopback" : "web" };
+	// `matches` drops this port, so showing one would say of the client what no match holds it to.
+	const host = loopbackLiteral.test(uri) ? parsed.hostname : parsed.host;
+	return { host, kind: isLoopbackName(parsed.hostname) ? "loopback" : "web" };
 }
 
 export function matches(registered: string, given: string): boolean {

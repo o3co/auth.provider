@@ -57,9 +57,10 @@ export function redirectsAt(client: Client, origin: string): boolean {
 
 /**
  * Where a client's redirect URIs send the user, each once, as a page shows them: a host as the URL
- * parser writes it (lower case, an A-label), with a port other than the scheme's default, read as
- * `loopback` by that host or as `web`; a private-use scheme alone, as `app`, its authority being no
- * host anyone reaches.
+ * parser writes it (lower case, an A-label), with a port other than the scheme's default but for a
+ * loopback literal `matches` takes on any port, read as `loopback` by that host or as `web`; a
+ * private-use scheme alone, as `app`, its authority being no host anyone reaches. Two URIs that
+ * match show alike.
  */
 export function redirectsShown(client: Client): readonly RedirectShown[] {
 	const once = new Map<string, RedirectShown>();

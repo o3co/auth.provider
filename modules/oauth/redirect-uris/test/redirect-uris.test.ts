@@ -76,7 +76,7 @@ describe("redirect URIs as a page shows them", () => {
 		for (const [uri, host] of [
 			["http://localhost:3000/cb", "localhost:3000"],
 			["http://127.0.0.1/cb", "127.0.0.1"],
-			["http://[::1]:9000/cb", "[::1]:9000"],
+			["http://[::1]:9000/cb", "[::1]"],
 			["https://localhost/cb", "localhost"],
 			["https://app.localhost/cb", "app.localhost"],
 			["https://127.1/cb", "127.0.0.1"],
@@ -87,6 +87,52 @@ describe("redirect URIs as a page shows them", () => {
 		}
 		for (const uri of ["https://localhost.redirect.example/cb", "https://127.0.0.1.example/cb"]) {
 			expect(shown(uri)[0]?.kind, uri).toBe("web");
+		}
+	});
+
+	it("shows a port only where it decides a match: never for a loopback literal over http, always for a name", () => {
+		for (const [uri, host] of [
+			["http://127.0.0.1:8080/cb", "127.0.0.1"],
+			["http://127.0.0.2:8080/cb", "127.0.0.2"],
+			["http://[::1]:8080/cb", "[::1]"],
+			["http://localhost:8080/cb", "localhost:8080"],
+			["https://localhost:8443/cb", "localhost:8443"],
+			["https://127.0.0.1:8443/cb", "127.0.0.1:8443"],
+		] as const) {
+			expect(shown(uri), uri).toEqual([{ host, kind: "loopback" }]);
+		}
+	});
+
+	it("shows two URIs alike wherever one matches the other, and apart where a port tells them apart", () => {
+		const uris = [
+			"http://127.0.0.1/cb",
+			"http://127.0.0.1:8080/cb",
+			"http://127.0.0.1:9090/cb",
+			"http://[::1]/cb",
+			"http://[::1]:8080/cb",
+			"http://localhost/cb",
+			"http://localhost:8080/cb",
+			"http://localhost:9090/cb",
+			"https://localhost:8443/cb",
+			"https://127.0.0.1:8443/cb",
+			"https://127.0.0.1:9443/cb",
+			"https://app.example/cb",
+			"https://app.example:8443/cb",
+		];
+		const pairs = uris.flatMap((a) => uris.map((b) => [a, b] as const));
+		for (const [a, b] of pairs.filter(([a, b]) => matches(a, b))) {
+			expect(shown(a), `${a} and ${b}`).toEqual(shown(b));
+		}
+		// The check above is about something: these match across ports, and these do not.
+		expect(matches("http://127.0.0.1:8080/cb", "http://127.0.0.1:9090/cb")).toBe(true);
+		expect(matches("http://[::1]:8080/cb", "http://[::1]/cb")).toBe(true);
+		for (const [a, b] of [
+			["http://localhost:8080/cb", "http://localhost:9090/cb"],
+			["https://127.0.0.1:8443/cb", "https://127.0.0.1:9443/cb"],
+			["https://app.example/cb", "https://app.example:8443/cb"],
+		] as const) {
+			expect(matches(a, b), `${a} and ${b}`).toBe(false);
+			expect(shown(a), `${a} and ${b}`).not.toEqual(shown(b));
 		}
 	});
 
@@ -110,8 +156,7 @@ describe("redirect URIs as a page shows them", () => {
 		).toEqual([
 			{ host: "app.example", kind: "web" },
 			{ host: "com.example.app", kind: "app" },
-			{ host: "127.0.0.1:1", kind: "loopback" },
-			{ host: "127.0.0.1:2", kind: "loopback" },
+			{ host: "127.0.0.1", kind: "loopback" },
 		]);
 		expect(shown()).toEqual([]);
 	});
