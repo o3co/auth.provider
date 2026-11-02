@@ -100,6 +100,7 @@ What each module contains is described by that module's contract card (each modu
 | Redis implementation of store | contract implementation / setting | redis |
 | Verifying and looking up users, from the settings or one contributed user ledger | contract | users |
 | Linking with upstream identities (written links, the settings' fixed ones), looking up a subject from an upstream identity | contract | users |
+| What an IdP name stands for, within one boot and across boots, and its issuer's stated moves | contract / data / setting | users |
 | A user's verified contacts, and the claimed ones the settings or the ledger state | contract / data | users |
 | User ledger, upstream identity, link, verified contact, claimed contact | vocabulary | users |
 | The names and value types of user attributes (the OIDC claim names), and a subject's shape | contract / vocabulary | users |
