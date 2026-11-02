@@ -172,6 +172,10 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Every request that changes state needs same-origin evidence or the double-submit token. An `Origin` or `Referer` naming another origin refuses it with 403, even with the token.
   - Every route declares whether it changes state, and one that does either uses a policy that keeps other sites' requests out and one that limits each source, or says why not; boot refuses a route that does neither. The [route reference](routes.md) lists each route's. A declaration is its owner's claim, not a proof.
   - Revoking a subject's sessions closes each of them.
+  - A consent is a grant to the client for the scopes. It does not distinguish audiences: a scope agreed to holds for every audience the client may be issued, and the consent page is not told them.
+  - A consent has no end of its own, and the user has no way to withdraw one. A client gone keeps it for when it is back, and a subject's revocation ends what the subject holds, never the grant, so the next login is not asked again.
+  - A consent to a client from a metadata document (`clients-cimd`) holds for the document as read, in all its fields. Once the document differs, the user is asked again before any code: nothing agreed to before carries over, a request under `prompt=none` is refused `consent_required`, and a challenge made before the change is `unknown_challenge`. A document that comes back as it was counts again. A difference is seen when the kept document is next read, at most `clients-cimd.cache-lifetime` after it was read, and sooner where the document's `Cache-Control` says so. A consent kept under no document counts for no such client, so its user is asked once.
+  - The consent page's route answers every redirect destination of the client, for every client, in the form `redirect-uris` shows them.
   - With second factors composed, `mfa-entry` holds sessions to them: under `mfa.mode = required` using a session needs one, and changing credentials needs one proven recently (or a recent sign-in while none is held). Every credentials entry first reads the subject's factors, judged against the witness, so a factor store that cannot answer makes every credentials route unavailable, witness or not. `mfa` refuses to boot without it, whatever the mode, so no app holds factors that sessions are not held to.
 - **Left to you:**
   - Keeping other subdomains of your origin from being taken over: double submit relies on them being unable to set the cookie.
@@ -183,6 +187,8 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Setting `user-verification = discouraged` (`passkeys`, `mfa-webauthn`) only where holding the authenticator is enough: whoever holds it passes, and every start warns `passkeys.user_unverified` or `mfa-webauthn.user_unverified`.
   - Naming `webauthn.top-origins` only for pages you trust to frame a ceremony: every start warns `webauthn.framed_by_other_origins`, with their count.
   - Naming a `login-passkey.password-exempt-group` only for members who must keep password logins under `password = refused-when-held`: every start warns `login-passkey.password_exempt_group`.
+  - Showing the user every entry of the consent page's `redirect_hosts`, and warning where every one is `loopback`: the provider draws no page, so only yours can ([your consent page](consent-page.md)).
+  - Telling your users what a consent reaches: every audience the client may be issued, for as long as the consent lasts, as they have no way here to withdraw it.
   - Setting a registered client's `sections.consent.first-party` only for a client you run: its users are never asked for consent, and every start warns `consent.first_party` with its id.
 
 ## Tokens
