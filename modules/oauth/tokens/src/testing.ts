@@ -447,11 +447,18 @@ export function tokensContract(
 			}
 		});
 
-		it("applies the configured access-token lifetime where a grant gives none", async () => {
+		it("tells the access-token lifetime it applies where a grant gives none", async () => {
 			const place = await open({ revocable: true });
-			expect((await issueFor(place.tokens, grant)).expiresIn).toBe(defaultLifetimeSeconds);
+			expect(place.tokens.accessTokenLifetimeSeconds()).toBe(defaultLifetimeSeconds);
+			expect((await issueFor(place.tokens, grant)).expiresIn).toBe(
+				place.tokens.accessTokenLifetimeSeconds(),
+			);
 			const set = await open({ revocable: true, lifetimeSeconds: 600 });
-			expect((await issueFor(set.tokens, grant)).expiresIn).toBe(600);
+			expect(set.tokens.accessTokenLifetimeSeconds()).toBe(600);
+			expect((await issueFor(set.tokens, grant)).expiresIn).toBe(
+				set.tokens.accessTokenLifetimeSeconds(),
+			);
+			expect(set.tokens.accessTokenLifetimeSeconds()).toBe(600);
 		});
 
 		it("caps a token's expiry at what it was issued for", async () => {
@@ -682,6 +689,7 @@ export function tokensStandIn(
 				};
 				const stand: Tokens = {
 					revocable: () => denylist.revocable,
+					accessTokenLifetimeSeconds: () => configured,
 					subjectsChecked: () => options.subjectsChecked ?? true,
 					...issuing(judge, issueAccess, c.clock.now),
 					verifyAccess: verify,

@@ -3,7 +3,6 @@
 ## Responsibilities
 - Owns the access token: its format, issuance, verification and revocation; stamps and checks `issuer`'s URL as `iss`.
 - Revokes through `token-denylist`'s denylist, over the store interface it offers and `tokens` passes on.
-- Applies `added-claims`' rules to the claims a grant adds, at `issue`, at `admits` and when a token is read back.
 - Its internal module `issuance` holds how `admits` and `issue` judge a request, and how `issue` issues over the judgment; `standing`, a token's standing time as its claim writes and reads it.
 
 ## Not here
@@ -19,6 +18,7 @@
 - Extension points: issuance policies (request → allowed / refused with an audit reason and a client description); access conditions, and exactly one subject check (token id, subject, issue time, standing time → holds / revoked; unavailable when unknown); a revoked answer fails the token as revoked. A policy reads session-built state late (`c.late`), else boot cycles.
 - `token-denylist`'s store interface for revoked tokens and its needs, passed on: a store wiring wires `tokens` and implements it.
 - `jwks_uri` among `issuer`'s metadata: `keys`' key set path on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written.
+- `accessTokenLifetimeSeconds`: the lifetime `issue` applies where a grant gives no `lifetimeSeconds`, in whole seconds from 2 to 86400, fixed when `tokens` is built, for a grant with a ceiling to read at build time. It is not the longest life any token may have: a grant's own `lifetimeSeconds` and token exchange's cap may differ. A boot check against it does not reach tokens already issued, or instances still on other settings.
 - Operator section: `access-token-lifetime` (written with its unit, `2s` to `1d` in whole seconds, default `1h`, counted from when `issue` is asked, the policies' wait included: a lifetime no longer than that wait leaves none, and the token is refused; a second's lifetime, its `iat` cut to the second, would leave less than a second once signed).
 - Operator section, beside it: `revocation` (`denylist` or `unsupported`), `issuance-timeout` (written with its unit, `1s` to `1m`, default `10s`), `subject-check` (`none` states that no module checks subjects).
 - `./testing`: the contract test every implementation passes, configuration builders, and a stand-in: in memory, unsigned, ending and reading bindings as `tokens` does.
