@@ -28,6 +28,9 @@
 - `./testing`: configuration builders, both store interfaces on `records` stand-ins, and the store contract tests.
 
 ## Invariants
+- A grant is to the client for the scopes: it holds at every audience the client may be issued, and the page is not told the audiences.
+- A grant has no end of its own, and the user has no way to withdraw it. A client gone keeps it for when it is back; a subject's revocation ends what the subject holds, never the grant, so the next login is not asked again.
+- For a client from another source, a grant counts only under what its source says of it now: while it says another value the user is asked again, and a value said again counts again.
 - A deadline counts on `kernel`'s clock, whatever the store still holds.
 - Without a public origin, the module refuses to start.
 
