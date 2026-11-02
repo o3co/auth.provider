@@ -9,7 +9,8 @@
 ## Offers
 - `AddedClaims`, `AddedValue`: JSON values by name; `AddedClaims` lists every reserved name.
 - `addedClaimsOf` (what a grant gives) → a new frozen copy within the rules, none for none or an empty set; throws TypeError, naming the rule, on anything outside them.
-- `addedClaimsIn` (a verified payload) → its members an access token's issuer does not write, for `addedClaimsOf` to check.
+- `addedClaimsIn` (a verified payload) → its members an access token's issuer does not write, for `addedClaimsReadBack` to check.
+- `addedClaimsReadBack` (those members) → as `addedClaimsOf` answers.
 
 ## Invariants
 - An added claim is JSON alone: plain objects (the object prototype or none), arrays with no hole or other property, strings, finite numbers, booleans and null.

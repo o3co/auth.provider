@@ -214,6 +214,18 @@ function copyObject(value: object, depth: number, walk: Walk): AddedClaims {
  * maker's mistake, on anything else: nothing given is called, nor used past the copy.
  */
 export function addedClaimsOf(given: unknown): AddedClaims | undefined {
+	return copied(given);
+}
+
+/**
+ * The added claims of a token read back, checked and copied as a grant's are. Signing took a null
+ * under 0.18, so a token it signed may hold one, and is read as it was signed.
+ */
+export function addedClaimsReadBack(given: unknown): AddedClaims | undefined {
+	return copied(given);
+}
+
+function copied(given: unknown): AddedClaims | undefined {
 	if (given === undefined) return undefined;
 	if (given === null || typeof given !== "object" || Array.isArray(given)) {
 		throw refused("set is not an object");
