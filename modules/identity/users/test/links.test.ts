@@ -104,7 +104,7 @@ describe("the link store users asks for", () => {
 	const boot = (ledger?: Ledger, links: readonly ReturnType<typeof countedLinks>[] = []) =>
 		assemble({ modules: parts(ledger, links), config });
 
-	it("is never asked where the ledger looks users up by upstream identity", async () => {
+	it("is asked for no link where the ledger looks users up by upstream identity", async () => {
 		const asked: string[] = [];
 		const app = await boot(
 			ledgerOf(async () => none),
@@ -120,12 +120,10 @@ describe("the link store users asks for", () => {
 		}
 	});
 
-	it("is taken where users keeps the links, and left untaken where the ledger keeps them", async () => {
-		const kept = await takesUnused({ modules: parts(ledgerOf(), [countedLinks([])]), config });
-		expect(kept.users).toBeUndefined();
-		const upstream = ledgerOf(async () => none);
-		const left = await takesUnused({ modules: parts(upstream, [countedLinks([])]), config });
-		// Its takes name the link store in every composition; a ledger with upstream lookups never asks it.
-		expect(left.users).toEqual(["users.link-store"]);
+	it("is taken in every composition: where users keeps the links, and where the ledger does, for what the names stand for", async () => {
+		for (const ledger of [ledgerOf(), ledgerOf(async () => none)]) {
+			const taken = await takesUnused({ modules: parts(ledger, [countedLinks([])]), config });
+			expect(taken.users).toBeUndefined();
+		}
 	});
 });

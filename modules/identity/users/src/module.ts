@@ -6,6 +6,7 @@ import { contributedSource } from "./ledger/contributed.ts";
 import { ledgerUsers } from "./ledger.ts";
 import { keptLinks } from "./links/kept.ts";
 import { ledgerLinks } from "./links/ledger.ts";
+import { issuersRefused, namesRefused } from "./names/names.ts";
 import { keyOf, record, registeredUsers } from "./registered.ts";
 import { contactStore, linkStore } from "./store.ts";
 
@@ -20,6 +21,18 @@ const section = z
 			.array(record)
 			.prefault([])
 			.describe("The users the settings register, each with its identifier and password hash."),
+		"issuer-moved": z
+			.array(
+				z.strictObject({
+					idp: z.string().min(1).describe("The IdP name whose issuer moves."),
+					from: z.string().min(1).describe("The issuer kept for the name."),
+					to: z.string().min(1).describe("The issuer now declared for the name."),
+				}),
+			)
+			.prefault([])
+			.describe(
+				"The moves of an IdP name to another issuer the operator states, its links going with it; every start warns while one is listed.",
+			),
 	})
 	.refine((s) => distinct(s.registered.map((r) => confusable(r.identifier))), {
 		message:
@@ -34,24 +47,6 @@ const section = z
 		message: "an upstream identity is linked to more than one user",
 		path: ["registered"],
 	});
-
-function namesRefused(declarations: readonly UpstreamNames[]): string[] {
-	const declared = declarations.flatMap((d) =>
-		d.names.map((n) => ({ ...n, declaredBy: d.declaredBy })),
-	);
-	// Told by the modules that declare them alone: a name and an issuer are configured values.
-	const empty = declared.filter((n) => n.name === "" || n.issuer === "");
-	const byName = Map.groupBy(declared, (n) => n.name);
-	const shared = [...byName].filter(([, all]) => new Set(all.map((n) => n.issuer)).size > 1);
-	const asDeclared = (all: readonly (typeof declared)[number][]) => {
-		const by = [...new Set(all.map((n) => n.declaredBy))];
-		return `as ${by.join(", ")} ${by.length === 1 ? "declares" : "declare"} it`;
-	};
-	return [
-		...empty.map((n) => `an IdP name or its issuer is empty, ${asDeclared([n])}`),
-		...shared.map(([, all]) => `an IdP name stands for more than one issuer, ${asDeclared(all)}`),
-	];
-}
 
 /** Each registered link through an IdP no module declares a name for: nothing would ever look it up. */
 function undeclaredLinks(
@@ -102,11 +97,12 @@ export default defineModule(
 			const source = ledger
 				? contributedSource(ledger, c.log)
 				: registeredUsers(c.section.registered, (inUse) => checkers.checkerOf(inUse));
-			// A ledger that looks users up by upstream identity has the last word there, so the link store,
-			// composed all the same (it is among what users takes), is never called.
-			const linking = ledger?.byUpstream
-				? ledgerLinks(source)
-				: keptLinks(source, await c.get(linkStore));
+			const links = await c.get(linkStore);
+			const moved = c.section["issuer-moved"];
+			const across = await issuersRefused(declarations, moved, links, c.log);
+			if (across.length > 0) return c.refuseAll(across);
+			// A ledger that looks users up by upstream identity has the last word on links: none is written.
+			const linking = ledger?.byUpstream ? ledgerLinks(source) : keptLinks(source, links);
 			return ledgerUsers(source, linking, await c.get(contactStore));
 		}),
 	],
