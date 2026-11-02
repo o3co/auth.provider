@@ -254,6 +254,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `tokens.access-token-lifetime` | `@mod/tokens` | `"1h"` | past the default hour, up to a day: a leaked access token, or one a resource server verifies itself after a revocation, is taken that long |
 | `tokens.revocation` | `@mod/tokens` |  | `unsupported`: nothing issued can be revoked |
 | `tokens.subject-check` | `@mod/tokens` |  | `none`: no module checks an access token's subject against its revocations, so a revoked subject's access tokens are taken until they expire |
+| `users.issuer-moved` | `@mod/users` | `[]` | a listed move carries an IdP name's links over to another issuer, whose accounts then reach them by the same upstream subject |
 | `webauthn.top-origins` | `@mod/webauthn` | `[]` | each page named may frame a ceremony, in another origin's page |
 
 ## What the operator does by hand
