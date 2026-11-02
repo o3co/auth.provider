@@ -10,7 +10,7 @@ describe("the added claims' copier", () => {
 	});
 
 	it("copies a plain set into a new frozen one, and takes none for none or an empty set", () => {
-		const given = { a: { b: [true, null, 1.5, "x"] } };
+		const given = { a: { b: [true, false, 1.5, "x"] } };
 		const copied = addedClaimsOf(given);
 		expect(copied).toEqual(given);
 		expect(copied).not.toBe(given);

@@ -8,12 +8,12 @@
 
 ## Offers
 - `AddedClaims`, `AddedValue`: JSON values by name; `AddedClaims` lists every reserved name.
-- `addedClaimsOf` (what a grant gives) → a new frozen copy within the rules, none for none or an empty set; throws TypeError, naming the rule, on anything outside them.
+- `addedClaimsOf` (what a grant gives) → a new frozen copy within the rules, none for none or an empty set; throws TypeError, naming the rule, and a null's path, on anything outside them.
 - `addedClaimsIn` (a verified payload) → its members an access token's issuer does not write, for `addedClaimsReadBack` to check.
-- `addedClaimsReadBack` (those members) → as `addedClaimsOf` answers.
+- `addedClaimsReadBack` (those members) → as `addedClaimsOf` answers, but a null is taken: a token an earlier release signed may hold one.
 
 ## Invariants
-- An added claim is JSON alone: plain objects (the object prototype or none), arrays with no hole or other property, strings, finite numbers, booleans and null.
+- An added claim is JSON alone: plain objects (the object prototype or none), arrays with no hole or other property, strings, finite numbers and booleans. A null, at any depth, is refused, as signing refuses it: leave the member out.
 - Only own enumerable data properties are read, and an array's own `length`; nothing given is called. An accessor, a proxy, a cycle, a prototype of its own, a function, a symbol, a bigint or undefined is refused.
 - Reserved at the top: every name an access token's issuer writes, and names a specification gives a meaning it never writes. A payload read back holding one of the latter is none the issuer wrote.
 - Never a key at any depth: `__proto__`, `constructor`, `prototype` and `toJSON`.
