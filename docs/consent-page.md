@@ -35,7 +35,7 @@ The browser sends the session's cookie with it. `200`, never cached:
 - `scopes`: what the client asks now. `granted_scopes`: what the user already agreed to for this client, which the page may show as kept.
 - `client_name` and `client_uri` are there when the client's registration sets them (its `consent` section's `name` and `uri`). A client whose registration is a document it published (`clients-cimd`) also has `client_id_host`, the host its document was read from: show it, since the name is the client's own word.
 - `redirect_hosts`: every place the client may send the user back to, not only the one this request names, since what the user agrees to holds for all of them. Show them all.
-  - `host` is a host as the URL parser writes it, in lower case with a port other than the default. Show it as it comes: a name beyond ASCII comes as its A-label (`xn--…`). Do not decode it, as a decoded name can look like another.
+  - `host` is a host as the URL parser writes it, in lower case with a port other than the default. A loopback address over http comes with no port, as the client may use any port on it. Show it as it comes: a name beyond ASCII comes as its A-label (`xn--…`). Do not decode it, as a decoded name can look like another.
   - `kind` `web` is a host on the network. `loopback` is the user's own machine: whatever listens there on that machine is who gets the answer. `app` is an installed app's private-use scheme, in `host` alone: nothing but the operating system says which app that is.
   - Warn the user where every entry is `loopback`: the client runs on their own machine, or something on it claims to be that client.
 - `expires_in`: seconds left to answer (`consent.challenge-lifetime`, 10 minutes unless set).
