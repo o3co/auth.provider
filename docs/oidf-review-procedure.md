@@ -6,7 +6,7 @@ This page says how to look at those pages and how to record what you saw. Record
 
 ## When to review
 
-Review the pages once for each release, on the run of the release branch's head ([Before the tag](releasing.md#before-the-tag), step 9). The plans that ask for a review, and how many tests each asks it for:
+Review the pages once for each release, on the run of the release branch's head ([Before the tag](releasing.md#before-the-tag), step 9; a security release reviews after it is published, as [its section](releasing.md#a-security-release) ends). The plans that ask for a review, and how many tests each asks it for:
 
 | Plan | Tests asking for a review |
 |---|---|
@@ -59,4 +59,4 @@ A page that asks whether to log out, where the request carries no `id_token_hint
 
 ## Record the result
 
-Add a section to [compliance/oidf-review.md](compliance/oidf-review.md) for the release, in the form that page gives: the commit, the run, each test's `ok` or `ng` with the text you judged by, your name and the date. A test you judged `ng` is a finding: open an issue for it and name the issue in the record. One that is a security hole opens no issue: it goes by `SECURITY.md` and [A security release](releasing.md#a-security-release), or as [findings and fixes](audit/findings.md#nothing-public-before-the-fix-is-released) says where no published version holds it, and the record's form says what waits for its fix.
+Add a section to [compliance/oidf-review.md](compliance/oidf-review.md) for the release, in the form that page gives: the commit, the run, each test's `ok` or `ng` with the text you judged by, your name and the date. A test you judged `ng` is a finding: open an issue for it and name the issue in the record. One that is a security hole opens no issue: it goes by `SECURITY.md` and [findings and fixes](audit/findings.md#nothing-public-before-the-fix-is-released), and the record's form says what that does to the section.

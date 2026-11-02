@@ -25,7 +25,7 @@ Add a section for each release, newest first, in this form:
 - "The text judged by" quotes what the page showed: the error, its description, or the page's heading.
 - Issue names the issue a `ng` was opened as; it is empty for `ok`.
 - Each section lists all twelve tests. A test the run did not reach is `ng`, with "not reached" as the text.
-- A section is of the run the tag takes. A `ng` that sent the release back through a new run stays in its issue, not here.
-- A `ng` that is a security hole holds its whole section out of a pull request until the hole is fixed, as a test's name can tell where the hole is; its Issue then names the fix.
+- A section is of the run reviewed for the release: before the tag, the run the tag takes; for a security release, the public run after it. A `ng` that sends the release back through a new run gets no section for that run: it stays in its issue or, where it is a security hole, in the ledger.
+- In a section reviewed after publication, a `ng` that is a security hole holds the whole section out of a pull request for as long as `SECURITY.md` keeps the hole silent, as a test's name can tell where it is; its Issue then names the fix.
 
 No release has been reviewed yet.
