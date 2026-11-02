@@ -421,7 +421,7 @@ describe("consent: the page", () => {
 		expect(await hostsOf("sent")).toEqual([
 			{ host: "app.example", kind: "web" },
 			{ host: "xn--bcher-kva.example:8443", kind: "web" },
-			{ host: "127.0.0.1:8080", kind: "loopback" },
+			{ host: "127.0.0.1", kind: "loopback" },
 			{ host: "com.example.app", kind: "app" },
 		]);
 		expect(await hostsOf(documentId)).toEqual([{ host: "localhost:3000", kind: "loopback" }]);
