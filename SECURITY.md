@@ -21,7 +21,7 @@ Include what you can of:
 - the settings involved, without their secret values;
 - what a request or a sequence of requests does, and what you expected instead.
 
-The report stays private between you and the maintainers until it is resolved. Once a fixed version is released, the [changelog](CHANGELOG.md) lists the kind of hole it closes.
+The report stays private between you and the maintainers until it is resolved. Once a fixed version is released, the [changelog](CHANGELOG.md) lists the kind of hole it closes, with [one exception](#how-a-fix-is-made-and-published).
 
 ## What a report covers
 
@@ -50,4 +50,4 @@ A fix is made and checked in private, and made public with the version that carr
 
 The advisory and the changelog name the kind of hole closed, the versions affected and the version that fixes it.
 
-One exception: a hole in no published version, or only in a published release candidate, is fixed in `develop`, by a pull request that names no hole. Its diff, the modules it changes and its tests are public as any change's, and can tell where the hole is; nothing else states the hole, the next version's changelog line aside, until the fix is merged or, where a published release candidate holds the hole, until the next version carrying the fix is published. It has no advisory, as no supported version holds it, and a line in that changelog, naming the kind of hole alone, only where a published release candidate held it ([findings and fixes](docs/audit/findings.md#nothing-public-before-the-fix-is-released)). A report stays private all the same.
+One exception: a hole in no published version, or only in a published release candidate, is fixed in `develop`, by a pull request that names no hole. Its diff, the modules it changes and its tests are public as any change's, and can tell where the hole is; nothing else states the hole until the fix is merged or, where a published release candidate holds the hole, until the next version carrying the fix is published, that version's changelog line aside. It has no advisory, as no supported version holds it, and a line in that changelog, naming the kind of hole alone, only where a published release candidate held it ([findings and fixes](docs/audit/findings.md#nothing-public-before-the-fix-is-released)). A report stays private all the same.
