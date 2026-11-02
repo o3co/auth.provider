@@ -147,7 +147,7 @@ What each module contains is described by that module's contract card (each modu
 | PKCE required of every client by S256 | contract | authorize |
 | Paths to return to after login | extension point kind | login-gates |
 | Where a login may return (listed targets, the check) | contract / setting | login-gates |
-| first-party, and the name, page and verified host the consent page shows (client metadata fields) | vocabulary / setting | consent |
+| first-party, and the name, page and verified host the consent page shows, and what a grant is agreed under (client metadata fields) | vocabulary / setting | consent |
 | Subject revocation boundaries (`sessions`, `delegations`) | contract / vocabulary | subject-revocation |
 | Comparison against a revocation boundary | contract | subject-revocation |
 | Work that follows a recorded revocation (followers) | extension point kind | subject-revocation |
@@ -229,7 +229,7 @@ What each module contains is described by that module's contract card (each modu
 | Additions issued with the redemption response | extension point kind | code-grant |
 | Clients told of each code redeemed in a session | extension point kind | code-grant |
 | Hooks pinned with each code redemption and told what it gave | extension point kind | code-grant |
-| Consent records | contract | consent |
+| Consent records, and whether one counts for a client now | contract | consent |
 | ID token contents (a contribution to code-grant's extension point), claim scope | vocabulary | oidc |
 | The claim table (the claims each scope releases, and the scope of each claim), and the claims released for a subject, scope and what a request asks beyond it, held to its constraints | contract | oidc |
 | Judging an ID token given back as a hint | contract | oidc |
