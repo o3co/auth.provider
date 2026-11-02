@@ -1676,6 +1676,31 @@ describe("lineage", () => {
 		expect(await s.stores.kept.records.read(name)).toMatchObject({ format: 2 });
 	});
 
+	it("refreshes a family holding `offline_access`, for a client not allowed it, and answers a scope without it", async () => {
+		const s = await serve();
+		const name = randomBytes(16).toString("base64url");
+		const secret = randomBytes(32).toString("base64url");
+		const held = {
+			format: 2,
+			current: createHash("sha256").update(secret).digest("base64url"),
+			clientId: "app",
+			subject: "alice",
+			scope: ["read", "offline_access"],
+			audience: ["https://api"],
+			authenticatedAt: Date.now(),
+			amr: ["pwd"],
+			expiresAt: Date.now() + 60_000,
+		};
+		await s.stores.kept.records.create(name, held as never, 60_000);
+		const next = await s.refresh(`${name}.${secret}`);
+		expect([next.status, next.body.scope]).toEqual([200, "read"]);
+		const check = await s.app.get(tokens).verifyAccess(next.body.access_token ?? "");
+		expect(check.kind === "valid" && check.grant.scope).toEqual(["read"]);
+		// The word is no part of the grant, so naming it is asking beyond it.
+		const named = await s.refresh(next.body.refresh_token, "app", { scope: "offline_access" });
+		expect(named.body.error).toBe("invalid_scope");
+	});
+
 	it("binds a confidential client's family too where the section says so", async () => {
 		const s = await serve({ bindConfidential: true });
 		const binding = { member: "test", confirmation: "k1", tokenType: "Test" };

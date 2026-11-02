@@ -67,12 +67,21 @@ const redemptionShape = z.union([
 /** Records outlive what they cover by this much, for hosts whose clocks lag. */
 export const allowanceMs = 120_000;
 
+/**
+ * What a family's scope may hold though nothing can grant it: 0.18 took it as any scope, and no
+ * client can be allowed it now, so a refresh keeping it would be refused. This reads records written
+ * by 0.18, so it can go once those families have ended.
+ */
+const notGranted = "offline_access";
+
 export const toStored = (kept: Kept) => kept as unknown as StoredFamily;
 /** What a family's record holds, checked on every read; nothing for a format or shape this does not know. */
 export const fromStored = (stored: StoredFamily | undefined): Kept | undefined => {
 	const read = keptShape.safeParse(stored);
 	if (!read.success) return undefined;
-	return "current" in read.data ? ({ ...read.data, format: 2 } as Family) : read.data;
+	if (!("current" in read.data)) return read.data;
+	const scope = read.data.scope.filter((name) => name !== notGranted);
+	return { ...read.data, format: 2, scope } as Family;
 };
 export const liveOf = (kept: Kept | undefined) => (kept && "current" in kept ? kept : undefined);
 export const liveFamily = (stored: StoredFamily | undefined) => liveOf(fromStored(stored));
