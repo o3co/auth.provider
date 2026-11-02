@@ -1309,6 +1309,7 @@ describe("idp-oidc", () => {
 		});
 		const scopes = ["openid", "offline_access", "files.read"];
 		const delegation = offered(upstream.delegation, "delegation");
+		expect(delegation.issuer).toBe(upstream.issuer);
 		expect(await delegation.exchange(delegatedExchange({ scopes }))).toEqual({
 			subject: "u-alice",
 			amr: [],

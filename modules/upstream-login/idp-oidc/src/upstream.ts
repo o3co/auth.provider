@@ -248,6 +248,7 @@ export async function opened(
 		// The login's refresh passes no resource.
 		refresh: (refreshToken, scopes) => refreshed(refreshToken, scopes),
 		delegation: {
+			issuer: s.issuer,
 			authorizationUrl: (start) => {
 				if (!start.scopes.includes("openid")) return { kind: "refused" };
 				// Offline access is granted only where the user is asked (OpenID Connect Core §11).
