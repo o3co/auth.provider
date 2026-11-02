@@ -27,7 +27,7 @@ const bulk = (text: string) => `$${text.length}\r\n${text}\r\n`;
 
 /**
  * Just enough of a Redis 7 primary to boot the module, counting PINGs per socket. Its role and
- * settings may change; a command named in `refused` is refused for want of permission. The check's
+ * settings may change, one not in `settings` answered empty as a server not showing it; a command named in `refused` is refused for want of permission. The check's
  * script answers as the real one reports: each command in `scripts.refused` refused in the words of
  * `scripts.wording`'s Redis, each in `scripts.keysRefusedIn` refused its key in those words, and
  * each write NOREPLICAS while `writes.noReplicas`, a SET refused its key while `writes.keysRefused`; with
@@ -122,8 +122,9 @@ export function fakeRedis() {
 			);
 		if (name === "ROLE") return `*3\r\n${bulk(settings.role ?? "")}:0\r\n*0\r\n`;
 		const setting = args[2] ?? "";
-		if (name === "CONFIG" && settings[setting] !== undefined) {
-			return `*2\r\n${bulk(setting)}${bulk(settings[setting] ?? "")}`;
+		if (name === "CONFIG") {
+			const shown = settings[setting];
+			return shown === undefined ? "*0\r\n" : `*2\r\n${bulk(setting)}${bulk(shown)}`;
 		}
 		return "+OK\r\n";
 	};

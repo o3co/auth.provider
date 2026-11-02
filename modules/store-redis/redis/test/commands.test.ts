@@ -45,6 +45,7 @@ async function boot(
 	replication?: "replicas" | "none",
 	prefix?: string,
 	extra: Module[] = [],
+	declared?: Readonly<Record<string, string>>,
 ) {
 	const recorded = recordingLog();
 	let context: BuildContext<unknown> | undefined;
@@ -65,7 +66,12 @@ async function boot(
 		],
 		config: {
 			...kernelConfig(),
-			redis: { url, ...(replication ? { replication } : {}), ...(prefix ? { prefix } : {}) },
+			redis: {
+				url,
+				...(replication ? { replication } : {}),
+				...(prefix ? { prefix } : {}),
+				...(declared ? { "server-settings": declared } : {}),
+			},
 		},
 		runtime: quietRuntime({
 			clock: { now: () => 0 },
@@ -164,6 +170,32 @@ describe("the commands the store needs", () => {
 		await app?.stop(1000);
 		redis.settings["no-appendfsync-on-rewrite"] = "no";
 		await boot(port, undefined, undefined, [durable]);
+		redis.down();
+	});
+
+	it("take the declared value of a setting CONFIG GET answers empty, warning at boot of each so taken", async () => {
+		const redis = primary();
+		redis.settings.appendfsync = "always";
+		const { warned } = await boot(await redis.listen(), undefined, undefined, [durable], {
+			appendonly: "yes",
+			"no-appendfsync-on-rewrite": "no",
+		});
+		expect(warned()).toContainEqual([
+			"redis.settings_declared",
+			{ settings: "appendonly, no-appendfsync-on-rewrite" },
+		]);
+		redis.down();
+	});
+
+	it("refuse boot where CONFIG GET answers empty and nothing is declared, naming the setting", async () => {
+		const redis = primary();
+		const port = await redis.listen();
+		const error = await boot(port, undefined, undefined, [durable]).catch((e) => e);
+		expect(error).toBeInstanceOf(BootRefused);
+		const reasons = String((error as BootRefused).refusals.map((r) => r.reason));
+		expect(reasons).toContain(
+			"the server's CONFIG GET does not show it: declare appendonly in redis.server-settings",
+		);
 		redis.down();
 	});
 

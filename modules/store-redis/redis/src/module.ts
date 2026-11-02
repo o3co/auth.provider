@@ -100,31 +100,34 @@ type SettingName = keyof Declared;
 
 const minimumVersion = [7, 0];
 
-/** Reads a server setting by CONFIG GET; where the server refuses it, the operator's declaration. */
+/** Reads a server setting by CONFIG GET; where the server refuses it or shows nothing, the operator's declaration. */
 type Settings = (name: SettingName) => Promise<string | undefined>;
 
 /**
  * The server's settings: CONFIG GET where it answers, a declared value that differs then refused;
- * the declaration where the server refuses CONFIG, a setting left undeclared then refused.
+ * the declaration where the server refuses CONFIG or its answer is empty, which shows nothing to
+ * compare, a setting left undeclared then refused.
  */
 function serverSettings(client: Redis, declared: Declared) {
 	const problems: string[] = [];
 	const used = new Set<SettingName>();
 	const declaredOf = (name: SettingName) =>
 		declared[name] === undefined ? undefined : String(declared[name]);
+	const taken = (name: SettingName, why: string) => {
+		used.add(name);
+		const value = declaredOf(name);
+		if (value === undefined) problems.push(`${why}: declare ${name} in redis.server-settings`);
+		return value;
+	};
 	const read: Settings = async (name) => {
 		let answered: string | undefined;
 		try {
 			answered = ((await client.config("GET", name)) as string[])[1];
 		} catch (error) {
 			if (!refusedForGood(error)) throw error;
-			used.add(name);
-			const value = declaredOf(name);
-			if (value === undefined) {
-				problems.push(`the server refuses CONFIG GET: declare ${name} in redis.server-settings`);
-			}
-			return value;
+			return taken(name, "the server refuses CONFIG GET");
 		}
+		if (answered === undefined) return taken(name, "the server's CONFIG GET does not show it");
 		const value = declaredOf(name);
 		if (value !== undefined && value !== answered) {
 			problems.push(`redis.server-settings.${name} differs from what the server answers`);

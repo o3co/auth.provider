@@ -830,7 +830,7 @@ describe("settings the server will not show", () => {
 		},
 	};
 
-	it("takes the declaration only where the server refuses CONFIG for want of permission or the command", async () => {
+	it("takes the declaration where the server refuses CONFIG for want of permission or the command", async () => {
 		for (const error of [
 			"NOPERM User default has no permissions to run the 'config|get' command",
 			"ERR unknown subcommand 'GET'. Try CONFIG HELP.",
