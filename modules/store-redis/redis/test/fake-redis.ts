@@ -31,7 +31,8 @@ const bulk = (text: string) => `$${text.length}\r\n${text}\r\n`;
  * script answers as the real one reports: each command in `scripts.refused` refused in the words of
  * `scripts.wording`'s Redis, each in `scripts.keysRefusedIn` refused its key in those words, and
  * each write NOREPLICAS while `writes.noReplicas`, a SET refused its key while `writes.keysRefused`; with
- * `scripts.keysRefused`, the script is refused its keys before it runs.
+ * `scripts.keysRefused`, the script is refused its keys before it runs. While `cluster.keysAnswer` is
+ * set, what takes a key is answered that error, as a cluster node answers a key it does not serve.
  */
 export function fakeRedis() {
 	const sockets = new Set<Socket>();
@@ -45,6 +46,7 @@ export function fakeRedis() {
 		keysRefusedIn: [] as string[],
 	};
 	const writes = { noReplicas: false, keysRefused: false };
+	const cluster = { keysAnswer: undefined as string | undefined };
 	/** The run id each connection's server answers, by the order the connections came: the last for any after. */
 	const servers = {
 		runIds: ["abc"],
@@ -86,6 +88,9 @@ export function fakeRedis() {
 		const name = args[0]?.toUpperCase() ?? "";
 		if (refused.has(name)) {
 			return `-NOPERM User default has no permissions to run the '${name.toLowerCase()}' command\r\n`;
+		}
+		if ((name === "EVAL" || name === "SET") && cluster.keysAnswer) {
+			return `-${cluster.keysAnswer}\r\n`;
 		}
 		if (name === "EVAL" && scripts.keysRefused) return "-NOPERM No permissions to access a key\r\n";
 		if (name === "EVAL" && (args[1] ?? "").includes("local failed = {}")) return report();
@@ -147,6 +152,7 @@ export function fakeRedis() {
 		refused,
 		scripts,
 		writes,
+		cluster,
 		servers,
 		storeScripts,
 		listen: () =>

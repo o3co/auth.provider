@@ -55,6 +55,11 @@ export const refusedForGood = (error: unknown) =>
 	error instanceof ReplyError &&
 	/^(NOPERM|ERR unknown (sub)?command)\b/i.test((error as Error).message);
 
+/** How boot refuses a server that holds only some of the store's keys, as a cluster node does. */
+export const clusterRefused =
+	"Redis cluster, and proxies that split keys across nodes, are not supported";
+/** A cluster node's answer for a key it does not serve. */
+const clusterAnswer = (message: string) => /^(MOVED|ASK|CLUSTERDOWN)\b/.test(message);
 /** A user refused keys, in Redis 7.0's or 7.4's words, before a script runs or within it. */
 const keysRefused = (message: string) =>
 	/no permissions to access (a key|one of the keys)|can't access at least one of the keys/i.test(
@@ -71,8 +76,9 @@ const noReplicas = (message: string) => /^NOREPLICAS\b/.test(message);
  * The confirming connection sends a round's ROLE and INFO, its SET of the confirmation key where
  * replication is declared, and its WAIT, asking for no replica, with replicas; the other runs a
  * script calling every command the scripts call, on keys of the store's own that expire at once,
- * and a SCAN of them. A write refused for want of replicas tells nothing either way, so it is no
- * problem; any other failure is thrown.
+ * and a SCAN of them. A key answered as a cluster node answers it is the cluster's refusal. A write
+ * refused for want of replicas tells nothing either way, so it is no problem; any other failure is
+ * thrown.
  */
 export async function refusedCommands(
 	client: Redis,
@@ -88,7 +94,8 @@ export async function refusedCommands(
 		if (keysRefused(message)) problems.add(`the server refuses this user ${keys}: allow them`);
 		else if (refusedForGood(error) || refusedInScript(message)) {
 			problems.add(`the server refuses ${name}: allow it`);
-		} else if (!noReplicas(message)) throw error;
+		} else if (clusterAnswer(message)) problems.add(clusterRefused);
+		else if (!noReplicas(message)) throw error;
 	};
 	const round = confirmationPipeline(confirmer, prefix, replication !== undefined);
 	const sent = ["ROLE", "INFO", ...(replication !== undefined ? ["SET"] : [])];

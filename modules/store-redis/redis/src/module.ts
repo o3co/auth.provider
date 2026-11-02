@@ -5,7 +5,13 @@ import { Redis } from "ioredis";
 import { z } from "zod";
 import { clientDebugs, clientOptions, inTheClear, queryRefusal } from "./client/client.ts";
 import { redisProbe } from "./probe.ts";
-import { redisStore, refusedCommands, refusedForGood, roundProblems } from "./redis-store.ts";
+import {
+	clusterRefused,
+	redisStore,
+	refusedCommands,
+	refusedForGood,
+	roundProblems,
+} from "./redis-store.ts";
 
 const section = z.strictObject({
 	url: z
@@ -140,7 +146,7 @@ async function serverProblems(client: Redis, role: Role): Promise<string[]> {
 	const problems: string[] = [];
 	if (role[0] !== "master") problems.push("connect to a primary (role master)");
 	if (/cluster_enabled:1/.test(await client.info("cluster"))) {
-		problems.push("Redis cluster, and proxies that split keys across nodes, are not supported");
+		problems.push(clusterRefused);
 	}
 	const version = /redis_version:(\d+)\.(\d+)/.exec(await client.info("server"));
 	const [major, minor] = [Number(version?.[1] ?? 0), Number(version?.[2] ?? 0)];

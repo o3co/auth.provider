@@ -405,7 +405,14 @@ describe("redis", () => {
 			await waitFor(() => pings(node));
 			await expect(
 				open([durable], undefined, `redis://127.0.0.1:${port}`, "none"),
-			).rejects.toBeInstanceOf(BootRefused);
+			).rejects.toMatchObject({
+				refusals: [
+					{
+						where: "redis",
+						reason: "Redis cluster, and proxies that split keys across nodes, are not supported",
+					},
+				],
+			});
 		} finally {
 			docker("rm", "-f", "-v", node);
 		}

@@ -214,6 +214,31 @@ describe("the commands the store needs", () => {
 		redis.down();
 	});
 
+	it("refuse boot as a cluster, not as no connection, where a key is answered as a cluster node answers it", async () => {
+		for (const answer of [
+			"MOVED 1234 10.0.0.2:6379",
+			"ASK 1234 10.0.0.2:6379",
+			"CLUSTERDOWN Hash slot not served",
+		]) {
+			const redis = primary();
+			redis.cluster.keysAnswer = answer;
+			expect(await refusal(await redis.listen(), "replicas"), answer).toBe(
+				"redis: Redis cluster, and proxies that split keys across nodes, are not supported",
+			);
+			redis.down();
+		}
+	});
+
+	it("name a refused command beside a cluster's answers, losing neither", async () => {
+		const redis = primary();
+		redis.cluster.keysAnswer = "MOVED 1234 10.0.0.2:6379";
+		redis.refused.add("WAIT");
+		const reasons = await refusal(await redis.listen(), "replicas");
+		expect(reasons).toContain("the server refuses WAIT: allow it");
+		expect(reasons).toContain("Redis cluster, and proxies that split keys across nodes");
+		redis.down();
+	});
+
 	it("answer unready once the server refuses one after boot, naming it, and ready once it allows it again", async () => {
 		const redis = primary();
 		const { warned, ready } = await boot(await redis.listen(), "replicas");
