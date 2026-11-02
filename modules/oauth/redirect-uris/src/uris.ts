@@ -1,3 +1,5 @@
+import { isLoopbackName } from "@mod/url-setting";
+
 /** Names a redirect URI's own query may not use, since the answer adds them. */
 const answerNames = ["code", "state", "iss", "error", "error_description", "error_uri"];
 
@@ -27,6 +29,23 @@ export function registrable(uri: string): boolean {
 	const native = reverseDomain.test(scheme) && !scheme.startsWith("javascript.");
 	if (scheme !== "https:" && !local && !native) return false;
 	return !answerNames.some((name) => parsed.searchParams.has(name));
+}
+
+/** Where a redirect URI sends the user, as it is shown to them. */
+export interface RedirectShown {
+	/** The host as the URL parser writes it, with a port other than the scheme's default; a private-use scheme, alone. */
+	readonly host: string;
+	readonly kind: "web" | "loopback" | "app";
+}
+
+/** A URI as it is shown: read from what the URL parser takes of it, never from how it is written. */
+export function shownOf(uri: string): RedirectShown | undefined {
+	const parsed = URL.parse(uri);
+	if (!parsed) return undefined;
+	if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+		return { host: parsed.protocol.slice(0, -1), kind: "app" };
+	}
+	return { host: parsed.host, kind: isLoopbackName(parsed.hostname) ? "loopback" : "web" };
 }
 
 export function matches(registered: string, given: string): boolean {

@@ -6,6 +6,7 @@ import {
 	redirects,
 	redirectsAt,
 	redirectsCopy,
+	redirectsShown,
 	registrable,
 } from "../src/contract.ts";
 
@@ -43,6 +44,82 @@ it("tells whether an origin is the scheme, host and port of one of the client's 
 it("answers no for a client whose record holds no authorize section, as where authorize is not composed", () => {
 	const bare: Client = { ...registering([]), section: <T>() => undefined as T };
 	expect(redirectsAt(bare, "https://app.example")).toBe(false);
+});
+
+describe("redirect URIs as a page shows them", () => {
+	const shown = (...uris: string[]) => redirectsShown(registering(uris));
+
+	it("shows a web host as the URL parser writes it, with a port only other than the default", () => {
+		expect(
+			shown(
+				"https://app.example/cb",
+				"https://APP2.Example:443/cb",
+				"https://app.example:8443/cb?x=1",
+			),
+		).toEqual([
+			{ host: "app.example", kind: "web" },
+			{ host: "app2.example", kind: "web" },
+			{ host: "app.example:8443", kind: "web" },
+		]);
+	});
+
+	it("shows a name beyond ASCII as its A-label, never the U-label", () => {
+		expect(shown("https://bücher.example/cb")).toEqual([
+			{ host: "xn--bcher-kva.example", kind: "web" },
+		]);
+		expect(shown("https://xn--bcher-kva.example/cb")).toEqual([
+			{ host: "xn--bcher-kva.example", kind: "web" },
+		]);
+	});
+
+	it("reads loopback from the parsed host, whichever scheme or spelling the URI uses", () => {
+		for (const [uri, host] of [
+			["http://localhost:3000/cb", "localhost:3000"],
+			["http://127.0.0.1/cb", "127.0.0.1"],
+			["http://[::1]:9000/cb", "[::1]:9000"],
+			["https://localhost/cb", "localhost"],
+			["https://app.localhost/cb", "app.localhost"],
+			["https://127.1/cb", "127.0.0.1"],
+			["https://2130706433/cb", "127.0.0.1"],
+			["https://[::ffff:7f00:1]/cb", "[::ffff:7f00:1]"],
+		] as const) {
+			expect(shown(uri), uri).toEqual([{ host, kind: "loopback" }]);
+		}
+		for (const uri of ["https://localhost.redirect.example/cb", "https://127.0.0.1.example/cb"]) {
+			expect(shown(uri)[0]?.kind, uri).toBe("web");
+		}
+	});
+
+	it("shows a private-use scheme alone, whatever authority it writes", () => {
+		expect(shown("com.example.app:/cb")).toEqual([{ host: "com.example.app", kind: "app" }]);
+		expect(shown("com.example.app://redirect.example/cb")).toEqual([
+			{ host: "com.example.app", kind: "app" },
+		]);
+	});
+
+	it("shows each destination once, in the order first written, and every one", () => {
+		expect(
+			shown(
+				"https://app.example/a",
+				"com.example.app:/cb",
+				"https://app.example/b",
+				"http://127.0.0.1:1/cb",
+				"http://127.0.0.1:2/cb",
+				"com.example.app:/other",
+			),
+		).toEqual([
+			{ host: "app.example", kind: "web" },
+			{ host: "com.example.app", kind: "app" },
+			{ host: "127.0.0.1:1", kind: "loopback" },
+			{ host: "127.0.0.1:2", kind: "loopback" },
+		]);
+		expect(shown()).toEqual([]);
+	});
+
+	it("shows none for a client read where the section is not composed", () => {
+		const bare: Client = { ...registering([]), section: <T>() => undefined as T };
+		expect(redirectsShown(bare)).toEqual([]);
+	});
 });
 
 it("registers https, http to localhost or loopback literals, and reverse-domain app schemes only [rfc9700-2.6-c] [oidc-core-3.1.2.1-w] [rfc9700-4.1.3-a]", () => {

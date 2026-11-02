@@ -1,7 +1,7 @@
 import type { DocumentCopy } from "@mod/client-documents";
 import type { Client, Section } from "@mod/clients";
 import { z } from "zod";
-import { answerTo, matches, registrable } from "./uris.ts";
+import { answerTo, matches, type RedirectShown, registrable, shownOf } from "./uris.ts";
 
 export interface Redirects {
 	readonly "redirect-uris": readonly string[];
@@ -41,6 +41,10 @@ export const redirectsCopy: DocumentCopy = {
 	copy: copied,
 };
 
+/** A client's redirect URIs; a client read where the section is not composed holds no section at all, so none. */
+const urisOf = (client: Client) =>
+	(client.section(redirects) as Redirects | undefined)?.["redirect-uris"] ?? [];
+
 /**
  * Whether `origin` is the scheme, host and port of one of the client's registered redirect URIs, as
  * OpenID Connect Front-Channel Logout 1.0 §2 asks of a front-channel URI. A private-use scheme's URI
@@ -48,10 +52,23 @@ export const redirectsCopy: DocumentCopy = {
  */
 export function redirectsAt(client: Client, origin: string): boolean {
 	if (origin === "null") return false;
-	// A client read where the section is not composed holds no section at all, so no URI.
-	const uris = (client.section(redirects) as Redirects | undefined)?.["redirect-uris"] ?? [];
-	return uris.some((uri) => URL.parse(uri)?.origin === origin);
+	return urisOf(client).some((uri) => URL.parse(uri)?.origin === origin);
+}
+
+/**
+ * Where a client's redirect URIs send the user, each once, as a page shows them: a host as the URL
+ * parser writes it (lower case, an A-label), with a port other than the scheme's default, read as
+ * `loopback` by that host or as `web`; a private-use scheme alone, as `app`, its authority being no
+ * host anyone reaches.
+ */
+export function redirectsShown(client: Client): readonly RedirectShown[] {
+	const once = new Map<string, RedirectShown>();
+	for (const uri of urisOf(client)) {
+		const shown = shownOf(uri);
+		if (shown) once.set(`${shown.kind} ${shown.host}`, shown);
+	}
+	return [...once.values()];
 }
 
 /** Whether a URI may be registered for a client to be sent back to; whether a given one matches a registered one; the answer's URL. */
-export { answerTo, matches, registrable };
+export { answerTo, matches, type RedirectShown, registrable };
