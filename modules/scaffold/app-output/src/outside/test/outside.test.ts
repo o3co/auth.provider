@@ -47,6 +47,7 @@ describe("what an app beside packages outside the release is given", () => {
 				image: undefined,
 				guide: "",
 				index: "",
+				comesWith: expect.any(String),
 			});
 		}
 	});
@@ -123,6 +124,16 @@ describe("what an app beside packages outside the release is given", () => {
 		expect(guide).toContain("take the overrides, `held` and `scripts/check-outside.mjs` from it");
 		expect(guide).toContain("not covered by its conformance");
 		expect(index).toContain("`outside-modules.json`");
+	});
+
+	it("says of the app's guide that only a package named comes, and says it for no other app", () => {
+		const release =
+			"What they need to run comes with them, and so do the wirings and bridges they come with.";
+		expect(besideRelease(undefined, app).comesWith).toBe(release);
+		const { comesWith } = besideRelease(outside, app);
+		expect(comesWith).toContain("the wirings and bridges of the release's modules");
+		expect(comesWith).toContain("each wiring and adapter outside it must be listed by name");
+		expect(comesWith).toContain("boot refuses, naming the contract no module provides");
 	});
 
 	it("records the integrity the release recorded of every package it holds to one copy", () => {

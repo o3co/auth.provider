@@ -423,3 +423,28 @@ it("records the packages outside the release and checks the lockfile against the
 	expect(await read(target, "README.md")).toContain("## Packages outside this release");
 	expect(await read(target, "AGENTS.md")).toContain("`outside-modules.json`");
 });
+
+it("tells of what comes with the modules as it holds for the app: the release's, or beside packages outside it", async () => {
+	const grant = {
+		name: "@x/grant",
+		version: "1.2.0",
+		integrity: "sha512-AAAA",
+		dependencies: {},
+		optionalDependencies: {},
+		peerDependencies: { zod: "^4.6.0" },
+		peerDependenciesMeta: {},
+	};
+	const outside = { modules: [grant], registries: { default: "https://registry.npmjs.org" } };
+	const release = { version: "1.2.3", integrity: { zod: "sha512-ZOD" } };
+	const listed = listedReadme("`@mod/http`");
+	const plain = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(plain, ["@mod/http"], fakePackages(), listed);
+	expect(await read(plain, "README.md")).toContain(
+		"What they need to run comes with them, and so do the wirings and bridges they come with. The modules' sections",
+	);
+	const beside = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(beside, ["@mod/http"], fakePackages(release, [], outside), listed);
+	const guide = await read(beside, "README.md");
+	expect(guide).not.toContain("{{comesWith}}");
+	expect(guide).toContain("each wiring and adapter outside it must be listed by name");
+});

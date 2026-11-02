@@ -126,6 +126,7 @@ export async function writeDeployment(
 				hostEnv: envName("http.host"),
 				portEnv: envName("http.port"),
 				...httpLines(http),
+				comesWith: beside.comesWith,
 				...readme.fill,
 			})) + beside.guide,
 	});

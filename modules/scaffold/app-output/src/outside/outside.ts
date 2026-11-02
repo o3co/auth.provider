@@ -20,6 +20,8 @@ export interface Beside {
 	/** The guide's section, and the agents' index's lines, on those packages. */
 	readonly guide: string;
 	readonly index: string;
+	/** What the guide's opening says comes with the modules listed. */
+	readonly comesWith: string;
 }
 
 const recordFile = "outside-modules.json";
@@ -35,6 +37,8 @@ const nothing: Beside = {
 	image: undefined,
 	guide: "",
 	index: "",
+	comesWith:
+		"What they need to run comes with them, and so do the wirings and bridges they come with.",
 };
 
 /**
@@ -109,6 +113,9 @@ export function besideRelease(
 		scripts: { [script]: `node ${scriptFile}` },
 		image: { copy: [recordFile, scriptFile], after: `pnpm ${script}` },
 		guide: guideOf(outside.modules),
+		// Only the packages named are read: one outside the release brings no other outside it.
+		comesWith:
+			"What they need to run comes with them, and so do the wirings and bridges of the release's modules. A package outside the release brings no other: each wiring and adapter outside it must be listed by name, or boot refuses, naming the contract no module provides.",
 		index: `\nPackages outside the release, not part of it: \`${recordFile}\` records each one as the app was generated.\n`,
 	};
 }
