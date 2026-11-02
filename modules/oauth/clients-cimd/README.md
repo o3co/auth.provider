@@ -4,6 +4,7 @@
 - Contributes a client source to `clients`: for a client id that is a URL, fetches the metadata document there through `outbound`, judges it, and gives a public client.
 - Says in the authorization server metadata that it takes such ids.
 - Its internal modules: `document` reads and judges a document, `fetching` bounds the fetches and keeps their answers. The package's module only declares.
+- Preview: this module follows draft-ietf-oauth-client-id-metadata-document-00; a later revision may change it in a minor version.
 
 ## Not here
 - Authenticating by `none` (`clients`). Matching redirect URIs (`redirect-uris`). Consent and its page (`consent`). The destination policy (`outbound-policy`).
