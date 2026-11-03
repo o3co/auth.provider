@@ -824,7 +824,7 @@ From `@mod/authorize`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.authorize.redirect-uris` | list of string | `[]` |  | The redirect URIs the client may ask for, each matched as written: https followed by //, http to a loopback host, or a private-use reverse-domain scheme, with no fragment, userinfo or query parameter named like a response parameter. |
+| `sections.authorize.redirect-uris` | list of string | `[]` |  | The redirect URIs the client may ask for, each matched as written: https with a host right after its //, http to a loopback host, or a private-use reverse-domain scheme, with no fragment, userinfo, backslash or query parameter named like a response parameter. |
 
 ### sections.client-allowance
 
@@ -865,7 +865,7 @@ From `@mod/consent`.
 | `sections.consent.name` | string |  |  | The client's name the consent page shows, trimmed and cut to 200 characters. |
 | `sections.consent.uri` | string |  |  | The client's home page the consent page shows, an https URL. |
 | `sections.consent.host` | string |  |  | The host the client's source verified, shown only for a client the operator did not register. |
-| `sections.consent.under` | string |  |  | What the client's source says of the description it read, which a grant is agreed under; it counts only for a client the operator did not register. |
+| `sections.consent.under` | string |  |  | What the client's source says of the description it read, which a grant is agreed under; ignored on a client the operator registered. |
 
 ### sections.federation-grants
 
