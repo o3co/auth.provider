@@ -29,7 +29,8 @@ export function callbackWith({ p, intents, entered, fail }: ConnectCommon) {
 		if (resumed.kind === "unconfigured")
 			return fail(request, resumed.ref, "grant_not_authorizable");
 		const { ref, view } = resumed;
-		const delegation = p.upstreams.of(view.idp)?.delegation;
+		const offered = p.upstreams.of(view.idp);
+		const delegation = offered?.delegation;
 		if (view.connection !== name || !delegation) {
 			return fail(request, ref, "grant_not_authorizable");
 		}
@@ -50,6 +51,8 @@ export function callbackWith({ p, intents, entered, fail }: ConnectCommon) {
 		});
 		if (exchanged.kind === "failed") return fail(request, ref, exchanged.error);
 		const { login } = exchanged;
+		// A refresh is held to what the upstream says, so a login naming another is found here.
+		if (login.issuer !== offered?.issuer) return fail(request, ref, "upstream_error");
 		const upstream = { issuer: String(login.issuer), subject: String(login.subject) };
 		const account = await p.upstreamAccount.refusal(
 			{ subject: view.subject, upstream: view.expected.held },
