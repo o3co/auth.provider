@@ -78,7 +78,6 @@ async function refresher(life: number, settings: { rotations?: number; windowMs?
 	const upstream: Upstream[] = [];
 	const asked: [string, readonly string[], string | undefined][] = [];
 	const delegation = {
-		issuer: "https://up.example",
 		refresh: async (token, scope, resource) => {
 			asked.push([token, scope, resource]);
 			const next = upstream.shift();
@@ -130,18 +129,17 @@ async function refresher(life: number, settings: { rotations?: number; windowMs?
 		asked,
 		logs: () => logged.lines(),
 		stored,
-		/** The delegation, as another issuer's behind the connection. */
-		delegationAt: (issuer: string): Delegation => ({ ...delegation, issuer }),
 		/** Asks for the token as a client's request does, from the grant read first. */
 		call: async (
 			more: {
 				scope?: readonly string[];
 				minTtlMs?: number;
 				resource?: string;
-				delegation?: Delegation;
+				issuer?: string;
 			} = {},
 		) =>
 			refresh.current((await stored()) as Grant, {
+				issuer: "https://up.example",
 				delegation,
 				maxAccessMs: 3_600_000,
 				minTtlMs: 0,
@@ -394,7 +392,7 @@ describe("refreshing a grant's token", () => {
 			const r = await refresher(4);
 			r.advance(2100);
 			const { rotations } = (await r.stored()) as Grant;
-			expect(said(await r.call({ delegation: r.delegationAt(other) }))).toBe(
+			expect(said(await r.call({ issuer: other }))).toBe(
 				"reauthorize upstream_issuer_changed",
 			);
 			expect(r.asked).toEqual([]);
@@ -421,7 +419,7 @@ describe("refreshing a grant's token", () => {
 		it("asks it nothing where the end cannot be written, and refuses on this host until the held token ends", async () => {
 			const r = await refresher(300);
 			r.advance(151_000);
-			const asking = { delegation: r.delegationAt(other), minTtlMs: 200_000 };
+			const asking = { issuer: other, minTtlMs: 200_000 };
 			r.stores.down.failNext("change");
 			await expect(r.call(asking)).rejects.toThrow();
 			expect(r.asked).toEqual([]);
@@ -431,7 +429,7 @@ describe("refreshing a grant's token", () => {
 
 		it("leaves a token not yet due as it is, asking no one", async () => {
 			const r = await refresher(300);
-			expect(said(await r.call({ delegation: r.delegationAt(other) }))).toBe("handed up-1");
+			expect(said(await r.call({ issuer: other }))).toBe("handed up-1");
 			expect(r.asked).toEqual([]);
 			expect((await r.stored())?.status).toBe("active");
 		});

@@ -46,6 +46,14 @@ describe("a grant's token renewed through the token route", () => {
 		expect(h.stores.peek(id)).not.toHaveProperty("sealed");
 	});
 
+	it("ends no grant of a type whose delegation says no issuer, as the upstream says it", async () => {
+		const { h, id } = await due();
+		const answered = await h.grantCall(id, "token");
+		expect(answered.status).toBe(200);
+		expect(h.asked.refreshes).toHaveLength(1);
+		expect((await h.grantCall(id, "status")).json).toMatchObject({ status: "active" });
+	});
+
 	it("asks nothing of another issuer behind the connection, answering reauthorization_required and erasing the credential", async () => {
 		const { h, id } = await due();
 		h.script.issuer = "https://another.example";

@@ -159,9 +159,6 @@ export async function harness(
 		refreshes: [] as [string, readonly string[], string | undefined][],
 	};
 	const delegation: Delegation = {
-		get issuer() {
-			return script.issuer;
-		},
 		authorizationUrl: (start) => {
 			if (script.startThrows) throw new Error("cannot build");
 			if (script.startRefused) return { kind: "refused" };
@@ -181,7 +178,15 @@ export async function harness(
 	};
 	const stubs = defineModule({ name: "stubs", replicaSafe: false, takes: [routes] }, (m) => [
 		m.provide(upstreams).by(() => ({
-			of: (idp) => (idp === "corp" && !script.withdrawn ? { delegation } : undefined),
+			of: (idp) =>
+				idp === "corp" && !script.withdrawn
+					? {
+							get issuer() {
+								return script.issuer;
+							},
+							delegation,
+						}
+					: undefined,
 		})),
 		m.provide(probed).by((c) => c.collect(routes)),
 	]);

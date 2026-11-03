@@ -102,11 +102,14 @@ export function connectionsIn(settings: Settings, upstreams: Upstreams) {
 		Object.hasOwn(settings.connections, name) ? settings.connections[name] : undefined;
 	return {
 		of,
-		/** A configured connection and the delegation of its IdP; none when either is missing. */
+		/** A configured connection, and the issuer and delegation of its IdP; none when either is missing. */
 		configured: (name: string) => {
 			const connection = of(name);
-			const delegation = connection && upstreams.of(connection.idp)?.delegation;
-			return connection && delegation ? { connection, delegation } : undefined;
+			const upstream = connection && upstreams.of(connection.idp);
+			const delegation = upstream?.delegation;
+			return connection && upstream && delegation
+				? { connection, issuer: upstream.issuer, delegation }
+				: undefined;
 		},
 	};
 }
