@@ -16,6 +16,7 @@ Read the [migration guide](docs/migration.md) before upgrading: each line below 
 - `clients-cimd`: `digest-algorithm`, `sha-256` alone, names the algorithm of a document's digest; changing it would ask each user of such a client once more.
 - `users`: `users.issuer-moved` states an IdP name's move to another issuer ([U-0.19-138](docs/migration.md#u-0.19-138)).
 - `kernel`: `onBuilt`, a hook that runs once every build passed, before `assemble` answers.
+- `federation-grants`: `federation.grant.reauthorized` says which part of the account changed (`account_changed`).
 - `tokens`: `lifetimeSecondsRange`, the range a grant's `lifetimeSeconds` is taken in ([U-0.19-50](docs/migration.md#u-0.19-50)).
 
 ### Changed
@@ -29,6 +30,7 @@ Read the [migration guide](docs/migration.md) before upgrading: each line below 
 - `users`: a start declaring another issuer for an IdP name than the one kept for it is refused, and a link store that cannot answer for a declared name refuses boot ([U-0.19-138](docs/migration.md#u-0.19-138)).
 - `federation-grants`, `federation-grants-connect`: a grant whose connection has come to another issuer, once a refresh is due, answers `410 reauthorization_required`, with `upstream_issuer_changed`, and its credentials are erased; reauthorizing it binds the new issuer ([U-0.19-138](docs/migration.md#u-0.19-138)).
 - `upstreams`: `of` answers an upstream's `issuer` ([U-0.19-139](docs/migration.md#u-0.19-139)).
+- `federation-grants-connect`: a login naming another issuer than the upstream says is refused `upstream_error` ([U-0.19-139](docs/migration.md#u-0.19-139)).
 - `tokens`: a `Tokens` of your own offers `accessTokenLifetimeSeconds` ([U-0.19-130](docs/migration.md#u-0.19-130)).
 - `redis`: one primary holding every key is a requirement of every composition, with no setting to loosen it ([U-0.19-7](docs/migration.md#u-0.19-7)).
 
@@ -53,11 +55,11 @@ Read the [migration guide](docs/migration.md) before upgrading: each line below 
 
 ### Security
 
-- `consent`, `clients-cimd`, `authorize`: the scope of a consent to a client from another source ([U-0.19-133](docs/migration.md#u-0.19-133)).
-- `redirect-uris`: the form of a redirect URI taken ([U-0.19-135](docs/migration.md#u-0.19-135)).
-- `users`: what an IdP name's links are held to ([U-0.19-138](docs/migration.md#u-0.19-138)).
-- `federation-grants`: where a grant's upstream credentials are sent ([U-0.19-138](docs/migration.md#u-0.19-138)).
-- `app-output`: what an app beside packages outside the release holds to the release's integrity ([U-0.19-131](docs/migration.md#u-0.19-131)).
+- `consent`, `clients-cimd`, `authorize`: a consent outliving the document it was agreed under ([U-0.19-133](docs/migration.md#u-0.19-133)).
+- `redirect-uris`: a redirect URI that readers can take differently ([U-0.19-135](docs/migration.md#u-0.19-135)).
+- `users`: an IdP name's links surviving a change of its issuer ([U-0.19-138](docs/migration.md#u-0.19-138)).
+- `federation-grants`: a grant's upstream credentials reaching another issuer than the one that granted them ([U-0.19-138](docs/migration.md#u-0.19-138)).
+- `app-output`: part of what an app beside packages outside the release installs not held to the release's integrity ([U-0.19-131](docs/migration.md#u-0.19-131)).
 
 ## [0.19.0-rc.1] - 2026-11-02
 
