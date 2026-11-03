@@ -154,7 +154,10 @@ export async function connector(
 		{ name: "stubs", replicaSafe: false, takes: [grantsBrowsers, routes] },
 		(m) => [
 			m.provide(upstreams).by(() => ({
-				of: (idp) => (idp === "corp" && !script.withdrawn ? { issuer: "https://up.example", delegation } : undefined),
+				of: (idp) =>
+					idp === "corp" && !script.withdrawn
+						? { issuer: "https://up.example", delegation }
+						: undefined,
 			})),
 			m.provide(users).by(
 				() =>
