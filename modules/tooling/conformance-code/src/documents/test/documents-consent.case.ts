@@ -161,6 +161,20 @@ describe.runIf(areaTarget().can("outbound-proxy"))(
 			});
 			return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 		};
+		/** The page's post accepting, as it comes. */
+		const post = async (asked: string) => {
+			const res = await fetch(`${base}/oauth/consent`, {
+				method: "POST",
+				redirect: "manual",
+				headers: browser.headers({
+					cookie: await browser.login(),
+					origin: issuer,
+					"content-type": "application/x-www-form-urlencoded",
+				}),
+				body: new URLSearchParams({ challenge: asked, decision: "accept" }),
+			});
+			return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+		};
 		/** Accepts on the page and follows the browser back to the endpoint, answering where that sends it. */
 		const accepted = async (asked: string) => {
 			const cookie = await browser.login();
@@ -292,8 +306,8 @@ describe.runIf(areaTarget().can("outbound-proxy"))(
 					status: 400,
 					body: { error: "unknown_challenge" },
 				});
-				// An answer agrees to what was shown, so the changed document is asked of again.
-				expect((await accepted(asked)).pathname).toBe("/consent");
+				const answered = await post(asked);
+				expect([answered.status, answered.body]).toEqual([400, { error: "unknown_challenge" }]);
 			});
 
 			it("asks nothing again for a document gone and back unchanged, and asks when it comes back changed", async () => {
