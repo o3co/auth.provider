@@ -91,7 +91,7 @@ const section = z.strictObject({
 		})
 		.optional()
 		.describe(
-			"The server's settings as the operator declares them, read only where the server refuses CONFIG GET; declare only what the server really has. Where CONFIG GET answers, a declared value that differs refuses boot.",
+			"The server's settings as the operator declares them, read only where the server refuses CONFIG GET or does not show the setting; declare only what the server really has. Where CONFIG GET answers, a declared value that differs refuses boot.",
 		),
 });
 
