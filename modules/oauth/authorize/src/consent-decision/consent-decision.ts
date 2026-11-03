@@ -1,5 +1,5 @@
 import type { Client } from "@mod/clients";
-import { canBeAgreed, type Consents, consents, isFirstParty } from "@mod/consent";
+import { type Consents, canBeAgreed, consents, isFirstParty } from "@mod/consent";
 import type { BuildContext } from "@mod/kernel";
 import type { Session } from "@mod/session";
 import { type Again, type Decision, recorded, refusal } from "../decision.ts";
