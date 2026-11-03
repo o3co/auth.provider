@@ -84,7 +84,7 @@ Where the service keeps these in a parameter group whose defaults are 0 or anoth
 
 ### Choosing `replication`
 
-- `replicas`: writes that must survive a failover wait until every replica has them. While no replica is seen, or replicas lag, those writes are unavailable and the requests that need them answer 503. The system denies rather than allows.
+- `replicas`: writes that must survive a failover wait until every replica has them. While no replica is seen, or replicas lag, those writes are unavailable and the requests that need them answer 503. The system denies rather than allows. With an IdP name declared, boot needs a confirmed read of the link store too, so a replica outage refuses a restart.
 - `none`: you state there is no failover. A failover then loses even confirmed writes, and a replica seen at boot or at runtime is refused or unavailable.
 
 Keeping a detached or lagging replica from being promoted is the operator's job, and so are the replicas' own disk settings. A `CONFIG SET` after boot that takes away what boot checked shows within about a second: `/readyz` answers 503, warning `redis.settings_unmet`, until it holds again.
