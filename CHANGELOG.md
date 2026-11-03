@@ -27,7 +27,6 @@ Read the [migration guide](docs/migration.md) before upgrading: each line below 
 - `authorize`: a client from a source that says nothing a grant could be agreed under is refused `unauthorized_client`, recorded `client_agreed_under_nothing` ([U-0.19-133](docs/migration.md#u-0.19-133)).
 - `users`: a start declaring another issuer for an IdP name than the one kept for it is refused, and a link store that cannot answer for a declared name refuses boot ([U-0.19-138](docs/migration.md#u-0.19-138)).
 - `federation-grants`, `federation-grants-connect`: a grant whose connection has come to another issuer, once a refresh is due, answers `410 reauthorization_required`, with `upstream_issuer_changed`, and its credentials are erased; reauthorizing it binds the new issuer ([U-0.19-138](docs/migration.md#u-0.19-138)).
-- `upstreams`: a `Delegation` says its `issuer` ([U-0.19-139](docs/migration.md#u-0.19-139)).
 - `tokens`: a `Tokens` of your own offers `accessTokenLifetimeSeconds` ([U-0.19-130](docs/migration.md#u-0.19-130)).
 - `redis`: one primary holding every key is a requirement of every composition, with no setting to loosen it ([U-0.19-7](docs/migration.md#u-0.19-7)).
 
@@ -46,7 +45,7 @@ Read the [migration guide](docs/migration.md) before upgrading: each line below 
 - `redis`: a `CONFIG GET` answered empty reads as a setting not shown, taking the declared value or refusing boot, named.
 - `outbound`: a lookup answered with any system error code fails that lookup alone.
 - `csrf`: a refusal for want of a public origin names the setting it needs ([U-0.19-59](docs/migration.md#u-0.19-59)).
-- `refresh`: a family started under 0.18 that holds `offline_access` keeps working ([U-0.19-76](docs/migration.md#u-0.19-76)).
+- `refresh`: a family started under 0.18 that holds `offline_access` keeps working, and a requested `scope` naming the word drops it, as `authorize` does ([U-0.19-76](docs/migration.md#u-0.19-76)).
 - `tokens`: a grant's `null` claim is refused at `issue`, naming its path, before any issuance policy runs ([U-0.19-85](docs/migration.md#u-0.19-85)).
 - `app-output`: a scope's recorded registry reaches the app and its image ([U-0.19-132](docs/migration.md#u-0.19-132)), and the guide of an app beside packages outside the release says each package comes only as named.
 
