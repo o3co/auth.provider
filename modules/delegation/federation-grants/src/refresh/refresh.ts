@@ -45,7 +45,6 @@ export interface Parts {
 
 /** What one request asks of the token: scopes it must carry, and how long it must still live. */
 export interface Asked {
-	/** The issuer behind the connection now, which a grant's refresh is held to. */
 	readonly issuer: string;
 	readonly delegation: Delegation;
 	readonly resource?: string;
