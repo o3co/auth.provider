@@ -8,7 +8,14 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
+import {
+	assemble,
+	contract,
+	defineModule,
+	kernelConfig,
+	type Module,
+	Unavailable,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import { redirects } from "@mod/redirect-uris";
@@ -18,7 +25,14 @@ import { openedOf, sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { askKey, storedOf } from "../src/ask.ts";
-import { type Asked, clientCopy, clientSection, consents, isFirstParty } from "../src/contract.ts";
+import {
+	type Asked,
+	canBeAgreed,
+	clientCopy,
+	clientSection,
+	consents,
+	isFirstParty,
+} from "../src/contract.ts";
 import consentModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import type { StoredAsk, StoredGrant } from "../src/store.ts";
@@ -140,6 +154,7 @@ const challengeOf = (url: string) => new URL(url).searchParams.get("challenge") 
 async function serve(
 	origin: string | null = "https://as.example",
 	page: string | null = "https://as.example/consent",
+	sections: readonly Module[] = [redirectSection],
 ) {
 	const grants = faulty<StoredGrant>();
 	const asks = faulty<StoredAsk>();
@@ -150,7 +165,7 @@ async function serve(
 			http,
 			clientsModule,
 			secretHashModule,
-			redirectSection,
+			...sections,
 			documents,
 			recorded.module,
 			csrfStandIn,
@@ -170,20 +185,24 @@ async function serve(
 			...clientsConfig([
 				publicClient({ id: "app" }),
 				publicClient({ id: "own", sections: { [clientSection.name]: { "first-party": true } } }),
-				publicClient({
-					id: "sent",
-					sections: {
-						[redirects.name]: {
-							"redirect-uris": [
-								"https://app.example/cb",
-								"https://APP.example/other",
-								"https://bücher.example:8443/cb",
-								"http://127.0.0.1:8080/cb",
-								"com.example.app://authority.example/cb",
-							],
-						},
-					},
-				}),
+				...(sections.includes(redirectSection)
+					? [
+							publicClient({
+								id: "sent",
+								sections: {
+									[redirects.name]: {
+										"redirect-uris": [
+											"https://app.example/cb",
+											"https://APP.example/other",
+											"https://bücher.example:8443/cb",
+											"http://127.0.0.1:8080/cb",
+											"com.example.app://authority.example/cb",
+										],
+									},
+								},
+							}),
+						]
+					: []),
 				publicClient({
 					id: "named",
 					sections: {
@@ -191,6 +210,8 @@ async function serve(
 							name: "Acme",
 							uri: "https://acme.example/about",
 							host: "acme.example",
+							// Counts for no client the operator registered.
+							under: "said-of-a-registered-client",
 						},
 					},
 				}),
@@ -608,7 +629,26 @@ describe("consent: a client from another source", () => {
 		expect(await given.coversFor(await clientOf(documentId), "alice", ["read"])).toBe(true);
 	});
 
-	it("shows a pending consent only while its source says the value it was asked under, and an answer writes under that", async () => {
+	it("takes a pending consent's answer only while its source says the value it was asked under, so a stale tab replaces no newer grant", async () => {
+		const { clientOf, sessionFor, given, call } = await serve();
+		const { cookie, session } = await sessionFor("alice");
+		const client = await clientOf(documentId);
+		const stale = challengeOf(await given.askFor(session, client, asking));
+		described.under = "d2";
+		const changed = await clientOf(documentId);
+		await given.grantFor(changed, "alice", ["read"]);
+		for (const decision of ["accept", "deny"]) {
+			const answered = await call("POST", cookie, { challenge: stale, decision });
+			expect(answered).toMatchObject({ status: 400, body: { error: "unknown_challenge" } });
+		}
+		expect(await given.coversFor(changed, "alice", ["read"])).toBe(true);
+		// The value said again, the challenge stands, unanswered.
+		described.under = "d1";
+		const taken = await call("POST", cookie, { challenge: stale, decision: "accept" });
+		expect([taken.status, taken.location]).toEqual([303, asking.onAccept]);
+	});
+
+	it("shows a pending consent only while its source says the value it was asked under", async () => {
 		const { clientOf, sessionFor, given, call } = await serve();
 		const { cookie, session } = await sessionFor("alice");
 		const client = await clientOf(documentId);
@@ -617,10 +657,6 @@ describe("consent: a client from another source", () => {
 		expect((await show()).status).toBe(200);
 		described.under = "d2";
 		expect(await show()).toMatchObject({ status: 400, body: { error: "unknown_challenge" } });
-		const answered = await call("POST", cookie, { challenge, decision: "accept" });
-		expect([answered.status, answered.location]).toEqual([303, asking.onAccept]);
-		expect(await given.coversFor(await clientOf(documentId), "alice", ["read"])).toBe(false);
-		expect(await given.coversFor(client, "alice", ["read", "write"])).toBe(true);
 	});
 
 	it("shows what was agreed to under the same value alone", async () => {
@@ -648,6 +684,23 @@ describe("consent: a client from another source", () => {
 		expect(await given.grantedFor(client, "alice")).toEqual([]);
 	});
 
+	it("answers no destinations for a real client where nothing composes the redirect URIs' section, as for a module's own ask", async () => {
+		const { clientOf, sessionFor, given, call } = await serve(undefined, undefined, []);
+		const { cookie, session } = await sessionFor("alice");
+		const challenge = challengeOf(await given.askFor(session, await clientOf("app"), asking));
+		const shown = await call("GET", cookie, { challenge });
+		expect(shown.status).toBe(200);
+		expect(shown.body).toMatchObject({ client_id: "app", redirect_hosts: [] });
+	});
+
+	it("tells a client a grant can never count for", async () => {
+		const { clientOf } = await serve();
+		expect(canBeAgreed(await clientOf("app"))).toBe(true);
+		expect(canBeAgreed(await clientOf(documentId))).toBe(true);
+		described.under = undefined;
+		expect(canBeAgreed(await clientOf(documentId))).toBe(false);
+	});
+
 	it("keeps no value for a client the operator registered, whose grants always count", async () => {
 		const { clientOf, sessionFor, given, call, grants } = await serve();
 		const { cookie, session } = await sessionFor("alice");
@@ -660,7 +713,7 @@ describe("consent: a client from another source", () => {
 		expect(grants.stand.peek(key)).toEqual({ format: 2, range: ["read", "write"] });
 	});
 
-	it("holds a pending consent kept without a value to no value: shown to no client from another source, and whatever is accepted is no grant for one", async () => {
+	it("holds a pending consent kept without a value to no value: neither shown nor answered for a client from another source", async () => {
 		const { asks, clientOf, sessionFor, given, call } = await serve();
 		const { cookie, session } = await sessionFor("alice");
 		const challenge = "c".repeat(43);
@@ -673,7 +726,10 @@ describe("consent: a client from another source", () => {
 			status: 400,
 			body: { error: "unknown_challenge" },
 		});
-		expect((await call("POST", cookie, { challenge, decision: "accept" })).status).toBe(303);
+		expect(await call("POST", cookie, { challenge, decision: "accept" })).toMatchObject({
+			status: 400,
+			body: { error: "unknown_challenge" },
+		});
 		expect(await given.coversFor(await clientOf(documentId), "alice", ["read"])).toBe(false);
 	});
 });

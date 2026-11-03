@@ -23,6 +23,7 @@
 - Client metadata section `consent`: `first-party` (default false), `name` (trimmed, cut to 200 characters), `uri` (an https URL), `host` and `under`.
 - `clientCopy`, contributed to `client-documents`' `documentCopies`: from a document, `client_name` (refused absent, not a string or blank), `client_uri` as written, the host its source checked, and its source's digest as `under`, never `first-party`.
 - `isFirstParty`: true only for a client the operator registered with `first-party` set; every start warns `consent.first_party` for each such client.
+- `canBeAgreed`: whether a grant can ever count for a client: false for one from another source whose section says no `under`, which a caller is to refuse rather than ask.
 - Operator section: `page` (an https URL without userinfo or fragment, or plain http on a loopback host outside production, as `authorize`'s login page; unset by default, so nobody is asked) and `challenge-lifetime` (written with its unit, `1m` to `1h` in whole seconds, default `10m`).
 - Store interfaces for grants and asks: save once, read, and update from what the record holds.
 - `./testing`: configuration builders, both store interfaces on `records` stand-ins, and the store contract tests.
@@ -44,7 +45,7 @@
 - `kernel`, `http`, `url-setting`, `request-source`, `session`, `csrf`, `clients`, `client-documents`, `redirect-uris`, `audit`
 
 ## Vocabulary
-- Consent range: a set of strings from the caller; consent only takes unions of it.
+- Consent range: a set of strings from the caller; a grant widens by their union, and under another `under` starts anew.
 - Pending consent: what the caller asked (`Asked`) with the subject, the deadline and any answer.
 - Ask: one pending consent as the ask store keeps it.
 - First-party: a client the operator runs, which needs no consent.

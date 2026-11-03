@@ -2,11 +2,12 @@ import { audit, declaredAudit } from "@mod/audit";
 import { clients } from "@mod/clients";
 import type { HttpRequest, HttpResponse, Route } from "@mod/http";
 import { jsonAnswer, noStore } from "@mod/http";
+import type { Client, Clients } from "@mod/clients";
 import { type BuildContext, isUnavailable } from "@mod/kernel";
 import { redirectsShown } from "@mod/redirect-uris";
 import { determinedSource } from "@mod/request-source";
 import { sessions } from "@mod/session";
-import { askKey, pendingOf, storedOf } from "../ask.ts";
+import { askKey, type Pending, pendingOf, storedOf } from "../ask.ts";
 import events from "../audit-events.ts";
 import { shownOf, underOf } from "../client-section.ts";
 import { grantsOver } from "../grants/grants.ts";
@@ -30,6 +31,18 @@ function guarded(handle: (request: HttpRequest) => Promise<HttpResponse>) {
 	};
 }
 
+/**
+ * The client a pending consent asks of, while it exists and, from another source, says what it was
+ * asked under: what it says now was not what this challenge asks about, so neither route takes it.
+ */
+const askedOf = async (
+	listed: Pick<Clients, "find">,
+	pending: Pending,
+): Promise<Client | undefined> => {
+	const client = await listed.find(pending.clientId);
+	return client && (client.registered || pending.under === underOf(client)) ? client : undefined;
+};
+
 /** `GET /oauth/consent`: what the page shows of the session's pending consent. */
 export async function showOver(c: BuildContext<unknown>): Promise<Pick<Route, "handle">> {
 	const opened = await c.get(sessions);
@@ -46,18 +59,15 @@ export async function showOver(c: BuildContext<unknown>): Promise<Pick<Route, "h
 			const now = c.clock.now();
 			if (!pending || pending.answer || pending.deadline <= now)
 				return jsonAnswer(400, { error: "unknown_challenge" });
-			const client = await listed.find(pending.clientId);
+			const client = await askedOf(listed, pending);
 			if (!client) return jsonAnswer(400, { error: "unknown_challenge" });
-			// Asked of what the client was: what it says now was not what this challenge asks about.
-			if (!client.registered && pending.under !== underOf(client))
-				return jsonAnswer(400, { error: "unknown_challenge" });
 			const { name, uri, host } = shownOf(client);
 			return jsonAnswer(200, {
 				client_id: pending.clientId,
 				...(host === undefined ? {} : { client_id_host: host }),
 				...(name === undefined ? {} : { client_name: name }),
 				...(uri === undefined ? {} : { client_uri: uri }),
-				redirect_hosts: redirectsShown(client).map(({ host, kind }) => ({ host, kind })),
+				redirect_hosts: redirectsShown(client),
 				scopes: pending.range,
 				granted_scopes: await grants.rangeFor(client, pending.subject),
 				expires_in: Math.ceil((pending.deadline - now) / 1000),
@@ -72,6 +82,7 @@ export async function answerOver(c: BuildContext<unknown>): Promise<Pick<Route, 
 	const asks = await c.get(askStore);
 	const grants = await grantsOver(c);
 	const recorded = await c.get(audit);
+	const listed = await c.get(clients);
 	return {
 		handle: guarded(async (request) => {
 			if (request.fields.repeated().length > 0) {
@@ -84,9 +95,13 @@ export async function answerOver(c: BuildContext<unknown>): Promise<Pick<Route, 
 			if (!session) return jsonAnswer(401, { error: "no_session" });
 			const challenge = challengeIn(request.fields.single("challenge"));
 			if (!challenge) return jsonAnswer(400, { error: "unknown_challenge" });
+			const key = askKey(session.id, challenge);
+			const asked = pendingOf(await asks.read(key));
+			if (!asked || !(await askedOf(listed, asked)))
+				return jsonAnswer(400, { error: "unknown_challenge" });
 			// The pending consent keeps its answer: a resend of this decision gets the same back, the other none.
 			const now = c.clock.now();
-			const marked = await asks.update(askKey(session.id, challenge), (record) => {
+			const marked = await asks.update(key, (record) => {
 				const held = pendingOf(record);
 				return held.answer ? undefined : { value: storedOf({ ...held, answer: decision }) };
 			});

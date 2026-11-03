@@ -51,7 +51,7 @@ export const clientSection: Section<ClientShown> = {
 			.refine((text) => !spaceOrControl.test(text))
 			.optional()
 			.describe(
-				"What the client's source says of the description it read, which a grant is agreed under; it counts only for a client the operator did not register.",
+				"What the client's source says of the description it read, which a grant is agreed under; ignored on a client the operator registered.",
 			),
 	}),
 };
@@ -87,6 +87,11 @@ export function isFirstParty(client: Client): boolean {
 /** What a grant for the client is agreed under: nothing for a client the operator registered. */
 export function underOf(client: Client): string | undefined {
 	return client.registered ? undefined : client.section(clientSection).under;
+}
+
+/** Whether a grant can ever count for the client: not for one from another source that says nothing it is agreed under. */
+export function canBeAgreed(client: Client): boolean {
+	return client.registered || underOf(client) !== undefined;
 }
 
 /** What the consent page shows of the client; a host only for a client from another source. */

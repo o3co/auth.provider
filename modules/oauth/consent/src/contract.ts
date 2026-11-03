@@ -27,5 +27,11 @@ export interface Consents {
 }
 
 export const consents = contract<Consents>("consent");
-export { type ClientShown, clientCopy, clientSection, isFirstParty } from "./client-section.ts";
+export {
+	type ClientShown,
+	canBeAgreed,
+	clientCopy,
+	clientSection,
+	isFirstParty,
+} from "./client-section.ts";
 export * from "./store.ts";
