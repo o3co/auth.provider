@@ -41,8 +41,15 @@ it("tells whether an origin is the scheme, host and port of one of the client's 
 	expect(redirectsAt(registering([]), "https://app.example")).toBe(false);
 });
 
-it("answers no for a client whose record holds no authorize section, as where authorize is not composed", () => {
-	const bare: Client = { ...registering([]), section: <T>() => undefined as T };
+/** A client read where the section is not composed: `clients` throws for a section no module contributed. */
+const bare: Client = {
+	...registering([]),
+	section: () => {
+		throw new Error("no module contributes the section authorize");
+	},
+};
+
+it("answers no for a client read where authorize is not composed", () => {
 	expect(redirectsAt(bare, "https://app.example")).toBe(false);
 });
 
@@ -162,7 +169,6 @@ describe("redirect URIs as a page shows them", () => {
 	});
 
 	it("shows none for a client read where the section is not composed", () => {
-		const bare: Client = { ...registering([]), section: <T>() => undefined as T };
 		expect(redirectsShown(bare)).toEqual([]);
 	});
 });
@@ -184,6 +190,15 @@ it("registers https, http to localhost or loopback literals, and reverse-domain 
 		"https:/app.example/cb",
 		"https:\\\\app.example/cb",
 		"HTTPS:app.example/cb",
+		"https:///app.example/cb",
+		"https:////app.example/cb",
+		"https://\\app.example/cb",
+		"https://app.example\\@evil.example/cb",
+		"https://@app.example/cb",
+		"https://:@app.example/cb",
+		"https://app.example/c\\b",
+		"http://localhost/c\\b",
+		"com.example.app:/c\\b",
 		"http://app.example/cb",
 		"http://localhost.example/cb",
 		"myapp:/cb",

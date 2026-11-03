@@ -18,7 +18,7 @@
 - `./testing`: `redirectsFor` (URIs → a client's sections registering them).
 
 ## Invariants
-- A registrable URI is https followed by `//`, so that it says its host the one way every reader of an answer sent as written takes it; http to localhost or a loopback IP literal, or a private-use reverse-domain scheme not starting with `javascript.` (RFC 8252).
+- A registrable URI holds no backslash, and is https with a host right after its `//`, so that it says its host the one way every reader of an answer sent as written takes it; http to localhost or a loopback IP literal, or a private-use reverse-domain scheme not starting with `javascript.` (RFC 8252).
 - Fragments, userinfo, control characters, and query parameters named like a response parameter are refused.
 - Matching compares the strings with no normalization; for a loopback IP literal (127.x or [::1]) alone, the port is dropped before comparing. localhost is not one.
 - The answer's parameters are added to the redirect URI's own query.

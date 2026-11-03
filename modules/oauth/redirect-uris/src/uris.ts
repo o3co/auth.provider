@@ -14,7 +14,7 @@ export function registrable(uri: string): boolean {
 		const code = ch.codePointAt(0) ?? 0;
 		return code < 0x20 || code === 0x7f || /\s/.test(ch);
 	});
-	if (control) return false;
+	if (control || uri.includes("\\")) return false;
 	let parsed: URL;
 	try {
 		parsed = new URL(uri);
@@ -28,8 +28,9 @@ export function registrable(uri: string): boolean {
 		(loopbackLiteral.test(uri) || /^http:\/\/localhost(:\d{1,5})?(\/|\?|$)/.test(uri));
 	const native = reverseDomain.test(scheme) && !scheme.startsWith("javascript.");
 	if (scheme !== "https:" && !local && !native) return false;
-	// An answer goes out as written, so a URI says its host the one way every reader of it takes.
-	if (scheme === "https:" && !/^https:\/\//i.test(uri)) return false;
+	// An answer goes out as written, so a URI says its host the one way every reader of it takes:
+	// after `https://`, a host begins.
+	if (scheme === "https:" && !/^https:\/\/[^/?#:@]/i.test(uri)) return false;
 	return !answerNames.some((name) => parsed.searchParams.has(name));
 }
 

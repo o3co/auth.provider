@@ -17,12 +17,12 @@ export const redirects: Section<Redirects> = {
 					.string()
 					.refine(
 						registrable,
-						"an absolute URI, https written with its //, without a fragment, userinfo, control characters, or a query named like a response parameter",
+						"an absolute URI, https with a host right after its //, without a fragment, userinfo, backslash, control characters, or a query named like a response parameter",
 					),
 			)
 			.prefault([])
 			.describe(
-				"The redirect URIs the client may ask for, each matched as written: https followed by //, http to a loopback host, or a private-use reverse-domain scheme, with no fragment, userinfo or query parameter named like a response parameter.",
+				"The redirect URIs the client may ask for, each matched as written: https with a host right after its //, http to a loopback host, or a private-use reverse-domain scheme, with no fragment, userinfo, backslash or query parameter named like a response parameter.",
 			),
 	}),
 };
@@ -41,9 +41,14 @@ export const redirectsCopy: DocumentCopy = {
 	copy: copied,
 };
 
-/** A client's redirect URIs; a client read where the section is not composed holds no section at all, so none. */
-const urisOf = (client: Client) =>
-	(client.section(redirects) as Redirects | undefined)?.["redirect-uris"] ?? [];
+/** A client's redirect URIs; `clients` throws for a section no module composed, which here means none. */
+const urisOf = (client: Client): readonly string[] => {
+	try {
+		return client.section(redirects)["redirect-uris"];
+	} catch {
+		return [];
+	}
+};
 
 /**
  * Whether `origin` is the scheme, host and port of one of the client's registered redirect URIs, as
