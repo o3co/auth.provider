@@ -12,7 +12,7 @@ Internal module of `authorize`: whether a request needs the user's consent befor
 - `consentDecisionOver` (the build context) → `consentDecisionWith` (`consent`'s records) → denied (single values → a refusal / none), served (client → a refusal / none), decide (client, session, scope, prompt words, the endpoint's URL again → none / a refusal / the consent page), consented (client, subject, one scope → whether agreed to, always for a first-party client).
 
 ## Invariants
-- `served` refuses a client that is not first-party with `unauthorized_client` while `consent` is not `asking`; `decide` is asked after it, and reads no records for a first-party client.
+- `served` refuses a client that is not first-party with `unauthorized_client` while `consent` is not `asking`, and one `consent` says no grant can count for (`canBeAgreed`), recorded `client_agreed_under_nothing`, as no answer could cover it and the browser would be asked for ever; `decide` is asked after it, and reads no records for a first-party client.
 - `consent`'s records are read only for a client that is not first-party and did not ask `prompt=consent`, and for the client the caller holds, the one the request's redirect URI was checked against: its id is never looked up again.
 - Under `prompt=none`, a request that would be asked is refused with `consent_required`, with that as its reason.
 - The destinations after consent and after denial are both the endpoint's URL. After consent it drops the re-authentication record and the prompt words `login` and `consent`, keeping `max_age`, measured again on the way back; denial adds `consent_denied`, and a request carrying it is refused with `access_denied`.

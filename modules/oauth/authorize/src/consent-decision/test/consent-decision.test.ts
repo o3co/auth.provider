@@ -84,6 +84,24 @@ describe("consent-decision", () => {
 		expect(await decided).toBeUndefined();
 	});
 
+	it("refuses, recorded, a client from another source that says nothing a grant could be agreed under, as no answer could ever cover it", () => {
+		const decision = consentDecisionWith({
+			consents: { asking: true, askFor: async () => "", coversFor: async () => false },
+		});
+		expect(decision.served(clientOf("elsewhere", false, false))).toEqual({
+			kind: "refuse",
+			error: "unauthorized_client",
+			reason: "client_agreed_under_nothing",
+			description: "client is not authorized for the authorization endpoint",
+		});
+		const under = (client: Client): Client => ({
+			...client,
+			section: <T>() => ({ "first-party": false, under: "d1" }) as T,
+		});
+		expect(decision.served(under(clientOf("documented", false, false)))).toBeUndefined();
+		expect(decision.served(clientOf("named", false))).toBeUndefined();
+	});
+
 	it("refuses a silent request with consent_required, so no code, unless its client is first-party or the subject agreed to its whole scope [rfc9700-4.11.2-a]", async () => {
 		const decision = consentDecisionWith({
 			consents: {
