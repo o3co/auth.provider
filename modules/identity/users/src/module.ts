@@ -6,7 +6,7 @@ import { contributedSource } from "./ledger/contributed.ts";
 import { ledgerUsers } from "./ledger.ts";
 import { keptLinks } from "./links/kept.ts";
 import { ledgerLinks } from "./links/ledger.ts";
-import { issuersRefused, namesRefused } from "./names/names.ts";
+import { issuersJudged, namesRefused } from "./names/names.ts";
 import { keyOf, record, registeredUsers } from "./registered.ts";
 import { contactStore, linkStore } from "./store.ts";
 
@@ -99,8 +99,13 @@ export default defineModule(
 				: registeredUsers(c.section.registered, (inUse) => checkers.checkerOf(inUse));
 			const links = await c.get(linkStore);
 			const moved = c.section["issuer-moved"];
-			const across = await issuersRefused(declarations, moved, links, c.log);
-			if (across.length > 0) return c.refuseAll(across);
+			const across = await issuersJudged(declarations, moved, links, c.log);
+			if (across.refusals.length > 0) return c.refuseAll(across.refusals);
+			// Written only once no module refuses this boot, so a refused one changes nothing kept.
+			c.onBuilt(async () => {
+				const refusals = await across.settle();
+				if (refusals.length > 0) c.refuseAll(refusals);
+			});
 			// A ledger that looks users up by upstream identity has the last word on links: none is written.
 			const linking = ledger?.byUpstream ? ledgerLinks(source) : keptLinks(source, links);
 			return ledgerUsers(source, linking, await c.get(contactStore));

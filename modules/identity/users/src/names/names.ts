@@ -40,79 +40,90 @@ const issuerIn = (record: StoredLink) => {
 	return typeof issuer === "string" ? issuer : "";
 };
 
+/** What a boot read of the names: what it refuses, and what to write once no module refuses it. */
+export interface IssuersJudged {
+	readonly refusals: readonly Refusal[];
+	/** Keeps each name and moves it as stated, answering what is refused of what it finds written. */
+	readonly settle: () => Promise<readonly Refusal[]>;
+}
+
+/** The refusal a store that cannot answer is, never no record. */
+const cannotAnswer: readonly Refusal[] = [
+	{
+		where: "users",
+		reason: "the link store cannot answer for the issuers IdP names stand for",
+	},
+];
+async function answeredBy<T>(run: () => Promise<T>, otherwise: T): Promise<T> {
+	try {
+		return await run();
+	} catch (thrown) {
+		if (!isUnavailable(thrown)) throw thrown;
+		return otherwise;
+	}
+}
+
 /**
- * Holds each declared name to the issuer kept for it, keeping it the first time and moving it as
- * stated, and answers what is refused. It judges every name and entry before it writes, so a refused
- * boot leaves what is kept. `declarations` have passed `namesRefused`, each name one issuer.
+ * Holds each declared name to the issuer kept for it, writing nothing: `settle` keeps it the first
+ * time and moves it as stated. `declarations` have passed `namesRefused`, each name one issuer.
  */
-async function settled(
+export async function issuersJudged(
 	declarations: readonly UpstreamNames[],
 	moved: readonly IssuerMoved[],
 	links: LinkStore,
 	log: Pick<Log, "warn">,
-): Promise<readonly Refusal[]> {
+): Promise<IssuersJudged> {
 	const byName = Map.groupBy(declaredIn(declarations), (n) => n.name);
 	const issuerOf = (name: string) => byName.get(name)?.[0]?.issuer;
-	const kept = new Map<string, string | undefined>();
-	for (const name of byName.keys()) {
-		const record = await links.read(keyOf(name));
-		kept.set(name, record === undefined ? undefined : issuerIn(record));
-	}
 	const differs = (name: string): Refusal => ({
 		where: "users",
 		reason: `an IdP name stands for another issuer than the one kept for it, ${asDeclared(byName.get(name) ?? [])}: use a new name, or state the move in users.issuer-moved`,
 	});
-	const refusals: Refusal[] = [];
+	const kept = new Map<string, string | undefined>();
 	const moving = new Map<string, IssuerMoved>();
-	for (const [i, entry] of moved.entries()) {
-		const held = kept.get(entry.idp);
-		if (issuerOf(entry.idp) === entry.to && held === entry.to) continue;
-		if (issuerOf(entry.idp) === entry.to && held === entry.from) {
-			moving.set(entry.idp, entry);
-			continue;
+	const judged = async (): Promise<readonly Refusal[]> => {
+		for (const name of byName.keys()) {
+			const record = await links.read(keyOf(name));
+			kept.set(name, record === undefined ? undefined : issuerIn(record));
 		}
-		refusals.push({
-			where: `users.issuer-moved.${i}`,
-			reason:
-				"the issuer kept for this IdP and the one declared are neither its from and to, nor both its to",
-		});
-	}
-	for (const [name, held] of kept) {
-		if (held !== undefined && held !== issuerOf(name) && !moving.has(name))
-			refusals.push(differs(name));
-	}
-	if (refusals.length > 0) return refusals;
-	for (const [name, held] of kept) {
-		const issuer = issuerOf(name) as string;
-		if (held === issuer) continue;
-		const move = moving.get(name);
-		// Another instance may keep or move it first: what it wrote is judged as read here.
-		const { after } = await written(links, keyOf(name), recordOf(issuer), (record) =>
-			move && issuerIn(record) === move.from ? { value: recordOf(move.to) } : undefined,
-		);
-		if (issuerIn(after) !== issuer) refusals.push(differs(name));
-	}
-	if (refusals.length > 0) return refusals;
-	for (const entry of moved) log.warn("users.issuer_moved", { idp: entry.idp });
-	return [];
-}
-
-/** What is refused of the names across boots; a store that cannot answer is one thing refused, never no record. */
-export async function issuersRefused(
-	declarations: readonly UpstreamNames[],
-	moved: readonly IssuerMoved[],
-	links: LinkStore,
-	log: Pick<Log, "warn">,
-): Promise<readonly Refusal[]> {
-	try {
-		return await settled(declarations, moved, links, log);
-	} catch (thrown) {
-		if (!isUnavailable(thrown)) throw thrown;
-		return [
-			{
-				where: "users",
-				reason: "the link store cannot answer for the issuers IdP names stand for",
-			},
-		];
-	}
+		const refusals: Refusal[] = [];
+		for (const [i, entry] of moved.entries()) {
+			const held = kept.get(entry.idp);
+			if (issuerOf(entry.idp) === entry.to && held === entry.to) continue;
+			if (issuerOf(entry.idp) === entry.to && held === entry.from) {
+				moving.set(entry.idp, entry);
+				continue;
+			}
+			refusals.push({
+				where: `users.issuer-moved.${i}`,
+				reason:
+					"the issuer kept for this IdP and the one declared are neither its from and to, nor both its to",
+			});
+		}
+		for (const [name, held] of kept) {
+			if (held !== undefined && held !== issuerOf(name) && !moving.has(name))
+				refusals.push(differs(name));
+		}
+		return refusals;
+	};
+	const writeKept = async (): Promise<readonly Refusal[]> => {
+		const refusals: Refusal[] = [];
+		for (const [name, held] of kept) {
+			const issuer = issuerOf(name) as string;
+			if (held === issuer) continue;
+			const move = moving.get(name);
+			// Another instance may keep or move it first: what it wrote is judged as read here.
+			const { after } = await written(links, keyOf(name), recordOf(issuer), (record) =>
+				move && issuerIn(record) === move.from ? { value: recordOf(move.to) } : undefined,
+			);
+			if (issuerIn(after) !== issuer) refusals.push(differs(name));
+		}
+		if (refusals.length > 0) return refusals;
+		for (const entry of moved) log.warn("users.issuer_moved", { idp: entry.idp });
+		return [];
+	};
+	return {
+		refusals: await answeredBy(judged, cannotAnswer),
+		settle: () => answeredBy(writeKept, cannotAnswer),
+	};
 }

@@ -1,6 +1,7 @@
 import {
 	assemble,
 	BootRefused,
+	contract,
 	defineModule,
 	kernelConfig,
 	type Module,
@@ -187,6 +188,65 @@ describe("an IdP name's issuer, across boots", () => {
 		const held = { issuer: 7 } as unknown as Parameters<LinkStore["save"]>[1];
 		await stores.links.store.save(nameKey("corp"), held, "endless");
 		expect((await boot(stores)).refusals).toEqual(refusedAs("federation declares"));
+	});
+});
+
+describe("a boot another module refuses", () => {
+	const refusing = defineModule({ name: "refusing", replicaSafe: true, takes: [] }, (m) => [
+		m.provide(contract<void>("refused")).by((c) => c.refuse("refusing", "refused on purpose")),
+	]);
+	const refusedOnPurpose = [{ where: "refusing", reason: "refused on purpose" }];
+	const stated = { idp: "corp", from: issuerA, to: issuerB };
+
+	it("leaves the record and a stated move as they were, and a boot back on the old issuer succeeds", async () => {
+		const stores = memoryUsersStores();
+		await boot(stores);
+		const refused = await boot(stores, {
+			names: { corp: issuerB },
+			moved: [stated],
+			more: [refusing],
+		});
+		expect(refused.refusals).toEqual(refusedOnPurpose);
+		expect(refused.warnings).toEqual([]);
+		expect(await issuerKept(stores, "corp")).toEqual({ issuer: issuerA });
+		expect((await boot(stores)).refusals).toBeUndefined();
+		expect(await issuerKept(stores, "corp")).toEqual({ issuer: issuerA });
+	});
+
+	it("keeps no entry first seen, which is kept once a boot succeeds", async () => {
+		const stores = memoryUsersStores();
+		const refused = await boot(stores, { more: [refusing] });
+		expect(refused.refusals).toEqual(refusedOnPurpose);
+		expect(await issuerKept(stores, "corp")).toBeUndefined();
+		expect((await boot(stores)).refusals).toBeUndefined();
+		expect(await issuerKept(stores, "corp")).toEqual({ issuer: issuerA });
+	});
+});
+
+describe("what a boot writes of a name's issuer, once no module refuses it", () => {
+	it("refuses a difference another instance wrote since it judged, leaving that instance's", async () => {
+		const stores = memoryUsersStores();
+		await boot(stores);
+		stores.links.raceNextUpdate(nameKey("corp"), () => ({ issuer: issuerC }) as never);
+		const refused = await boot(stores, {
+			names: { corp: issuerB },
+			moved: [{ idp: "corp", from: issuerA, to: issuerB }],
+		});
+		expect(refused.refusals).toEqual(refusedAs("federation declares"));
+		expect(refused.warnings).toEqual([]);
+		expect(await issuerKept(stores, "corp")).toEqual({ issuer: issuerC });
+	});
+
+	it("refuses boot where the store cannot answer the write, never reading that as kept", async () => {
+		const stores = memoryUsersStores();
+		vi.spyOn(stores.links.store, "update").mockRejectedValueOnce(new Unavailable("store"));
+		const refused = await boot(stores);
+		expect(refused.refusals).toEqual([
+			{
+				where: "users",
+				reason: "the link store cannot answer for the issuers IdP names stand for",
+			},
+		]);
 	});
 });
 
