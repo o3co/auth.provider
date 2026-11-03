@@ -12,7 +12,7 @@ import { oauthArea } from "@mod/conformance-oauth";
 import { afterEach, describe, expect, it } from "vitest";
 import { browser as openBrowser, probeClient } from "../../../test/browser.ts";
 import { fakeUpstream } from "../../../test/upstream.ts";
-import { grantsAt, grantsScene, scopes, upstreamClient } from "../../grants/test/grants.ts";
+import { back, grantsAt, grantsScene, scopes, upstreamClient } from "../../grants/test/grants.ts";
 import { type FederationScene, federationScene, landedStatus } from "../../main.ts";
 
 const origin = "https://issuer.example";
@@ -327,5 +327,29 @@ describe("a grant's refresh across starts", () => {
 		);
 		stops.push(second.stop);
 		await refusedAtNext(second.instance, a, id, [a, b]);
+		const moved = grantsAt(() => second.instance.baseUrl, b);
+		// Another person's subject at the new issuer stays refused, by who holds it there.
+		const lodged = await moved.grantCall(id, "reauthorize", { redirect_uri: back, state: "st-1" });
+		const browser = await moved.loggedIn();
+		const { challenge } = await moved.open(browser, lodged.body.connect_uri);
+		const asked = await moved.answer(browser, { challenge, decision: "accept" });
+		const someoneElse = await moved.callback(
+			browser,
+			b.authorize(asked.location, { subject: "u-bob", tokens: { scope: scopes.join(" ") } }),
+		);
+		expect(moved.returned(someoneElse).get("error")).toBe("identity_conflict");
+		// Reauthorized, the grant holds the new issuer, and a refresh goes there.
+		const { done } = await moved.connected({ expiresIn: 2 }, { renew: id, b: browser });
+		expect(moved.returned(done).get("error")).toBeNull();
+		const status = await moved.grantCall(id, "status");
+		expect([status.body.status, status.body.upstream]).toEqual([
+			"active",
+			{ issuer: b.issuer, subject: "u-alice" },
+		]);
+		await new Promise((resolve) => setTimeout(resolve, 1100));
+		const token = await moved.grantCall(id, "token");
+		expect(token.status).toBe(200);
+		expect(b.refreshCalls).toHaveLength(1);
+		expect(a.refreshCalls).toEqual([]);
 	});
 });
