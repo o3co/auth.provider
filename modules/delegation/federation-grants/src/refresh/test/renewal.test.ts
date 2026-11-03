@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { harness, said, scopes, upstreamTokens } from "./harness.ts";
+import { harness, said, scopes, upstreamTokens } from "../../../test/harness.ts";
 
 /** A grant whose token is due: four seconds of life, past half of it. */
 async function due(settings: Parameters<typeof harness>[0] = {}) {
