@@ -115,7 +115,7 @@ describe("a pool's lookups", () => {
 		expect(h.latest().killed).toBe(0);
 	});
 
-	it("fails only the lookup a system error no list names answers, keeping the helper and the other lookups", async () => {
+	it("fails only the lookup any system error code answers, keeping the helper and the other lookups", async () => {
 		const h = harness();
 		await h.ready();
 		const failing = h.pool.run("nowhere");
