@@ -1,11 +1,12 @@
 import { setting } from "@mod/kernel";
 import { z } from "zod";
+import { lifetimeSecondsRange } from "./contract.ts";
 
 export const section = z.strictObject({
 	"access-token-lifetime": setting
 		.duration("s")
 		// A second's lifetime, its iat cut to the second, leaves less than a second once signed: never issued.
-		.pipe(z.number().int().min(2).max(86_400))
+		.pipe(z.number().int().min(lifetimeSecondsRange.min).max(lifetimeSecondsRange.max))
 		.prefault("1h")
 		.describe(
 			"How long an access token lives, from when it is asked for (the issuance policies' wait included), from `2s` to `1d` in whole seconds.",

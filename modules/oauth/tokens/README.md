@@ -11,7 +11,7 @@
 
 ## Offers
 - Issuance only through `issue`, policies first: `issue(request: grant, grant type, session, `continuing` (set by an issuing side whose grant the policies already let through); limits)` → issued, or refused by the first policy to refuse.
-- What it issues for: a grant (subject, issued-to, audience, scope; optionally an actor chain, `amr`, an authentication time, `acr`, a standing time and the `claims` it adds), an expiry cap, a binding, and a lifetime other than the section's (2–86400 s) → the token, its id, expiry, token type and the added claims' names.
+- What it issues for: a grant (subject, issued-to, audience, scope; optionally an actor chain, `amr`, an authentication time, `acr`, a standing time and the `claims` it adds), an expiry cap, a binding, and a lifetime other than the section's (`lifetimeSecondsRange`: 2–86400 s) → the token, its id, expiry, token type and the added claims' names.
 - Verification → the id, the grant (its added claims frozen), the standing time (its standing claim, else its issue), the token type (Bearer, or the bound kind's) and the binding; the validity check `sender-binding` admits a request at a resource by.
 - Issued-to, for the revoking side to check the owner: answered for revoked tokens and within the allowance past expiry too; never for authorization.
 - Revocation, directly or by a reference to an issued token (its shape is `tokens`' own), within the allowance past expiry; or unsupported, which `revocable` tells and every start warns of (`tokens.revocation_unsupported`). Whether subjects are checked, which `subjectsChecked` tells: false only where the section states `subject-check = none`, which every start warns of (`tokens.subjects_unchecked`).

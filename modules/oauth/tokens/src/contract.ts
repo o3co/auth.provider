@@ -122,6 +122,13 @@ export interface IssueLimits {
 	readonly lifetimeSeconds?: number;
 }
 
+/**
+ * The whole seconds an access token may be given to live: `lifetimeSeconds` in `IssueLimits`, any
+ * other answered by `issue` with a RangeError, and the section's `access-token-lifetime`. A grant
+ * may check at boot the value it will give against it.
+ */
+export const lifetimeSecondsRange = Object.freeze({ min: 2, max: 86_400 });
+
 /** Its `verifyAccess` is the validity `sender-binding` checks a token by at a resource. */
 export interface Tokens extends TokenValidity<AccessCheck> {
 	revocable(): boolean;

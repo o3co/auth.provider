@@ -12,6 +12,7 @@ import {
 	type IssuanceVerdict,
 	type IssueLimits,
 	issuancePolicies,
+	lifetimeSecondsRange,
 	referenceOf,
 	subjectChecks,
 	type Tokens,
@@ -440,6 +441,22 @@ export function tokensContract(
 			});
 			expect(capped.expiresIn).toBe(120);
 			for (const lifetimeSeconds of [0, 1, 86_401, 1.5, Number.NaN]) {
+				await expect(
+					issueFor(place.tokens, grant, { lifetimeSeconds }),
+					String(lifetimeSeconds),
+				).rejects.toBeInstanceOf(RangeError);
+			}
+		});
+
+		it("holds a lifetime asked to the range it exports, for a grant to check at boot what it will give", async () => {
+			expect(lifetimeSecondsRange).toEqual({ min: 2, max: 86_400 });
+			const place = await open({ revocable: true });
+			const { min, max } = lifetimeSecondsRange;
+			for (const lifetimeSeconds of [min, max]) {
+				const issued = await issueFor(place.tokens, grant, { lifetimeSeconds });
+				expect(issued.expiresIn).toBe(lifetimeSeconds);
+			}
+			for (const lifetimeSeconds of [min - 1, max + 1]) {
 				await expect(
 					issueFor(place.tokens, grant, { lifetimeSeconds }),
 					String(lifetimeSeconds),
