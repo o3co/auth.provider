@@ -15,6 +15,7 @@ Read the [migration guide](docs/migration.md) before upgrading: each line below 
 - `consent`, `client-documents`: a client's section takes `under`, what a grant is agreed under, which its source sets, a document's from the `digest` its source says ([U-0.19-133](docs/migration.md#u-0.19-133)).
 - `clients-cimd`: `digest-algorithm`, `sha-256` alone, names the algorithm of a document's digest; changing it would ask each user of such a client once more.
 - `users`: `users.issuer-moved` states an IdP name's move to another issuer ([U-0.19-138](docs/migration.md#u-0.19-138)).
+- `kernel`: `onBuilt`, a hook that runs once every build passed, before `assemble` answers.
 - `tokens`: `lifetimeSecondsRange`, the range a grant's `lifetimeSeconds` is taken in ([U-0.19-50](docs/migration.md#u-0.19-50)).
 
 ### Changed
@@ -27,6 +28,7 @@ Read the [migration guide](docs/migration.md) before upgrading: each line below 
 - `authorize`: a client from a source that says nothing a grant could be agreed under is refused `unauthorized_client`, recorded `client_agreed_under_nothing` ([U-0.19-133](docs/migration.md#u-0.19-133)).
 - `users`: a start declaring another issuer for an IdP name than the one kept for it is refused, and a link store that cannot answer for a declared name refuses boot ([U-0.19-138](docs/migration.md#u-0.19-138)).
 - `federation-grants`, `federation-grants-connect`: a grant whose connection has come to another issuer, once a refresh is due, answers `410 reauthorization_required`, with `upstream_issuer_changed`, and its credentials are erased; reauthorizing it binds the new issuer ([U-0.19-138](docs/migration.md#u-0.19-138)).
+- `upstreams`: `of` answers an upstream's `issuer` ([U-0.19-139](docs/migration.md#u-0.19-139)).
 - `tokens`: a `Tokens` of your own offers `accessTokenLifetimeSeconds` ([U-0.19-130](docs/migration.md#u-0.19-130)).
 - `redis`: one primary holding every key is a requirement of every composition, with no setting to loosen it ([U-0.19-7](docs/migration.md#u-0.19-7)).
 
