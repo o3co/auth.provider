@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { refusalsOf, unreadable } from "../../../test/refusals.ts";
 import {
 	assemble,
 	contract,
@@ -7,8 +8,7 @@ import {
 	extensionPoint,
 	type Handle,
 	kernelConfig,
-} from "../src/contract.ts";
-import { refusalsOf, unreadable } from "./refusals.ts";
+} from "../../contract.ts";
 
 const single = kernelConfig();
 const none = (label: string) => ({ where: "", reason: `no module provides ${label}` });
