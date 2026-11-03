@@ -1,8 +1,8 @@
 import { audit, declaredAudit } from "@mod/audit";
+import type { Client, Clients } from "@mod/clients";
 import { clients } from "@mod/clients";
 import type { HttpRequest, HttpResponse, Route } from "@mod/http";
 import { jsonAnswer, noStore } from "@mod/http";
-import type { Client, Clients } from "@mod/clients";
 import { type BuildContext, isUnavailable } from "@mod/kernel";
 import { redirectsShown } from "@mod/redirect-uris";
 import { determinedSource } from "@mod/request-source";
