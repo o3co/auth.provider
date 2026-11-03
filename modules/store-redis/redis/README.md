@@ -4,13 +4,13 @@
 - Implements the `store` contract with Redis, with one script per shape of basic operation and none per feature.
 - Maps each partition to a hash tag, so a batch and a consistent read run in one slot. A batch across partitions runs in one script on the one server, over the slots of every partition it touches.
 - Checks, once at boot, that the Redis configuration gives the declared spaces their guarantees.
-- Confirms an answer before giving it, for spaces that need replicated or confirmed reads.
+- Confirms an answer before giving it, for spaces that need replicated or confirmed reads (internal module `round`).
 
 ## Not here
 - Space names and meanings, and the shapes of values. Which feature uses it.
 
 ## Offers
-- Composition definition only: implements `store`.
+- Composition definition only.
 - The probe `redis` at `kernel`'s `probes`: each run PINGs both connections and, at most once a second, checks again what boot checked of the server, answering unready and logging `redis.settings_unmet` with what no longer holds when that changes.
 - Operator section:
   - `url` (`redis` or `rediss`, with no query), `address-family` (`ipv4`, `ipv6`, or either unset), `prefix` (lower-case letters, digits and `-`; default `store`).
@@ -27,10 +27,9 @@
 - A setting is read by `CONFIG GET`. Where the server refuses it for good (`NOPERM`, or an unknown command or subcommand) or answers it empty, not showing it, the declared value is taken, a needed one left undeclared refusing boot, and every boot warns `redis.settings_declared` with the names taken so; where it answers, a declared value that differs refuses boot; any other error (`BUSY`, say) refuses boot.
 - `durability` `none`: the operator states the server does not fsync every write, so a crash loses the latest writes, spent assertion and proof ids and lockout records among them; every boot warns `redis.durability_none` naming the durable spaces.
 - A refusal or a warning never tells the URL, which may hold a password; a failure is told by its code alone, never its message: an error event as `redis.error` with `code`, and a refused connection in `redis.url`'s reason.
-- `replicas`: at runtime, no replica seen is unavailable.
+- `replicas`: at runtime, no replica seen is unavailable, at boot too: `users`' read of an IdP name refuses a restart.
 - `none`: the operator states there is no failover, so even confirmed writes are lost by one; a replica seen at runtime is unavailable; every boot warns `redis.replication_none` naming the replicated spaces.
 - A timeout, too few replicas, or another server than the one that answered is unavailable, the answer then unknown.
-- Internal module `round` (the confirmation round).
 - Internal module `client`: boot warns `redis.plaintext` where the URL is in the clear. Production refuses `url` while `DEBUG` covers ioredis. Another floor refuses boot.
 - Every script first deletes keys whose expiry is at or before its time, as Redis still holds them then.
 - Versions are `server.epoch.n` and never repeat after a restart, a failover, or the end of the key counting them.
@@ -46,7 +45,7 @@
 - `appendonly yes`, `appendfsync always` and `no-appendfsync-on-rewrite no`, where a composed module keeps a durable space, unless `durability` is `none`.
 - With `replication` `replicas`: `min-replicas-to-write` and `min-replicas-max-lag` of 1 or more. With `none`: no replica connected.
 - `CONFIG GET` allowed, or the settings it would read declared in `server-settings`.
-- Allowed: `EVAL`, `PING` (the probe's), the commands the scripts call (`TIME`, `INFO`, `EXISTS`, `GET`, `HGET`, `HMGET`, `PTTL`, `PEXPIRETIME`, `SET`, `INCR`, `HSET`, `HINCRBY`, `PEXPIRE`, `PEXPIREAT`, `DEL`), `SCAN`, `ROLE` and the keys under the prefix; with `replication`, `SET` of `<prefix>:#confirm`, and with `replicas` `WAIT`.
+- Allowed: `EVAL`, `PING`, the commands the scripts call (`TIME`, `INFO`, `EXISTS`, `GET`, `HGET`, `HMGET`, `PTTL`, `PEXPIRETIME`, `SET`, `INCR`, `HSET`, `HINCRBY`, `PEXPIRE`, `PEXPIREAT`, `DEL`), `SCAN`, `ROLE` and the keys under the prefix; with `replication`, `SET` of `<prefix>:#confirm`, and with `replicas` `WAIT`.
 - The operator's, outside these checks: keeping a detached or lagging replica from promotion, replicas' disk writes, and what a `CONFIG SET` or a failover after boot lets through until a probe answers unready.
 
 ## Data
