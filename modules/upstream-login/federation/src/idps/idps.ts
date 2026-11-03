@@ -25,14 +25,15 @@ export async function idpsIn(c: BuildContext<Settings>) {
 	return idps;
 }
 
-/** `upstreams` over the opened IdPs: each one's refresh, end of session and delegation. */
+/** `upstreams` over the opened IdPs: each one's issuer, refresh, end of session and delegation. */
 const upstreamsWith = (idps: ReadonlyMap<string, Idp>) => ({
 	of: (idp: string) => {
 		const upstream = idps.get(idp)?.upstream;
 		if (!upstream) return undefined;
 		// Only what it offers besides a login: never its authorization URL or code exchange.
-		const { refresh, endSession, delegation } = upstream;
+		const { issuer, refresh, endSession, delegation } = upstream;
 		return {
+			issuer,
 			...(refresh ? { refresh } : {}),
 			...(endSession ? { endSession } : {}),
 			...(delegation ? { delegation } : {}),
