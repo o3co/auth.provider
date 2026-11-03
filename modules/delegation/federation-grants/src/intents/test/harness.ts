@@ -62,7 +62,8 @@ export async function intents(options: { readonly settings?: Record<string, unkn
 	} as unknown as Delegation;
 	const withdrawn = { idp: false };
 	const upstreams: Upstreams = {
-		of: (idp) => (idp === "corp" && !withdrawn.idp ? { issuer: "https://up.example", delegation } : undefined),
+		of: (idp) =>
+			idp === "corp" && !withdrawn.idp ? { issuer: "https://up.example", delegation } : undefined,
 	};
 	const listed = { connections: ["cal"], returns: [back] };
 	const clients = {

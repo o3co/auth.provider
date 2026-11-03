@@ -392,9 +392,7 @@ describe("refreshing a grant's token", () => {
 			const r = await refresher(4);
 			r.advance(2100);
 			const { rotations } = (await r.stored()) as Grant;
-			expect(said(await r.call({ issuer: other }))).toBe(
-				"reauthorize upstream_issuer_changed",
-			);
+			expect(said(await r.call({ issuer: other }))).toBe("reauthorize upstream_issuer_changed");
 			expect(r.asked).toEqual([]);
 			const ended = await r.stored();
 			expect(ended).toMatchObject({
