@@ -102,6 +102,11 @@ export function callbackWith({
 			) {
 				return failed(ref, "grant_not_authorizable", reached);
 			}
+			// Told by which part alone, never its value.
+			const held = grant.upstream;
+			const moved = held && held.issuer !== upstream.issuer;
+			const other = held && held.subject !== upstream.subject;
+			const accountChanged = moved ? "issuer" : other ? "subject" : undefined;
 			audited.record(
 				intent.kind === "initial" ? "federation.grant.authorized" : "federation.grant.reauthorized",
 				{
@@ -110,6 +115,7 @@ export function callbackWith({
 						client: grant.client,
 						connection: grant.connection,
 						outcome: reached.identityCheck,
+						...(accountChanged ? { account_changed: accountChanged } : {}),
 						...(reached.source ? { source: reached.source } : {}),
 					},
 				},
