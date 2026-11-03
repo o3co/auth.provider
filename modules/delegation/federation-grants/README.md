@@ -5,7 +5,7 @@
 - Holds the upstream credentials apart from any session, and hands the client the upstream's bearer token, refreshed under a lock within a rotation budget.
 - Seals again, for `seal`'s resealers (as `federation-grants`), credentials a `previous` key sealed: walking every grant, writing only over the credentials read and keeping the grant's lifetime, counting those no key opens. A refresh seals under the current key anyway.
 - Answers a grant's status, renewal and revocation, and follows a subject's revocation.
-- Internal modules: `grant` (records, sealing, shared judgments), `api` (client routes and the follower), `sweep` (erasing credentials), `intents` (an intent's steps, for the browser half), `refresh` (tokens, for `api`).
+- Internal modules: `grant` (records, sealing, shared judgments), `api` (client routes and the follower), `sweep` (erasing credentials), `intents` (for the browser half), `refresh` (tokens).
 
 ## Not here
 - The browser half, whose upstream account a callback reached, and the browser settings (`federation-grants-connect`). The upstream's requests (`upstreams`' IdP type), revocation boundaries (`subject-revocation`), consent to this provider's clients (`consent`).
@@ -35,7 +35,7 @@
 - Follower of `subject-revocation`: writes at once, for each grant listed under the subject, what the boundary decides at the next read.
 - Store interfaces the assembly wires: grants by id, walked by pages (no eviction, durable, replicated, confirmed reads); steps by secret (no eviction, replicated, names from the secret); pending first-time intents per client and subject, and each subject's grants (keyed sets; the listing also durable and replicated); and the refresh lock store (no eviction), each lock held under its holder's mark and changed only over the mark read, so a holder lets go of its own lock and never another's.
 - Audit events `federation.grant.*`: `requested`, `request.denied`, `authorized`, `reauthorized`, `authorization_failed`, `token.success`, `token.denied`, `revoke.denied`, `revoked`, with `client`, `connection` and an outcome or reason, `unavailable` where the store could not answer.
-- `./testing`: configuration builders and the store interfaces' contract tests, one for the refresh lock store.
+- `./testing`: configuration builders and the store interfaces' contract tests.
 
 ## Invariants
 - A grant route reads the body, then the owner; an unknown grant and another client's or subject's answer the same bytes.
@@ -43,7 +43,7 @@
 - A revocation is the end: no refresh or activation writes over it, and an ordinary logout leaves grants.
 - A subject's boundary ends a grant when read, in whole seconds with nothing allowed for hosts' clocks; with `keep-on-subject-revocation`, only `delegations` does, which every start warns of (`federation-grants.kept_on_subject_revocation`).
 - A failed listing is logged and passed: the boundary still refuses what the follower misses.
-- Credentials are sealed to the grant's id, subject, client and connection, and erased once revoked, sent to reauthorization, or read past the end. Refreshed only at the issuer the grant was connected at.
+- Credentials are sealed to the grant's id, subject, client and connection, and erased once revoked, sent to reauthorization, or read past the end. Refreshed only at the issuer the grant was connected at; `users.issuer-moved` carries no grant: a reauthorization binds the new one.
 - Tokens, secrets and upstream text reach neither answers, logs nor audit.
 
 ## Depends on
