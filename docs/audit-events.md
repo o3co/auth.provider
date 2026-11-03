@@ -48,7 +48,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 |---|---|---|
 | `federation.grant.authorization_failed` | `client`, `connection`, `outcome`, `source` | a connection fails, with why (`outcome`) |
 | `federation.grant.authorized` | `client`, `connection`, `outcome`, `source` | the user connects a new grant, with the identity check that applied (`outcome`) |
-| `federation.grant.reauthorized` | `client`, `connection`, `outcome`, `source` | the user connects a renewal, with the identity check that applied (`outcome`) |
+| `federation.grant.reauthorized` | `account_changed`, `client`, `connection`, `outcome`, `source` | the user connects a renewal, with the identity check that applied (`outcome`), and which of the grant's account differs from what it held (`account_changed`: `issuer` or `subject`), if any |
 | `federation.grant.request.denied` | `client`, `outcome`, `source` | a client's intent is refused, with why (`outcome`) |
 | `federation.grant.requested` | `client`, `connection`, `outcome`, `source` | a client lodges an intent, for a new grant (`initial`) or a renewal (`reauthorization`) |
 | `federation.grant.revoke.denied` | `client`, `reason`, `source` | a client's revoke is refused before the grant is found, with why (`reason`), by the client only |
