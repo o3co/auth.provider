@@ -24,7 +24,7 @@ Read the [migration guide](docs/migration.md) before upgrading: each line below 
 - `consent`: a consent makes no distinction of audience: a scope agreed to holds for every audience the client may be issued.
 - `consent`: a consent's record has a new format ([U-0.19-134](docs/migration.md#u-0.19-134)).
 - `users`: a start declaring another issuer for an IdP name than the one kept for it is refused, and a link store that cannot answer for a declared name refuses boot ([U-0.19-138](docs/migration.md#u-0.19-138)).
-- `federation-grants`: a grant whose connection has come to another issuer answers `410 reauthorization_required`, with `upstream_issuer_changed`, and its credentials are erased.
+- `federation-grants`: a grant whose connection has come to another issuer, once a refresh is due, answers `410 reauthorization_required`, with `upstream_issuer_changed`, and its credentials are erased.
 - `upstreams`: a `Delegation` says its `issuer` ([U-0.19-139](docs/migration.md#u-0.19-139)).
 - `tokens`: a `Tokens` of your own offers `accessTokenLifetimeSeconds` ([U-0.19-130](docs/migration.md#u-0.19-130)).
 - `redis`: one primary holding every key is a requirement of every composition, with no setting to loosen it ([U-0.19-7](docs/migration.md#u-0.19-7)).
