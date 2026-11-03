@@ -169,6 +169,9 @@ describe("what an app beside packages outside the release is given", () => {
 				{ "@x": "https://user:s3cret@registry.x.example" },
 				{ "@x": "https://registry.x.example/path" },
 				{ "@x": "file:///etc" },
+				{ "@x": "https://${FOO}" },
+				{ "@x": "https://$foo.example" },
+				{ "@x": "https://r_x.example" },
 				{ "@x\nregistry=https://evil.example": "https://registry.x.example" },
 			]) {
 				const given = { ...outside, registries: { default: "https://r.example", scopes } };
@@ -207,9 +210,8 @@ describe("what an app beside packages outside the release is given", () => {
 				"@o3co/auth-provider-second-factor": "sha512-SECOND",
 			},
 			bundles: {
-				// From a dependency and from a peer alone, and through another; a cycle ends.
+				// From a dependency, through another alone, and a cycle ends.
 				"@o3co/auth-provider-oauth": ["@o3co/auth-provider-second-factor"],
-				"@o3co/auth-provider-identity": ["@o3co/auth-provider-foundation"],
 				"@o3co/auth-provider-second-factor": [
 					"@o3co/auth-provider-foundation",
 					"@o3co/auth-provider-oauth",

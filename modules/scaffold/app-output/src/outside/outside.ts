@@ -151,10 +151,13 @@ function npmrcOf({ scopes = {} }: Registries): string | undefined {
 	return entries.map(([scope, origin]) => `${scope}:registry=${origin}/\n`).join("");
 }
 
+/** A host as `.npmrc` may hold it: nothing pnpm would expand, as `${...}`, or read otherwise. */
+const originHost = /^(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])(?::\d+)?$/;
+
 const isOrigin = (text: string) => {
 	try {
 		const url = new URL(text);
-		return /^https?:$/.test(url.protocol) && url.origin === text;
+		return /^https?:$/.test(url.protocol) && url.origin === text && originHost.test(url.host);
 	} catch {
 		return false;
 	}
