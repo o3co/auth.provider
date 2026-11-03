@@ -191,6 +191,29 @@ describe("an IdP name's issuer, across boots", () => {
 	});
 });
 
+describe("what a declarer gives", () => {
+	it("refuses an issuer that is no non-empty string, naming the declarer and no value", async () => {
+		for (const issuer of [undefined, null, 7, ""]) {
+			const stores = memoryUsersStores();
+			const refused = await boot(stores, {
+				names: {},
+				more: [
+					defineModule({ name: "giving", replicaSafe: true, takes: [] }, (m) => [
+						m.contribute(upstreamNames).by(() => ({
+							declaredBy: "giving",
+							names: [{ name: "corp", issuer: issuer as never }],
+						})),
+					]),
+				],
+			});
+			expect(refused.refusals, String(issuer)).toEqual([
+				{ where: "users", reason: "an IdP name or its issuer is empty, as giving declares it" },
+			]);
+			expect(await issuerKept(stores, "corp")).toBeUndefined();
+		}
+	});
+});
+
 describe("a boot another module refuses", () => {
 	const refusing = defineModule({ name: "refusing", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(contract<void>("refused")).by((c) => c.refuse("refusing", "refused on purpose")),
@@ -235,6 +258,41 @@ describe("what a boot writes of a name's issuer, once no module refuses it", () 
 		expect(refused.refusals).toEqual(refusedAs("federation declares"));
 		expect(refused.warnings).toEqual([]);
 		expect(await issuerKept(stores, "corp")).toEqual({ issuer: issuerC });
+	});
+
+	it("refuses a move another instance made since it judged a name it does not write", async () => {
+		const stores = memoryUsersStores();
+		await boot(stores);
+		await stores.links.store.update(nameKey("corp"), () => ({
+			value: { issuer: issuerC } as never,
+		}));
+		vi.spyOn(stores.links.store, "read").mockImplementationOnce(
+			async () => ({ issuer: issuerA }) as never,
+		);
+		const refused = await boot(stores);
+		expect(refused.refusals).toEqual(refusedAs("federation declares"));
+		expect(await issuerKept(stores, "corp")).toEqual({ issuer: issuerC });
+	});
+
+	it("keeps what it wrote of a first name where a second's write cannot answer, as writes are per name", async () => {
+		const stores = memoryUsersStores();
+		const { update } = stores.links.store;
+		const failing = vi.spyOn(stores.links.store, "update");
+		failing.mockImplementationOnce(update).mockRejectedValueOnce(new Unavailable("store"));
+		const refused = await boot(stores, { names: { corp: issuerA, other: issuerB } });
+		expect(refused.refusals).toEqual([
+			{
+				where: "users",
+				reason: "the link store cannot answer for the issuers IdP names stand for",
+			},
+		]);
+		expect(await issuerKept(stores, "corp")).toEqual({ issuer: issuerA });
+		expect(await issuerKept(stores, "other")).toBeUndefined();
+		failing.mockRestore();
+		expect(
+			(await boot(stores, { names: { corp: issuerA, other: issuerB } })).refusals,
+		).toBeUndefined();
+		expect(await issuerKept(stores, "other")).toEqual({ issuer: issuerB });
 	});
 
 	it("refuses boot where the store cannot answer the write, never reading that as kept", async () => {

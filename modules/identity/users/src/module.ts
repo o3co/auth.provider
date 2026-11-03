@@ -31,7 +31,7 @@ const section = z
 			)
 			.prefault([])
 			.describe(
-				"The moves of an IdP name to another issuer the operator states, its links going with it; every start warns while one is listed.",
+				"The moves of an IdP name to another issuer the operator states, its links going with it; every assembly no module refuses applies it and warns while one is listed.",
 			),
 	})
 	.refine((s) => distinct(s.registered.map((r) => confusable(r.identifier))), {

@@ -22,7 +22,8 @@ const asDeclared = (all: readonly Pick<Declared, "declaredBy">[]) => {
 /** What is refused of the names within one boot; told by the modules that declare them alone: a name and an issuer are configured values. */
 export function namesRefused(declarations: readonly UpstreamNames[]): string[] {
 	const declared = declaredIn(declarations);
-	const empty = declared.filter((n) => n.name === "" || n.issuer === "");
+	const named = (text: unknown) => typeof text === "string" && text !== "";
+	const empty = declared.filter((n) => !named(n.name) || !named(n.issuer));
 	const byName = Map.groupBy(declared, (n) => n.name);
 	const shared = [...byName].filter(([, all]) => new Set(all.map((n) => n.issuer)).size > 1);
 	return [
@@ -110,7 +111,12 @@ export async function issuersJudged(
 		const refusals: Refusal[] = [];
 		for (const [name, held] of kept) {
 			const issuer = issuerOf(name) as string;
-			if (held === issuer) continue;
+			if (held === issuer) {
+				// Not written, so read again: another instance may have moved it during this build.
+				const now = await links.read(keyOf(name));
+				if (now !== undefined && issuerIn(now) !== issuer) refusals.push(differs(name));
+				if (now !== undefined) continue;
+			}
 			const move = moving.get(name);
 			// Another instance may keep or move it first: what it wrote is judged as read here.
 			const { after } = await written(links, keyOf(name), recordOf(issuer), (record) =>

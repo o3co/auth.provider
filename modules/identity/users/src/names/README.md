@@ -15,7 +15,8 @@ Internal module of `users`: what an IdP name stands for, within one boot and acr
 
 ## Invariants
 - A name's issuer is compared as written.
-- Nothing is written while a boot is built: a boot refused by any module's build, this one's judgment among them, writes nothing and applies no stated move, and a new name beside a refused one is not kept either. A write is made once every build passed (`kernel`'s `onBuilt`), and is not taken back if a later such hook refuses.
+- Nothing is written while a boot is built: a boot refused by any module's build, this one's judgment among them, writes nothing and applies no stated move, and a new name beside a refused one is not kept either. A write is made once every build passed (`kernel`'s `onBuilt`), and is not taken back if a later such hook refuses, nor where `start` then fails.
+- A name not written is read again then, so a move another instance made during this build is judged. Writes are per name: where a later one cannot answer, the boot is refused and what was written of an earlier one stays.
 - One name is one record, saved if absent, so of instances starting at once the first writer's issuer is what the rest are judged by.
 - A store that cannot answer, at the read or the write, is a refusal, as is a record of another shape; neither reads as no record.
 - An entry passes where the kept issuer is its `from` and the declared one its `to`, rewriting the record over that `from` alone, or where both are its `to`; any other, no record kept or no such name among them, is refused at its key.
