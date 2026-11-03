@@ -269,6 +269,26 @@ describe("an IdP name's issuer across starts", () => {
 	});
 });
 
+describe("a start another module refuses", () => {
+	it("keeps nothing of a stated move, so a start back on the old issuer boots", async () => {
+		const [topology, a, b] = [await aStore(), await anUpstream(), await anUpstream()];
+		await startedOnce(topology, grantsScene(a));
+		// The connection names an IdP none declares, which another module refuses as it builds.
+		const said = await refusedWith(
+			topology,
+			grantsScene(
+				b,
+				{ connections: [{ name: "calendar", idp: "none", scopes, maxAccessTokenSeconds: 3600 }] },
+				{ issuerMoved: [{ idp: "corp", from: a.issuer, to: b.issuer }] },
+			),
+		);
+		expect(said).toContain("federation-grants.connections.calendar.idp");
+		const back = await started(topology, grantsScene(a));
+		stops.push(back.stop);
+		expect(warnedOfNames(back.instance)).toEqual([]);
+	});
+});
+
 describe("a grant's refresh across starts", () => {
 	const sealKey = randomBytes(32).toString("base64");
 	const calendar = (idp: string) => ({
