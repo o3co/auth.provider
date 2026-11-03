@@ -141,7 +141,9 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `document` (`src/document`): reading and judging a client's metadata document.
   - `fetching` (`src/fetching`): how often a document is fetched, and how long its answer is kept.
 - `@mod/code-grant` (feature, `modules/oauth/code-grant`): Holds authorization codes and redeems them at the token endpoint (the `authorization_code` grant), adding the ID token and the contributed additions to the answer.
-- `@mod/consent` (feature, `modules/oauth/consent`): Keeps each subject's grants, per client, as the union of the ranges agreed to.
+- `@mod/consent` (feature, `modules/oauth/consent`): Keeps each subject's grants, per client, as the union of the ranges agreed to; for a client from another source, as the ranges agreed to under what its source says of it now.
+  - `grants` (`src/grants`): each subject's grants, per client, as the grant store keeps them.
+  - `page` (`src/page`): the two routes the deployment's consent page calls.
 - `@mod/device-grant` (feature, `modules/oauth/device-grant`): Provides the OAuth 2.0 Device Authorization Grant (RFC 8628): device authorization, the verification interface the deployment's page calls, and the `device_code` grant.
   - `authorization` (`src/authorization`): device authorization (RFC 8628 §3.1–3.2), where a device asks for its codes.
   - `grant` (`src/grant`): the `device_code` grant (RFC 8628 §3.4–3.5), which a device polls until its code is decided or ends.
@@ -167,7 +169,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/oidc` (feature, `modules/oauth/oidc`): Makes the ID token (a contribution to `code-grant`'s ID token makers, for the `openid` scope).
   - `claims` (`src/claims`): the claim table, and mapping a user's attributes through it.
 - `@mod/reauth` (feature, `modules/oauth/reauth`): Owns re-authentication requests: records asked for one authorization request, taken once, kept through the store the assembly wires.
-- `@mod/redirect-uris` (feature, `modules/oauth/redirect-uris`): Owns the rules of a client's redirect URIs: which may be registered, which given one matches a registered one, and the URL an answer is sent back to.
+- `@mod/redirect-uris` (feature, `modules/oauth/redirect-uris`): Owns the rules of a client's redirect URIs: which may be registered, which given one matches a registered one, the URL an answer is sent back to, and how each is shown to a user.
 - `@mod/refresh` (feature, `modules/oauth/refresh`): Owns refresh tokens and their families: rotation on every use, reuse detection, family revocation, revoking each access token a family issued.
   - `founding` (`src/founding`): how a family begins, from a code's redemption or a `start`, and how a redemption's family is taken back.
   - `grant` (`src/grant`): the `refresh_token` grant.
