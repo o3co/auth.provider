@@ -42,7 +42,12 @@ describe("whose upstream account a connection reached", () => {
 		// The same string at another issuer is no one in particular, so it is no match either.
 		const alike = { issuer: before.issuer, subject: at.subject };
 		expect(
-			await none.refusal({ ...grant, upstream: alike }, { expectedUpstream: at.subject }, "corp", at),
+			await none.refusal(
+				{ ...grant, upstream: alike },
+				{ expectedUpstream: at.subject },
+				"corp",
+				at,
+			),
 		).toBe("account_mismatch");
 		const held = upstreamAccountWith({ users: ledger("bob"), check: "required" });
 		expect(await held.refusal({ ...grant, upstream: before }, {}, "corp", at)).toBe(
