@@ -41,7 +41,7 @@
 - After `prompt=login` or a max age, a login counts only when the upstream says when the user logged in.
 - Fresh enough, after `prompt=login` or with a max age: by the IdP's `fresh-login-allowance` (its type's clock allowance by default), as `round-trip`'s card says.
 - The fresh login allowance narrows only how far back a login time reaches: a time ahead of ours that the type's clock allowance passes, or any time the upstream says, is taken as the upstream says it.
-- The local user is found only by the IdP's name, which `users` holds to one issuer, and the upstream subject.
+- The local user is found only by the IdP's name and the upstream subject.
 - An unknown identity is refused, and nothing is created.
 - The login proves `fed` plus only the upstream amr values the operator maps (declared as provable).
 - An upstream's text and tokens never reach the browser or the logs.
