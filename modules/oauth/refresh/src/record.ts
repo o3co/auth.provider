@@ -68,11 +68,10 @@ const redemptionShape = z.union([
 export const allowanceMs = 120_000;
 
 /**
- * What a family's scope may hold though nothing can grant it: 0.18 took it as any scope, and no
- * client can be allowed it now, so a refresh keeping it would be refused. This reads records written
- * by 0.18, so it can go once those families have ended.
+ * What nothing can grant, as offline access is not offered: a family's scope 0.18 kept may hold it,
+ * and a request may name it. Neither reads it as part of the grant.
  */
-const notGranted = "offline_access";
+export const notGranted = "offline_access";
 
 export const toStored = (kept: Kept) => kept as unknown as StoredFamily;
 /** What a family's record holds, checked on every read; nothing for a format or shape this does not know. */

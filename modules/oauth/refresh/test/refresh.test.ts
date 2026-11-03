@@ -1696,8 +1696,13 @@ describe("lineage", () => {
 		expect([next.status, next.body.scope]).toEqual([200, "read"]);
 		const check = await s.app.get(tokens).verifyAccess(next.body.access_token ?? "");
 		expect(check.kind === "valid" && check.grant.scope).toEqual(["read"]);
-		// The word is no part of the grant, so naming it is asking beyond it.
-		const named = await s.refresh(next.body.refresh_token, "app", { scope: "offline_access" });
+		// Named beside what is granted, it is dropped, as an authorization request drops it.
+		const beside = await s.refresh(next.body.refresh_token, "app", {
+			scope: "read offline_access",
+		});
+		expect([beside.status, beside.body.scope]).toEqual([200, "read"]);
+		// Named alone it asks nothing else: refused, never given the whole family, as `authorize` refuses it.
+		const named = await s.refresh(beside.body.refresh_token, "app", { scope: "offline_access" });
 		expect(named.body.error).toBe("invalid_scope");
 	});
 
