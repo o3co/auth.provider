@@ -262,7 +262,7 @@ export const upstreamContinuations = extensionPoint<UpstreamContinuation>(
 
 /** The upstreams of the configured IdPs, by name. */
 export interface Upstreams {
-	of(idp: string): Pick<Upstream, "refresh" | "endSession" | "delegation"> | undefined;
+	of(idp: string): Pick<Upstream, "issuer" | "refresh" | "endSession" | "delegation"> | undefined;
 }
 
 export const upstreams = contract<Upstreams>("upstreams");
