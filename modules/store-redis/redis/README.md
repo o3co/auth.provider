@@ -27,7 +27,7 @@
 - A setting is read by `CONFIG GET`. Where the server refuses it for good (`NOPERM`, or an unknown command or subcommand) or answers it empty, not showing it, the declared value is taken, a needed one left undeclared refusing boot, and every boot warns `redis.settings_declared` with the names taken so; where it answers, a declared value that differs refuses boot; any other error (`BUSY`, say) refuses boot.
 - `durability` `none`: the operator states the server does not fsync every write, so a crash loses the latest writes, spent assertion and proof ids and lockout records among them; every boot warns `redis.durability_none` naming the durable spaces.
 - A refusal or a warning never tells the URL, which may hold a password; a failure is told by its code alone, never its message: an error event as `redis.error` with `code`, and a refused connection in `redis.url`'s reason.
-- `replicas`: no replica seen is unavailable, a confirmed read at boot too, so a module that reads at boot refuses the restart.
+- `replicas`: no replica seen is unavailable, a confirmed read at boot too, so a module reading at boot refuses a restart.
 - `none`: the operator states there is no failover, so even confirmed writes are lost by one; a replica seen at runtime is unavailable; every boot warns `redis.replication_none` naming the replicated spaces.
 - A timeout, too few replicas, or another server than the one that answered is unavailable, the answer then unknown.
 - Internal module `client`: boot warns `redis.plaintext` where the URL is in the clear. Production refuses `url` while `DEBUG` covers ioredis. Another floor refuses boot.
