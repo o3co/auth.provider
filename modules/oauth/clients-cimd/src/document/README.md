@@ -17,7 +17,7 @@ Internal module of `clients-cimd`: reading and judging a client's metadata docum
 - `readingOver` (the build context) → `readingWith` (`outbound`, the narrower, the ceiling, the log, the digest's algorithm, `clients`' `checkRecord`, taken late) → a loader for `fetching`.
 
 ## Invariants
-- `digestOf` (a document, the algorithm): `<algorithm>:<base64url>`, the section's algorithm over the whole document as read, every field whether read or not, serialized as JSON text after parsing, with each object's members in one order at every depth. Two documents differ in it where they differ as JSON values once parsed: values one parse makes equal digest alike, as white space, member order, an escape, `1` and `1.0`, or a repeated member's earlier values.
+- `digestOf` (a document, the algorithm): `<algorithm>:<base64url>`, the section's algorithm over the whole document as read, every field whether read or not, the value as serialized after a parse, with each object's members in one order at every depth. A parse and serializing fold what JSON cannot hold, so values they make equal digest alike: white space, member order, an escape, `1` and `1.0`, `1e400` and `null`, or a repeated member's earlier values.
 - The loader answers found with the answer's max age, refused with a logged reason, or failed.
 - The max age is zero under `no-store` or `no-cache`, else its `max-age`, else none.
 - A refusal's reason is the field refused, the status, `not a JSON object`, `outbound`'s refusal or failure, or `record at` the paths where `checkRecord` refuses the record. A record is checked before it is kept; a check that throws rejects, which `fetching` takes as a failure.
