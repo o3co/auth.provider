@@ -235,7 +235,7 @@ describe.runIf(areaTarget().can("outbound-proxy"))(
 		});
 
 		describe("a document that changes after the consent", () => {
-			it("asks again for a document naming another redirect URI, with no code in any answer, and refuses a silent request", async () => {
+			it("asks again for a document naming another redirect URI, with no code in any answer, and refuses a silent request [rfc9700-4.11.2-c] [rfc6749-10.12-a]", async () => {
 				const client = documentClient();
 				expect(codeIn(await agreed(client.id))).not.toBeNull();
 				expect(codeIn((await authorizing(client.id)).at)).not.toBeNull();
