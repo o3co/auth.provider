@@ -2,10 +2,16 @@ import type { Client } from "@mod/clients";
 import type { HttpRequest } from "@mod/http";
 import { contract, extensionPoint } from "@mod/kernel";
 
-/** Where a binding is read: at issuance, or at a resource presenting the token. */
+/** Where a binding is read: at issuance, or at a resource presenting the token, which holds `held`. */
 export type Scene =
 	| { readonly kind: "issue" }
-	| { readonly kind: "resource"; readonly token: string };
+	| {
+			readonly kind: "resource";
+			readonly token: string;
+			readonly held?: Binding;
+			/** The subject the token's issuer names, passed on unread. */
+			readonly subject?: string;
+	  };
 
 /** What one binding kind reads from a request. */
 export type BindingRead =
@@ -17,6 +23,8 @@ export type BindingRead =
 			readonly error: string;
 			readonly description?: string;
 			readonly unavailable?: boolean;
+			/** At a resource, too many proofs for the token: answered with this and the kind's headers, unchallenged. */
+			readonly status?: 429;
 			readonly headers?: Readonly<Record<string, string>>;
 	  };
 
@@ -44,10 +52,11 @@ export type BindingOutcome =
 	| { readonly kind: "multiple_bindings" }
 	| Extract<BindingRead, { kind: "refused" }>;
 
-/** A token's validity as its issuer reads it; a valid bound one names its binding. */
+/** A token's validity as its issuer reads it; a valid one names its subject, a bound one its binding. */
 export type TokenCheck =
 	| {
 			readonly kind: "valid";
+			readonly grant?: { readonly subject: string };
 			readonly binding?: Binding;
 	  }
 	| { readonly kind: "invalid" };
@@ -57,12 +66,12 @@ export interface TokenValidity<C extends TokenCheck> {
 	verifyAccess(token: string): Promise<C>;
 }
 
-/** A resource's answer to a request presenting a token; a refusal carries `WWW-Authenticate`. */
+/** A resource's answer to a request presenting a token; a refusal carries `WWW-Authenticate`, a `429` `Retry-After`. */
 export type Admission<C extends TokenCheck> =
 	| { readonly kind: "admitted"; readonly access: Extract<C, { kind: "valid" }> }
 	| {
 			readonly kind: "refused";
-			readonly status: 400 | 401;
+			readonly status: 400 | 401 | 429;
 			/** None when the request presented no token. */
 			readonly error?: string;
 			readonly headers: Readonly<Record<string, string>>;
