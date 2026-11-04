@@ -62,9 +62,9 @@ function packOutside(dir: string, into: string, version: string, zod: string) {
  * Serves the release's tarballs, as just published, and a package outside it, from a registry of
  * its own; installs
  * `create-auth-provider` and, into a project of its own, the package from it; generates an app of
- * the pattern adding it; installs the app as published, by version, through the `.npmrc` it was
- * given; and runs its `scripts/check-outside.mjs`,
- * which must pass. Then points the lockfile's zod at another package's tarball on zod's registry,
+ * the pattern adding it; and, as its guide says, through the `.npmrc` it was given, resolves its
+ * lockfile by version, runs its `scripts/check-outside.mjs`, which must pass, and installs it.
+ * Then points the lockfile's zod at another package's tarball on zod's registry,
  * and the check must refuse it for the integrity the release recorded, and for that alone.
  */
 export async function outsideScene(options: {
@@ -110,9 +110,10 @@ export async function outsideScene(options: {
 			[app, "--pattern", options.pattern, "--add", `npm:${grant}`, "--outside-from", staging],
 			options.scratch,
 		);
-		// Installed by the `.npmrc` the app was given, from what the project recorded.
-		must("pnpm", ["install"], app);
+		// In the guide's order, by the `.npmrc` the app was given, from what the project recorded.
+		must("pnpm", ["install", "--lockfile-only"], app);
 		must("node", ["scripts/check-outside.mjs"], app);
+		must("pnpm", ["install", "--frozen-lockfile", "--ignore-scripts"], app);
 
 		const record = JSON.parse(readFileSync(join(app, "outside-modules.json"), "utf8")) as {
 			registries: { default: string };
@@ -123,7 +124,7 @@ export async function outsideScene(options: {
 		if ("problem" in swapped) throw new Error(swapped.problem);
 		writeFileSync(lockfile, swapped.text);
 		const refused = ran("node", ["scripts/check-outside.mjs"], app);
-		const expected = `zod: integrity ${swapped.integrity}, not ${record.held.zod} as the release recorded\ncheck:outside: 1 refusal(s)\n`;
+		const expected = `zod: integrity ${swapped.integrity}, not ${record.held.zod} as the release recorded\n1 refusal(s)\n`;
 		if (refused.status !== 1 || refused.stdout !== expected) {
 			throw new Error(
 				`a zod pointed at another tarball was not refused for its integrity alone: ${refused.said}`,
