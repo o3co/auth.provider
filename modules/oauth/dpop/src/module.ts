@@ -117,11 +117,7 @@ export default defineModule(
 					if (scene.kind === "resource") {
 						const { held, subject } = scene;
 						// Not the holder's: `sender-binding` refuses it, with nothing counted or spent.
-						if (
-							held?.member !== member ||
-							held.confirmation !== checked.jkt ||
-							subject === undefined
-						) {
+						if (held.member !== member || held.confirmation !== checked.jkt) {
 							return { kind: "bound", confirmation: checked.jkt };
 						}
 						// By subject, as a token's holder picks its key. Past the proof, so a copy of a token alone counts
