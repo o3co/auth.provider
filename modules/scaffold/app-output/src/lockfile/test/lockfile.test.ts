@@ -417,6 +417,31 @@ describe("reading a package's record from the project pnpm installed it into", (
 	});
 });
 
+describe("a recorded package declaring a command", () => {
+	const withBin = changed((lock) => {
+		lock.packages["@x/grant@1.2.0"].hasBin = true;
+	});
+	const said = "@x/grant: the lockfile says it declares a command";
+
+	it("is refused where the lockfile says so", () => {
+		expect(refusals(withBin)).toEqual([said]);
+	});
+
+	it("is refused whatever the entry holds under the name", () => {
+		const off = changed((lock) => {
+			lock.packages["@x/grant@1.2.0"].hasBin = false;
+		});
+		expect(refusals(off)).toEqual([said]);
+	});
+
+	it("leaves a package the record does not name to pnpm", () => {
+		const held = changed((lock) => {
+			lock.packages["jose-lite@1.4.0"].hasBin = true;
+		});
+		expect(refusals(held)).toEqual([]);
+	});
+});
+
 describe("the script an app runs, the file as it ships", () => {
 	/** An app's directory holding the script beside the lockfile, the record and the overrides. */
 	const appWith = (lock: string, held: Record<string, string> | null = recorded) => {
@@ -446,6 +471,16 @@ describe("the script an app runs, the file as it ships", () => {
 
 	it("passes the lockfile the module passes", () => {
 		expect(run(appWith(appLock))).toEqual({ code: 0, out: "check:outside: ok\n" });
+	});
+
+	it("refuses a recorded package the lockfile says declares a command", () => {
+		const lock = changed((l) => {
+			l.packages["@x/grant@1.2.0"].hasBin = true;
+		});
+		expect(run(appWith(lock))).toEqual({
+			code: 1,
+			out: "@x/grant: the lockfile says it declares a command\ncheck:outside: 1 refusal(s)\n",
+		});
 	});
 
 	it("is the bundle of the module's own file, as write-check makes it, from wherever it is made", async () => {

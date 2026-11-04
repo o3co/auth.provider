@@ -8449,6 +8449,7 @@ function recordRefusals(lock, record, overrides, references, registries) {
 	if (unregistered !== void 0) return [...refusals, unregistered];
 	const integrity = own(own(entry).get("resolution")).get("integrity");
 	if (integrity !== record.integrity) return [...refusals, say(`integrity ${integrity}, not ${record.integrity} as recorded`)];
+	if (own(entry).has("hasBin")) refusals.push(say("the lockfile says it declares a command"));
 	const peers = own(record.peerDependencies);
 	const locked = own(own(entry).get("peerDependencies"));
 	for (const dep of [.../* @__PURE__ */ new Set([...peers.keys(), ...locked.keys()])].sort()) {
