@@ -159,7 +159,8 @@ export async function assembleWatching(
 			refusals.push({ where: by, reason: `no module provides ${contract.label}` });
 		}
 	}
-	if (refusals.length > 0) {
+	const refuseIfAnyRefused = async () => {
+		if (refusals.length === 0) return;
 		// Taken first: a context a build kept may still add refusals, from a stop hook too.
 		const refused = new BootRefused(refusals);
 		// What the builds started, ended before refusing: the hooks registered so far, in reverse.
@@ -167,7 +168,19 @@ export async function assembleWatching(
 			during: "refusal",
 		});
 		throw refused;
+	};
+	await refuseIfAnyRefused();
+	// One at a time, stopping at the first refused: a later one may write what this one refuses.
+	for (const { module, run } of hooks.built) {
+		try {
+			await run();
+		} catch (error) {
+			recordFailure(error, module, refusals);
+		}
+		if (refusals.length > 0) break;
 	}
+	await refuseIfAnyRefused();
+	// Only now has assembly succeeded, so late references and readiness answer from here on.
 	assembledWith(readinessOf(probeList, runtime, () => stopping));
 
 	return {

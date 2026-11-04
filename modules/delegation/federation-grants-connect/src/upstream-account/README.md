@@ -13,7 +13,8 @@ Internal module of `federation-grants-connect`: whose upstream account a connect
 - `upstreamAccountWith` (`users`' lookup by upstream identity, the identity check) and `upstreamAccountOver` (the build context, the identity check `connectOver` read) → `refusal` (grant, intent, IdP, the account reached: `account_mismatch`, `identity_unverifiable`, `identity_conflict`, or none) and `check`, the identity check made, as an activation's audit names it.
 
 ## Invariants
-- An account other than the grant's recorded one, or than its intent's expected subject, is `account_mismatch`.
+- At the grant's recorded issuer, or where it records none, an account other than the grant's recorded one, or than its intent's expected subject, is `account_mismatch`.
+- A subject is unique within its issuer alone, so at another issuer the recorded subject is not compared, and the activation records the account reached; an intent's expected subject, being of the recorded issuer, is `account_mismatch` there, whichever account is reached.
 - Under `required`, an account another user holds is `identity_conflict`, whatever that user's subject reads; one nobody holds, or the subject's own, passes. Under `none`, nobody is asked.
 - Any failure of the lookup reads as `identity_unverifiable`, an unavailable ledger and any other throw alike.
 

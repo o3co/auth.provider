@@ -5,6 +5,11 @@ import { extensionPoint } from "@mod/kernel";
 export interface DocumentSource {
 	readonly id: string;
 	readonly host: string;
+	/**
+	 * A value that differs when the document differs, as its source computes it; what it is computed
+	 * over is the source's card. A source that computes none leaves it out.
+	 */
+	readonly digest?: string;
 }
 
 /**

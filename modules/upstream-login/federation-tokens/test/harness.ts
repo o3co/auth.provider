@@ -90,7 +90,12 @@ export async function harness(
 				name: "refresh",
 				holds: async ({ id }) => (families.get(id) === "ended" ? "revoked" : "holds"),
 			})),
-			m.provide(upstreams).by(() => ({ of: (idp) => offered[idp] })),
+			m.provide(upstreams).by(() => ({
+				of: (idp) => {
+					const one = offered[idp];
+					return one && { issuer: `https://${idp}.example`, ...one };
+				},
+			})),
 			m.contribute(entryRequirements).by(() => ({
 				name: "test-short",
 				judges: ["use"],

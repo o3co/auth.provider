@@ -37,4 +37,6 @@ export interface Release {
 	readonly repository?: string;
 	/** The integrity the release recorded of each of its bundles and of zod, by name: required to compose packages outside it. */
 	readonly integrity?: Readonly<Record<string, string>>;
+	/** Each bundle's dependencies on other bundles, by name: what an app composing packages outside it holds beyond those it names. */
+	readonly bundles?: Readonly<Record<string, readonly string[]>>;
 }

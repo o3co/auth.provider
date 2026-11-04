@@ -1,7 +1,7 @@
 import { clientCopy } from "@mod/consent";
 import { redirectsCopy } from "@mod/redirect-uris";
 import { describe, expect, it } from "vitest";
-import { documentUrl, recordOf } from "../src/document/document.ts";
+import { digestOf, documentUrl, recordOf } from "../src/document/document.ts";
 
 const id = "https://app.example/client.json";
 const doc = {
@@ -10,10 +10,12 @@ const doc = {
 	redirect_uris: ["https://app.example/cb"],
 };
 const ceiling = { scopes: ["openid", "read"], audiences: ["https://api.example"] };
+const algorithm = "sha-256";
 /** The sections their owners copy from a document, as composed. */
 const copies = [redirectsCopy, clientCopy];
 const record = (fields: Record<string, unknown>, limits = ceiling) =>
-	recordOf(new URL(id), { ...doc, ...fields }, limits, copies);
+	recordOf(new URL(id), { ...doc, ...fields }, limits, copies, algorithm);
+const digest = (document: Readonly<Record<string, unknown>>) => digestOf(document, algorithm);
 /** The client-allowance section of the record, or the refusal as it is. */
 const allowances = (fields: Record<string, unknown>, limits = ceiling) => {
 	const made = record(fields, limits);
@@ -78,14 +80,67 @@ describe("document record", () => {
 					scopes: ["openid", "read"],
 					audiences: ["https://api.example"],
 				},
-				consent: { name: "App", uri: "https://app.example/", host: "app.example" },
+				consent: {
+					name: "App",
+					uri: "https://app.example/",
+					host: "app.example",
+					under: digestOf({ ...doc, client_uri: "https://app.example/" }, algorithm),
+				},
 			},
 		});
 	});
 
+	it("names the algorithm in the digest it gives, so a value says what it was made under", () => {
+		expect(digest(doc)).toMatch(/^sha-256:[A-Za-z0-9_-]{43}$/);
+		expect(digest({})).toBe("sha-256:RBNvo1WzZ4oRRq0W9-hknpT7T8If536DEMBg9hyq_4o");
+	});
+
+	it("gives each copy a digest of the whole document, in one order at every depth", () => {
+		const seen: (string | undefined)[] = [];
+		const noting = {
+			...clientCopy,
+			copy: (...args: Parameters<typeof clientCopy.copy>) => {
+				seen.push(args[1].digest);
+				return undefined;
+			},
+		};
+		const given = { ...doc, a: { y: [{ q: 1, p: 2 }], x: 1 }, __proto__: null };
+		recordOf(new URL(id), given, ceiling, [noting], algorithm);
+		expect(seen).toEqual([digest(given)]);
+		expect(digest({ a: 1, b: { c: 2, d: [3] } })).toBe(digest({ b: { d: [3], c: 2 }, a: 1 }));
+		const read = JSON.parse('{ "b" : 1, "\u0061" : 2 }');
+		expect(digest(read)).toBe(digest({ a: 2, b: 1 }));
+	});
+
+	it.each([
+		["a field no copy reads", { tos_uri: "https://app.example/terms" }],
+		["a field no copy reads, nested", { jwks: { keys: [] } }],
+		["a member named as an object's own prototype", JSON.parse('{ "__proto__": { "a": 1 } }')],
+		["a value's type", { client_name: 1 }],
+		["null beside absent", { client_uri: null }],
+		["a list's order", { redirect_uris: ["https://b.example/cb", "https://a.example/cb"] }],
+	])("tells a document apart by %s", (_, fields) => {
+		expect(digest({ ...doc, ...fields })).not.toBe(digest(doc));
+	});
+
+	it("tells apart member values a list's order or an object's nesting would otherwise run together", () => {
+		const pair = (first: unknown, second: unknown) =>
+			expect(digest({ a: first })).not.toBe(digest({ a: second }));
+		pair(["x", "y"], ["y", "x"]);
+		pair({ b: "c" }, ["b", "c"]);
+		pair("1", 1);
+		pair(null, "null");
+	});
+
 	it("shows the id's host without its port", () => {
 		const ported = "https://app.example:8443/c";
-		const made = recordOf(new URL(ported), { ...doc, client_id: ported }, ceiling, copies);
+		const made = recordOf(
+			new URL(ported),
+			{ ...doc, client_id: ported },
+			ceiling,
+			copies,
+			algorithm,
+		);
 		expect("sections" in made && made.sections.consent).toMatchObject({ host: "app.example" });
 	});
 
@@ -137,7 +192,7 @@ describe("document record", () => {
 			sections: { consent: { uri: ["https://app.example/"] } },
 		});
 		expect(record({ client_name: " " })).toEqual({ refused: "client_name" });
-		const made = recordOf(new URL(id), doc, ceiling, []);
+		const made = recordOf(new URL(id), doc, ceiling, [], algorithm);
 		expect("sections" in made && Object.keys(made.sections)).toEqual(["client-allowance"]);
 	});
 

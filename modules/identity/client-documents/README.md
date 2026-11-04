@@ -9,7 +9,7 @@
 
 ## Offers
 - `documentCopies`, keyed by the name of the section each fills: `section` (the `clients` section), `reads` (the document's fields it reads, in RFC 7591's words) and `copy` (a document and its `DocumentSource` → the section's value before the schema, `refused` naming a field, or nothing).
-- `DocumentSource`: the client id a document came from, and the host its source checked.
+- `DocumentSource`: the client id a document came from, the host its source checked, and `digest`, where the source computes one: a value that differs when the document differs, over what the source's card says.
 
 ## Invariants
 - A copy holds the section's own keys alone, never the document's, so where a record fails holds no document text; `refused` is a field's name, never its text.

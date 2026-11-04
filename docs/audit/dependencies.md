@@ -161,7 +161,7 @@ flowchart LR
 | `@mod/client-credentials` | feature | `@mod/client-allowance`, `@mod/grants`, `@mod/issuer`, `@mod/kernel` |
 | `@mod/clients-cimd` | feature | `@mod/client-allowance`, `@mod/client-documents`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/host-entries`, `@mod/issuer`, `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/refresh`, `@mod/url-setting` |
 | `@mod/code-grant` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/tokens` |
-| `@mod/consent` | feature | `@mod/audit`, `@mod/client-documents`, `@mod/clients`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/session`, `@mod/url-setting` |
+| `@mod/consent` | feature | `@mod/audit`, `@mod/client-documents`, `@mod/clients`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/url-setting` |
 | `@mod/device-grant` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/clients`, `@mod/csrf`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/rate-limit`, `@mod/request-source`, `@mod/session`, `@mod/subject-revocation`, `@mod/token-endpoint`, `@mod/tokens`, `@mod/url-setting` |
 | `@mod/discovery` | feature | `@mod/http`, `@mod/issuer`, `@mod/kernel` |
 | `@mod/dpop` | feature | `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/sender-binding` |
@@ -175,7 +175,7 @@ flowchart LR
 | `@mod/mfa-acr` | feature | `@mod/acr`, `@mod/kernel`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading` |
 | `@mod/oidc` | feature | `@mod/authorize`, `@mod/claims-selection`, `@mod/client-documents`, `@mod/clients`, `@mod/code-grant`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/subject-attributes`, `@mod/users` |
 | `@mod/reauth` | feature | `@mod/kernel`, `@mod/session` |
-| `@mod/redirect-uris` | feature | `@mod/client-documents`, `@mod/clients` |
+| `@mod/redirect-uris` | feature | `@mod/client-documents`, `@mod/clients`, `@mod/url-setting` |
 | `@mod/refresh` | feature | `@mod/audit`, `@mod/claims-selection`, `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/session-participants`, `@mod/subject-revocation`, `@mod/token-control`, `@mod/tokens` |
 | `@mod/resource-indicators` | feature | `@mod/grants`, `@mod/kernel` |
 | `@mod/rp-logout` | feature | `@mod/audit`, `@mod/clients`, `@mod/code-grant`, `@mod/csrf`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/oidc`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/session-participants`, `@mod/url-setting` |
@@ -287,7 +287,7 @@ flowchart LR
 |---|---|---|
 | `@mod/api-docs` | assembly | none |
 | `@mod/conformance` | verification | `@mod/combinations`, `@mod/create-app`, `@mod/docker-client`, `@mod/trial` |
-| `@mod/conformance-code` | verification | `@mod/conformance`, `@mod/conformance-identity`, `@mod/conformance-keys`, `@mod/conformance-legacy`, `@mod/conformance-mtls`, `@mod/conformance-oauth`, `@mod/conformance-second-factor` |
+| `@mod/conformance-code` | verification | `@mod/conformance`, `@mod/conformance-front`, `@mod/conformance-identity`, `@mod/conformance-keys`, `@mod/conformance-legacy`, `@mod/conformance-mtls`, `@mod/conformance-oauth`, `@mod/conformance-second-factor`, `@mod/conformance-tunnel` |
 | `@mod/conformance-device` | verification | `@mod/conformance`, `@mod/conformance-identity`, `@mod/conformance-keys`, `@mod/conformance-legacy`, `@mod/conformance-oauth` |
 | `@mod/conformance-exchange` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-device`, `@mod/conformance-identity`, `@mod/conformance-keys`, `@mod/conformance-legacy`, `@mod/conformance-oauth` |
 | `@mod/conformance-federation` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-identity`, `@mod/conformance-keys`, `@mod/conformance-legacy`, `@mod/conformance-oauth` |

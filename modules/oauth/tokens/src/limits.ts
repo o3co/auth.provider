@@ -1,19 +1,20 @@
 import type { Random } from "@mod/kernel";
-import type { AccessGrant, Actor } from "./contract.ts";
+import { type AccessGrant, type Actor, lifetimeSecondsRange } from "./contract.ts";
 
 /** An access token's lifetime where the section does not set one. */
 export const defaultLifetimeSeconds = 3600;
 
-/** The longest lifetime an access token is issued with, a day. */
-const maxLifetimeSeconds = 86_400;
-/** The shortest, two seconds: one second, its iat cut to the second, leaves less than a second once signed. */
-const minLifetimeSeconds = 2;
 /** How far ahead of the clock a token's iat is taken, for clocks that differ between hosts. */
 const iatAheadMs = 60_000;
 
 export function lifetimeOf(asked: number | undefined, configured: number): number {
 	if (asked === undefined) return configured;
-	if (Number.isInteger(asked) && asked >= minLifetimeSeconds && asked <= maxLifetimeSeconds) {
+	// The shortest is two seconds: one, its iat cut to the second, leaves less than a second once signed.
+	if (
+		Number.isInteger(asked) &&
+		asked >= lifetimeSecondsRange.min &&
+		asked <= lifetimeSecondsRange.max
+	) {
 		return asked;
 	}
 	throw new RangeError("tokens: a lifetime asked is 2 to 86400 whole seconds");
@@ -60,7 +61,7 @@ export function actorSnapshot(actor: unknown): Actor | undefined {
 
 /** Whether a token's iat and exp are as tokens issues them: exp not before iat, iat at most a minute ahead, a day at most between them. */
 export function issuedWithin(iat: number, exp: number, nowMs: number): boolean {
-	return exp >= iat && iat * 1000 <= nowMs + iatAheadMs && exp - iat <= maxLifetimeSeconds;
+	return exp >= iat && iat * 1000 <= nowMs + iatAheadMs && exp - iat <= lifetimeSecondsRange.max;
 }
 
 /** A token's id: 16 random bytes in base64url. */

@@ -292,7 +292,7 @@ SIGTERM と SIGINT を受け取ると、アプリは `kernel.stop-deadline`（�
 
 1.0 より前は、マイナーリリースでも互換性が失われる場合があります。新しいリリース候補でも同様です。アップグレード前に、移行ガイドと[変更履歴](CHANGELOG.md)を読んでください。
 
-セキュリティ修正は、最新の 0.18.x にのみ提供します。リリース候補で見つかった問題の修正は、次のリリース候補に含めます。脆弱性は、[SECURITY.md](SECURITY.md) の説明に従い、このリポジトリの Security タブにある **Report a vulnerability** から非公開で報告してください。公開 issue は作成しないでください。
+セキュリティ修正は、[SECURITY.md](SECURITY.md) がサポート対象とするバージョンに提供します。リリース候補で見つかった問題の修正は、次のリリース候補に含めます。各バージョンが何の互換性を保つか、その変更をどう告知するかは、[リリースポリシー](docs/releasing.md#what-a-version-promises)にあります。脆弱性は、[SECURITY.md](SECURITY.md) の説明に従い、このリポジトリの Security タブにある **Report a vulnerability** から非公開で報告してください。公開 issue は作成しないでください。
 
 ## 開発への参加
 

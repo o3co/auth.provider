@@ -14,8 +14,8 @@ export default auditEvents({
 		when: "the user connects a new grant, with the identity check that applied (`outcome`)",
 	},
 	"federation.grant.reauthorized": {
-		attributes: ["client", "connection", "outcome", "source"],
-		when: "the user connects a renewal, with the identity check that applied (`outcome`)",
+		attributes: ["account_changed", "client", "connection", "outcome", "source"],
+		when: "the user connects a renewal, with the identity check that applied (`outcome`), and which of the grant's account differs from what it held (`account_changed`: `issuer` or `subject`), if any",
 	},
 	"federation.grant.authorization_failed": {
 		attributes: ["client", "connection", "outcome", "source"],

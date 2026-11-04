@@ -12,6 +12,7 @@
 ## Offers
 - `readOutside` (project, names, release, and how pnpm is asked: its command and time): each package read (`Outside`: its declaration, its record, and its fragment, card and section defaults where it ships them), and the registries the project installs from. It refuses, naming each, every reason at once.
 - `Release`: the release's version, the app's zod, and the bundle a module of the release ships in.
+- `bundlesIn` (the index's members): each bundle's dependencies on other bundles, from where its members' runtime dependencies lie.
 
 ## Invariants
 - A name is an npm package's and outside the release's scopes (`@o3co/`, `@mod/`).

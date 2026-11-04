@@ -6,6 +6,7 @@ import {
 	redirects,
 	redirectsAt,
 	redirectsCopy,
+	redirectsShown,
 	registrable,
 } from "../src/contract.ts";
 
@@ -40,9 +41,136 @@ it("tells whether an origin is the scheme, host and port of one of the client's 
 	expect(redirectsAt(registering([]), "https://app.example")).toBe(false);
 });
 
-it("answers no for a client whose record holds no authorize section, as where authorize is not composed", () => {
-	const bare: Client = { ...registering([]), section: <T>() => undefined as T };
+/** A client read where the section is not composed: `clients` throws for a section no module contributed. */
+const bare: Client = {
+	...registering([]),
+	section: () => {
+		throw new Error("no module contributes the section authorize");
+	},
+};
+
+it("answers no for a client read where authorize is not composed", () => {
 	expect(redirectsAt(bare, "https://app.example")).toBe(false);
+});
+
+describe("redirect URIs as a page shows them", () => {
+	const shown = (...uris: string[]) => redirectsShown(registering(uris));
+
+	it("shows a web host as the URL parser writes it, with a port only other than the default", () => {
+		expect(
+			shown(
+				"https://app.example/cb",
+				"https://APP2.Example:443/cb",
+				"https://app.example:8443/cb?x=1",
+			),
+		).toEqual([
+			{ host: "app.example", kind: "web" },
+			{ host: "app2.example", kind: "web" },
+			{ host: "app.example:8443", kind: "web" },
+		]);
+	});
+
+	it("shows a name beyond ASCII as its A-label, never the U-label", () => {
+		expect(shown("https://bücher.example/cb")).toEqual([
+			{ host: "xn--bcher-kva.example", kind: "web" },
+		]);
+		expect(shown("https://xn--bcher-kva.example/cb")).toEqual([
+			{ host: "xn--bcher-kva.example", kind: "web" },
+		]);
+	});
+
+	it("reads loopback from the parsed host, whichever scheme or spelling the URI uses", () => {
+		for (const [uri, host] of [
+			["http://localhost:3000/cb", "localhost:3000"],
+			["http://127.0.0.1/cb", "127.0.0.1"],
+			["http://[::1]:9000/cb", "[::1]"],
+			["https://localhost/cb", "localhost"],
+			["https://app.localhost/cb", "app.localhost"],
+			["https://127.1/cb", "127.0.0.1"],
+			["https://2130706433/cb", "127.0.0.1"],
+			["https://[::ffff:7f00:1]/cb", "[::ffff:7f00:1]"],
+		] as const) {
+			expect(shown(uri), uri).toEqual([{ host, kind: "loopback" }]);
+		}
+		for (const uri of ["https://localhost.redirect.example/cb", "https://127.0.0.1.example/cb"]) {
+			expect(shown(uri)[0]?.kind, uri).toBe("web");
+		}
+	});
+
+	it("shows a port only where it decides a match: never for a loopback literal over http, always for a name", () => {
+		for (const [uri, host] of [
+			["http://127.0.0.1:8080/cb", "127.0.0.1"],
+			["http://127.0.0.2:8080/cb", "127.0.0.2"],
+			["http://[::1]:8080/cb", "[::1]"],
+			["http://localhost:8080/cb", "localhost:8080"],
+			["https://localhost:8443/cb", "localhost:8443"],
+			["https://127.0.0.1:8443/cb", "127.0.0.1:8443"],
+		] as const) {
+			expect(shown(uri), uri).toEqual([{ host, kind: "loopback" }]);
+		}
+	});
+
+	it("shows two URIs alike wherever one matches the other, and apart where a port tells them apart", () => {
+		const uris = [
+			"http://127.0.0.1/cb",
+			"http://127.0.0.1:8080/cb",
+			"http://127.0.0.1:9090/cb",
+			"http://[::1]/cb",
+			"http://[::1]:8080/cb",
+			"http://localhost/cb",
+			"http://localhost:8080/cb",
+			"http://localhost:9090/cb",
+			"https://localhost:8443/cb",
+			"https://127.0.0.1:8443/cb",
+			"https://127.0.0.1:9443/cb",
+			"https://app.example/cb",
+			"https://app.example:8443/cb",
+		];
+		const pairs = uris.flatMap((a) => uris.map((b) => [a, b] as const));
+		for (const [a, b] of pairs.filter(([a, b]) => matches(a, b))) {
+			expect(shown(a), `${a} and ${b}`).toEqual(shown(b));
+		}
+		// The check above is about something: these match across ports, and these do not.
+		expect(matches("http://127.0.0.1:8080/cb", "http://127.0.0.1:9090/cb")).toBe(true);
+		expect(matches("http://[::1]:8080/cb", "http://[::1]/cb")).toBe(true);
+		for (const [a, b] of [
+			["http://localhost:8080/cb", "http://localhost:9090/cb"],
+			["https://127.0.0.1:8443/cb", "https://127.0.0.1:9443/cb"],
+			["https://app.example/cb", "https://app.example:8443/cb"],
+		] as const) {
+			expect(matches(a, b), `${a} and ${b}`).toBe(false);
+			expect(shown(a), `${a} and ${b}`).not.toEqual(shown(b));
+		}
+	});
+
+	it("shows a private-use scheme alone, whatever authority it writes", () => {
+		expect(shown("com.example.app:/cb")).toEqual([{ host: "com.example.app", kind: "app" }]);
+		expect(shown("com.example.app://redirect.example/cb")).toEqual([
+			{ host: "com.example.app", kind: "app" },
+		]);
+	});
+
+	it("shows each destination once, in the order first written, and every one", () => {
+		expect(
+			shown(
+				"https://app.example/a",
+				"com.example.app:/cb",
+				"https://app.example/b",
+				"http://127.0.0.1:1/cb",
+				"http://127.0.0.1:2/cb",
+				"com.example.app:/other",
+			),
+		).toEqual([
+			{ host: "app.example", kind: "web" },
+			{ host: "com.example.app", kind: "app" },
+			{ host: "127.0.0.1", kind: "loopback" },
+		]);
+		expect(shown()).toEqual([]);
+	});
+
+	it("shows none for a client read where the section is not composed", () => {
+		expect(redirectsShown(bare)).toEqual([]);
+	});
 });
 
 it("registers https, http to localhost or loopback literals, and reverse-domain app schemes only [rfc9700-2.6-c] [oidc-core-3.1.2.1-w] [rfc9700-4.1.3-a]", () => {
@@ -53,10 +181,24 @@ it("registers https, http to localhost or loopback literals, and reverse-domain 
 		"http://[::1]:9000/cb",
 		"com.example.app:/cb",
 		"com.example.app://cb",
+		"HTTPS://app.example/cb",
 	]) {
 		expect(registrable(ok)).toBe(true);
 	}
 	for (const bad of [
+		"https:app.example/cb",
+		"https:/app.example/cb",
+		"https:\\\\app.example/cb",
+		"HTTPS:app.example/cb",
+		"https:///app.example/cb",
+		"https:////app.example/cb",
+		"https://\\app.example/cb",
+		"https://app.example\\@evil.example/cb",
+		"https://@app.example/cb",
+		"https://:@app.example/cb",
+		"https://app.example/c\\b",
+		"http://localhost/c\\b",
+		"com.example.app:/c\\b",
 		"http://app.example/cb",
 		"http://localhost.example/cb",
 		"myapp:/cb",

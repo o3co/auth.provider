@@ -15,6 +15,7 @@
 	"peerDependencies": {
 		"@o3co/auth-provider-foundation": "<version>",
 		"@o3co/auth-provider-identity": "<version>",
-		"@o3co/auth-provider-oauth": "<version>"
+		"@o3co/auth-provider-oauth": "<version>",
+		"zod": "^4.6.0"
 	}
 }

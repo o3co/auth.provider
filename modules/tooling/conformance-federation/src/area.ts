@@ -96,6 +96,14 @@ export interface FederationPart {
 	readonly ledgerUrls?: readonly string[];
 	/** Modules the scene is about the absence of: a pattern composing one cannot hold it. */
 	readonly without?: readonly string[];
+	/** The moves of an IdP name to another issuer the scene states, on a store an earlier start kept. */
+	readonly issuerMoved?: readonly {
+		readonly idp: string;
+		readonly from: string;
+		readonly to: string;
+	}[];
+	/** The sealing key, where a scene starts again on what an earlier start sealed; else one of its own. */
+	readonly sealKey?: string;
 }
 
 export const federationArea = area<FederationPart>("federation");
@@ -149,6 +157,8 @@ export function federationScene(scene: FederationScene): AreaScene {
 			...(scene.linkStepUpPage ? { linkStepUpPage: scene.linkStepUpPage } : {}),
 			...(scene.proxy ? { proxy: scene.proxy } : {}),
 			...(scene.without ? { without: scene.without } : {}),
+			...(scene.issuerMoved ? { issuerMoved: scene.issuerMoved } : {}),
+			...(scene.sealKey ? { sealKey: scene.sealKey } : {}),
 			...(scene.ledger
 				? {
 						ledgerUrls: [

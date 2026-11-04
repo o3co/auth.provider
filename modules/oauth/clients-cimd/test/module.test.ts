@@ -195,7 +195,30 @@ describe("clients-cimd: a document client", () => {
 			name: "n".repeat(200),
 			uri: "https://app.example/",
 			host: "app.example",
+			under: expect.any(String),
 		});
+	});
+
+	it("says of a client what its document holds, for every field, whether read or not", async () => {
+		const under = async () => (await documentClient()).section(clientSection).under;
+		const first = await under();
+		expect(first).toEqual(expect.any(String));
+		answer = () => json({ ...document, tos_uri: "https://app.example/terms" });
+		const changed = await under();
+		expect(changed).toEqual(expect.any(String));
+		expect(changed).not.toBe(first);
+	});
+
+	it("takes its digest's algorithm from its section, sha-256 alone and by default, and names it in what it says of a client", async () => {
+		expect(section.parse({})["digest-algorithm"]).toBe("sha-256");
+		expect(section.parse({ "digest-algorithm": "sha-256" })["digest-algorithm"]).toBe("sha-256");
+		for (const refused of ["sha-1", "SHA-256", "sha256", "", 256]) {
+			expect(section.safeParse({ "digest-algorithm": refused }).success, String(refused)).toBe(
+				false,
+			);
+		}
+		const client = await (await boot({ "digest-algorithm": "sha-256" })).find();
+		expect((client as Client).section(clientSection).under).toMatch(/^sha-256:[\w-]{43}$/);
 	});
 
 	it("is said in the metadata, only with the code grant composed", async () => {
@@ -688,6 +711,7 @@ describe("clients-cimd: times and sizes in the section", () => {
 			"cache-entries": 256,
 			"refused-lifetime": 60,
 			"max-concurrent": 8,
+			"digest-algorithm": "sha-256",
 		});
 	});
 });

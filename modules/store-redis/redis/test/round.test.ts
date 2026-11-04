@@ -41,20 +41,28 @@ async function boot(port: number, replication?: "replicas" | "none") {
 			return {};
 		}),
 	]);
+	let now = 0;
 	app = await assemble({
 		modules: [redisModule, tlsOptionsForTests, asker, ...(replication ? [replicated] : [])],
 		config: {
 			...kernelConfig(),
 			redis: { url: `redis://127.0.0.1:${port}`, ...(replication ? { replication } : {}) },
 		},
-		runtime: quietRuntime({ clock: { now: () => 0 }, log: recorded.log }),
+		runtime: quietRuntime({ clock: { now: () => now }, log: recorded.log }),
 	});
 	const warned = () =>
 		recorded
 			.lines()
 			.filter((line) => line.level === "warn")
 			.map((line) => [line.event, line.fields]);
-	return { warned, ready: () => context?.readinessReport(1000).then((r) => r.answer) };
+	return {
+		warned,
+		/** A probe past the second a check of the server serves. */
+		ready: () => {
+			now += 1000;
+			return context?.readinessReport(1000).then((r) => r.answer);
+		},
+	};
 }
 
 const refusal = async (port: number, replication?: "replicas" | "none") => {

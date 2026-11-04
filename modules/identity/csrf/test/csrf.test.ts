@@ -192,7 +192,10 @@ describe("without a public origin", () => {
 				config: { ...kernelConfig(), ...httpConfig({}) },
 				runtime,
 			}),
-		).rejects.toMatchObject({ name: "BootRefused", refusals: [{ where: "csrf" }] });
+		).rejects.toMatchObject({
+			name: "BootRefused",
+			refusals: [{ where: "csrf", reason: "a public origin is required: set http.public-origin" }],
+		});
 	});
 
 	it("starts the stand-in, which then refuses every unsafe request [guarantee-9-a]", async () => {

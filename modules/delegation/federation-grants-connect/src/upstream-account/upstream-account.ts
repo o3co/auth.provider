@@ -26,10 +26,12 @@ export function upstreamAccountWith(p: UpstreamAccountParts) {
 			reached: UpstreamAccount,
 		): Promise<AccountRefusal | undefined> => {
 			const known = grant.upstream;
-			if (known && (known.issuer !== reached.issuer || known.subject !== reached.subject)) {
-				return "account_mismatch";
-			}
-			if (intent.expectedUpstream !== undefined && intent.expectedUpstream !== reached.subject) {
+			// A subject is unique within its issuer alone, so what is known of another issuer says nothing here.
+			const sameIssuer = !known || known.issuer === reached.issuer;
+			if (known && sameIssuer && known.subject !== reached.subject) return "account_mismatch";
+			// A subject the client expects is of the issuer the grant holds: never compared with another's.
+			const expected = intent.expectedUpstream;
+			if (expected !== undefined && (!sameIssuer || expected !== reached.subject)) {
 				return "account_mismatch";
 			}
 			if (p.check !== "required") return undefined;
