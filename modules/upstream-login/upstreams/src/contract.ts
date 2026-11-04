@@ -72,6 +72,12 @@ export interface UpstreamTokens {
 export interface Upstream {
 	/** The issuer the upstream's logins come from, as the type knows it: its own, or the one its settings name. */
 	readonly issuer: string;
+	/**
+	 * Where the upstream's subjects are read, where the type's settings point that away from its own
+	 * endpoint: what the IdP's name stands for in place of `issuer`. Never sent or compared with an
+	 * upstream's answer, which name `issuer` alone.
+	 */
+	readonly subjectsFrom?: string;
 	/** How the upstream sends the browser back: in the query (the default) or a posted form. */
 	readonly responseMode?: "query" | "form_post";
 	/** How far this upstream's clock may be from ours; none when not given. */
