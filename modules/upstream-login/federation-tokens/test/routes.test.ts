@@ -1,5 +1,6 @@
 import { testRequest } from "@mod/http/testing";
 import { Unavailable } from "@mod/kernel";
+import type { BindingRead } from "@mod/sender-binding";
 import { type Entry, sessions } from "@mod/session";
 import type { UpstreamRefresh } from "@mod/upstreams";
 import { describe, expect, it, vi } from "vitest";
@@ -446,6 +447,29 @@ describe("the upstream logout route", () => {
 				offered === failing ? [{ idp: "corp", kind: "RangeError" }] : [],
 			);
 		}
+	});
+
+	it("stays refused with the wait while the token's admission answers too many, forgetting nothing and sending nobody on", async () => {
+		let read: BindingRead | undefined = {
+			kind: "refused",
+			error: "rate_limited",
+			status: 429,
+			headers: { "retry-after": "7" },
+		};
+		const h = await linked({ offered: ending, bindingRead: () => read }, { idToken: "id-1" });
+		const { token } = await h.issue(h.session, "app", { dpop: true });
+		const form = { post_logout_redirect_uri: back };
+		const out = await h.call("logout", token, { scheme: "DPoP", form });
+		expect([out.status, out.json, out.headers["retry-after"], out.headers.location]).toEqual([
+			429,
+			{ error: "rate_limited" },
+			"7",
+			undefined,
+		]);
+		expect(h.events).toEqual([]);
+		read = undefined;
+		const after = await h.call("token", token, { scheme: "DPoP" });
+		expect([after.status, after.json?.access_token]).toEqual([200, "up-1"]);
 	});
 
 	it("answers not linked for an IdP the session has no tokens from, and keeps the others", async () => {
