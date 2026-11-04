@@ -19,7 +19,7 @@ import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { memoryRecords } from "@mod/records/testing";
 import { type Scene, type SenderBinding, senderBinding, senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
-import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
+import { CompactSign, calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
 import dpop from "../src/module.ts";
 import { type SpentProofs, spentProofs } from "../src/store.ts";
@@ -448,7 +448,7 @@ describe("what a proof writes at a resource", () => {
 		const spent = spentInMemory();
 		const app = await boot({ nonce: { required: "never" }, ...section }, spent, issuer, counts);
 		const present = (
-			dpopProof: string,
+			dpopProof: string | undefined,
 			scheme = "DPoP",
 			tokens: typeof keyed | typeof unbound = keyed,
 			source = "192.0.2.1",
@@ -459,7 +459,7 @@ describe("what a proof writes at a resource", () => {
 					path: "/api",
 					headers: new Map([
 						["authorization", `${scheme} ${token}`],
-						["dpop", dpopProof],
+						...(dpopProof === undefined ? [] : ([["dpop", dpopProof]] as const)),
 					]),
 					source: { address: source },
 				}),
@@ -505,6 +505,25 @@ describe("what a proof writes at a resource", () => {
 		expect(at.writes).toHaveLength(3);
 	});
 
+	it("says the count's wait in whole seconds, rounded up", async () => {
+		for (const [wait, said] of [
+			[1, "1"],
+			[1500, "2"],
+			[2000, "2"],
+		] as const) {
+			const counts = defineModule({ name: "counts", replicaSafe: false, takes: [] }, (m) => [
+				m.provide(rateLimit).by(() => ({
+					hit: async () => ({ kind: "limited", retryAfterMs: wait }) as const,
+				})),
+			]);
+			const at = await atResource({}, counts);
+			expect(await at.present(await toResource()), String(wait)).toEqual({
+				...tooMany,
+				headers: { "retry-after": said },
+			});
+		}
+	});
+
 	it("takes 60 in a minute by default, and takes more once the clock is past that minute", async () => {
 		const at = await atResource();
 		for (let i = 0; i < 60; i++) {
@@ -517,6 +536,146 @@ describe("what a proof writes at a resource", () => {
 		shift = 61_000;
 		expect(await at.present(await toResource())).toMatchObject(admitted);
 		expect(at.writes).toHaveLength(61);
+	});
+
+	describe("what counts nothing", () => {
+		type At = Awaited<ReturnType<typeof atResource>>;
+		/** What this proof reads as at the resource, its reason told. */
+		const readAt = (at: At, dpopProof: string) =>
+			at.app
+				.get(senderBinding)
+				.bindingOf(
+					testRequest({ method: "POST", path: "/api", headers: new Map([["dpop", dpopProof]]) }),
+					{ kind: "resource", token, held, subject: grant.subject },
+				);
+		/** The whole count is still the holder's: this many taken, then the next one over. */
+		async function wholeCountLeft(at: At, proofs: number) {
+			for (let n = 0; n < proofs; n++) {
+				expect(await at.present(await toResource()), String(n)).toMatchObject(admitted);
+			}
+			expect(await at.present(await toResource())).toMatchObject(tooMany);
+			expect(at.writes).toHaveLength(proofs);
+		}
+		const claims = () => ({
+			htm: "POST",
+			htu: `${issuer}/api`,
+			ath,
+			iat: Math.floor(runtime.clock.now() / 1000),
+			jti: randomUUID(),
+		});
+		const jwk = () => exportJWK(holder.publicKey);
+		const header = async () => ({ alg: "EdDSA", typ: "dpop+jwt", jwk: await jwk() });
+		const refusals: readonly (readonly [string, () => Promise<string>])[] = [
+			["one DPoP header only", async () => `${await toResource()},${await toResource()}`],
+			["not a JWT", async () => "not-a-jwt"],
+			[
+				"typ must be dpop+jwt",
+				async () =>
+					new SignJWT(claims())
+						.setProtectedHeader({ ...(await header()), typ: "jwt" })
+						.sign(holder.privateKey),
+			],
+			[
+				"alg not allowed",
+				async () =>
+					new SignJWT(claims())
+						.setProtectedHeader({ ...(await header()), alg: "HS256" })
+						.sign(randomBytes(32)),
+			],
+			[
+				"jwk must be a public key",
+				async () =>
+					new SignJWT(claims())
+						.setProtectedHeader({ alg: "EdDSA", typ: "dpop+jwt" })
+						.sign(holder.privateKey),
+			],
+			[
+				"signature does not verify",
+				async () =>
+					new SignJWT(claims()).setProtectedHeader(await header()).sign(stranger.privateKey),
+			],
+			[
+				"payload is not JSON",
+				async () =>
+					new CompactSign(new TextEncoder().encode("not json"))
+						.setProtectedHeader(await header())
+						.sign(holder.privateKey),
+			],
+			[
+				"missing or malformed claims",
+				async () =>
+					new SignJWT({ ...claims(), jti: "" })
+						.setProtectedHeader(await header())
+						.sign(holder.privateKey),
+			],
+			["htm does not match", () => proof({ htu: `${issuer}/api`, ath, htm: "GET" })],
+			["htu does not match", () => proof({ htu: `${issuer}/other`, ath })],
+			[
+				"iat outside the window",
+				() => proof({ htu: `${issuer}/api`, ath, iat: claims().iat - 3600 }),
+			],
+			["ath does not match the token", () => proof({ htu: `${issuer}/api`, ath: "another" })],
+		];
+
+		it("counts nothing for a copy of the token with no proof, past `proofs`, and the holder's next proof is taken", async () => {
+			const at = await atResource({ proofs: 2 });
+			for (const n of [1, 2, 3, 4, 5]) {
+				expect(await at.present(undefined), String(n)).toEqual(notTheHolders);
+			}
+			expect(at.writes).toEqual([]);
+			await wholeCountLeft(at, 2);
+		});
+
+		it("counts nothing for a copy of the token presented under another scheme", async () => {
+			const at = await atResource({ proofs: 2 });
+			for (const n of [1, 2, 3, 4, 5]) {
+				expect(await at.present(undefined, "Bearer"), String(n)).toEqual(notTheHolders);
+			}
+			expect(at.writes).toEqual([]);
+			await wholeCountLeft(at, 2);
+		});
+
+		for (const [reason, made] of refusals) {
+			it(`counts nothing for a proof refused as "${reason}"`, async () => {
+				const at = await atResource({ proofs: 2 });
+				expect(await readAt(at, await made())).toEqual({
+					kind: "refused",
+					error: "invalid_dpop_proof",
+					description: reason,
+				});
+				for (const n of [1, 2, 3, 4, 5]) {
+					expect(await at.present(await made()), String(n)).toMatchObject({
+						kind: "refused",
+						status: 401,
+						error: "invalid_dpop_proof",
+					});
+				}
+				expect(at.writes).toEqual([]);
+				await wholeCountLeft(at, 2);
+			});
+		}
+
+		it("counts nothing for a proof asked for a nonce", async () => {
+			const secret = randomBytes(32).toString("base64");
+			const at = await atResource({ proofs: 2, nonce: { required: "as+rs", secret } });
+			let nonce = "";
+			for (const n of [1, 2, 3, 4, 5]) {
+				const asked = await at.present(await toResource());
+				expect(asked, String(n)).toMatchObject({
+					kind: "refused",
+					status: 401,
+					error: "use_dpop_nonce",
+				});
+				nonce = (asked as { headers: Record<string, string> }).headers["dpop-nonce"] ?? "";
+			}
+			expect(at.writes).toEqual([]);
+			const carrying = () => proof({ htu: `${issuer}/api`, ath, nonce });
+			for (const n of [1, 2]) {
+				expect(await at.present(await carrying()), String(n)).toMatchObject(admitted);
+			}
+			expect(await at.present(await carrying())).toMatchObject(tooMany);
+			expect(at.writes).toHaveLength(2);
+		});
 	});
 
 	describe("whose count it is", () => {
@@ -677,7 +836,7 @@ describe("what a proof writes at a resource", () => {
 		expect(at.writes).toEqual([]);
 	});
 
-	it("refuses a replay as ever, counted and writing no second spend", async () => {
+	it("refuses a replay as ever, and counts it", async () => {
 		const at = await atResource({ proofs: 2 });
 		const once = await toResource();
 		expect(await at.present(once)).toMatchObject(admitted);
