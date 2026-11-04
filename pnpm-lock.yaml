@@ -2744,6 +2744,9 @@ importers:
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
       zod:
         specifier: 4.6.7
         version: 4.6.7

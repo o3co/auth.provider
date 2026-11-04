@@ -204,7 +204,7 @@ flowchart LR
 | `@mod/passkey-witnessing` | feature | `@mod/audit`, `@mod/kernel`, `@mod/passkey-witness`, `@mod/passkeys` |
 | `@mod/passkeys` | feature | `@mod/kernel`, `@mod/passkey-witness`, `@mod/webauthn` |
 | `@mod/webauthn` | feature | `@mod/kernel` |
-| `@mod/webauthn-login` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/passkeys`, `@mod/rate-limit`, `@mod/refresh`, `@mod/subject-revocation` |
+| `@mod/webauthn-login` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/passkeys`, `@mod/rate-limit`, `@mod/refresh`, `@mod/subject-revocation`, `@mod/users` |
 
 ### scaffold
 

@@ -24,7 +24,7 @@
 - The count is compared after the signature verified, and must go up (0 after 0 passes).
 - An assertion whose request named no credential is refused without a user handle (`user-handle`, WebAuthn §7.2 step 6); one whose request named it may carry none. A handle carried must be the credential's.
 - A user handle is 32 random bytes, carrying neither the subject nor a name. Handles and credential ids are compared only as unpadded base64url. Transports are taken only as a short list of short strings.
-- Creation asks for no attestation, so it takes the public key as sent: nothing proves the client holds its private key until the first assertion. `required` refuses a response without user verification. A backup eligibility other than the credential's is refused.
+- Creation asks for no attestation, so it takes the public key as sent: nothing proves the client holds its private key until the first assertion. The statement sent is dropped before the library reads it, and only `authData` is read, as a `none` attestation. `required` refuses a response without user verification. A backup eligibility other than the credential's is refused.
 
 ## Data
 - None: the caller keeps the challenges and the credentials.

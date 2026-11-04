@@ -17,16 +17,16 @@
 - Route `POST /oauth/webauthn/authentication/options`: takes JSON, a form or no body, and reads only `client_id`; declared to take requests from other sites.
   - It answers `passkeys`' options with `no-store`, their challenge made for that client.
   - A missing `client_id`, or one that is not one non-empty string, is `400 invalid_request`.
-- Audit event `passkey.login.refused`, with `client` and `reason`: a kind from a fixed list, one per refusal of `passkeys`, and `authentication_revoked`.
+- Audit event `passkey.login.refused`, with `client` and `reason`: a kind from a fixed list, one per refusal of `passkeys`, `authentication_revoked` and `unknown_user`.
 - Operator section: `requests` (1–100000, default 60) in `window` (1s–1d in whole seconds, written with its unit, default `1m`), for the options route.
 
 ## Invariants
-- Order: the assertion's shape, then `passkeys` (user handle, the challenge once and its client, signature, count), then the scope, then the subject's revocation boundary, then the access token, then the refresh token.
+- Order: the assertion's shape, then `passkeys` (user handle, the challenge once and its client, signature, count), then the scope, then the subject's revocation boundary, then `users`, then the access token, then the refresh token.
 - A missing assertion is `invalid_request`; one that is not an object is `invalid_grant`.
-- Every refusal of `passkeys`, and the revocation boundary, is the same `invalid_grant`, so no answer tells whether a credential is registered.
+- Every refusal of `passkeys`, the revocation boundary and a subject `users` does not know is the same `invalid_grant`, so no answer tells whether a credential is registered.
 - A challenge made for another client is one of those refusals.
 - The audit event holds no credential id and nothing else the request sent.
-- The subject is the passkey's holder.
+- The subject is the passkey's holder, and `users` must know it (`bySubject`); a subject it cannot answer for is `503`, so a ledger without a lookup by subject answers every grant `503`. A refresh does not ask `users`: a family started before a removal goes on until a revocation or its end.
 - The authentication time is when the challenge was made, and is what the revocation boundary is compared with, here and as the access token's standing time at each verification.
 - Scope and audience are the client's allowance (`client-allowance`); beyond it, `invalid_scope`.
 - The access token is the client's, bound to the request's binding, with amr `pop` and the authentication time, issued through `tokens`' issuance policies without a session; a refusal starts no family. The policies are first asked once `passkeys` has taken the challenge, since only then is the holder known.
@@ -36,4 +36,4 @@
 - A store that cannot answer is `503`, never a refusal.
 
 ## Depends on
-- `kernel`, `http`, `grants`, `client-allowance`, `passkeys`, `refresh`, `subject-revocation`, `issuer`, `rate-limit`, `audit`
+- `kernel`, `http`, `grants`, `client-allowance`, `passkeys`, `refresh`, `subject-revocation`, `users`, `issuer`, `rate-limit`, `audit`
