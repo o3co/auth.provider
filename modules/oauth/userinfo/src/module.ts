@@ -54,7 +54,8 @@ export default defineModule({ name: "userinfo", replicaSafe: true, takes: module
 				: {
 						crossSite:
 							"The access token comes in the Authorization header, never a cookie, and it only reads.",
-						unlimited: "It is authenticated by a bearer access token and only reads.",
+						unlimited:
+							"It is authenticated by an access token and only reads; what a DPoP proof spends, `dpop` counts by the token's subject.",
 					}),
 			// `503`, never a refusal: http warns of it once, by what failed and the route.
 			unavailable: { response: unavailable },
