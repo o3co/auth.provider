@@ -13,6 +13,9 @@ import {
 import { urlsChecked } from "@mod/url-setting";
 import { z } from "zod";
 
+/** Where Apple publishes the keys that sign its id_tokens. */
+export const ownJwksUri = "https://appleid.apple.com/auth/keys";
+
 /** The three settings that sign the client's secret, together. */
 const signing = ["team-id", "key-id", "private-key"] as const;
 
@@ -49,7 +52,7 @@ const section = clientSetting
 			.prefault("https://appleid.apple.com/auth/token")
 			.describe("Where a code is exchanged for tokens; Apple's own unless named."),
 		"jwks-uri": endpoint
-			.prefault("https://appleid.apple.com/auth/keys")
+			.prefault(ownJwksUri)
 			.describe("Where the keys that sign Apple's id_tokens are read; Apple's own unless named."),
 		algorithms: algorithmsSetting(knownAlgorithms, ["RS256"]).describe(
 			"The algorithms Apple's id_tokens may be signed with: asymmetric ones only, RS256 by default, the one Apple signs with.",

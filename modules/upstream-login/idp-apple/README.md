@@ -33,7 +33,7 @@
 - Boot is refused, at its key, where `outbound`'s destination policy refuses `token-endpoint` or `jwks-uri` with its host alone, saying which of its keys to set (`outbound.refusals`).
 - Boot is refused, at its key, on an `authorization-endpoint` or `end-session-endpoint`, which the browser goes to, that `outbound.refusals`' `browsedRefusal` refuses: plain http is taken at a loopback name alone, Apple being a public service.
 - Apple's own default endpoints are put to that policy too.
-- A signed secret lives `secret-lifetime`, on `kernel`'s clock.
+- `subjectsFrom`, where the keys that vouch for a subject are read: off Apple's own, `jwks-uri`'s URL as the parser writes it with no trailing slash; at Apple's own, however it is spelled, none, so the name stands for Apple's issuer as it always did.
 - The id_token is checked under `algorithms` (`external-jwt`'s `algorithmsSetting`, RS256 by default), Apple's issuer exactly, the client among its audiences, and `clock-skew`.
 - An id_token that gives `at_hash` must give the access token's; one that does not refuses the exchange.
 - The id_token names no audience other than the client, and its `azp`, where given, must be the client.
