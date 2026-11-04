@@ -14,7 +14,6 @@ export interface OutsideModules {
 /** What the app is given beside its own files, where it composes packages outside the release. */
 export interface Beside {
 	readonly files: Readonly<Record<string, string>>;
-	readonly scripts: Readonly<Record<string, string>>;
 	/** What the image's install stage copies, and runs before anything is installed. */
 	readonly image:
 		| {
@@ -41,7 +40,6 @@ const releasePackage = (name: string) => name.startsWith("@o3co/auth-provider-")
 
 const nothing: Beside = {
 	files: {},
-	scripts: {},
 	image: undefined,
 	guide: "",
 	index: "",
@@ -120,7 +118,6 @@ export function besideRelease(
 			"pnpm-workspace.yaml": stringify(settings),
 			...(npmrc ? { [npmrcFile]: npmrc } : {}),
 		},
-		scripts: {},
 		image: {
 			copy: [recordFile, scriptFile, ...(npmrc ? [npmrcFile] : [])],
 			check: `node ${scriptFile}`,

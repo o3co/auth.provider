@@ -10,7 +10,7 @@
 - Writing the files: `app-output`'s `writeDeployment`.
 
 ## Offers
-- `besideRelease` (the packages outside, as `OutsideModules`, and the app's dependencies, release version, zod, the integrity the release recorded and each bundle's dependencies on other bundles): the files, dependencies, scripts, image lines, guide section and index line to add; nothing where there is no package outside.
+- `besideRelease` (the packages outside, as `OutsideModules`, and the app's dependencies, release version, zod, the integrity the release recorded and each bundle's dependencies on other bundles): the files, image lines, guide section and index line to add; nothing where there is no package outside.
 - `OutsideModules`: the records, the registries they and the release come from, and the names let through though fresh.
 
 ## Invariants
