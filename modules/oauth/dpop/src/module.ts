@@ -39,7 +39,7 @@ const section = z.strictObject({
 		.max(100_000)
 		.prefault(60)
 		.describe(
-			"Proofs a token's subject may present at resources in each `proofs-window`, from 1 to 100000.",
+			"Proofs a token's subject may present at resources in each `proofs-window`, one count shared by all its clients, from 1 to 100000.",
 		),
 	"proofs-window": setting
 		.duration("s")

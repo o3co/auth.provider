@@ -31,7 +31,7 @@
 - `iat` is taken within the window on either side of `kernel`'s clock, edges included.
 - At a resource, `ath` is the hash of the token presented.
 - At a resource, a proof by another key than the one the token holds, or on a token another kind holds, is answered bound and `sender-binding` refuses it, with nothing counted or spent.
-- At a resource, a proof by the token's key is counted, by the token's subject whatever the key or source, in `rate-limit`'s requests and before its spend. Over `proofs`, it is `429` `rate_limited` with `retry-after` and not spent, so it may come again; a count that cannot be made is unavailable. A proof at the token endpoint is not counted.
+- At a resource, a proof by the token's key is counted, by the token's subject whatever the key or source, in `rate-limit`'s requests and before its spend. A subject's count is one, shared by all its clients, so any of them can use it up for the others. Over `proofs`, it is `429` `rate_limited` with `retry-after` and not spent, so it may come again; a count that cannot be made is unavailable. A proof at the token endpoint is not counted.
 - The `jti` is spent last, after every other check, so a proof refused for its `ath` is not used up.
 - A spent `jti` is refused. One the store cannot answer for is unavailable.
 - A proof spent before the grant fails stays spent; the client signs again.
