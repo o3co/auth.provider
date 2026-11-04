@@ -120,9 +120,13 @@ describe("userinfo: what a DPoP proof writes", () => {
 			const taken = await userinfo(i, token, await proof(holder, "GET", path, token));
 			expect(taken.status).toBe(200);
 			const spent = successes(i, proofSpent).length;
-			const drop = i.relay.dropReplyTo(proofsCounted(svc.id));
-			const answer = await userinfo(i, token, await proof(holder, "GET", path, token));
-			await drop.first;
+			const hold = i.relay.hold(proofsCounted(svc.id));
+			const asked = userinfo(i, token, await proof(holder, "GET", path, token));
+			const held = await hold;
+			// Let go once the count has timed out, a second in: a spend past it would be answered, and taken.
+			await Promise.race([asked, new Promise((resolve) => setTimeout(resolve, 1500))]);
+			held.release();
+			const answer = await asked;
 			expect([answer.status, answer.error]).toEqual([503, "temporarily_unavailable"]);
 			expect(successes(i, proofSpent).length).toBe(spent);
 			await ready(i);
