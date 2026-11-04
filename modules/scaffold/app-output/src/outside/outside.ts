@@ -29,6 +29,10 @@ export interface Beside {
 	readonly index: string;
 	/** What the guide's opening says comes with the modules listed. */
 	readonly comesWith: string;
+	/** Whether the app has scripts: none beside a package outside the release. */
+	readonly scripts: boolean;
+	/** The first step of the guide's start. */
+	readonly install: string;
 }
 
 const recordFile = "outside-modules.json";
@@ -45,6 +49,8 @@ const nothing: Beside = {
 	index: "",
 	comesWith:
 		"What they need to run comes with them, and so do the wirings and bridges they come with.",
+	scripts: true,
+	install: "`pnpm install`",
 };
 
 /**
@@ -128,6 +134,9 @@ export function besideRelease(
 		// Only the packages named are read: one outside the release brings no other outside it.
 		comesWith:
 			"What they need to run comes with them, and so do the wirings and bridges of the release's modules. A package outside the release brings no other: each wiring and adapter outside it must be listed by name, or boot refuses, naming the contract no module provides.",
+		scripts: false,
+		install:
+			"Install as `## Packages outside this release` below says: its three commands, in their order",
 		index: `\nPackages outside the release, not part of it: \`${recordFile}\` records each one as the app was generated.\n`,
 	};
 }

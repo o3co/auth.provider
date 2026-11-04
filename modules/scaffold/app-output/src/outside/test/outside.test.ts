@@ -47,6 +47,8 @@ describe("what an app beside packages outside the release is given", () => {
 				guide: "",
 				index: "",
 				comesWith: expect.any(String),
+				scripts: true,
+				install: "`pnpm install`",
 			});
 		}
 	});
@@ -87,6 +89,18 @@ describe("what an app beside packages outside the release is given", () => {
 			"@o3co/auth-provider-oauth": "0.19.0",
 			zod: "4.6.7",
 		});
+	});
+
+	it("says of an app beside a package outside that it has no scripts, whatever the package", () => {
+		expect(besideRelease(outside, app).scripts).toBe(false);
+		const plain = { ...outside, modules: [{ ...grant, peerDependencies: {} }] };
+		expect(besideRelease(plain, app).scripts).toBe(false);
+	});
+
+	it("says of the guide's start to install as its section says", () => {
+		const { install, guide } = besideRelease(outside, app);
+		expect(install).toContain("`## Packages outside this release`");
+		expect(guide).toContain("## Packages outside this release");
 	});
 
 	it("installs no version published within the last day, but the release's and those let through by name and version", () => {
