@@ -72,6 +72,8 @@ pnpm add @example/did-grant@1.2.0
 cd ..
 ```
 
+The package must come from a registry, npm's or one of your own: one installed from a git repository, a directory or a file is refused.
+
 pnpm resolves it from your registry with your credentials and checks its integrity; set `minimumReleaseAge` there too, so a version published a moment ago is not taken. Use pnpm (10 or later, whose default runs no dependency's build script), keep this project on your own machine, put no `overrides` in it, and do not change it while the generator reads it.
 
 ### Generate the app
@@ -90,6 +92,8 @@ npx @o3co/create-auth-provider my-app --pattern simple-web --add npm:@example/di
 
 The generator takes the version your project's lockfile resolved, and refuses the package where it lies outside the project's `node_modules`, where its manifest or its lockfile entry says other than the other, or where it breaks a rule of the first half of this page; it names every reason at once. A package outside the release is composed beside the published release alone, one recording the integrity of its own packages and of zod: never with `--workspace`. The `create-app` card and its internal module `outside` hold these rules.
 
+Only the packages you name are read, and a package outside the release brings no other. Name each wiring and adapter of your own beside the feature it serves; the app's boot otherwise refuses, naming the missing contract (`refused <module>: no module provides <contract>`).
+
 The app is installed with no version published within the last day, but the release's own. To take a newer one of your package, name it: `--allow-fresh @example/did-grant` lets that version alone be installed.
 
 ### Install the app, and check what it installed
@@ -105,7 +109,13 @@ git add pnpm-lock.yaml
 
 Commit the lockfile once the check passes. The image runs the same check after installing, and refuses to build otherwise. The check holds what it uses, so nothing of the install it checks is run by it.
 
-`pnpm-workspace.yaml` holds every package of the release the app depends on, or a package outside it takes as a peer, and zod, to one version each. When you upgrade the release, generate the app again with the new release's `create-auth-provider` and take the overrides, `held` and `scripts/check-outside.mjs` from it: the overrides and `held` move together, and the check refuses one without the other. Take the check too, as one older than the record may not read all of it: an app generated before `held` was recorded has a check that does not read it.
+Where your project installs a scope from a registry of its own, the app is given `.npmrc`, naming each such registry by its origin and holding no credential. Commit it, and write a registry served under a path in it by hand. Keep credentials in your own `~/.npmrc`: the image's install stage copies the app's `.npmrc` and takes credentials as a build secret, so neither reaches the image the app runs in:
+
+```sh
+docker build --secret id=npmrc,src=$HOME/.npmrc -t auth-provider .
+```
+
+`pnpm-workspace.yaml` holds every package of the release the app depends on, or a package outside it takes as a peer, every bundle of the release those depend on, and zod, to one version each. When you upgrade the release, generate the app again with the new release's `create-auth-provider` and take the overrides, `held` and `scripts/check-outside.mjs` from it: the overrides and `held` move together, and the check refuses one without the other. Take the check too, as one older than the record may not read all of it: an app generated before `held` was recorded has a check that does not read it.
 
 ## What is and is not checked
 

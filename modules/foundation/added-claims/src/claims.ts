@@ -1,6 +1,6 @@
 import { types } from "node:util";
 
-/** A value a grant adds to its access token: JSON, as the rules below take it. */
+/** A value of an added claim: JSON, as the rules below take it. A null is read back alone, from a token 0.18 signed. */
 export type AddedValue =
 	| null
 	| boolean
@@ -93,11 +93,12 @@ const withinCodePoints = (text: string, most: number) => {
 };
 const bytesOf = (text: string) => Buffer.byteLength(JSON.stringify(text));
 
-/** The walk's running counts: the values met and the bytes the JSON would take. */
+/** The walk's running counts: the values met and the bytes the JSON would take; and whether it takes a null. */
 interface Walk {
 	nodes: number;
 	bytes: number;
 	readonly seen: Set<object>;
+	readonly nulls: "refused" | "read";
 }
 
 /** Each count is checked as it grows, before the walk goes on. */
@@ -140,9 +141,13 @@ function ownData(value: object, most: number, over: string): [string | symbol, u
 	});
 }
 
-function copy(value: unknown, depth: number, walk: Walk): AddedValue {
+/** `at` is the value's path, as `keys` names a null: a member by `.name`, an array's value by `[i]`. */
+function copy(value: unknown, depth: number, walk: Walk, at: string): AddedValue {
 	if (depth > limits.depth) throw refused(`is nested deeper than ${limits.depth}`);
 	node(walk);
+	if (value === null && walk.nulls === "refused") {
+		throw refused(`holds a null at ${at}: leave it out`);
+	}
 	if (value === null || typeof value === "boolean") {
 		bytes(walk, value === null ? 4 : String(value).length);
 		return value;
@@ -165,13 +170,20 @@ function copy(value: unknown, depth: number, walk: Walk): AddedValue {
 	if (walk.seen.has(value)) throw refused("holds itself");
 	walk.seen.add(value);
 	try {
-		return Array.isArray(value) ? copyArray(value, depth, walk) : copyObject(value, depth, walk);
+		return Array.isArray(value)
+			? copyArray(value, depth, walk, at)
+			: copyObject(value, depth, walk, at);
 	} finally {
 		walk.seen.delete(value);
 	}
 }
 
-function copyArray(value: readonly unknown[], depth: number, walk: Walk): readonly AddedValue[] {
+function copyArray(
+	value: readonly unknown[],
+	depth: number,
+	walk: Walk,
+	path: string,
+): readonly AddedValue[] {
 	if (Object.getPrototypeOf(value) !== Array.prototype) throw refused("array is not a plain one");
 	// A plain array's length is its own data property, read before anything else.
 	const length = value.length;
@@ -184,7 +196,7 @@ function copyArray(value: readonly unknown[], depth: number, walk: Walk): readon
 	for (let at = 0; at < length; at++) {
 		const [key, entry] = entries[at] ?? [];
 		if (key !== String(at)) throw refused("array holds a hole");
-		copied.push(copy(entry, depth + 1, walk));
+		copied.push(copy(entry, depth + 1, walk, `${path}[${at}]`));
 	}
 	return Object.freeze(copied);
 }
@@ -196,14 +208,14 @@ function plainMembers(value: object, over: string): [string | symbol, unknown][]
 	return ownData(value, limits.members, over);
 }
 
-function copyObject(value: object, depth: number, walk: Walk): AddedClaims {
+function copyObject(value: object, depth: number, walk: Walk, path: string): AddedClaims {
 	const entries = plainMembers(value, `object holds more than ${limits.members} members`);
 	bytes(walk, 2 + Math.max(0, entries.length - 1));
 	const copied: Record<string, AddedValue> = {};
 	for (const [key, member] of entries) {
 		const name = nameOf(key, false);
 		bytes(walk, bytesOf(name) + 1);
-		copied[name] = copy(member, depth + 1, walk);
+		copied[name] = copy(member, depth + 1, walk, `${path}.${name}`);
 	}
 	return Object.freeze(copied);
 }
@@ -214,6 +226,18 @@ function copyObject(value: object, depth: number, walk: Walk): AddedClaims {
  * maker's mistake, on anything else: nothing given is called, nor used past the copy.
  */
 export function addedClaimsOf(given: unknown): AddedClaims | undefined {
+	return copied(given, "refused");
+}
+
+/**
+ * The added claims of a token read back, checked and copied as a grant's are but for a null. Signing
+ * took one under 0.18, so a token it signed may hold one, and is read as it was signed.
+ */
+export function addedClaimsReadBack(given: unknown): AddedClaims | undefined {
+	return copied(given, "read");
+}
+
+function copied(given: unknown, nulls: Walk["nulls"]): AddedClaims | undefined {
 	if (given === undefined) return undefined;
 	if (given === null || typeof given !== "object" || Array.isArray(given)) {
 		throw refused("set is not an object");
@@ -221,15 +245,15 @@ export function addedClaimsOf(given: unknown): AddedClaims | undefined {
 	if (types.isProxy(given)) throw refused("set is a proxy");
 	const entries = plainMembers(given, `set holds more than ${limits.members} claims`);
 	if (entries.length === 0) return undefined;
-	const walk: Walk = { nodes: 0, bytes: 0, seen: new Set([given]) };
+	const walk: Walk = { nodes: 0, bytes: 0, seen: new Set([given]), nulls };
 	bytes(walk, 2 + entries.length - 1);
-	const copied: Record<string, AddedValue> = {};
+	const taken: Record<string, AddedValue> = {};
 	for (const [key, value] of entries) {
 		const name = nameOf(key, true);
 		bytes(walk, bytesOf(name) + 1);
-		copied[name] = copy(value, 1, walk);
+		taken[name] = copy(value, 1, walk, name);
 	}
-	return Object.freeze(copied);
+	return Object.freeze(taken);
 }
 
 /** The added claims a verified payload holds: its members an access token's issuer does not write. */

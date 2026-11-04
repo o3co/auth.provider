@@ -10,8 +10,10 @@ import {
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces } from "@mod/store";
 import { tlsOptionsForTests } from "@mod/tls-options/testing";
+import type { Redis } from "ioredis";
 import { afterEach, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
+import { redisProbe } from "../src/probe.ts";
 import { fakeRedis } from "./fake-redis.ts";
 
 /** Waits until `holds`, checking every 10 ms, for 2 s at most: on the event, not on a guess of its time. */
@@ -41,11 +43,12 @@ async function boot(port: number, extra: readonly Module[] = []) {
 			return {};
 		}),
 	]);
+	let now = 0;
 	app = await assemble({
 		modules: [redisModule, tlsOptionsForTests, asker, ...extra],
 		config: { ...kernelConfig(), redis: { url: `redis://127.0.0.1:${port}` } },
 		runtime: quietRuntime({
-			clock: { now: () => 0 },
+			clock: { now: () => now },
 			random: { bytes: (n) => new Uint8Array(n) },
 			log: recorded.log,
 		}),
@@ -65,7 +68,11 @@ async function boot(port: number, extra: readonly Module[] = []) {
 	return {
 		warned,
 		warnedFields,
-		ready: () => context?.readinessReport(1000).then((r) => r.answer),
+		/** A probe past the second a check of the server serves. */
+		ready: () => {
+			now += 1000;
+			return context?.readinessReport(1000).then((r) => r.answer);
+		},
 	};
 }
 
@@ -145,5 +152,104 @@ describe("the redis probe", () => {
 		redis.down();
 		await until(async () => (await ready()) === "unready");
 		expect(await ready()).toBe("unready");
+	});
+});
+
+describe("the redis probe's check of what boot checked", () => {
+	/** The probe over two connections and a check a test scripts, on a clock it moves. */
+	function probing(answer: () => Promise<readonly string[]> = async () => []) {
+		const recorded = recordingLog();
+		const clock = { at: 1_000_000, now: () => clock.at };
+		const counts = { pings: 0, checks: 0 };
+		const connection = {
+			ping: async () => {
+				counts.pings++;
+				if (connections.down) throw new Error("Connection is closed.");
+				return "PONG";
+			},
+		} as unknown as Redis;
+		const connections = { down: false };
+		const unmet = () => {
+			counts.checks++;
+			return answer();
+		};
+		const probe = redisProbe([connection, connection], unmet, recorded.log, clock);
+		return {
+			clock,
+			counts,
+			connections,
+			run: () => probe.check(new AbortController().signal),
+			warned: () => recorded.lines().filter((line) => line.level === "warn"),
+		};
+	}
+
+	it("starts at most once a second from its start, while every run PINGs both connections", async () => {
+		const p = probing();
+		await p.run();
+		p.clock.at += 999;
+		await p.run();
+		expect(p.counts).toEqual({ pings: 4, checks: 1 });
+		p.clock.at += 1;
+		await p.run();
+		expect(p.counts).toEqual({ pings: 6, checks: 2 });
+	});
+
+	it("reads a failed answer within the second as it reads a passed one, warning once, and checks again after it", async () => {
+		let problems = ["the server changed"];
+		const p = probing(async () => problems);
+		await expect(p.run()).rejects.toThrow();
+		await expect(p.run()).rejects.toThrow();
+		expect(p.counts.checks).toBe(1);
+		expect(p.warned().map((line) => line.event)).toEqual(["redis.settings_unmet"]);
+		problems = [];
+		await expect(p.run()).rejects.toThrow();
+		p.clock.at += 1000;
+		await expect(p.run()).resolves.toBeUndefined();
+		expect(p.counts.checks).toBe(2);
+	});
+
+	it("reads a check that threw within the second too", async () => {
+		const p = probing(() => Promise.reject(new Error("timed out")));
+		await expect(p.run()).rejects.toThrow("timed out");
+		await expect(p.run()).rejects.toThrow("timed out");
+		expect(p.counts.checks).toBe(1);
+		p.clock.at += 1000;
+		await expect(p.run()).rejects.toThrow("timed out");
+		expect(p.counts.checks).toBe(2);
+	});
+
+	it("joins a check still running, also past the second, never starting a second one", async () => {
+		const running = Promise.withResolvers<readonly string[]>();
+		const p = probing(() => running.promise);
+		const runs = [p.run()];
+		await until(() => p.counts.checks === 1);
+		p.clock.at += 5000;
+		runs.push(p.run());
+		await until(() => p.counts.pings === 4);
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(p.counts.checks).toBe(1);
+		running.resolve([]);
+		await Promise.all(runs);
+		expect(p.counts.checks).toBe(1);
+		await p.run();
+		expect(p.counts.checks).toBe(2);
+	});
+
+	it("checks anew where the clock was set back", async () => {
+		const p = probing();
+		await p.run();
+		p.clock.at -= 1;
+		await p.run();
+		expect(p.counts.checks).toBe(2);
+	});
+
+	it("fails at once on a dropped connection within the second, starting no check", async () => {
+		const p = probing();
+		await p.run();
+		p.connections.down = true;
+		await expect(p.run()).rejects.toThrow("Connection is closed.");
+		p.clock.at += 1000;
+		await expect(p.run()).rejects.toThrow("Connection is closed.");
+		expect(p.counts.checks).toBe(1);
 	});
 });

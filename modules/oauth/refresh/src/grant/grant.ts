@@ -10,7 +10,7 @@ import { type SubjectRevocation, subjectRevocation } from "@mod/subject-revocati
 import events from "../audit-events.ts";
 import { refreshGrantType } from "../contract.ts";
 import { type Random, text } from "../founding/found.ts";
-import { type Family, hashOf, liveFamily, parseToken, toStored } from "../record.ts";
+import { type Family, hashOf, liveFamily, notGranted, parseToken, toStored } from "../record.ts";
 import type { Settings } from "../section.ts";
 import { type Revoker, type Stores, settlingIn } from "../settle/settle.ts";
 
@@ -26,10 +26,16 @@ export interface Checks {
 	readonly revocation: SubjectRevocation;
 }
 
-/** This round's access token scope: what is asked, or the family's when none is; none when malformed or wider. */
+/**
+ * This round's access token scope: what is asked without `offline_access`, or the family's when
+ * nothing is; none when malformed, wider, or naming that word alone, which asks nothing else and so
+ * is refused rather than given the family, as `authorize` refuses it rather than give a default.
+ */
 function scopeFor(asked: string | undefined, granted: readonly string[]) {
 	const named = clientAllowance.parseScope(asked);
-	const asking = named?.length === 0 ? granted : named;
+	const kept = named?.filter((word) => word !== notGranted);
+	if (kept?.length === 0 && named?.length !== 0) return undefined;
+	const asking = kept?.length === 0 ? granted : kept;
 	if (!asking || asking.some((s) => !granted.includes(s))) return undefined;
 	return [...new Set(asking)];
 }

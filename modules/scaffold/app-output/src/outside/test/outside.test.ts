@@ -47,6 +47,7 @@ describe("what an app beside packages outside the release is given", () => {
 				image: undefined,
 				guide: "",
 				index: "",
+				comesWith: expect.any(String),
 			});
 		}
 	});
@@ -125,6 +126,72 @@ describe("what an app beside packages outside the release is given", () => {
 		expect(index).toContain("`outside-modules.json`");
 	});
 
+	describe("a scope recorded with a registry of its own", () => {
+		const scoped: OutsideModules = {
+			...outside,
+			registries: {
+				default: "https://registry.npmjs.org",
+				scopes: { "@x": "https://registry.x.example", "@a": "http://127.0.0.1:4873" },
+			},
+		};
+
+		it("names each in the app's .npmrc, by its origin, and takes credentials in the image as a build secret", () => {
+			const { files, image, guide } = besideRelease(scoped, app);
+			expect(files[".npmrc"]).toBe(
+				"@a:registry=http://127.0.0.1:4873/\n@x:registry=https://registry.x.example/\n",
+			);
+			expect(image).toEqual({
+				copy: ["outside-modules.json", "scripts/check-outside.mjs", ".npmrc"],
+				after: "pnpm check:outside",
+				mount: "--mount=type=secret,id=npmrc,target=/root/.npmrc",
+			});
+			expect(guide).toContain("`.npmrc` names the registry of each scope recorded");
+			expect(guide).toContain("docker build --secret id=npmrc,src=$HOME/.npmrc");
+		});
+
+		it("gives an app with no such record none of it", () => {
+			for (const none of [
+				outside,
+				{ ...outside, registries: { default: "https://r.example", scopes: {} } },
+			]) {
+				const { files, image, guide } = besideRelease(none, app);
+				expect(files).not.toHaveProperty([".npmrc"]);
+				expect(image).toEqual({
+					copy: ["outside-modules.json", "scripts/check-outside.mjs"],
+					after: "pnpm check:outside",
+				});
+				expect(guide).not.toContain(".npmrc");
+			}
+		});
+
+		it("refuses a record that is no scope and origin, telling neither, as an address may hold a secret", () => {
+			for (const scopes of [
+				{ "@x": "https://user:s3cret@registry.x.example" },
+				{ "@x": "https://registry.x.example/path" },
+				{ "@x": "file:///etc" },
+				{ "@x": "https://${FOO}" },
+				{ "@x": "https://$foo.example" },
+				{ "@x": "https://r_x.example" },
+				{ "@x\nregistry=https://evil.example": "https://registry.x.example" },
+			]) {
+				const given = { ...outside, registries: { default: "https://r.example", scopes } };
+				expect(() => besideRelease(given, app)).toThrow(
+					"a scoped registry's record is not a scope and an origin",
+				);
+			}
+		});
+	});
+
+	it("says of the app's guide that only a package named comes, and says it for no other app", () => {
+		const release =
+			"What they need to run comes with them, and so do the wirings and bridges they come with.";
+		expect(besideRelease(undefined, app).comesWith).toBe(release);
+		const { comesWith } = besideRelease(outside, app);
+		expect(comesWith).toContain("the wirings and bridges of the release's modules");
+		expect(comesWith).toContain("each wiring and adapter outside it must be listed by name");
+		expect(comesWith).toContain("boot refuses, naming the contract no module provides");
+	});
+
 	it("records the integrity the release recorded of every package it holds to one copy", () => {
 		const record = JSON.parse(besideRelease(outside, app).files["outside-modules.json"] as string);
 		expect(record.held).toEqual({
@@ -132,6 +199,50 @@ describe("what an app beside packages outside the release is given", () => {
 			"@o3co/auth-provider-oauth": "sha512-OAUTH",
 			zod: "sha512-ZOD",
 		});
+	});
+
+	it("holds the closure of the release's packages it depends on, each bundle's bundles too, to one copy", () => {
+		const closing = {
+			...app,
+			integrity: {
+				...integrity,
+				"@o3co/auth-provider-foundation": "sha512-FOUNDATION",
+				"@o3co/auth-provider-second-factor": "sha512-SECOND",
+			},
+			bundles: {
+				// From a dependency, through another alone, and a cycle ends.
+				"@o3co/auth-provider-oauth": ["@o3co/auth-provider-second-factor"],
+				"@o3co/auth-provider-second-factor": [
+					"@o3co/auth-provider-foundation",
+					"@o3co/auth-provider-oauth",
+				],
+				"@o3co/auth-provider-other": ["@o3co/auth-provider-other-still"],
+			},
+		};
+		const closed = [
+			"@o3co/auth-provider-foundation",
+			"@o3co/auth-provider-identity",
+			"@o3co/auth-provider-oauth",
+			"@o3co/auth-provider-second-factor",
+		];
+		const { files } = besideRelease(outside, closing);
+		const settings = parse(files["pnpm-workspace.yaml"] as string);
+		expect(Object.keys(settings.overrides).sort()).toEqual([...closed, "zod"]);
+		expect(settings.overrides["@o3co/auth-provider-second-factor"]).toBe("0.19.0");
+		expect(settings.minimumReleaseAgeExclude).toEqual(closed);
+		const { held } = JSON.parse(files["outside-modules.json"] as string);
+		expect(Object.keys(held)).toEqual([...closed, "zod"]);
+		expect(held["@o3co/auth-provider-second-factor"]).toBe("sha512-SECOND");
+	});
+
+	it("refuses a bundle of the closure the release records no integrity of", () => {
+		const closing = {
+			...app,
+			bundles: { "@o3co/auth-provider-oauth": ["@o3co/auth-provider-unsealed"] },
+		};
+		expect(() => besideRelease(outside, closing)).toThrow(
+			"@o3co/auth-provider-unsealed: held to one copy, but the release records no integrity of it",
+		);
 	});
 
 	it("refuses a held package the release records no integrity of, and a release recording none", () => {

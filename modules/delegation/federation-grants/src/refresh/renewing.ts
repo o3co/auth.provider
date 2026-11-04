@@ -80,6 +80,7 @@ export function renewWith(
 		asked: Asked,
 		ours: () => Promise<boolean>,
 	): Promise<Current> => {
+		if (grant.upstream?.issuer !== asked.issuer) return end(grant, held, "upstream_issuer_changed");
 		const spent = await spend(grant);
 		if (spent.kind === "gone") return { kind: "gone" };
 		if (spent.kind === "wait") {

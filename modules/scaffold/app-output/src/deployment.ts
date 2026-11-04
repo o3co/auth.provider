@@ -97,6 +97,7 @@ export async function writeDeployment(
 		version: release.version,
 		zod,
 		...(release.integrity ? { integrity: release.integrity } : {}),
+		...(release.bundles ? { bundles: release.bundles } : {}),
 	});
 	await writeProject(target, {
 		"package.json": manifestOf("node --env-file-if-exists=.env src/main.ts", dependencies, {
@@ -125,6 +126,7 @@ export async function writeDeployment(
 				hostEnv: envName("http.host"),
 				portEnv: envName("http.port"),
 				...httpLines(http),
+				comesWith: beside.comesWith,
 				...readme.fill,
 			})) + beside.guide,
 	});
@@ -146,7 +148,7 @@ const installed = (beside: Beside["image"]) =>
 		? "RUN pnpm install --frozen-lockfile --prod"
 		: `# The lockfile is held to what was recorded of the packages outside the release.
 ${beside.copy.map((file) => `COPY ${file} ./${file}`).join("\n")}
-RUN pnpm install --frozen-lockfile --prod && ${beside.after}`;
+${beside.mount ? "# A registry's credentials come as a build secret, and stay in no layer.\n" : ""}RUN ${beside.mount ? `${beside.mount} ` : ""}pnpm install --frozen-lockfile --prod && ${beside.after}`;
 
 /** Each composed module's card, where the app installs it. */
 const cardLines = (cards: readonly Card[]) =>

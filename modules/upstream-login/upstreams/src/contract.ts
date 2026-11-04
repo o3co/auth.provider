@@ -106,6 +106,7 @@ export interface DelegationRefused {
 export interface Delegation {
 	/** Never throws: a start the upstream does not take is refused as a value. */
 	authorizationUrl(start: DelegationStart): string | DelegationRefused;
+	/** Names the upstream's own issuer: what is held from it is refreshed where the upstream says that issuer alone. */
 	exchange(
 		code: DelegatedExchange,
 	): Promise<UpstreamLogin & { readonly issuer: string; readonly tokens: UpstreamTokens }>;
@@ -260,7 +261,7 @@ export const upstreamContinuations = extensionPoint<UpstreamContinuation>(
 
 /** The upstreams of the configured IdPs, by name. */
 export interface Upstreams {
-	of(idp: string): Pick<Upstream, "refresh" | "endSession" | "delegation"> | undefined;
+	of(idp: string): Pick<Upstream, "issuer" | "refresh" | "endSession" | "delegation"> | undefined;
 }
 
 export const upstreams = contract<Upstreams>("upstreams");

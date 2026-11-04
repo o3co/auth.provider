@@ -25,7 +25,7 @@
 - In the policy, an `Origin` or a `Referer` naming another origin means refusal, even with the token; the policy reads no `Sec-Fetch-Site`.
 - Origin evidence also counts any `Sec-Fetch-Site` other than `same-origin` as cross-origin.
 - `Origin: null` and an unreadable Referer count as no evidence, so the policy falls through to the token.
-- The origin compared against is `http`'s public origin. Without one, boot is refused.
+- The origin compared against is `http`'s public origin. Without one, boot is refused, naming `http.public-origin`.
 - Cookies go through `cookies`.
 - In a deployment that can make cookies secure (`http` answers), requests that are not HTTPS are refused.
 - Double submit relies on other subdomains being unable to set the cookie, in a deployment that can make cookies secure.

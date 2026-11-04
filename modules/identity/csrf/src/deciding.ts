@@ -19,7 +19,7 @@ export const deciding = (m: Parts<undefined>, withoutOrigin: "refuse boot" | "re
 	m.provide(ours).by(async (c) => {
 		const publicSite = await c.get(site);
 		if (publicSite.origin === undefined && withoutOrigin === "refuse boot")
-			return c.refuse("csrf", "a public origin is required");
+			return c.refuse("csrf", "a public origin is required: set http.public-origin");
 		return publicSite;
 	}),
 	m.provide(originEvidence).by(async (c) => {

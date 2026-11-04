@@ -1,4 +1,4 @@
-import { type AddedClaims, addedClaimsIn, addedClaimsOf } from "@mod/added-claims";
+import { type AddedClaims, addedClaimsIn, addedClaimsReadBack } from "@mod/added-claims";
 import type { AccessTokenSigning } from "@mod/keys";
 import type { SenderBindings } from "@mod/sender-binding";
 import { z } from "zod";
@@ -62,10 +62,10 @@ const grantOf = (claims: Claims, added: AddedClaims | undefined): AccessGrant =>
 		...(added ? { claims: added } : {}),
 	});
 
-/** The added claims of a verified payload, copied as an issue copies them; undefined for a token none of tokens' issued. */
+/** The added claims of a verified payload, copied by `added-claims`' reading of them; undefined for a token none of tokens' issued. */
 const addedOf = (payload: Readonly<Record<string, unknown>>) => {
 	try {
-		return { added: addedClaimsOf(addedClaimsIn(payload)) };
+		return { added: addedClaimsReadBack(addedClaimsIn(payload)) };
 	} catch (error) {
 		if (error instanceof TypeError) return undefined;
 		throw error;

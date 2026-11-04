@@ -1,3 +1,5 @@
+import { isLoopbackName } from "@mod/url-setting";
+
 /** Names a redirect URI's own query may not use, since the answer adds them. */
 const answerNames = ["code", "state", "iss", "error", "error_description", "error_uri"];
 
@@ -12,7 +14,7 @@ export function registrable(uri: string): boolean {
 		const code = ch.codePointAt(0) ?? 0;
 		return code < 0x20 || code === 0x7f || /\s/.test(ch);
 	});
-	if (control) return false;
+	if (control || uri.includes("\\")) return false;
 	let parsed: URL;
 	try {
 		parsed = new URL(uri);
@@ -26,7 +28,29 @@ export function registrable(uri: string): boolean {
 		(loopbackLiteral.test(uri) || /^http:\/\/localhost(:\d{1,5})?(\/|\?|$)/.test(uri));
 	const native = reverseDomain.test(scheme) && !scheme.startsWith("javascript.");
 	if (scheme !== "https:" && !local && !native) return false;
+	// An answer goes out as written, so a URI says its host the one way every reader of it takes:
+	// after `https://`, a host begins.
+	if (scheme === "https:" && !/^https:\/\/[^/?#:@]/i.test(uri)) return false;
 	return !answerNames.some((name) => parsed.searchParams.has(name));
+}
+
+/** Where a redirect URI sends the user, as it is shown to them. */
+export interface RedirectShown {
+	/** The host as the URL parser writes it, with a port other than the scheme's default where matching reads it; a private-use scheme, alone. */
+	readonly host: string;
+	readonly kind: "web" | "loopback" | "app";
+}
+
+/** A URI as it is shown: read from what the URL parser takes of it, never from how it is written. */
+export function shownOf(uri: string): RedirectShown | undefined {
+	const parsed = URL.parse(uri);
+	if (!parsed) return undefined;
+	if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+		return { host: parsed.protocol.slice(0, -1), kind: "app" };
+	}
+	// `matches` drops this port, so showing one would say of the client what no match holds it to.
+	const host = loopbackLiteral.test(uri) ? parsed.hostname : parsed.host;
+	return { host, kind: isLoopbackName(parsed.hostname) ? "loopback" : "web" };
 }
 
 export function matches(registered: string, given: string): boolean {

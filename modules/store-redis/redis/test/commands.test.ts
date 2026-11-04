@@ -45,6 +45,7 @@ async function boot(
 	replication?: "replicas" | "none",
 	prefix?: string,
 	extra: Module[] = [],
+	declared?: Readonly<Record<string, string>>,
 ) {
 	const recorded = recordingLog();
 	let context: BuildContext<unknown> | undefined;
@@ -55,6 +56,7 @@ async function boot(
 		}),
 	]);
 	const url = `redis://:s3cret@127.0.0.1:${port}`;
+	let now = 0;
 	app = await assemble({
 		modules: [
 			redisModule,
@@ -65,10 +67,15 @@ async function boot(
 		],
 		config: {
 			...kernelConfig(),
-			redis: { url, ...(replication ? { replication } : {}), ...(prefix ? { prefix } : {}) },
+			redis: {
+				url,
+				...(replication ? { replication } : {}),
+				...(prefix ? { prefix } : {}),
+				...(declared ? { "server-settings": declared } : {}),
+			},
 		},
 		runtime: quietRuntime({
-			clock: { now: () => 0 },
+			clock: { now: () => now },
 			random: { bytes: (n) => new Uint8Array(n) },
 			log: recorded.log,
 		}),
@@ -78,7 +85,14 @@ async function boot(
 			.lines()
 			.filter((line) => line.level === "warn")
 			.map((line) => [line.event, line.fields]);
-	return { warned, ready: () => context?.readinessReport(1000).then((r) => r.answer) };
+	return {
+		warned,
+		/** A probe past the second a check of the server serves. */
+		ready: () => {
+			now += 1000;
+			return context?.readinessReport(1000).then((r) => r.answer);
+		},
+	};
 }
 
 /** Why boot was refused, at `redis`; the refusal never names the URL or its password. */
@@ -167,6 +181,32 @@ describe("the commands the store needs", () => {
 		redis.down();
 	});
 
+	it("take the declared value of a setting CONFIG GET answers empty, warning at boot of each so taken", async () => {
+		const redis = primary();
+		redis.settings.appendfsync = "always";
+		const { warned } = await boot(await redis.listen(), undefined, undefined, [durable], {
+			appendonly: "yes",
+			"no-appendfsync-on-rewrite": "no",
+		});
+		expect(warned()).toContainEqual([
+			"redis.settings_declared",
+			{ settings: "appendonly, no-appendfsync-on-rewrite" },
+		]);
+		redis.down();
+	});
+
+	it("refuse boot where CONFIG GET answers empty and nothing is declared, naming the setting", async () => {
+		const redis = primary();
+		const port = await redis.listen();
+		const error = await boot(port, undefined, undefined, [durable]).catch((e) => e);
+		expect(error).toBeInstanceOf(BootRefused);
+		const reasons = String((error as BootRefused).refusals.map((r) => r.reason));
+		expect(reasons).toContain(
+			"the server's CONFIG GET does not show it: declare appendonly in redis.server-settings",
+		);
+		redis.down();
+	});
+
 	it("take a write refused for want of replicas as no answer, never as a refused command", async () => {
 		const redis = primary();
 		redis.writes.noReplicas = true;
@@ -211,6 +251,31 @@ describe("the commands the store needs", () => {
 		redis.refused.add("WAIT");
 		const { ready } = await boot(await redis.listen());
 		expect(await ready()).toBe("ready");
+		redis.down();
+	});
+
+	it("refuse boot as a cluster, not as no connection, where a key is answered as a cluster node answers it", async () => {
+		for (const answer of [
+			"MOVED 1234 10.0.0.2:6379",
+			"ASK 1234 10.0.0.2:6379",
+			"CLUSTERDOWN Hash slot not served",
+		]) {
+			const redis = primary();
+			redis.cluster.keysAnswer = answer;
+			expect(await refusal(await redis.listen(), "replicas"), answer).toBe(
+				"redis: Redis cluster, and proxies that split keys across nodes, are not supported",
+			);
+			redis.down();
+		}
+	});
+
+	it("name a refused command beside a cluster's answers, losing neither", async () => {
+		const redis = primary();
+		redis.cluster.keysAnswer = "MOVED 1234 10.0.0.2:6379";
+		redis.refused.add("WAIT");
+		const reasons = await refusal(await redis.listen(), "replicas");
+		expect(reasons).toContain("the server refuses WAIT: allow it");
+		expect(reasons).toContain("Redis cluster, and proxies that split keys across nodes");
 		redis.down();
 	});
 

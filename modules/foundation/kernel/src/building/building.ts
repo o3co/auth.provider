@@ -120,6 +120,7 @@ export function buildingWith({
 	/** Each provision's contract, so a provision built records its interface under it. */
 	const contractOf = new Map([...providers].map(([contract, item]) => [item, contract]));
 	const builtContracts = new Map<Contract<unknown>, unknown>();
+	const builtHooks: { readonly module: string; readonly run: Hook }[] = [];
 	const startHooks: Hook[] = [];
 	const stopHooks: StopHook[] = [];
 	const periodics: ReturnType<typeof periodic>[] = [];
@@ -221,6 +222,7 @@ export function buildingWith({
 				}
 				return assembled.readiness(deadlineMs);
 			},
+			onBuilt: (hook) => builtHooks.push({ module: item.module.name, run: hook }),
 			onStart: (hook) => startHooks.push(hook),
 			onStop: (hook) => stopHooks.push({ module: item.module.name, run: hook }),
 			every: (intervalMs, task) => {
@@ -286,7 +288,7 @@ export function buildingWith({
 		/** The interface a contract's provision built, or none where none did. */
 		provided: (contract: Contract<unknown>) =>
 			builtContracts.has(contract) ? { value: builtContracts.get(contract) } : undefined,
-		hooks: { start: startHooks, stop: stopHooks, periodics },
+		hooks: { built: builtHooks, start: startHooks, stop: stopHooks, periodics },
 		/** Late references and readiness answer from here on, readiness by `readiness`. */
 		assembledWith: (readiness: (deadlineMs: number) => Promise<ReadinessReport>) => {
 			assembled = { readiness };

@@ -1,8 +1,8 @@
 import { isUnavailable } from "@mod/kernel";
 import { expect, it } from "vitest";
-import type { IssuancePolicy } from "../src/contract.ts";
-import { judging } from "../src/issuance/issuance.ts";
-import { section } from "../src/section.ts";
+import type { IssuancePolicy } from "../../contract.ts";
+import { section } from "../../section.ts";
+import { judging } from "../issuance.ts";
 
 const request = {
 	grant: { subject: "s", issuedTo: "c", audience: ["api"], scope: [] },

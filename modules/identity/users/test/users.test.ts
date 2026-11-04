@@ -337,7 +337,7 @@ describe("records", () => {
 });
 
 it("registers no users, and a user no attributes or upstream identities, that the operator leaves out", () => {
-	expect(usersModule.section?.parse({})).toEqual({ registered: [] });
+	expect(usersModule.section?.parse({})).toEqual({ registered: [], "issuer-moved": [] });
 	const written = { identifier: "bob", "password-hash": aliceEntry["password-hash"] };
 	expect(record.parse(written)).toEqual({ ...written, attributes: {}, upstream: [] });
 });
