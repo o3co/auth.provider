@@ -49,9 +49,9 @@ The kernel finds contracts by the object itself, never by name, and a section's 
 - None of them is among your `dependencies` or `optionalDependencies`, bundled, or reached through an alias (`"my-zod": "npm:zod@…"`).
 - Do not bake a copy of them into your build's output: a lockfile cannot show it, and nothing refuses it.
 
-### Run nothing when installed
+### Run nothing when installed, and declare no command
 
-A package with a `preinstall`, `install` or `postinstall` script is refused.
+A package with a `preinstall`, `install` or `postinstall` script is refused, and so is one declaring a command (`bin`, or `directories.bin`), at generation and, as its lockfile entry says `hasBin`, by the check. An image installs with `--ignore-scripts`, so a package needing a build fails when the app runs, not at its install.
 
 ### Write its section's example
 
@@ -98,24 +98,25 @@ The app is installed with no version published within the last day, but the rele
 
 ### Install the app, and check what it installed
 
-The app records each package outside the release in `outside-modules.json` (its version, its integrity, the dependencies it declares and the registries it comes from), with the integrity the release recorded of each of its own packages and of zod (`held`), and holds its lockfile to that record with `pnpm check:outside`:
+The app records each package outside the release in `outside-modules.json` (its version, its integrity, the dependencies it declares and the registries it comes from), with the integrity the release recorded of each of its own packages and of zod (`held`), and holds its lockfile to that record with `scripts/check-outside.mjs`, before anything is installed:
 
 ```sh
 cd my-app
-pnpm install
-pnpm check:outside
+pnpm install --lockfile-only
+node scripts/check-outside.mjs
+pnpm install --frozen-lockfile
 git add pnpm-lock.yaml
 ```
 
-Commit the lockfile once the check passes. The image runs the same check after installing, and refuses to build otherwise. The check holds what it uses, so nothing of the install it checks is run by it.
+Commit the lockfile once the check passes. The image runs the same check with node, in a step of its own before its install, and refuses to build otherwise. The check holds what it uses, and runs before there is an install for it to load anything of.
 
-Where your project installs a scope from a registry of its own, the app is given `.npmrc`, naming each such registry by its origin and holding no credential. Commit it, and write a registry served under a path in it by hand. Keep credentials in your own `~/.npmrc`: the image's install stage copies the app's `.npmrc` and takes credentials as a build secret, so neither reaches the image the app runs in:
+Where your project installs a scope from a registry of its own, the app is given `.npmrc`, naming each such registry by its origin and holding no credential. Commit it, and write a registry served under a path in it by hand. Keep credentials in your own `~/.npmrc`: the image's install stage copies the app's `.npmrc` and takes credentials as a build secret, for its install alone, which runs no package's script, so neither reaches the image the app runs in:
 
 ```sh
 docker build --secret id=npmrc,src=$HOME/.npmrc -t auth-provider .
 ```
 
-`pnpm-workspace.yaml` holds every package of the release the app depends on, or a package outside it takes as a peer, every bundle of the release those depend on, and zod, to one version each. When you upgrade the release, generate the app again with the new release's `create-auth-provider` and take the overrides, `held` and `scripts/check-outside.mjs` from it: the overrides and `held` move together, and the check refuses one without the other. Take the check too, as one older than the record may not read all of it: an app generated before `held` was recorded has a check that does not read it.
+`pnpm-workspace.yaml` holds every package of the release the app depends on, or a package outside it takes as a peer, every bundle of the release those depend on, and zod, to one version each. When you upgrade the release, generate the app again with the new release's `create-auth-provider` and take the overrides, `held`, `scripts/check-outside.mjs` and the `Dockerfile` from it: the overrides and `held` move together, and the check refuses one without the other. Take the check too, as one older than the record may not read all of it: an app generated before `held` was recorded has a check that does not read it. A new version does not change a generated app's `Dockerfile` or check by itself.
 
 ## What is and is not checked
 
@@ -124,5 +125,5 @@ Checked: that the app installs each package outside the release as recorded (its
 Not checked:
 
 - The code of a package outside the release. It is not part of the release, nor covered by its conformance.
-- The project you installed it into. The generator reads it as you left it; a change there between installing and generating, or a change of pnpm's store, reaches the generated app and is not found later by `pnpm check:outside`, which checks the app's install, not what was generated.
+- The project you installed it into. The generator reads it as you left it; a change there between installing and generating, or a change of pnpm's store, reaches the generated app and is not found later by `scripts/check-outside.mjs`, which checks the app's lockfile, not what was generated.
 - A registry taken over, publishing a bad version with a good integrity: `minimumReleaseAge` only delays it.
