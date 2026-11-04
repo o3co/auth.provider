@@ -93,7 +93,7 @@ export function passkeyGrant(p: LoginParts): Grant {
 			}
 			const known = await p.users.bySubject(subject);
 			if (known.kind === "unanswerable") throw new Unavailable("users");
-			if (known.kind === "none") return notAccepted("unknown_user");
+			if (known.kind !== "user") return notAccepted("unknown_user");
 			const amr = passkeyAmr;
 			// The holder is known only once `passkeys` has taken the challenge, so `issue` alone asks.
 			// issue binds the access token itself; the family is handed the binding here.

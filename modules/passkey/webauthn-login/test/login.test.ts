@@ -336,6 +336,21 @@ describe("the passkey grant", () => {
 		expect(s.begun).toEqual([]);
 	});
 
+	it("refuses any answer of users but a user, as a subject it does not know", async () => {
+		const s = await serve();
+		s.state.answer = { kind: "refused", reason: "signature" };
+		const other = await s.call({ assertion });
+		s.state.answer = asserted(now - 5000);
+		s.state.user = { kind: "suspended" } as never;
+		expect(await s.call({ assertion })).toEqual(other);
+		expect(s.events.at(-1)).toEqual({
+			kind: "passkey.login.refused",
+			attributes: { client: "app", reason: "unknown_user" },
+			at: now,
+		});
+		expect(s.begun).toEqual([]);
+	});
+
 	it("is unavailable when users cannot answer for the subject, never a refusal, issuing nothing", async () => {
 		const s = await serve();
 		s.state.user = { kind: "unanswerable" };
