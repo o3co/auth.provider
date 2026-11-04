@@ -4,8 +4,7 @@
 - Keeps the upstream tokens of a federation login, sealed, per session and IdP, and seals again what a `previous` key sealed: when a read opens it (a write that cannot be made leaves the read whole), and for `seal`'s resealers (as `federation-tokens`, walking every record and counting an entry no key opens).
 - Hands a receiving client the session's upstream access token.
 - Refreshes that token when its end is near.
-- Logs a session out of one upstream: forgets that IdP's tokens, then sends the browser to the upstream's end of session.
-- Forgets a session's upstream tokens when the session closes.
+- Logs a session out of one upstream.
 - Builds the end of session of a session's first upstream, for a logout that starts elsewhere.
 - Its internal modules: `caller` accepts the access token a request presents; `renewal` keeps the records and renews them; `vault` seals them and reads their shape.
 
@@ -20,10 +19,10 @@
   - An end of session the upstream cannot build is none, warned as `federation-tokens.end_session_failed` with the IdP and the failure's kind only.
 - Route `POST /oauth/federation/<idp>/token` (no body is read): `200 {access_token, token_type: "Bearer", expires_in?, scope?}`; taken from other sites, as a client's own call, authenticated as that client, which reads no cookie.
   - `expires_in` only for a finite end; `scope` only when there is one.
-  - Errors: `401 invalid_token` (or `sender-binding`'s answer), `403 forbidden` or `upstream_interaction_required`, `404 federation_not_linked`, `410 refresh_token_absent`, `re_authentication_required` or `refresh_not_supported` (no refresh at the upstream, or an IdP no longer set), `429 rate_limited` (with `retry-after`: the upstream's when 1 to 86400, or the one in `sender-binding`'s answer), `500 refresh_failed`, `502 upstream_token_ineligible` (`retry-after: 300`), `503 lock_timeout` or `temporarily_unavailable`.
+  - Errors: `401 invalid_token` (or `sender-binding`'s answer), `403 forbidden` or `upstream_interaction_required`, `404 federation_not_linked`, `410 refresh_token_absent`, `re_authentication_required` or `refresh_not_supported` (no refresh at the upstream, or an IdP no longer set), `429 rate_limited` (`retry-after`: `sender-binding`'s, or the upstream's when 1 to 86400), `500 refresh_failed`, `502 upstream_token_ineligible` (`retry-after: 300`), `503 lock_timeout` or `temporarily_unavailable`.
 - Route `POST /oauth/federation/<idp>/logout` (form: `post_logout_redirect_uri?`, `state?`): `303` to the upstream's end of session, or `200 {"disconnected": true}` where it has none or fails; taken from other sites as the token route is.
   - Errors as the token route's, without `403`.
-  - While `sender-binding` answers `429`, as `dpop`'s count of a subject's proofs does, this route stays refused: the entry is kept and the browser is sent nowhere. `/session/logout` takes no access token, so that count does not hold it.
+  - While a kind answers `429` (`dpop`'s count), refused, the entry kept; `/session/logout` reads no access token, so no count holds it.
 - Both routes answer `no-store` and are limited per source by `rate-limit`'s requests policy.
 - Client metadata section `federation-tokens`: `receives` (default false), `post-logout-redirect-uris` (default none; each one a client may register to be sent back to, by `redirect-uris`' rule).
 - Operator section: `refresh-before` (default `30s`), `max-lifetime` (default `1d`), `lock-lifetime` (default `5s`), `requests` in `window`; times written with their unit, a bare number refused.
