@@ -185,12 +185,12 @@ async function appOf(names: readonly string[]): Promise<string> {
 	return app;
 }
 
-/** The environment of the operator's shell: not this run's, whose PATH may name what a runner put there. */
+/** The environment of the operator's shell: not this run's, whose PATH names this repository's commands. */
 const operatorEnv = (mark: string) => ({
 	...Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^npm_/i.test(name))),
 	PATH: (process.env.PATH ?? "")
 		.split(delimiter)
-		.filter((dir) => isAbsolute(dir) && !dir.includes(join("node_modules", ".bin")))
+		.filter((dir) => isAbsolute(dir) && !dir.startsWith(root))
 		.join(delimiter),
 	SHADOW_MARK: mark,
 });
