@@ -5,7 +5,7 @@ import type { OutboundRefusals } from "@mod/outbound-policy";
 import { testTlsOptions } from "@mod/tls-options/testing";
 import { type AuthorizationStart, type CodeExchange, UpstreamRefused } from "@mod/upstreams";
 import { describe, expect, it } from "vitest";
-import { settingsOf } from "../src/settings.ts";
+import { type Settings, settingsOf } from "../src/settings.ts";
 import { opened } from "../src/upstream.ts";
 
 type Handler = (request: OutboundRequest) => OutboundResponse | "unreachable" | "broken";
@@ -403,5 +403,51 @@ describe("github's settings", () => {
 		const kindOf = (key: { _zod: { def: { type: string } } }) => key._zod.def.type;
 		const byDefault = Object.entries(settings.shape).filter(([, key]) => kindOf(key) === "default");
 		expect(byDefault.map(([name]) => name)).toEqual([]);
+	});
+});
+
+describe("where the subject is read", () => {
+	const github = "https://github.com/login/oauth";
+	const moved = "https://ghe.example/api/v3";
+	const stub: Outbound = { fetch: async () => ok({}, 404) };
+
+	it("says nothing at GitHub's own API, so the name stands for the issuer as it did", () => {
+		for (const api of [undefined, "https://api.github.com", "https://api.github.com/"]) {
+			const { upstream } = open({}, api === undefined ? {} : { api });
+			expect(upstream.issuer, api).toBe(github);
+			expect("subjectsFrom" in upstream, api).toBe(false);
+		}
+	});
+
+	it("says nothing at a spelling of GitHub's own that its setting refuses, had one been read", () => {
+		const read = settings.parse({ "client-id": "cid", "client-secret": "sec" });
+		for (const api of ["https://API.github.com", "https://api.github.com:443"]) {
+			expect(
+				() => settings.parse({ "client-id": "cid", "client-secret": "sec", api }),
+				api,
+			).toThrow();
+			const upstream = opened({ ...read, api: api as Settings["api"] }, stub);
+			expect("subjectsFrom" in upstream, api).toBe(false);
+		}
+	});
+
+	it("names a named API as the parser writes it, with no trailing slash, and leaves the issuer", () => {
+		for (const api of [moved, `${moved}/`]) {
+			const { upstream } = open({}, { api });
+			expect(upstream.subjectsFrom, api).toBe(moved);
+			expect(upstream.issuer, api).toBe(github);
+		}
+		expect(open({}, { api: "https://ghe.example" }).upstream.subjectsFrom).toBe(
+			"https://ghe.example",
+		);
+	});
+
+	it("still names the API beside an issuer written, which alone a callback is held to", async () => {
+		const written = "https://ghe.example/login/oauth";
+		const { upstream } = open({}, { api: moved, issuer: written });
+		expect(upstream.subjectsFrom).toBe(moved);
+		expect(upstream.issuer).toBe(written);
+		expect(await outcome(upstream.exchange(exchange({ iss: moved })))).toBe("refused");
+		expect("subjectsFrom" in open({}, { issuer: written }).upstream).toBe(false);
 	});
 });
