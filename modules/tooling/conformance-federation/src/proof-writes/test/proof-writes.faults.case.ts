@@ -13,6 +13,7 @@ const landing = "https://app.example/home";
 const callback = "https://app.example/cb";
 const verifier = "w".repeat(43);
 const path = "/oauth/federation/corp/token";
+const logoutPath = "/oauth/federation/corp/logout";
 const upstreamClient = { id: "as-client", secret: "as-client-secret-0123456789" };
 const pair = generateKeyPairSync("ed25519");
 const holder = generateKeyPairSync("ed25519");
@@ -191,6 +192,17 @@ describe("federation tokens: what a DPoP proof writes", () => {
 			]);
 			expect(refused.retryAfter).toMatch(/^[1-9]\d*$/);
 			expect(successes(i, proofSpent).length).toBe(spent + proofs);
+			// The logout of the upstream waits on the same count, and forgets nothing meanwhile.
+			const leaving = await post(
+				i,
+				logoutPath,
+				{},
+				{ authorization: `DPoP ${token}`, dpop: await proof(holder, logoutPath, token) },
+				"203.0.113.102",
+			);
+			expect([leaving.status, leaving.body.error]).toEqual([429, "rate_limited"]);
+			expect(leaving.retryAfter).toMatch(/^[1-9]\d*$/);
+			expect(successes(i, proofSpent).length).toBe(spent + proofs);
 			await new Promise((resolve) => setTimeout(resolve, Number(refused.retryAfter) * 1000));
 			expect((await upstreamToken(i, token, over, "203.0.113.101")).status).toBe(200);
 			expect(successes(i, proofSpent).length).toBe(spent + proofs + 1);
@@ -203,9 +215,13 @@ describe("federation tokens: what a DPoP proof writes", () => {
 			const taken = await upstreamToken(i, token, await proof(holder, path, token));
 			expect(taken.status).toBe(200);
 			const spent = successes(i, proofSpent).length;
-			const drop = i.relay.dropReplyTo(proofsCounted(subjectOf(token)));
-			const answer = await upstreamToken(i, token, await proof(holder, path, token));
-			await drop.first;
+			const hold = i.relay.hold(proofsCounted(subjectOf(token)));
+			const asked = upstreamToken(i, token, await proof(holder, path, token));
+			const held = await hold;
+			// Let go once the count has timed out, a second in: a spend past it would be answered, and taken.
+			await Promise.race([asked, new Promise((resolve) => setTimeout(resolve, 1500))]);
+			held.release();
+			const answer = await asked;
 			expect([answer.status, answer.body.error]).toEqual([503, "temporarily_unavailable"]);
 			expect(successes(i, proofSpent).length).toBe(spent);
 			await ready(i);
