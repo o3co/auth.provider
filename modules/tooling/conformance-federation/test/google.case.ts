@@ -7,7 +7,7 @@ import { type Authorized, fakeUpstream, googleShape } from "./upstream.ts";
 
 const origin = "https://issuer.example";
 const landing = "https://app.example/home";
-const start = "/session/oauth/federation/google";
+const start = "/session/oauth/federation/workspace";
 const pair = generateKeyPairSync("ed25519");
 const client = { id: "g-client.apps.example", secret: "g-client-secret-0123456789" };
 
@@ -29,7 +29,7 @@ beforeAll(async () => {
 			},
 			idps: [
 				{
-					name: "google",
+					name: "workspace",
 					type: "google",
 					issuer: google.base,
 					clientId: client.id,
@@ -42,7 +42,7 @@ beforeAll(async () => {
 				{
 					identifier: "alice",
 					password: "correct horse battery",
-					upstream: { idp: "google", subject: "1078-alice" },
+					upstream: { idp: "workspace", subject: "1078-alice" },
 				},
 			],
 			clients: [probeClient],
