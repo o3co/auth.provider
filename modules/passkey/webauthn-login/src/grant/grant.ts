@@ -2,10 +2,11 @@ import { type Audit, audit, declaredAudit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Grant, GrantOutcome } from "@mod/grants";
 import { issuer } from "@mod/issuer";
-import type { BuildContext } from "@mod/kernel";
+import { type BuildContext, Unavailable } from "@mod/kernel";
 import { type Passkeys, passkeys } from "@mod/passkeys";
 import { type Lineage, lineage } from "@mod/refresh";
 import { type SubjectRevocation, subjectRevocation } from "@mod/subject-revocation";
+import { type Users, users } from "@mod/users";
 import events from "../audit-events.ts";
 import { passkeyAmr, webauthnGrantType } from "../contract.ts";
 import { requesterFor } from "../requester.ts";
@@ -40,12 +41,13 @@ export interface LoginParts {
 	readonly passkeys: Passkeys;
 	readonly lineage: Lineage;
 	readonly revocation: SubjectRevocation;
+	readonly users: Pick<Users, "bySubject">;
 	readonly audit: Pick<Audit, "record">;
 	readonly issuer: string;
 }
 
 /** What `passkeyGrantIn` takes from the build context. */
-export const grantTakes = [passkeys, lineage, subjectRevocation, audit, issuer] as const;
+export const grantTakes = [passkeys, lineage, subjectRevocation, users, audit, issuer] as const;
 
 /** The grant over the contracts the assembly gives. */
 export const passkeyGrantIn = async (c: BuildContext<unknown>) =>
@@ -53,6 +55,7 @@ export const passkeyGrantIn = async (c: BuildContext<unknown>) =>
 		passkeys: await c.get(passkeys),
 		lineage: await c.get(lineage),
 		revocation: await c.get(subjectRevocation),
+		users: await c.get(users),
 		audit: await c.get(audit),
 		issuer: (await c.get(issuer)).url,
 	});
@@ -88,6 +91,9 @@ export function passkeyGrant(p: LoginParts): Grant {
 			if ((await p.revocation.check(subject, authenticatedAt)) === "revoked") {
 				return notAccepted("authentication_revoked");
 			}
+			const known = await p.users.bySubject(subject);
+			if (known.kind === "unanswerable") throw new Unavailable("users");
+			if (known.kind === "none") return notAccepted("unknown_user");
 			const amr = passkeyAmr;
 			// The holder is known only once `passkeys` has taken the challenge, so `issue` alone asks.
 			// issue binds the access token itself; the family is handed the binding here.

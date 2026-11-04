@@ -27,6 +27,7 @@ import { laggingRevocation, subjectRevocationStandIn } from "@mod/subject-revoca
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import { type IssuanceRequest, issuancePolicies, subjectChecks, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
+import { type BySubject, users } from "@mod/users";
 import { afterEach, describe, expect, it } from "vitest";
 import { passkeyAmr, webauthnGrantType } from "../src/contract.ts";
 import { type LoginParts, passkeyGrant } from "../src/grant/grant.ts";
@@ -88,6 +89,8 @@ async function serve(
 		answer: asserted(now - 5000),
 		down: false,
 		family: "fam.secret" as string | undefined,
+		user: { kind: "user", user: { subject: "alice", attributes: {} } } as BySubject,
+		asked: [] as string[],
 	};
 	const standIns = defineModule({ name: "stand-ins", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(passkeys).by(() => ({
@@ -103,6 +106,15 @@ async function serve(
 				return state.answer;
 			},
 		})),
+		m.provide(users).by(
+			() =>
+				({
+					bySubject: async (subject: string) => {
+						state.asked.push(subject);
+						return state.user;
+					},
+				}) as never,
+		),
 		m.provide(lineage).by(() => ({
 			of: async () => ({ kind: "none" }),
 			adopt: async () => "ended",
@@ -298,6 +310,45 @@ describe("the passkey grant", () => {
 		]);
 		expect(s.events).toHaveLength(Object.keys(recordedAs).length + 1);
 		expect(s.begun).toEqual([]);
+	});
+
+	it("asks users for the passkey's holder after the revocation boundary, and issues for a user", async () => {
+		const s = await serve();
+		expect((await s.call({ assertion })).kind).toBe("issued");
+		expect(s.state.asked).toEqual(["alice"]);
+		await s.app.get(subjectRevocation).revoke("alice");
+		expect(await s.call({ assertion })).toMatchObject({ error: "invalid_grant" });
+		expect(s.state.asked).toEqual(["alice"]);
+	});
+
+	it("refuses a subject users does not know with the same answer, recording the kind and starting no family", async () => {
+		const s = await serve();
+		s.state.answer = { kind: "refused", reason: "signature" };
+		const other = await s.call({ assertion });
+		s.state.answer = asserted(now - 5000);
+		s.state.user = { kind: "none" };
+		expect(await s.call({ assertion })).toEqual(other);
+		expect(s.events.at(-1)).toEqual({
+			kind: "passkey.login.refused",
+			attributes: { client: "app", reason: "unknown_user" },
+			at: now,
+		});
+		expect(s.begun).toEqual([]);
+	});
+
+	it("is unavailable when users cannot answer for the subject, never a refusal, issuing nothing", async () => {
+		const s = await serve();
+		s.state.user = { kind: "unanswerable" };
+		await expect(s.call({ assertion })).rejects.toSatisfy(isUnavailable);
+		expect(s.events).toEqual([]);
+		expect(s.begun).toEqual([]);
+	});
+
+	it("answers a scope beyond the allowance before asking users", async () => {
+		const s = await serve();
+		s.state.user = { kind: "none" };
+		expect(await s.call({ assertion, scope: "admin" })).toMatchObject({ error: "invalid_scope" });
+		expect(s.state.asked).toEqual([]);
 	});
 
 	it("issues through the issuance policies without a session, starting no family when they refuse", async () => {
