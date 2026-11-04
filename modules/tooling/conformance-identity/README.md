@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Owns the conformance scenes of the identity area: password login (a form or JSON body), missing credentials, return destination, attempt limits, logout, login during a store failure, the audit events of password login, the attempt limit (over it, and unable to count) and logout.
-- Owns the scenes of password login against a user ledger asked over HTTP, in the legacy build's HTTP user repository shapes: success, a user it does not hold, its failures, a redirect, a malformed user, and the boot refusal beside users in the settings. A scene's ledger may also look users up by upstream identity, with no lookup by subject.
+- Owns the scenes of password login against a user ledger asked over HTTP, in the legacy build's HTTP user repository shapes: success, a user it does not hold, its failures, a redirect, a malformed user, and the boot refusal beside users in the settings. A scene's ledger may also look users up by upstream identity or by subject, each only where the scene gives its URL.
 - A user ledger over HTTP beside users in the settings is a need the legacy build cannot meet.
 - A recent-authentication window a scene sets (`recentAuthenticationWindow`) is a need the legacy build cannot meet.
 - Owns the fault scenes of password login and the ledger's revocation route, on a Redis topology and a deployment of their own, each after a control with no fault, with what they share (internal module `faults`).
