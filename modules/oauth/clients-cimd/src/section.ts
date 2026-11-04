@@ -73,6 +73,12 @@ export const section = z.strictObject({
 		.pipe(count(0, 86_400))
 		.prefault("1m")
 		.describe("How long a refusal is remembered: a duration with a unit, e.g. 1m."),
+	"digest-algorithm": z
+		.enum(["sha-256"])
+		.prefault("sha-256")
+		.describe(
+			"The hash of what is said of each document, kept in long-lived records under its name. Changing it asks each user of such a client once more.",
+		),
 	"max-concurrent": count(1, 1024)
 		.prefault(8)
 		.describe(

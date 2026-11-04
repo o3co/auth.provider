@@ -47,6 +47,25 @@ describe("the callback of a renewal", () => {
 		expect(h.asked.refreshes.length).toBe(2);
 	});
 
+	it("says in a renewal's audit that the account moved, by no value, and of one that did not, nothing", async () => {
+		const h = await harness();
+		const { id } = await h.connected({ expiresInSeconds: 3600 });
+		const renewed = async () => {
+			const renewal = await h.grantCall(id, "reauthorize", { redirect_uri: back, state: "r" });
+			const alice = await h.login();
+			const { state } = await h.decide((await h.open(renewal, alice)).challenge, alice);
+			await h.callback(state, alice);
+			return h.events.filter((e) => e.kind === "federation.grant.reauthorized").at(-1)?.attributes;
+		};
+		expect(await renewed()).not.toHaveProperty("account_changed");
+		const elsewhere = "https://elsewhere.example";
+		h.script.issuer = elsewhere;
+		h.script.exchange = async () => ({ ...upstreamLogin(), issuer: elsewhere });
+		expect(await renewed()).toMatchObject({ account_changed: "issuer" });
+		h.script.exchange = async () => ({ ...upstreamLogin(), issuer: elsewhere, subject: "u-other" });
+		expect(await renewed()).toMatchObject({ account_changed: "subject" });
+	});
+
 	it("lists an activated grant for its life, so a revocation long after its connection ends it", async () => {
 		const h = await harness();
 		const { id } = await h.connected();

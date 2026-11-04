@@ -100,6 +100,7 @@ What each module contains is described by that module's contract card (each modu
 | Redis implementation of store | contract implementation / setting | redis |
 | Verifying and looking up users, from the settings or one contributed user ledger | contract | users |
 | Linking with upstream identities (written links, the settings' fixed ones), looking up a subject from an upstream identity | contract | users |
+| What an IdP name stands for, within one boot and across boots, and its issuer's stated moves | contract / data / setting | users |
 | A user's verified contacts, and the claimed ones the settings or the ledger state | contract / data | users |
 | User ledger, upstream identity, link, verified contact, claimed contact | vocabulary | users |
 | The names and value types of user attributes (the OIDC claim names), and a subject's shape | contract / vocabulary | users |
@@ -133,7 +134,7 @@ What each module contains is described by that module's contract card (each modu
 | Client authentication methods | extension point kind | clients |
 | `private_key_jwt` (client assertions), the client's keys (client metadata field) | contribution / vocabulary | client-assertion |
 | Client sources | extension point kind | clients |
-| Clients whose id is a URL: fetching and judging the metadata document there, building its record from the sections' copies, keeping it, the ceiling they are allowed within | contribution / setting | clients-cimd |
+| Clients whose id is a URL: fetching and judging the metadata document there, the digest of the document as read, building its record from the sections' copies, keeping it, the ceiling they are allowed within | contribution / setting | clients-cimd |
 | Client metadata sections | extension point kind | clients |
 | Checking a client record as a source's is held (`checkRecord`) | contract | clients |
 | The clients the operator registered, in the settings' order (`registered`) | contract | clients |
@@ -143,11 +144,11 @@ What each module contains is described by that module's contract card (each modu
 | Allowed grants, allowed scopes and audiences (client metadata fields), and what a client may be issued and may see | vocabulary / setting / contract | client-allowance |
 | The audience a request asks for: the one rule (none reads nothing), asked with each issuance's default and ceiling | extension point kind / contract | grants |
 | Resource indicators (RFC 8707): reading `resource` and narrowing the audience issued to it | contribution | resource-indicators |
-| Redirect URIs (a client metadata field), the rule for URIs a client may register to be sent back to, and how a given one matches | vocabulary / setting / contract | redirect-uris |
+| Redirect URIs (a client metadata field), the rule for URIs a client may register to be sent back to, how a given one matches, and how each is shown to a user | vocabulary / setting / contract | redirect-uris |
 | PKCE required of every client by S256 | contract | authorize |
 | Paths to return to after login | extension point kind | login-gates |
 | Where a login may return (listed targets, the check) | contract / setting | login-gates |
-| first-party, and the name, page and verified host the consent page shows (client metadata fields) | vocabulary / setting | consent |
+| first-party, and the name, page and verified host the consent page shows, and what a grant is agreed under (client metadata fields) | vocabulary / setting | consent |
 | Subject revocation boundaries (`sessions`, `delegations`) | contract / vocabulary | subject-revocation |
 | Comparison against a revocation boundary | contract | subject-revocation |
 | Work that follows a recorded revocation (followers) | extension point kind | subject-revocation |
@@ -229,7 +230,7 @@ What each module contains is described by that module's contract card (each modu
 | Additions issued with the redemption response | extension point kind | code-grant |
 | Clients told of each code redeemed in a session | extension point kind | code-grant |
 | Hooks pinned with each code redemption and told what it gave | extension point kind | code-grant |
-| Consent records | contract | consent |
+| Consent records, and whether one counts for a client now | contract | consent |
 | ID token contents (a contribution to code-grant's extension point), claim scope | vocabulary | oidc |
 | The claim table (the claims each scope releases, and the scope of each claim), and the claims released for a subject, scope and what a request asks beyond it, held to its constraints | contract | oidc |
 | Judging an ID token given back as a hint | contract | oidc |

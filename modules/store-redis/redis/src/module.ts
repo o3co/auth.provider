@@ -5,7 +5,13 @@ import { Redis } from "ioredis";
 import { z } from "zod";
 import { clientDebugs, clientOptions, inTheClear, queryRefusal } from "./client/client.ts";
 import { redisProbe } from "./probe.ts";
-import { redisStore, refusedCommands, refusedForGood, roundProblems } from "./redis-store.ts";
+import {
+	clusterRefused,
+	redisStore,
+	refusedCommands,
+	refusedForGood,
+	roundProblems,
+} from "./redis-store.ts";
 
 const section = z.strictObject({
 	url: z
@@ -85,7 +91,7 @@ const section = z.strictObject({
 		})
 		.optional()
 		.describe(
-			"The server's settings as the operator declares them, read only where the server refuses CONFIG GET; declare only what the server really has. Where CONFIG GET answers, a declared value that differs refuses boot.",
+			"The server's settings as the operator declares them, read only where the server refuses CONFIG GET or does not show the setting; declare only what the server really has. Where CONFIG GET answers, a declared value that differs refuses boot.",
 		),
 });
 
@@ -94,31 +100,34 @@ type SettingName = keyof Declared;
 
 const minimumVersion = [7, 0];
 
-/** Reads a server setting by CONFIG GET; where the server refuses it, the operator's declaration. */
+/** Reads a server setting by CONFIG GET; where the server refuses it or shows nothing, the operator's declaration. */
 type Settings = (name: SettingName) => Promise<string | undefined>;
 
 /**
  * The server's settings: CONFIG GET where it answers, a declared value that differs then refused;
- * the declaration where the server refuses CONFIG, a setting left undeclared then refused.
+ * the declaration where the server refuses CONFIG or its answer is empty, which shows nothing to
+ * compare, a setting left undeclared then refused.
  */
 function serverSettings(client: Redis, declared: Declared) {
 	const problems: string[] = [];
 	const used = new Set<SettingName>();
 	const declaredOf = (name: SettingName) =>
 		declared[name] === undefined ? undefined : String(declared[name]);
+	const taken = (name: SettingName, why: string) => {
+		used.add(name);
+		const value = declaredOf(name);
+		if (value === undefined) problems.push(`${why}: declare ${name} in redis.server-settings`);
+		return value;
+	};
 	const read: Settings = async (name) => {
 		let answered: string | undefined;
 		try {
 			answered = ((await client.config("GET", name)) as string[])[1];
 		} catch (error) {
 			if (!refusedForGood(error)) throw error;
-			used.add(name);
-			const value = declaredOf(name);
-			if (value === undefined) {
-				problems.push(`the server refuses CONFIG GET: declare ${name} in redis.server-settings`);
-			}
-			return value;
+			return taken(name, "the server refuses CONFIG GET");
 		}
+		if (answered === undefined) return taken(name, "the server's CONFIG GET does not show it");
 		const value = declaredOf(name);
 		if (value !== undefined && value !== answered) {
 			problems.push(`redis.server-settings.${name} differs from what the server answers`);
@@ -140,7 +149,7 @@ async function serverProblems(client: Redis, role: Role): Promise<string[]> {
 	const problems: string[] = [];
 	if (role[0] !== "master") problems.push("connect to a primary (role master)");
 	if (/cluster_enabled:1/.test(await client.info("cluster"))) {
-		problems.push("Redis cluster, and proxies that split keys across nodes, are not supported");
+		problems.push(clusterRefused);
 	}
 	const version = /redis_version:(\d+)\.(\d+)/.exec(await client.info("server"));
 	const [major, minor] = [Number(version?.[1] ?? 0), Number(version?.[2] ?? 0)];
@@ -405,7 +414,7 @@ export default defineModule(
 		m.contribute(probes).by(async (c) => {
 			const { client, confirmer, declared } = await c.get(connections);
 			const recheck = async () => (await unmet(client, confirmer, declared, c.section)).problems;
-			return redisProbe([client, confirmer], recheck, c.log);
+			return redisProbe([client, confirmer], recheck, c.log, c.clock);
 		}),
 	],
 );

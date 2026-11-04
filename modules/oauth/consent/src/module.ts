@@ -1,24 +1,20 @@
 import { audit } from "@mod/audit";
 import { documentCopies } from "@mod/client-documents";
 import { clients, metadataSections } from "@mod/clients";
-import { routes, site } from "@mod/http";
+import { csrfChecked } from "@mod/csrf";
+import { routes, site, use } from "@mod/http";
 import { defineModule, Unavailable } from "@mod/kernel";
 import { sessions } from "@mod/session";
 import { loopbackPagesRefused } from "@mod/url-setting";
 import { askKey, storedOf } from "./ask.ts";
-import { clientCopy, clientSection, isFirstParty } from "./client-section.ts";
+import { clientCopy, clientSection, isFirstParty, underOf } from "./client-section.ts";
 import { consents } from "./contract.ts";
-import { answerRoute, showRoute } from "./routes.ts";
+import { grantsOver } from "./grants/grants.ts";
+import { answerOver, path, showOver } from "./page/page.ts";
 import { section } from "./section.ts";
 import { httpsUrl, spaceOrControl } from "./shapes.ts";
-import { askStore, grantStore, type StoredGrant } from "./store.ts";
+import { askStore, grantStore } from "./store.ts";
 
-/** A grant is kept as its range, distinct and sorted. */
-const rangeOf = (record: StoredGrant | undefined) =>
-	(record as unknown as readonly string[] | undefined) ?? [];
-const grantOf = (range: readonly string[]) => [...new Set(range)].sort() as unknown as StoredGrant;
-/** One key per subject and client, whatever either holds. */
-const grantKey = (clientId: string, subject: string) => JSON.stringify([subject, clientId]);
 /** A consent range: distinct strings, none empty, none holding whitespace or a control character. */
 const isRange = (range: readonly string[]) =>
 	range.every((r) => r !== "" && !spaceOrControl.test(r)) && new Set(range).size === range.length;
@@ -39,7 +35,7 @@ export default defineModule(
 		m.contribute(metadataSections).by(() => clientSection),
 		m.contribute(documentCopies).by(() => clientCopy),
 		m.provide(consents).by(async (c) => {
-			const grants = await c.get(grantStore);
+			const grants = await grantsOver(c);
 			const asks = await c.get(askStore);
 			const origin = (await c.get(site)).origin;
 			if (origin === undefined) return c.refuse("consent", "a public origin is required");
@@ -51,25 +47,11 @@ export default defineModule(
 			const onOrigin = (url: string) => httpsUrl(url)?.origin === origin;
 			const { page } = c.section;
 			return {
-				granted: async (clientId, subject) =>
-					rangeOf(await grants.read(grantKey(clientId, subject))),
-				covers: async (clientId, subject, range) => {
-					const record = await grants.read(grantKey(clientId, subject));
-					const known = new Set(rangeOf(record));
-					return record !== undefined && range.every((r) => known.has(r));
-				},
-				grant: async (clientId, subject, range) => {
-					const key = grantKey(clientId, subject);
-					const widen = (record: StoredGrant) => ({
-						value: grantOf([...rangeOf(record), ...range]),
-					});
-					if (await grants.update(key, widen)) return;
-					if ((await grants.save(key, grantOf(range), "endless")) === "created") return;
-					// Another request saved it first: widen what it saved.
-					if (!(await grants.update(key, widen))) throw new Unavailable("consent");
-				},
+				grantedFor: grants.rangeFor,
+				coversFor: grants.covers,
+				grantFor: grants.grant,
 				asking: page !== undefined,
-				ask: async (session, asked) => {
+				askFor: async (session, client, asked) => {
 					if (page === undefined) throw new TypeError("consent: no consent page is set to ask on");
 					if (!onOrigin(asked.onAccept) || !onOrigin(asked.onDeny)) {
 						throw new TypeError("consent: destinations must be https URLs on the public origin");
@@ -79,11 +61,14 @@ export default defineModule(
 					}
 					const challenge = Buffer.from(c.random.bytes(32)).toString("base64url");
 					const lifetimeMs = c.section["challenge-lifetime"] * 1000;
+					const under = underOf(client);
 					const record = storedOf({
 						...asked,
+						clientId: client.id,
 						range: [...asked.range],
 						subject: session.context.subject,
 						deadline: c.clock.now() + lifetimeMs,
+						...(under === undefined ? {} : { under }),
 					});
 					const saved = await asks.save(askKey(session.id, challenge), record, lifetimeMs);
 					if (saved !== "created") throw new Unavailable("consent");
@@ -93,7 +78,20 @@ export default defineModule(
 				},
 			};
 		}),
-		m.contribute(routes).by(showRoute),
-		m.contribute(routes).by(answerRoute),
+		m.contribute(routes).by(async (c) => ({
+			method: "GET",
+			path,
+			changesState: false,
+			...(await showOver(c)),
+		})),
+		m.contribute(routes).by(async (c) => ({
+			method: "POST",
+			path,
+			uses: [use(csrfChecked)],
+			unlimited:
+				"The user's session is authenticated; a per-source limit belongs to unauthenticated entries.",
+			takes: ["form", "json"],
+			...(await answerOver(c)),
+		})),
 	],
 );

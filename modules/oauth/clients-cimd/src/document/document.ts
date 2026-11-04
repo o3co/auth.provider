@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isIP } from "node:net";
 import { type AllowanceLists, clientAllowance } from "@mod/client-allowance";
 import type { DocumentCopy } from "@mod/client-documents";
@@ -5,6 +6,7 @@ import type { ClientRecord } from "@mod/clients";
 import { codeGrantType } from "@mod/code-grant";
 import { refreshGrantType } from "@mod/refresh";
 import { isLoopbackName } from "@mod/url-setting";
+import type { Settings } from "../section.ts";
 
 /** The grants a document client may hold: the code, and refresh when its document names it. */
 const documentGrants = [codeGrantType, refreshGrantType];
@@ -65,6 +67,26 @@ function refusalOf(url: URL, doc: Readonly<Record<string, unknown>>): Refused | 
 	return undefined;
 }
 
+/** An object's members in one order, at any depth, so two documents that hold the same read the same. */
+const inOneOrder = (_: string, value: unknown) => {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+	const members = value as Readonly<Record<string, unknown>>;
+	return Object.fromEntries(
+		Object.keys(members)
+			.sort()
+			.map((name) => [name, members[name]]),
+	);
+};
+
+type DigestAlgorithm = Settings["digest-algorithm"];
+const hashNames: Readonly<Record<DigestAlgorithm, string>> = { "sha-256": "sha256" };
+
+/** The whole document as read, serialized in one order, hashed: `<algorithm>:<base64url>`. */
+export const digestOf = (doc: Readonly<Record<string, unknown>>, algorithm: DigestAlgorithm) => {
+	const hash = createHash(hashNames[algorithm]).update(JSON.stringify(doc, inOneOrder));
+	return `${algorithm}:${hash.digest("base64url")}`;
+};
+
 /**
  * The public client a document describes, each section as its owner copies it, or why it is
  * refused. The ceiling's grants are the code and refresh; its scopes and audiences the operator's.
@@ -74,6 +96,7 @@ export function recordOf(
 	doc: Readonly<Record<string, unknown>>,
 	ceiling: Omit<AllowanceLists, "grants">,
 	copies: readonly DocumentCopy[],
+	digestAlgorithm: DigestAlgorithm,
 ): ClientRecord | Refused {
 	const refused = refusalOf(url, doc);
 	if (refused) return refused;
@@ -86,7 +109,7 @@ export function recordOf(
 	// A document never asks audiences, so this guards only the contract's undefined.
 	if (allowances === undefined) return { refused: "audiences" };
 	const copied: Record<string, unknown> = {};
-	const from = { id: url.href, host: url.hostname };
+	const from = { id: url.href, host: url.hostname, digest: digestOf(doc, digestAlgorithm) };
 	for (const one of copies) {
 		const copy = one.copy(doc, from);
 		if (copy === undefined) continue;

@@ -9,7 +9,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | Kind | Attributes | Recorded when |
 |---|---|---|
 | `authorize.granted` | `client`, `source`, `response_type` | a code is given, with the subject and `response_type` `code`, and `source` only where `request-source` determined it |
-| `authorize.rejected` | `client`, `source`, `reason`, `policy` | a refusal decided for the client or its consent, with no subject and its `reason` (`grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required`, or an issuance policy's reason with `policy` its name), and `source` only where `request-source` determined it |
+| `authorize.rejected` | `client`, `source`, `reason`, `policy` | a refusal decided for the client or its consent, with no subject and its `reason` (`grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `client_agreed_under_nothing`, `consent_required`, or an issuance policy's reason with `policy` its name), and `source` only where `request-source` determined it |
 
 ## @mod/clients
 
@@ -48,7 +48,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 |---|---|---|
 | `federation.grant.authorization_failed` | `client`, `connection`, `outcome`, `source` | a connection fails, with why (`outcome`) |
 | `federation.grant.authorized` | `client`, `connection`, `outcome`, `source` | the user connects a new grant, with the identity check that applied (`outcome`) |
-| `federation.grant.reauthorized` | `client`, `connection`, `outcome`, `source` | the user connects a renewal, with the identity check that applied (`outcome`) |
+| `federation.grant.reauthorized` | `account_changed`, `client`, `connection`, `outcome`, `source` | the user connects a renewal, with the identity check that applied (`outcome`), and which of the grant's account differs from what it held (`account_changed`: `issuer` or `subject`), if any |
 | `federation.grant.request.denied` | `client`, `outcome`, `source` | a client's intent is refused, with why (`outcome`) |
 | `federation.grant.requested` | `client`, `connection`, `outcome`, `source` | a client lodges an intent, for a new grant (`initial`) or a renewal (`reauthorization`) |
 | `federation.grant.revoke.denied` | `client`, `reason`, `source` | a client's revoke is refused before the grant is found, with why (`reason`), by the client only |

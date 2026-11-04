@@ -2,12 +2,11 @@
 
 ## Supported versions
 
-Security fixes are released for:
+Security fixes are released for the latest minor version, in a patch release of it.
 
-- the latest minor version, in a patch release of it;
-- the minor version before it, for three months after the newer minor is released, so that a new minor never forces an upgrade on the day it comes out. This holds before 1.0, and is looked at again at 1.0.
+Before 1.0, the version policy is still being settled: a new minor version may end support for the versions before it at once, and its changelog says so. 0.19.0 ends support for every version before it. What holds from 1.0 is set at 1.0.
 
-Release candidates are previews and get no fixes of their own: a fix found in one lands in the next. A version past its support is named in the changelog of the release that ends it.
+Release candidates are previews and get no fixes of their own: a fix found in one lands in the next.
 
 Which surfaces a version keeps compatible, and how a change to them is announced, is in [the release policy](docs/releasing.md#what-a-version-promises).
 

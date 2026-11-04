@@ -96,8 +96,13 @@ const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): Ne
 		},
 		// Sealing, where what is composed brings it (kept tokens, grants), takes a key of the scene's own.
 		...(modules.includes("@mod/seal")
-			? { seal: { current: { id: "scene", key: randomBytes(32).toString("base64") } } }
+			? {
+					seal: {
+						current: { id: "scene", key: part.sealKey ?? randomBytes(32).toString("base64") },
+					},
+				}
 			: {}),
+		...(part.issuerMoved ? { users: { "issuer-moved": part.issuerMoved } } : {}),
 		...(part.grants
 			? {
 					"federation-grants": grantsSection(part.grants),

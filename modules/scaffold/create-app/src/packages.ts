@@ -10,7 +10,7 @@ import {
 	type Sampled,
 	sampleFile,
 } from "@mod/app-output";
-import type { Outside, Read } from "./outside/contract.ts";
+import { bundlesIn, type Outside, type Read } from "./outside/contract.ts";
 import { dependenciesOf, workspacePackages } from "./project.ts";
 
 /** Where an entry's files lie in the app: under `node_modules`, the entry's own path. */
@@ -209,7 +209,10 @@ export function publishedIn(index: Indexed, beside?: Beside): Packages {
 			version: index.version,
 			...(index.repository ? { repository: index.repository } : {}),
 			...(index.integrity && index.zod
-				? { integrity: { ...index.integrity, zod: index.zod.integrity } }
+				? {
+						integrity: { ...index.integrity, zod: index.zod.integrity },
+						bundles: bundlesIn(index.packages),
+					}
 				: {}),
 		}),
 		outside: (names) => {

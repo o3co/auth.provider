@@ -3,6 +3,7 @@ import { acrEntries } from "@mod/acr";
 import { claimsSelections, type SelectionRecords, selectionRecords } from "@mod/claims-selection";
 import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import { type DocumentCopy, documentCopies } from "@mod/client-documents";
+import { type Client, clients } from "@mod/clients";
 import { codes, type IdTokenRequest, idTokens } from "@mod/code-grant";
 import { consents } from "@mod/consent";
 import { targetRules } from "@mod/grants";
@@ -143,7 +144,8 @@ describe("authorize: session and consent", () => {
 		).toBe("consent_required");
 		const asked = await authorize(request({ client_id: "third" }), cookie);
 		expect(`${asked.at?.origin}${asked.at?.pathname}`).toBe("https://as.example/consent");
-		await app.get(consents).grant("third", "alice", ["read"]);
+		const third = (await app.get(clients).find("third")) as Client;
+		await app.get(consents).grantFor(third, "alice", ["read"]);
 		expect(
 			(await authorize(request({ client_id: "third" }), cookie)).at?.searchParams.has("code"),
 		).toBe(true);
@@ -156,7 +158,8 @@ describe("authorize: session and consent", () => {
 		const { app, authorize, login, events } = await serve({ asking: false });
 		expect((await authorize(request({ client_id: "third" }))).at?.pathname).toBe("/login");
 		const cookie = await login();
-		await app.get(consents).grant("third", "alice", ["read"]);
+		const third = (await app.get(clients).find("third")) as Client;
+		await app.get(consents).grantFor(third, "alice", ["read"]);
 		for (const prompt of [undefined, "none", "consent"]) {
 			const res = await authorize(
 				request({ client_id: "third", ...(prompt ? { prompt } : {}) }),

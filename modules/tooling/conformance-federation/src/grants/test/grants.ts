@@ -10,7 +10,7 @@ const landing = "https://app.example/home";
 export const page = `${origin}/grant-consent`;
 export const back = "https://worker.example/connected";
 export const scopes = ["openid", "offline_access", "calendar.read"];
-const upstreamClient = { id: "as-client", secret: "as-client-secret-0123456789" };
+export const upstreamClient = { id: "as-client", secret: "as-client-secret-0123456789" };
 const secretOf = (id: string) => `${id}-secret-0123456789abcdef`;
 const pair = generateKeyPairSync("ed25519");
 
@@ -41,7 +41,7 @@ export const upstreamAt = () => fakeUpstream(upstreamClient);
 export function grantsScene(
 	corp: FakeUpstream,
 	more: Partial<GrantsPart> = {},
-	extra: Pick<FederationScene, "revocations"> = {},
+	extra: Partial<Pick<FederationScene, "revocations" | "idps" | "issuerMoved" | "sealKey">> = {},
 ): AreaScene {
 	return federationScene({
 		origin,

@@ -26,6 +26,13 @@ export interface BuildContext<S> extends Runtime {
 	 * begins. It rejects until assembly is done.
 	 */
 	readinessReport(deadlineMs: number): Promise<ReadinessReport>;
+	/**
+	 * Runs `hook` once every build passed, in the order registered, each awaited, before `assemble`
+	 * answers: for what a boot may write only once no module refuses it. It uses what its factory
+	 * holds; a late reference and readiness do not answer yet. A `refuse`, or any throw, refuses boot
+	 * as a build's does, and the hooks after it do not run; what an earlier hook wrote is not taken back.
+	 */
+	onBuilt(hook: () => Promise<void> | void): void;
 	onStart(hook: () => Promise<void> | void): void;
 	/**
 	 * Hooks run in reverse order, each awaited; one that fails is logged and the next runs. At the

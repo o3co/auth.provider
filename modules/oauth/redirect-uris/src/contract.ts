@@ -1,7 +1,7 @@
 import type { DocumentCopy } from "@mod/client-documents";
 import type { Client, Section } from "@mod/clients";
 import { z } from "zod";
-import { answerTo, matches, registrable } from "./uris.ts";
+import { answerTo, matches, type RedirectShown, registrable, shownOf } from "./uris.ts";
 
 export interface Redirects {
 	readonly "redirect-uris": readonly string[];
@@ -17,12 +17,12 @@ export const redirects: Section<Redirects> = {
 					.string()
 					.refine(
 						registrable,
-						"an absolute URI without a fragment, userinfo, control characters, or a query named like a response parameter",
+						"an absolute URI, https with a host right after its //, without a fragment, userinfo, backslash, control characters, or a query named like a response parameter",
 					),
 			)
 			.prefault([])
 			.describe(
-				"The redirect URIs the client may ask for, each matched as written: https, http to a loopback host, or a private-use reverse-domain scheme, with no fragment, userinfo or query parameter named like a response parameter.",
+				"The redirect URIs the client may ask for, each matched as written: https with a host right after its //, http to a loopback host, or a private-use reverse-domain scheme, with no fragment, userinfo, backslash or query parameter named like a response parameter.",
 			),
 	}),
 };
@@ -41,6 +41,15 @@ export const redirectsCopy: DocumentCopy = {
 	copy: copied,
 };
 
+/** A client's redirect URIs; `clients` throws for a section no module composed, which here means none. */
+const urisOf = (client: Client): readonly string[] => {
+	try {
+		return client.section(redirects)["redirect-uris"];
+	} catch {
+		return [];
+	}
+};
+
 /**
  * Whether `origin` is the scheme, host and port of one of the client's registered redirect URIs, as
  * OpenID Connect Front-Channel Logout 1.0 §2 asks of a front-channel URI. A private-use scheme's URI
@@ -48,10 +57,24 @@ export const redirectsCopy: DocumentCopy = {
  */
 export function redirectsAt(client: Client, origin: string): boolean {
 	if (origin === "null") return false;
-	// A client read where the section is not composed holds no section at all, so no URI.
-	const uris = (client.section(redirects) as Redirects | undefined)?.["redirect-uris"] ?? [];
-	return uris.some((uri) => URL.parse(uri)?.origin === origin);
+	return urisOf(client).some((uri) => URL.parse(uri)?.origin === origin);
+}
+
+/**
+ * Where a client's redirect URIs send the user, each once, as a page shows them: a host as the URL
+ * parser writes it (lower case, an A-label), with a port other than the scheme's default but for a
+ * loopback literal `matches` takes on any port, read as `loopback` by that host or as `web`; a
+ * private-use scheme alone, as `app`, its authority being no host anyone reaches. Two URIs that
+ * match show alike.
+ */
+export function redirectsShown(client: Client): readonly RedirectShown[] {
+	const once = new Map<string, RedirectShown>();
+	for (const uri of urisOf(client)) {
+		const shown = shownOf(uri);
+		if (shown) once.set(`${shown.kind} ${shown.host}`, shown);
+	}
+	return [...once.values()];
 }
 
 /** Whether a URI may be registered for a client to be sent back to; whether a given one matches a registered one; the answer's URL. */
-export { answerTo, matches, registrable };
+export { answerTo, matches, type RedirectShown, registrable };

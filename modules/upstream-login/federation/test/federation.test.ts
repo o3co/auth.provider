@@ -1231,9 +1231,14 @@ describe("federation", () => {
 		expect(of("corp")?.endSession?.({ state: "s" })).toBe("https://idp.example/logout");
 		expect(await of("corp")?.delegation?.exchange(exchanged)).toMatchObject({ tokens: bearer });
 		// Only what it offers: never the login's authorization URL or code exchange.
-		expect(Object.keys(of("corp") ?? {}).sort()).toEqual(["delegation", "endSession", "refresh"]);
+		expect(Object.keys(of("corp") ?? {}).sort()).toEqual([
+			"delegation",
+			"endSession",
+			"issuer",
+			"refresh",
+		]);
 		const plain = await (await serve()).upstreams();
-		expect(Object.keys(plain.of("corp") ?? {})).toEqual([]);
+		expect(Object.keys(plain.of("corp") ?? {})).toEqual(["issuer"]);
 		for (const name of ["other", "constructor", "__proto__", "Corp"]) {
 			expect(of(name), name).toBeUndefined();
 		}

@@ -26,3 +26,22 @@ it("kills a target that goes on past its time after SIGTERM, and is stopped once
 	// Nothing answers where it listened.
 	await expect(fetch(started.baseUrl, { signal: AbortSignal.timeout(500) })).rejects.toThrow();
 });
+
+it("tells what a running target has written so far", async () => {
+	const port = await freePort();
+	const started = await launch({
+		command: process.execPath,
+		args: ["-e", `console.log('told'); console.error('warned');\n${deaf(port)}`],
+		cwd: tmpdir(),
+		env: baseEnv(),
+		port,
+		stopGraceMs: 200,
+	});
+	if (started.kind !== "running") throw new Error(`refused: ${started.output}`);
+	try {
+		expect(started.written?.()).toContain("told");
+		expect(started.written?.()).toContain("warned");
+	} finally {
+		await started.stop();
+	}
+});

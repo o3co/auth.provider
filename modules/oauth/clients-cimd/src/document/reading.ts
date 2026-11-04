@@ -44,6 +44,7 @@ export interface ReadingParts {
 	readonly log: Log;
 	/** The owners' copies of their sections from a document. */
 	readonly copies: readonly DocumentCopy[];
+	readonly digestAlgorithm: Settings["digest-algorithm"];
 	/** Where a record fails the checks `clients` holds a source's to, as `checkRecord` answers. */
 	readonly check: (record: ClientRecord) => Promise<readonly RecordRefusal[] | undefined>;
 }
@@ -55,6 +56,7 @@ export function readingWith({
 	ceiling,
 	log,
 	copies,
+	digestAlgorithm,
 	check,
 }: ReadingParts) {
 	const refused = (id: string, reason: string): Fetched<ClientRecord> => {
@@ -85,7 +87,7 @@ export function readingWith({
 		if (!isJson(answer)) return refused(id, "not a JSON object");
 		const read = jsonObjectOf(answer);
 		if (read.kind !== "object") return refused(id, "not a JSON object");
-		const record = recordOf(new URL(id), read.value, ceiling, copies);
+		const record = recordOf(new URL(id), read.value, ceiling, copies, digestAlgorithm);
 		if ("refused" in record) return refused(id, record.refused);
 		// Checked before it is kept: one that throws is not remembered, as a failed fetch is not.
 		const refusals = await check(record);
@@ -144,6 +146,7 @@ export async function readingOver(c: BuildContext<Settings>) {
 		ceiling: { scopes: s.scopes, audiences: s.audiences },
 		log: c.log,
 		copies,
+		digestAlgorithm: s["digest-algorithm"],
 		// Late: `clients` is built from the sources, this one among them.
 		check: (record) => known().checkRecord(record),
 	});

@@ -12,6 +12,7 @@ import {
 	type IssuanceVerdict,
 	type IssueLimits,
 	issuancePolicies,
+	lifetimeSecondsRange,
 	referenceOf,
 	subjectChecks,
 	type Tokens,
@@ -447,11 +448,34 @@ export function tokensContract(
 			}
 		});
 
-		it("applies the configured access-token lifetime where a grant gives none", async () => {
+		it("holds a lifetime asked to the range it exports, for a grant to check at boot what it will give", async () => {
+			expect(lifetimeSecondsRange).toEqual({ min: 2, max: 86_400 });
 			const place = await open({ revocable: true });
-			expect((await issueFor(place.tokens, grant)).expiresIn).toBe(defaultLifetimeSeconds);
+			const { min, max } = lifetimeSecondsRange;
+			for (const lifetimeSeconds of [min, max]) {
+				const issued = await issueFor(place.tokens, grant, { lifetimeSeconds });
+				expect(issued.expiresIn).toBe(lifetimeSeconds);
+			}
+			for (const lifetimeSeconds of [min - 1, max + 1]) {
+				await expect(
+					issueFor(place.tokens, grant, { lifetimeSeconds }),
+					String(lifetimeSeconds),
+				).rejects.toBeInstanceOf(RangeError);
+			}
+		});
+
+		it("tells the access-token lifetime it applies where a grant gives none", async () => {
+			const place = await open({ revocable: true });
+			expect(place.tokens.accessTokenLifetimeSeconds()).toBe(defaultLifetimeSeconds);
+			expect((await issueFor(place.tokens, grant)).expiresIn).toBe(
+				place.tokens.accessTokenLifetimeSeconds(),
+			);
 			const set = await open({ revocable: true, lifetimeSeconds: 600 });
-			expect((await issueFor(set.tokens, grant)).expiresIn).toBe(600);
+			expect(set.tokens.accessTokenLifetimeSeconds()).toBe(600);
+			expect((await issueFor(set.tokens, grant)).expiresIn).toBe(
+				set.tokens.accessTokenLifetimeSeconds(),
+			);
+			expect(set.tokens.accessTokenLifetimeSeconds()).toBe(600);
 		});
 
 		it("caps a token's expiry at what it was issued for", async () => {
@@ -682,6 +706,7 @@ export function tokensStandIn(
 				};
 				const stand: Tokens = {
 					revocable: () => denylist.revocable,
+					accessTokenLifetimeSeconds: () => configured,
 					subjectsChecked: () => options.subjectsChecked ?? true,
 					...issuing(judge, issueAccess, c.clock.now),
 					verifyAccess: verify,

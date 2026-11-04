@@ -557,6 +557,17 @@ const callbackCases: readonly {
 	{ name: "answers a repeated parameter", query: { iss: ["a", "b"] }, error: "upstream_error" },
 ];
 
+describe("a callback's login", () => {
+	it("is refused where it names another issuer than the upstream says, naming neither", async () => {
+		const h = await connector({});
+		h.script.exchange = async () => ({ ...upstreamLogin(), issuer: "https://other.example" });
+		const flow = await h.started();
+		const done = await h.callback(flow.state, flow.browser);
+		expect(errorOf(h, done)).toBe("upstream_error");
+		expect(statusOf(h, flow.id)).toBe("pending");
+	});
+});
+
 describe("a first connection's callback", () => {
 	for (const c of callbackCases) {
 		it(c.name, async () => {

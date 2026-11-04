@@ -15,6 +15,20 @@ const filled = (n: number, value: unknown = 0) => Array.from({ length: n }, () =
 const membersOf = (n: number) => Object.fromEntries(filled(n).map((_, at) => [`m${at}`, 0]));
 
 describe("the shape an added claim takes", () => {
+	it("refuses a null a grant gives, at any depth, naming its path and never a value", () => {
+		const paths: [unknown, string][] = [
+			[{ "https://example.com/c": null }, "https://example.com/c"],
+			[{ c: { a: null } }, "c.a"],
+			[{ c: [1, null] }, "c[1]"],
+			[{ c: [{ a: { b: [null] } }], other: "kept-secret" }, "c[0].a.b[0]"],
+		];
+		for (const [given, path] of paths) {
+			const reason = refusedFor(given);
+			expect(reason).toBe(`added-claims: an added claim holds a null at ${path}: leave it out`);
+			expect(reason).not.toContain("kept-secret");
+		}
+	});
+
 	it("refuses an object's own names at any depth: __proto__, constructor, prototype and toJSON", () => {
 		for (const name of ["__proto__", "constructor", "prototype", "toJSON"]) {
 			const at = (depth: number) => {

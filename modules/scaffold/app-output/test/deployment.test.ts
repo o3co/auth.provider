@@ -423,3 +423,63 @@ it("records the packages outside the release and checks the lockfile against the
 	expect(await read(target, "README.md")).toContain("## Packages outside this release");
 	expect(await read(target, "AGENTS.md")).toContain("`outside-modules.json`");
 });
+
+it("tells of what comes with the modules as it holds for the app: the release's, or beside packages outside it", async () => {
+	const grant = {
+		name: "@x/grant",
+		version: "1.2.0",
+		integrity: "sha512-AAAA",
+		dependencies: {},
+		optionalDependencies: {},
+		peerDependencies: { zod: "^4.6.0" },
+		peerDependenciesMeta: {},
+	};
+	const outside = { modules: [grant], registries: { default: "https://registry.npmjs.org" } };
+	const release = { version: "1.2.3", integrity: { zod: "sha512-ZOD" } };
+	const listed = listedReadme("`@mod/http`");
+	const plain = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(plain, ["@mod/http"], fakePackages(), listed);
+	expect(await read(plain, "README.md")).toContain(
+		"What they need to run comes with them, and so do the wirings and bridges they come with. The modules' sections",
+	);
+	const beside = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(beside, ["@mod/http"], fakePackages(release, [], outside), listed);
+	const guide = await read(beside, "README.md");
+	expect(guide).not.toContain("{{comesWith}}");
+	expect(guide).toContain("each wiring and adapter outside it must be listed by name");
+});
+
+it("takes a registry's credentials as a build secret, only where a scope records a registry of its own", async () => {
+	const grant = {
+		name: "@x/grant",
+		version: "1.2.0",
+		integrity: "sha512-AAAA",
+		dependencies: {},
+		optionalDependencies: {},
+		peerDependencies: { zod: "^4.6.0" },
+		peerDependenciesMeta: {},
+	};
+	const release = { version: "1.2.3", integrity: { zod: "sha512-ZOD" } };
+	const written = async (registries: { default: string; scopes?: Record<string, string> }) => {
+		const target = await mkdtemp(join(tmpdir(), "app-output-"));
+		const packages = fakePackages(release, [], { modules: [grant], registries });
+		await writeDeployment(target, ["@mod/http"], packages, readme);
+		return target;
+	};
+	const scoped = await written({
+		default: "https://registry.npmjs.org",
+		scopes: { "@x": "https://registry.x.example" },
+	});
+	expect(await read(scoped, ".npmrc")).toBe("@x:registry=https://registry.x.example/\n");
+	const docker = await read(scoped, "Dockerfile");
+	expect(docker).toContain("COPY .npmrc ./.npmrc");
+	expect(docker).toContain(
+		"RUN --mount=type=secret,id=npmrc,target=/root/.npmrc pnpm install --frozen-lockfile --prod && pnpm check:outside",
+	);
+	// The image the app runs in takes neither.
+	expect(docker.slice(docker.indexOf("AS runtime"))).not.toContain("npmrc");
+	const plain = await written({ default: "https://registry.npmjs.org" });
+	expect(await readdir(plain)).not.toContain(".npmrc");
+	expect(await read(plain, "Dockerfile")).not.toContain("npmrc");
+	expect(await read(plain, "README.md")).not.toContain("npmrc");
+});

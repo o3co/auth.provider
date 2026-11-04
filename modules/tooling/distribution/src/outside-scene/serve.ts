@@ -6,14 +6,14 @@ import { join } from "node:path";
 const startLimitMs = 30_000;
 
 /**
- * Starts the registry over the directories, before the upstream's: its origin once it listens, and
- * a stop that ends when it has exited. Refuses one that exits, cannot be spawned, or is not
+ * Starts the registry over the directories, before the upstream's, one of them as just published
+ * where named: its origin once it listens, and a stop that ends when it has exited. Refuses one that exits, cannot be spawned, or is not
  * listening in time, stopping it first.
  */
 export async function served(
 	upstream: string,
 	dirs: readonly string[],
-	limits: { readonly upstreamMs?: number } = {},
+	limits: { readonly upstreamMs?: number; readonly justPublished?: string } = {},
 ): Promise<{ origin: string; stop: () => Promise<void> }> {
 	const child = spawn("node", [join(import.meta.dirname, "registry.ts"), upstream, ...dirs], {
 		stdio: ["ignore", "pipe", "inherit"],
@@ -22,6 +22,9 @@ export async function served(
 			...(limits.upstreamMs === undefined
 				? {}
 				: { REGISTRY_UPSTREAM_LIMIT_MS: String(limits.upstreamMs) }),
+			...(limits.justPublished === undefined
+				? {}
+				: { REGISTRY_JUST_PUBLISHED: limits.justPublished }),
 		},
 	});
 	const exited = new Promise<void>((resolve) => child.once("close", () => resolve()));

@@ -35,6 +35,26 @@ describe("whose upstream account a connection reached", () => {
 		);
 	});
 
+	it("compares no subject across issuers: another issuer's holds nothing, the identity check stays, and a subject expected of the grant's issuer refuses", async () => {
+		const before = { issuer: "https://before.example", subject: "u-before" };
+		const none = upstreamAccountWith({ users: ledger(undefined), check: "none" });
+		expect(await none.refusal({ ...grant, upstream: before }, {}, "corp", at)).toBeUndefined();
+		// The same string at another issuer is no one in particular, so it is no match either.
+		const alike = { issuer: before.issuer, subject: at.subject };
+		expect(
+			await none.refusal(
+				{ ...grant, upstream: alike },
+				{ expectedUpstream: at.subject },
+				"corp",
+				at,
+			),
+		).toBe("account_mismatch");
+		const held = upstreamAccountWith({ users: ledger("bob"), check: "required" });
+		expect(await held.refusal({ ...grant, upstream: before }, {}, "corp", at)).toBe(
+			"identity_conflict",
+		);
+	});
+
 	it("checks the holder only where the identity check is required, and says which check it makes", async () => {
 		const required = upstreamAccountWith({ users: ledger("bob"), check: "required" });
 		expect(required.check).toBe("required");

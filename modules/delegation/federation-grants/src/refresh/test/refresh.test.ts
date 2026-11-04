@@ -105,6 +105,7 @@ async function refresher(life: number, settings: { rotations?: number; windowMs?
 		scopes: shown,
 		authorizedAt: now,
 		expiresAt: now + day,
+		upstream: { issuer: "https://up.example", subject: "u-alice" },
 		version: "v-0",
 		rotations: { from: now, count: 0 },
 	};
@@ -129,8 +130,16 @@ async function refresher(life: number, settings: { rotations?: number; windowMs?
 		logs: () => logged.lines(),
 		stored,
 		/** Asks for the token as a client's request does, from the grant read first. */
-		call: async (more: { scope?: readonly string[]; minTtlMs?: number; resource?: string } = {}) =>
+		call: async (
+			more: {
+				scope?: readonly string[];
+				minTtlMs?: number;
+				resource?: string;
+				issuer?: string;
+			} = {},
+		) =>
 			refresh.current((await stored()) as Grant, {
+				issuer: "https://up.example",
 				delegation,
 				maxAccessMs: 3_600_000,
 				minTtlMs: 0,
@@ -374,6 +383,54 @@ describe("refreshing a grant's token", () => {
 			reason: "upstream_interaction_required",
 		});
 		expect(ended).not.toHaveProperty("sealed");
+	});
+
+	describe("with another issuer behind the connection", () => {
+		const other = "https://another.example";
+
+		it("asks it nothing, spends no rotation, and ends the credential under its own reason", async () => {
+			const r = await refresher(4);
+			r.advance(2100);
+			const { rotations } = (await r.stored()) as Grant;
+			expect(said(await r.call({ issuer: other }))).toBe("reauthorize upstream_issuer_changed");
+			expect(r.asked).toEqual([]);
+			const ended = await r.stored();
+			expect(ended).toMatchObject({
+				status: "reauthorization_required",
+				reason: "upstream_issuer_changed",
+				rotations,
+			});
+			expect(ended).not.toHaveProperty("sealed");
+		});
+
+		it("asks it nothing of a grant that holds no issuer", async () => {
+			const r = await refresher(4);
+			r.advance(2100);
+			await r.stores.grants.change("g", (stored) => {
+				const { upstream: _gone, ...rest } = r.records.grantOf(stored) as Grant;
+				return { value: r.records.stored(rest) };
+			});
+			expect(said(await r.call())).toBe("reauthorize upstream_issuer_changed");
+			expect(r.asked).toEqual([]);
+		});
+
+		it("asks it nothing where the end cannot be written, and refuses on this host until the held token ends", async () => {
+			const r = await refresher(300);
+			r.advance(151_000);
+			const asking = { issuer: other, minTtlMs: 200_000 };
+			r.stores.down.failNext("change");
+			await expect(r.call(asking)).rejects.toThrow();
+			expect(r.asked).toEqual([]);
+			expect(said(await r.call(asking))).toBe("reauthorize upstream_issuer_changed");
+			expect(r.asked).toEqual([]);
+		});
+
+		it("leaves a token not yet due as it is, asking no one", async () => {
+			const r = await refresher(300);
+			expect(said(await r.call({ issuer: other }))).toBe("handed up-1");
+			expect(r.asked).toEqual([]);
+			expect((await r.stored())?.status).toBe("active");
+		});
 	});
 
 	it("ends the credential only on a structured invalid_grant", async () => {

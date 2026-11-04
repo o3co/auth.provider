@@ -51,7 +51,7 @@ export function tokeningWith({ p, records, connections, record, stateRefusal }: 
 			const refusal = error(403, "access_denied", "connection_not_permitted");
 			return refuse("connection_not_permitted", refusal);
 		}
-		const { connection, delegation } = configured;
+		const { connection, issuer, delegation } = configured;
 		const named = body.text("connection");
 		if (named !== undefined && named !== grant.connection)
 			return refuse("connection_mismatch", error(400, "invalid_request", "connection_mismatch"));
@@ -69,6 +69,7 @@ export function tokeningWith({ p, records, connections, record, stateRefusal }: 
 			return refuse("min_ttl_out_of_range", refusal);
 		}
 		const current = await p.refresh.current(grant, {
+			issuer,
 			delegation,
 			...(connection.resource ? { resource: connection.resource } : {}),
 			maxAccessMs,

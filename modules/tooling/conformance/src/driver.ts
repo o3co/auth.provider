@@ -10,6 +10,8 @@ export type Started =
 	| {
 			readonly kind: "running";
 			readonly baseUrl: string;
+			/** What it has written to its standard streams so far, where launched here. */
+			written?(): string;
 			stop(): Promise<void>;
 			/**
 			 * Ends it at once with SIGKILL, its process group with it, answering how it ended and when, on
@@ -152,6 +154,7 @@ export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started>
 			return {
 				kind: "running",
 				baseUrl,
+				written: () => output,
 				stop,
 				...(spec.group ? { kill, ...(child.pid ? { pid: child.pid } : {}) } : {}),
 			};

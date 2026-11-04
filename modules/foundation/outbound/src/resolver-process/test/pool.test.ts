@@ -115,6 +115,20 @@ describe("a pool's lookups", () => {
 		expect(h.latest().killed).toBe(0);
 	});
 
+	it("fails only the lookup any system error code answers, keeping the helper and the other lookups", async () => {
+		const h = harness();
+		await h.ready();
+		const failing = h.pool.run("nowhere");
+		const other = h.pool.run("collector");
+		h.latest().answer(0, { code: "EMFILE" });
+		expect(await reason(failing?.answer as Promise<unknown>)).toBe("not-found");
+		expect(h.latest().killed).toBe(0);
+		expect(h.warned).toEqual([]);
+		h.latest().answer(1, { addresses: ["10.0.0.1"] });
+		await expect(other?.answer).resolves.toEqual(["10.0.0.1"]);
+		expect(h.started).toHaveLength(1);
+	});
+
 	it("drops a lookup answered with more addresses than it takes, keeping the helper", async () => {
 		const h = harness();
 		await h.ready();
@@ -243,7 +257,7 @@ describe("a helper that fails", () => {
 		["an unknown lookup", { id: 99, addresses: ["10.0.0.1"] }],
 		["both shapes", { addresses: ["10.0.0.1"], code: "ENOTFOUND" }],
 		["neither shape", {}],
-		["a code out of range", { code: "EVIL" }],
+		["a code of no system error's shape", { code: "evil" }],
 		["no address", { addresses: [] }],
 		["not an address", { addresses: ["collector.internal"] }],
 		["an IPv6 address for IPv4 alone", { addresses: ["::1"] }],
@@ -289,7 +303,7 @@ describe("a helper that fails", () => {
 		const first = h.latest();
 		first.stuck = true;
 		h.pool.run("a");
-		first.answer(0, { code: "EVIL" });
+		first.answer(0, { code: "evil" });
 		await vi.advanceTimersByTimeAsync(poolLimits.stuckMs * 3);
 		expect(h.warned.filter(([event]) => event === "outbound.resolver_stuck")).toHaveLength(3);
 		expect(h.pool.run("b")).toBeUndefined();

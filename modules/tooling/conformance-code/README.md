@@ -33,4 +33,4 @@
 - Touches only the HTTP interface and boot refusals.
 
 ## Depends on
-- `conformance`, `conformance-legacy`, `conformance-keys`, `conformance-identity`, `conformance-oauth`, `conformance-second-factor`, `conformance-mtls`
+- `conformance`, `conformance-legacy`, `conformance-keys`, `conformance-identity`, `conformance-oauth`, `conformance-second-factor`, `conformance-mtls`, `conformance-front`, `conformance-tunnel`

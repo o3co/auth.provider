@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addedClaimsIn, addedClaimsOf } from "../src/contract.ts";
+import { addedClaimsIn, addedClaimsOf, addedClaimsReadBack } from "../src/contract.ts";
 
 describe("the added claims' copier", () => {
 	const refuses = (given: unknown) => expect(() => addedClaimsOf(given)).toThrow(TypeError);
@@ -10,7 +10,7 @@ describe("the added claims' copier", () => {
 	});
 
 	it("copies a plain set into a new frozen one, and takes none for none or an empty set", () => {
-		const given = { a: { b: [true, null, 1.5, "x"] } };
+		const given = { a: { b: [true, false, 1.5, "x"] } };
 		const copied = addedClaimsOf(given);
 		expect(copied).toEqual(given);
 		expect(copied).not.toBe(given);
@@ -18,6 +18,17 @@ describe("the added claims' copier", () => {
 		expect(addedClaimsOf(undefined)).toBeUndefined();
 		expect(addedClaimsOf({})).toBeUndefined();
 		expect(addedClaimsOf(Object.assign(Object.create(null), { a: 1 }))).toEqual({ a: 1 });
+	});
+
+	it("reads a set back by the same rules, into a new frozen copy", () => {
+		const given = { a: { b: [true, null, 1.5, "x"] } };
+		const read = addedClaimsReadBack(given);
+		expect(read).toEqual(given);
+		expect(read).not.toBe(given);
+		expect(Object.isFrozen(read?.a)).toBe(true);
+		expect(addedClaimsReadBack({})).toBeUndefined();
+		expect(() => addedClaimsReadBack({ nbf: 0 })).toThrow(TypeError);
+		expect(() => addedClaimsReadBack({ a: undefined })).toThrow(TypeError);
 	});
 
 	it("refuses what is not JSON or not plain, calling nothing it was given", () => {
