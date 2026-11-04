@@ -61,7 +61,7 @@
 
 ## 4 A subject's revocation boundary refuses everything made before it.
 
-- **guarantee-4-a** MUST NOT: once a subject's boundary is written, a read from any instance lets through a session, a code, a refresh token, an access token or a session grant made before it; a revocation that cannot finish never answers done. One exception alone: where `tokens.subject-check = none` is chosen, an access token lives until it expires. A split confirmation is held by guarantee-5-a, the store's one path.
+- **guarantee-4-a** MUST NOT: once a subject's boundary is written, a read from any instance lets through a session, a code, a refresh token, an access token or a session grant made before it; a revocation that cannot finish never answers done. Two exceptions: where `tokens.subject-check = none` is chosen, an access token lives until it expires; and a token exchanged with an actor answers to its own subject's boundary, not to that of the actor's subject, so it stands through the latter until it expires. A split confirmation is held by guarantee-5-a, the store's one path.
   faults: Lr, Lx, F, C, K, H2
 - **guarantee-4-b** MUST NOT: once a subject's boundary is written, a read from any instance lets through a token from a device code approved before it. One exception alone: where `tokens.subject-check = none` is chosen, an access token lives until it expires. The boundary's write is the artifact of guarantee-4-a (subject-revocation's boundary) on the same path, so its faults are held there.
   faults: H2
