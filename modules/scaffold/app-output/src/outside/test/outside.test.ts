@@ -111,7 +111,6 @@ describe("what an app beside packages outside the release is given", () => {
 		const { image } = besideRelease(outside, app);
 		expect(image).toEqual({
 			copy: ["outside-modules.json", "scripts/check-outside.mjs"],
-			after: "pnpm check:outside",
 			check: "node scripts/check-outside.mjs",
 		});
 	});
@@ -120,9 +119,17 @@ describe("what an app beside packages outside the release is given", () => {
 		const { guide, index } = besideRelease(outside, app);
 		expect(guide).toContain("## Packages outside this release");
 		expect(guide).toContain("| `@x/grant` | `1.2.0` | `sha512-AAAA` |");
-		expect(guide).toContain("pnpm check:outside");
+		const said = [
+			"pnpm install --lockfile-only",
+			"node scripts/check-outside.mjs",
+			"pnpm install --frozen-lockfile",
+		];
+		expect(guide).toContain(said.join("\n"));
+		expect(guide).not.toContain("pnpm check:outside");
 		expect(guide).toContain("the overrides and `held` move together");
-		expect(guide).toContain("take the overrides, `held` and `scripts/check-outside.mjs` from it");
+		expect(guide).toContain(
+			"take the overrides, `held`, `scripts/check-outside.mjs` and the `Dockerfile` from it",
+		);
 		expect(guide).toContain("not covered by its conformance");
 		expect(index).toContain("`outside-modules.json`");
 	});
@@ -143,7 +150,6 @@ describe("what an app beside packages outside the release is given", () => {
 			);
 			expect(image).toEqual({
 				copy: ["outside-modules.json", "scripts/check-outside.mjs", ".npmrc"],
-				after: "pnpm check:outside",
 				check: "node scripts/check-outside.mjs",
 				mount: "--mount=type=secret,id=npmrc,target=/root/.npmrc",
 			});
@@ -160,7 +166,6 @@ describe("what an app beside packages outside the release is given", () => {
 				expect(files).not.toHaveProperty([".npmrc"]);
 				expect(image).toEqual({
 					copy: ["outside-modules.json", "scripts/check-outside.mjs"],
-					after: "pnpm check:outside",
 					check: "node scripts/check-outside.mjs",
 				});
 				expect(guide).not.toContain(".npmrc");

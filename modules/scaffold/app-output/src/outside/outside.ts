@@ -15,11 +15,10 @@ export interface OutsideModules {
 export interface Beside {
 	readonly files: Readonly<Record<string, string>>;
 	readonly scripts: Readonly<Record<string, string>>;
-	/** What the image's install stage copies, and runs once the dependencies are installed. */
+	/** What the image's install stage copies, and runs before anything is installed. */
 	readonly image:
 		| {
 				readonly copy: readonly string[];
-				readonly after: string;
 				/** What holds the lockfile to the record, node's own and nothing of the install: run before there is one. */
 				readonly check: string;
 				/** How its install takes a registry's credentials, where a scope records a registry. */
@@ -125,7 +124,6 @@ export function besideRelease(
 		scripts: { [script]: `node ${scriptFile}` },
 		image: {
 			copy: [recordFile, scriptFile, ...(npmrc ? [npmrcFile] : [])],
-			after: `pnpm ${script}`,
 			check: `node ${scriptFile}`,
 			// Never in a layer: the install stage reads them from where pnpm looks, for that one command.
 			...(npmrc ? { mount: "--mount=type=secret,id=npmrc,target=/root/.npmrc" } : {}),
@@ -199,7 +197,15 @@ function guideOf(modules: readonly OutsideRecord[], scoped: boolean): string {
 		"|---|---|---|",
 		...modules.map((m) => `| \`${m.name}\` | \`${m.version}\` | \`${m.integrity}\` |`),
 		"",
-		`After the first \`pnpm install\`, run \`pnpm ${script}\` and commit \`pnpm-lock.yaml\`: it holds the lockfile to that record, and the image runs it after installing. \`pnpm-workspace.yaml\` holds the release's packages and zod to one version each, and \`held\` in \`${recordFile}\` each to the integrity the release recorded of it. When upgrading the release, generate the app again with the new release's \`create-auth-provider\` and take the overrides, \`held\` and \`${scriptFile}\` from it: the overrides and \`held\` move together, and a check older than the record may not read all of it. A version published within the last day is not installed, but for those \`minimumReleaseAgeExclude\` names.`,
+		"Install it in this order, and commit `pnpm-lock.yaml`:",
+		"",
+		"```sh",
+		"pnpm install --lockfile-only",
+		`node ${scriptFile}`,
+		"pnpm install --frozen-lockfile",
+		"```",
+		"",
+		`The second command holds the lockfile to that record before anything is installed, and the image runs it before its install too. \`pnpm-workspace.yaml\` holds the release's packages and zod to one version each, and \`held\` in \`${recordFile}\` each to the integrity the release recorded of it. When upgrading the release, generate the app again with the new release's \`create-auth-provider\` and take the overrides, \`held\`, \`${scriptFile}\` and the \`Dockerfile\` from it: the overrides and \`held\` move together, and a check older than the record may not read all of it. A version published within the last day is not installed, but for those \`minimumReleaseAgeExclude\` names. The image installs with \`--ignore-scripts\`: a package needing a build fails when the app runs, not at its install.`,
 		"",
 		...(scoped
 			? [
