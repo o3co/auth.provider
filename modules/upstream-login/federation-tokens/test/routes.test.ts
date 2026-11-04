@@ -1,7 +1,9 @@
+import { testRequest } from "@mod/http/testing";
 import { Unavailable } from "@mod/kernel";
 import { type Entry, sessions } from "@mod/session";
 import type { UpstreamRefresh } from "@mod/upstreams";
 import { describe, expect, it, vi } from "vitest";
+import { type Flow, federationTokens } from "../src/routes/routes.ts";
 import { back, harness, named, type Offered, receiver, unreadable } from "./harness.ts";
 
 const refreshed = (more: Record<string, unknown> = {}): UpstreamRefresh =>
@@ -167,6 +169,20 @@ describe("the token route", () => {
 			401,
 			'DPoP error="invalid_token"',
 		]);
+	});
+
+	it("passes on an answer of too many from the token's admission, with its wait", async () => {
+		const accepted = async () => ({
+			kind: "refused",
+			status: 429,
+			error: "rate_limited",
+			headers: { "retry-after": "7" },
+		});
+		const got = await federationTokens(
+			{ caller: { accepted } } as unknown as Flow,
+			testRequest({ method: "POST", path: "/oauth/federation/corp/token" }),
+		);
+		expect([got.status, got.headers?.["retry-after"]]).toEqual([429, "7"]);
 	});
 
 	it("refuses a token once its session closed, and forgets the session's upstream tokens", async () => {
