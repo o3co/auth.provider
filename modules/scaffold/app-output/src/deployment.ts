@@ -100,10 +100,11 @@ export async function writeDeployment(
 		...(release.bundles ? { bundles: release.bundles } : {}),
 	});
 	await writeProject(target, {
-		"package.json": manifestOf("node --env-file-if-exists=.env src/main.ts", dependencies, {
-			...entries.scripts,
-			...beside.scripts,
-		}),
+		"package.json": manifestOf(
+			"node --env-file-if-exists=.env src/main.ts",
+			dependencies,
+			entries.scripts,
+		),
 		...beside.files,
 		[paths.main]: await mainSource(modules, packages.importOf, keys),
 		...entries.files,

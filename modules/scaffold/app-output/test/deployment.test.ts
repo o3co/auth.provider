@@ -413,6 +413,7 @@ it("records the packages outside the release and checks the lockfile against the
 		zod: "sha512-ZOD",
 	});
 	const manifest = JSON.parse(await read(target, "package.json"));
+	expect(Object.keys(manifest.scripts)).not.toContain("check:outside");
 	// The check holds what it uses: the app depends on nothing for it.
 	expect(manifest.dependencies).not.toHaveProperty("semver");
 	expect(manifest.dependencies).not.toHaveProperty("yaml");
