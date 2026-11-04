@@ -13,7 +13,7 @@
 - `outsideLock.recordOf` (lockfile text, name, registries): the version and integrity the root importer resolves the name to.
   - It refuses a name the importer lacks, a resolution to no version (a link, a file, an alias), and one from no registry.
 - `outsideLock.refusals` (lockfile text, records, overrides, registries: the default origin and each scope's, and the integrity the release recorded of each package held): why the lockfile is not as recorded; none where it is.
-- `outsideLock.script`: the file an app runs beside its `pnpm-lock.yaml`, `outside-modules.json` (`{ modules: records, registries, held }`) and `pnpm-workspace.yaml` (its `overrides`); it prints each refusal, or why a file cannot be read, and exits 1 on any, whether entered by its path or through a link. It is `check-outside.mjs` bundled with `yaml` and `semver` inside (`pnpm check-outside` makes it, in development), so it loads nothing of the install it checks.
+- `outsideLock.script`: the file an app runs beside its `pnpm-lock.yaml`, `outside-modules.json` (`{ modules: records, registries, held }`) and `pnpm-workspace.yaml` (its `overrides`); it prints each refusal, or why a file cannot be read, and exits 1 on any, entered by its path or through a link; a main naming no file is no entry. It is `check-outside.mjs` bundled with `yaml` and `semver` inside (`pnpm check-outside` makes it, in development), so it loads nothing of the install it checks.
 
 ## Invariants
 - A lockfile is read as data, as `reading` reads it: pnpm's version 9.0 alone, at most 16 MiB, no anchor's alias resolved, no unknown tag and no duplicate key; only own keys are read, never inherited ones.

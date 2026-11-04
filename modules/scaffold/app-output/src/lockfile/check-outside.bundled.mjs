@@ -8520,8 +8520,15 @@ function recordOf(text, name, registries) {
 		integrity: own(own(entry).get("resolution")).get("integrity")
 	};
 }
+function entered() {
+	try {
+		return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+	} catch {
+		return false;
+	}
+}
 /** Run as an app's script: the lockfile, the record (its packages and registries) and the overrides beside it. */
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (entered()) {
 	const read = (file) => readFileSync(file, "utf8");
 	try {
 		const workspace = (0, import_dist.parseDocument)(read("pnpm-workspace.yaml"), { merge: false }).toJS({ maxAliasCount: 0 });
