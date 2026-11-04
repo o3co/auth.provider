@@ -1321,7 +1321,7 @@ describe("federation", () => {
 					corp: {
 						type: "test",
 						issuer: constant,
-						...(subjectsFrom ? { "subjects-from": subjectsFrom } : {}),
+						...(subjectsFrom === undefined ? {} : { "subjects-from": subjectsFrom }),
 					},
 				},
 			},
@@ -1392,6 +1392,12 @@ describe("federation", () => {
 				expect(said).toEqual([expect.stringContaining("stands for more than one issuer")]);
 				expect(said.join()).toContain(declaredBy);
 			}
+		});
+
+		it("refuses an upstream saying an empty place, never reading it as its issuer", async () => {
+			expect(await refusalsOf(corp(""))).toEqual([
+				expect.stringContaining("an IdP name or its issuer is empty"),
+			]);
 		});
 
 		it("answers `upstreams` the issuer alone", async () => {
