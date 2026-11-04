@@ -111,7 +111,7 @@ If your grant calls another server, take `outbound`'s contract and send the requ
 
 ## Add it to the app
 
-Generate the app as the README's quick start shows, add your package to its dependencies, and add your module to the list the generated `src/main.ts` passes to `assemble`. (To have the generator compose it instead, declare it and install it as [packages outside the release](outside-modules.md) shows.)
+Generate the app as the README's quick start shows, add your package to its dependencies, and add your module to the list the generated `src/main.ts` passes to `assemble`. (To have the generator compose it instead, declare it and install it as [packages outside the release](outside-modules.md) shows.) A package added by hand has no record, and nothing there holds it: no check reads its lockfile entry, nothing refuses a command it declares, and the app keeps its scripts, which run with `node_modules/.bin` first on PATH.
 
 <!-- generated:main -->
 ```ts

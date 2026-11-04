@@ -14,12 +14,12 @@ export interface OutsideModules {
 /** What the app is given beside its own files, where it composes packages outside the release. */
 export interface Beside {
 	readonly files: Readonly<Record<string, string>>;
-	readonly scripts: Readonly<Record<string, string>>;
-	/** What the image's install stage copies, and runs once the dependencies are installed. */
+	/** What the image's install stage copies, and runs before anything is installed. */
 	readonly image:
 		| {
 				readonly copy: readonly string[];
-				readonly after: string;
+				/** What holds the lockfile to the record, node's own and nothing of the install: run before there is one. */
+				readonly check: string;
 				/** How its install takes a registry's credentials, where a scope records a registry. */
 				readonly mount?: string;
 		  }
@@ -29,24 +29,28 @@ export interface Beside {
 	readonly index: string;
 	/** What the guide's opening says comes with the modules listed. */
 	readonly comesWith: string;
+	/** Whether the app has scripts: none beside a package outside the release. */
+	readonly scripts: boolean;
+	/** The first step of the guide's start. */
+	readonly install: string;
 }
 
 const recordFile = "outside-modules.json";
 const scriptFile = "scripts/check-outside.mjs";
 const npmrcFile = ".npmrc";
-const script = "check:outside";
 /** A day, in minutes: pnpm installs no version published since. */
 const releaseAge = 1440;
 const releasePackage = (name: string) => name.startsWith("@o3co/auth-provider-");
 
 const nothing: Beside = {
 	files: {},
-	scripts: {},
 	image: undefined,
 	guide: "",
 	index: "",
 	comesWith:
 		"What they need to run comes with them, and so do the wirings and bridges they come with.",
+	scripts: true,
+	install: "`pnpm install`",
 };
 
 /**
@@ -120,10 +124,9 @@ export function besideRelease(
 			"pnpm-workspace.yaml": stringify(settings),
 			...(npmrc ? { [npmrcFile]: npmrc } : {}),
 		},
-		scripts: { [script]: `node ${scriptFile}` },
 		image: {
 			copy: [recordFile, scriptFile, ...(npmrc ? [npmrcFile] : [])],
-			after: `pnpm ${script}`,
+			check: `node ${scriptFile}`,
 			// Never in a layer: the install stage reads them from where pnpm looks, for that one command.
 			...(npmrc ? { mount: "--mount=type=secret,id=npmrc,target=/root/.npmrc" } : {}),
 		},
@@ -131,6 +134,9 @@ export function besideRelease(
 		// Only the packages named are read: one outside the release brings no other outside it.
 		comesWith:
 			"What they need to run comes with them, and so do the wirings and bridges of the release's modules. A package outside the release brings no other: each wiring and adapter outside it must be listed by name, or boot refuses, naming the contract no module provides.",
+		scripts: false,
+		install:
+			"Install as `## Packages outside this release` below says: its three commands, in their order",
 		index: `\nPackages outside the release, not part of it: \`${recordFile}\` records each one as the app was generated.\n`,
 	};
 }
@@ -196,7 +202,21 @@ function guideOf(modules: readonly OutsideRecord[], scoped: boolean): string {
 		"|---|---|---|",
 		...modules.map((m) => `| \`${m.name}\` | \`${m.version}\` | \`${m.integrity}\` |`),
 		"",
-		`After the first \`pnpm install\`, run \`pnpm ${script}\` and commit \`pnpm-lock.yaml\`: it holds the lockfile to that record, and the image runs it after installing. \`pnpm-workspace.yaml\` holds the release's packages and zod to one version each, and \`held\` in \`${recordFile}\` each to the integrity the release recorded of it. When upgrading the release, generate the app again with the new release's \`create-auth-provider\` and take the overrides, \`held\` and \`${scriptFile}\` from it: the overrides and \`held\` move together, and a check older than the record may not read all of it. A version published within the last day is not installed, but for those \`minimumReleaseAgeExclude\` names.`,
+		"Install it in this order, and commit `pnpm-lock.yaml`:",
+		"",
+		"```sh",
+		"pnpm install --lockfile-only",
+		`node ${scriptFile}`,
+		"pnpm install --frozen-lockfile --ignore-scripts",
+		"```",
+		"",
+		`The second command holds the lockfile to that record before anything is installed, and the image runs it before its install too. \`pnpm-workspace.yaml\` holds the release's packages and zod to one version each, and \`held\` in \`${recordFile}\` each to the integrity the release recorded of it. A version published within the last day is not installed, but for those \`minimumReleaseAgeExclude\` names. The third command and the image install with \`--ignore-scripts\`: a package needing a build fails when the app runs, not at its install. Do not approve a build pnpm stops at (\`pnpm approve-builds\`): it runs where your credentials are, with \`node_modules/.bin\` first on PATH.`,
+		"",
+		`When upgrading the release, generate the app again with the new release's \`create-auth-provider\`, and take \`package.json\`, this README, the overrides, \`held\`, \`${scriptFile}\` and the \`Dockerfile\` from it: the overrides and \`held\` move together, and a check older than the record may not read all of it. Run the generator from outside this directory, there and wherever this guide says to generate again.`,
+		"",
+		"What pnpm links at `node_modules/.bin` is not checked: it is decided from things the lockfile does not record, so it may hold a command of a package no one named, `node` among them. The app runs nothing through it. `package.json` holds no scripts, and `pnpm start` and `pnpm run <entry>` fail. Where a document says either, run the file with node: `## Start` gives the command for the app, and an entry takes the same command and `APP_CONFIG`, naming `src/<entry>.ts`.",
+		"",
+		"These run with what `.bin` holds, in place of the command you meant: a script you add, `pnpm exec`, `pnpm node`, `pnpm <name>`, `npx` or `pnpm dlx` run from this directory, a `.bin/<cmd>` run by path, a shell with `./node_modules/.bin` on PATH, and a package's build script once its build is approved.",
 		"",
 		...(scoped
 			? [

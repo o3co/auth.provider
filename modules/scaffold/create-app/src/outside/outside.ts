@@ -299,6 +299,10 @@ function outsideOf(
 	const refusals = installScripts
 		.filter((s) => scripts[s] !== undefined)
 		.map((s) => `it runs ${s} when installed`);
+	if (manifest.bin !== undefined) refusals.push("it declares bin");
+	if (isObject(manifest.directories) && manifest.directories.bin !== undefined) {
+		refusals.push("it declares directories.bin");
+	}
 	const { declaration, refusals: declared } = declarationOf(name, manifest.authProvider);
 	refusals.push(...declared);
 	if (!loadsSubpath(manifest.exports, "./module")) refusals.push("exports no ./module");

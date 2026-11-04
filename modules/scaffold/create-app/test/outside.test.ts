@@ -84,7 +84,8 @@ describe("an app listing a package outside the release", () => {
 			"@o3co/auth-provider-oauth": "0.19.0",
 			zod: "4.6.7",
 		});
-		expect(manifest.scripts["check:outside"]).toBe("node scripts/check-outside.mjs");
+		expect(manifest).not.toHaveProperty("scripts");
+		expect(await read(target, "Dockerfile")).toContain("RUN node scripts/check-outside.mjs\n");
 		const main = await read(target, "src/main.ts");
 		expect(main).toContain('from "@x/grant/module"');
 		expect(main).toContain('from "@o3co/auth-provider-oauth/tokens/module"');
