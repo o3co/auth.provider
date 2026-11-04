@@ -66,7 +66,7 @@ describe("what an app beside packages outside the release is given", () => {
 		expect(beside.files["scripts/check-outside.mjs"]).toBe(
 			readFileSync(outsideLock.script, "utf8"),
 		);
-		expect(beside.scripts).toEqual({ "check:outside": "node scripts/check-outside.mjs" });
+		expect(beside.scripts).toEqual({});
 		expect(beside).not.toHaveProperty("dependencies");
 	});
 

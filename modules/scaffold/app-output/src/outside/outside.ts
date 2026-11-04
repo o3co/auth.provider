@@ -35,7 +35,6 @@ export interface Beside {
 const recordFile = "outside-modules.json";
 const scriptFile = "scripts/check-outside.mjs";
 const npmrcFile = ".npmrc";
-const script = "check:outside";
 /** A day, in minutes: pnpm installs no version published since. */
 const releaseAge = 1440;
 const releasePackage = (name: string) => name.startsWith("@o3co/auth-provider-");
@@ -121,7 +120,7 @@ export function besideRelease(
 			"pnpm-workspace.yaml": stringify(settings),
 			...(npmrc ? { [npmrcFile]: npmrc } : {}),
 		},
-		scripts: { [script]: `node ${scriptFile}` },
+		scripts: {},
 		image: {
 			copy: [recordFile, scriptFile, ...(npmrc ? [npmrcFile] : [])],
 			check: `node ${scriptFile}`,
