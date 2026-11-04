@@ -8,11 +8,12 @@ Internal module of `conformance-code`: what the area's fault scenes share in the
 - Names, in `test/wire.ts` alone, what the area's scenes take from the store's inside, so no scene names a space, an operation or a record's field itself:
   - the store's prefix; a code's record kept, written and read, its read's confirming mark, and the read of a browser's session; a code's use (its record turned consumed) and the token noted on it after, by the code's challenge; a refresh token's rotation, by its family and secret, and a read of a family's record and of a session's entry;
   - a closing session's writes: the closings added and done with, its record closing and closed, and its token's revocation;
-  - a store operation as the Redis adapter sends it, a subject's boundary writes and the one that creates it, and a follower's first write, session-lifecycle adding to its closings.
+  - a store operation as the Redis adapter sends it, a subject's boundary writes and the one that creates it, and a follower's first write, session-lifecycle adding to its closings;
+  - a DPoP proof's spend, and the count of a subject's proofs.
 
 ## Offers
 - `faultScene`, `on` (`conformance`'s, on `faultScene` by default), `pkce` (a verifier of its own and its challenge), `browserOn`, `codeAt`, `tokenAt`, `redeemAt`, `familyAt`, `refreshAt`, `said`, and the scene's `issuer`, `callback` and client `app`.
-- From `test/wire.ts`: `prefix`, `codeRecord`, `codeKept`, `codeRead`, `codeReadSettled`, `cookieRead`, `codeUse`, `codeNoted`, `rotationFrom`, `familyRead`, `sessionRead`, `added`, `recordAs`, `revocationOf`, `closingOf`, `doneWith`, `Closing`, `isStoreOperation`, `boundaryOf`, `boundaryCreated`, `closingAdded`.
+- From `test/wire.ts`: `prefix`, `codeRecord`, `codeKept`, `codeRead`, `codeReadSettled`, `cookieRead`, `codeUse`, `codeNoted`, `rotationFrom`, `familyRead`, `sessionRead`, `added`, `recordAs`, `revocationOf`, `closingOf`, `doneWith`, `Closing`, `isStoreOperation`, `boundaryOf`, `boundaryCreated`, `closingAdded`, `proofSpent`, `proofsCounted`.
 
 ## Invariants
 - Each code has a challenge of its own, so a match on it never takes another code's write.

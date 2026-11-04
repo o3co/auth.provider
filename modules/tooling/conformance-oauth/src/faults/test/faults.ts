@@ -240,12 +240,12 @@ export const provenAt = (i: Instance, p: Proof): Promise<Answer> =>
 		{ dpop: p.jwt },
 	);
 
-/** The write that spends the proof's `jti`: its record placed under the key's thumbprint and the jti. */
+/** The write that spends the proof's `jti`: its record placed under the digest of the key's thumbprint and the jti. */
 export const proofSpendOf = (p: Proof): Match =>
 	storeWrite({
 		prefix,
 		space: "dpop-store.spent",
-		partition: `${p.jkt}.${p.jti}`,
+		partition: createHash("sha256").update(`${p.jkt}.${p.jti}`).digest("base64url"),
 		operations: ["putIfAbsent"],
 	});
 

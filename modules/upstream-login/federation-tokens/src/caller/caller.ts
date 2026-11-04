@@ -17,7 +17,7 @@ export type Caller =
 	  }
 	| {
 			readonly kind: "refused";
-			readonly status: 400 | 401;
+			readonly status: 400 | 401 | 429;
 			readonly error?: string;
 			readonly headers: Readonly<Record<string, string>>;
 	  };

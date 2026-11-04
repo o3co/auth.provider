@@ -22,7 +22,12 @@ interface Place {
 }
 const endpoint: Place = { scene: { kind: "issue" }, method: "POST", path: "/oauth/token" };
 const resource: Place = {
-	scene: { kind: "resource", token },
+	scene: {
+		kind: "resource",
+		token,
+		held: { member: "jkt", confirmation: "k", tokenType: "DPoP" },
+		subject: "s",
+	},
 	method: "GET",
 	path: "/userinfo",
 	ath: createHash("sha256").update(token).digest("base64url"),

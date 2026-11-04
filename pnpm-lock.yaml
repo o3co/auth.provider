@@ -1388,6 +1388,9 @@ importers:
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
