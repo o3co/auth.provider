@@ -12,11 +12,12 @@ import {
 	type CreationOptions,
 	testCeremonies as ceremoniesFor,
 	softwareAuthenticator,
+	statingCertificate,
 	type Twist,
 	testOrigin,
 	webauthnConfig,
 } from "@mod/webauthn/testing";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { memoryStores, writeToken } from "../../../test/stores.ts";
 import { keptChallenges } from "../../challenges/challenges.ts";
 import { registrations } from "../../contract.ts";
@@ -134,6 +135,22 @@ it("takes a challenge once, and only for the subject it was made for", async () 
 		kind: "refused",
 		reason: "no-challenge",
 	});
+});
+
+it("registers a response stating a certificate as one stating nothing, fetching nothing", async () => {
+	const fetched: unknown[] = [];
+	vi.stubGlobal("fetch", async (url: unknown) => {
+		fetched.push(url);
+		throw new Error("nothing is fetched at a registration");
+	});
+	try {
+		const { register } = kept();
+		const twist = { attestationObject: statingCertificate("apple") };
+		expect((await register("sam", { twist })).answer.kind).toBe("registered");
+		expect(fetched).toEqual([]);
+	} finally {
+		vi.unstubAllGlobals();
+	}
 });
 
 it("refuses client data it cannot read before taking any challenge", async () => {
