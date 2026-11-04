@@ -36,6 +36,7 @@ Every guarantee here rests on what the deployment does. Each section's "Left to 
 - **A signer key ledger answers the keys signers hold now.** `signer-keys-http` asks for each assertion and keeps nothing between them, so a key the ledger still answers still signs.
 - **Its origin's other subdomains are its own.** Double-submit CSRF protection relies on them being unable to set the cookie ([Browsers](#browsers-sessions-cookies-and-csrf)).
 - **Its configuration and its credentials are its own.** The configuration files and environment that hold secrets are readable only by the app, and whoever writes them is trusted; each ledger's `credential` is known only to the app and that ledger.
+- **What it composes from outside the release is its own to hold.** [Packages outside the release](outside-modules.md#what-is-and-is-not-checked) says what is checked of such a package and what is not, and how such an app is run.
 - **What it asks of it is in place.** The runbook's [Before you deploy](runbook.md#before-you-deploy) lists what the deployment must provide.
 
 Every setting that weakens a guarantee, its default and what it loosens, is listed in Attack surface's [Settings that weaken a guarantee](attack-surface.md#settings-that-weaken-a-guarantee); a promise names only the choices that change its own statement.
