@@ -122,6 +122,10 @@ interface Setup {
 	readonly withoutLink?: true;
 	/** What the test type's upstreams offer besides a login. */
 	readonly more?: Pick<Upstream, "refresh" | "endSession" | "delegation">;
+	/** In place of the users' stores of its own, so what one start keeps is there at the next. */
+	readonly usersStores?: ReturnType<typeof memoryUsersStores>;
+	/** The moves `users.issuer-moved` states. */
+	readonly issuerMoved?: readonly { idp: string; from: string; to: string }[];
 }
 
 async function serve(setup: Setup = {}) {
@@ -158,7 +162,7 @@ async function serve(setup: Setup = {}) {
 			gatesModule,
 			usersModule,
 			secretHashModule,
-			memoryUsersStores().module,
+			(setup.usersStores ?? memoryUsersStores()).module,
 			sessionStandIn,
 			subjectRevocationStandIn,
 			rateLimitModule,
@@ -185,11 +189,14 @@ async function serve(setup: Setup = {}) {
 				...(setup.origin === null ? {} : { "public-origin": setup.origin ?? origin }),
 				...(setup.origin?.startsWith("http:") ? { "insecure-origin": true } : {}),
 			}),
-			...usersConfig([
-				testUser("alice", "pw", {
-					upstream: setup.unlinked ? [] : [{ idp: "corp", subject: "u-alice" }],
-				}),
-			]),
+			users: {
+				...usersConfig([
+					testUser("alice", "pw", {
+						upstream: setup.unlinked ? [] : [{ idp: "corp", subject: "u-alice" }],
+					}),
+				]).users,
+				...(setup.issuerMoved ? { "issuer-moved": setup.issuerMoved } : {}),
+			},
 			...federationConfig({
 				idps: { corp: { type: "test", issuer: "https://idp.example" } },
 				...setup.federation,
@@ -1302,6 +1309,101 @@ describe("federation", () => {
 		await expect(
 			serve({ federation: { idps }, extra: [naming("https://idp.example")] }),
 		).resolves.toBeDefined();
+	});
+
+	describe("where an upstream says its subjects are read", () => {
+		const constant = "https://idp.example/login/oauth";
+		const named = "https://ghe.example/api/v3";
+		const elsewhere = "https://other.example/api/v3";
+		const corp = (subjectsFrom?: string) => ({
+			federation: {
+				idps: {
+					corp: {
+						type: "test",
+						issuer: constant,
+						...(subjectsFrom === undefined ? {} : { "subjects-from": subjectsFrom }),
+					},
+				},
+			},
+		});
+		const refusalsOf = (setup: Setup) =>
+			serve(setup).then(
+				async () => {
+					await stop();
+					return [];
+				},
+				(error: BootRefused) => error.refusals.map((r) => `${r.where}: ${r.reason}`),
+			);
+		/** Stores holding what a start without `subjectsFrom` kept, as an earlier version's did. */
+		const kept = async () => {
+			const usersStores = memoryUsersStores();
+			expect(await refusalsOf({ ...corp(), usersStores })).toEqual([]);
+			return usersStores;
+		};
+
+		it("refuses a start reading them elsewhere under a name holding the constant, telling neither value", async () => {
+			const usersStores = await kept();
+			const said = await refusalsOf({ ...corp(named), usersStores });
+			expect(said).toEqual([expect.stringContaining("stands for another issuer")]);
+			expect(said.join()).toContain("federation");
+			expect(said.join()).not.toContain(constant);
+			expect(said.join()).not.toContain(named);
+		});
+
+		it("takes that start where the move is stated, at every start while it is listed, the kept value moved", async () => {
+			const usersStores = await kept();
+			const issuerMoved = [{ idp: "corp", from: constant, to: named }];
+			for (const _start of [1, 2]) {
+				expect(await refusalsOf({ ...corp(named), usersStores, issuerMoved })).toEqual([]);
+				expect(logged().filter((line) => line.startsWith("users."))).toContainEqual(
+					'users.issuer_moved {"idp":"corp"}',
+				);
+			}
+			expect(await refusalsOf({ ...corp(named), usersStores })).toEqual([]);
+			expect((await refusalsOf({ ...corp(), usersStores })).join()).toContain(
+				"stands for another issuer",
+			);
+		});
+
+		it("refuses a stated move with the wrong from, or to another place, at its key", async () => {
+			const usersStores = await kept();
+			for (const entry of [
+				{ idp: "corp", from: elsewhere, to: named },
+				{ idp: "corp", from: constant, to: elsewhere },
+			]) {
+				const said = await refusalsOf({ ...corp(named), usersStores, issuerMoved: [entry] });
+				expect(said.join()).toContain("users.issuer-moved.0");
+			}
+			expect((await refusalsOf({ ...corp(), usersStores })).join()).toBe("");
+		});
+
+		it("refuses a name another module declares for its issuer", async () => {
+			for (const declaredBy of ["jwt-bearer-users", "exchange-id-tokens"]) {
+				const extra = [
+					defineModule({ name: "elsewhere", replicaSafe: true, takes: [] }, (m) => [
+						m.contribute(upstreamNames).by(() => ({
+							declaredBy,
+							names: [{ name: "corp", issuer: constant }],
+						})),
+					]),
+				];
+				expect(await refusalsOf({ ...corp(), extra })).toEqual([]);
+				const said = await refusalsOf({ ...corp(named), extra });
+				expect(said).toEqual([expect.stringContaining("stands for more than one issuer")]);
+				expect(said.join()).toContain(declaredBy);
+			}
+		});
+
+		it("refuses an upstream saying an empty place, never reading it as its issuer", async () => {
+			expect(await refusalsOf(corp(""))).toEqual([
+				expect.stringContaining("an IdP name or its issuer is empty"),
+			]);
+		});
+
+		it("answers `upstreams` the issuer alone", async () => {
+			const s = await serve(corp(named));
+			expect(await s.upstreams().of("corp")).toEqual({ issuer: constant });
+		});
 	});
 
 	it("refuses to boot on an unknown type, bad settings, an upstream that does not match, or no public origin", async () => {

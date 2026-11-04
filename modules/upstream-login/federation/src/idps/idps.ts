@@ -44,12 +44,12 @@ const upstreamsWith = (idps: ReadonlyMap<string, Idp>) => ({
 export const upstreamsIn = async (c: BuildContext<Settings>) =>
 	upstreamsWith(await c.get(federationIdps));
 
-/** Each IdP's name to `users`, with the issuer its upstream says: the names its lookups take. */
+/** Each IdP's name to `users`, with what it stands for: where its upstream says its subjects are read, else its issuer. */
 export const upstreamNamesIn = async (c: BuildContext<Settings>) => ({
 	declaredBy: "federation",
 	names: [...(await c.get(federationIdps))].map(([name, idp]) => ({
 		name,
-		issuer: idp.upstream.issuer,
+		issuer: idp.upstream.subjectsFrom ?? idp.upstream.issuer,
 	})),
 });
 

@@ -2,7 +2,7 @@ import { jsonObjectOf, type Outbound, type OutboundRequest } from "@mod/outbound
 import { answerOf, authorizationUrl, guarded, tokenPostOf } from "@mod/upstream-client";
 import { type Upstream, UpstreamRefused } from "@mod/upstreams";
 import { z } from "zod";
-import { hostsOf, type Settings, userUrl } from "./settings.ts";
+import { hostsOf, ownApi, type Settings, userUrl } from "./settings.ts";
 
 const tokenAnswer = z.looseObject({
 	access_token: z.string().min(1),
@@ -33,6 +33,9 @@ function profileOf(said: Readonly<Record<string, unknown>>) {
 	return Object.keys(profile).length > 0 ? { profile } : {};
 }
 
+/** A URL as the parser writes it, with no trailing slash: one spelling of one endpoint. */
+const spelled = (url: string) => new URL(url).href.replace(/\/$/, "");
+
 /** GitHub's OAuth (not OpenID Connect): the subject is the user's numeric id, read from its API. */
 export function opened(s: Settings, outbound: Outbound): Upstream {
 	const hosts = hostsOf(s);
@@ -42,8 +45,10 @@ export function opened(s: Settings, outbound: Outbound): Upstream {
 		{ id: s["client-id"], auth: "form", secret: async () => s["client-secret"] },
 		{ hosts, internal: s["token-endpoint"] },
 	);
+	const subjectsFrom = spelled(s.api);
 	return {
 		issuer: s.issuer,
+		...(subjectsFrom === spelled(ownApi) ? {} : { subjectsFrom }),
 		authorizationUrl: (start) =>
 			authorizationUrl(s["authorization-endpoint"], start, {
 				clientId: s["client-id"],

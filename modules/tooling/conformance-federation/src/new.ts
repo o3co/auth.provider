@@ -16,7 +16,7 @@ function settingsOf(idp: IdpScene): Record<string, unknown> {
 				"authorization-endpoint": `${idp.issuer}/login/oauth/authorize`,
 				"token-endpoint": `${idp.issuer}/login/oauth/access_token`,
 				api: idp.issuer,
-				issuer: `${idp.issuer}/login/oauth`,
+				...(idp.issuerUnset ? {} : { issuer: `${idp.issuer}/login/oauth` }),
 			};
 		case "apple":
 			return {

@@ -13,6 +13,7 @@ Internal module of `idp-apple`: the client's secret Apple asks for, signed by th
 
 ## Invariants
 - The JWT's header is ES256 with the key id. It names the team as `iss`, the client as `sub` and Apple as `aud`, with `iat` and `exp` from the clock given.
+- A signed secret lives the lifetime given, the package's `secret-lifetime`, on the clock given, `kernel`'s.
 - A held secret is made again once half its lifetime has passed. Requests at once share one signing; a signing that failed is not held.
 - A held secret is tied to the key that made it: under another key, a new one is signed.
 

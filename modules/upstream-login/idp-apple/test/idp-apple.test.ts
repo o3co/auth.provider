@@ -31,7 +31,7 @@ import {
 import { jwtVerify } from "jose";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import idpApple from "../src/module.ts";
-import { settingsOf } from "../src/settings.ts";
+import { type Settings, settingsOf } from "../src/settings.ts";
 import { issuer, opened } from "../src/upstream.ts";
 
 const base = "https://apple.test";
@@ -615,5 +615,54 @@ describe("idp-apple", () => {
 		const upstream = await apple.open(read, { idp: "apple", redirectUri: callback });
 		const url = new URL(upstream.authorizationUrl(start));
 		expect(url.searchParams.get("redirect_uri")).toBe(callback);
+	});
+});
+
+describe("where the keys vouching for a subject are read", () => {
+	const own = "https://appleid.apple.com/auth/keys";
+	const moved = "https://keys.example/auth/keys";
+	const secret = { "client-secret": "fixed-secret" };
+
+	it("says nothing at Apple's own key set, so the name stands for Apple's issuer as it did", async () => {
+		for (const jwks of [undefined, own, `${own}/`]) {
+			const { upstream } = await open(undefined, { ...secret, "jwks-uri": jwks });
+			expect(upstream.issuer, jwks).toBe(issuer);
+			expect("subjectsFrom" in upstream, jwks).toBe(false);
+		}
+	});
+
+	it("says nothing at a spelling of Apple's own that its setting refuses, had one been read", async () => {
+		const given = { "client-id": "com.example.web", ...secret };
+		const read = settings.parse(given);
+		const app = await assemble({
+			modules: [
+				defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
+					m.provide(outbound).by(() => ({}) as Outbound),
+				]),
+				externalJwtModule,
+			],
+			config: kernelConfig(),
+			runtime,
+		});
+		for (const jwks of [
+			"https://APPLEID.apple.com/auth/keys",
+			"https://appleid.apple.com:443/auth/keys",
+		]) {
+			expect(() => settings.parse({ ...given, "jwks-uri": jwks }), jwks).toThrow();
+			const named = { ...read, "jwks-uri": jwks as Settings["jwks-uri"] };
+			const upstream = opened(named, {} as Outbound, app.get(externalJwt), {
+				clock,
+				redirectUri: callback,
+			});
+			expect("subjectsFrom" in upstream, jwks).toBe(false);
+		}
+	});
+
+	it("names a named key set as the parser writes it, with no trailing slash, and leaves the issuer", async () => {
+		for (const jwks of [moved, `${moved}/`]) {
+			const { upstream } = await open(undefined, { ...secret, "jwks-uri": jwks });
+			expect(upstream.subjectsFrom, jwks).toBe(moved);
+			expect(upstream.issuer, jwks).toBe(issuer);
+		}
 	});
 });

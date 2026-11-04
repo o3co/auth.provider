@@ -15,6 +15,7 @@
   - `open` gets the IdP's name as `idp`, the word `upstreams.of` and the receivers use, and its redirect URI.
   - `open` throws `UpstreamMismatch(reason, at)` to say why it refuses the settings and at which of their keys; the reason names no configuration value.
 - An upstream: its issuer, how it answers (in the query or a posted form), its clock allowance, authorization URL, and code exchange → upstream login, with its tokens and profile if the type gives them
+  - It may say `subjectsFrom`, where its subjects are read when the type's settings point that away from its own endpoint: what the IdP's name stands for in place of the issuer. The issuer stays what its answers are compared with.
   - The code exchange gets the verifier, nonce, redirect URI and the callback's `iss`.
 - Exchanges and refreshes throw `UpstreamRefused` for an answer that does not hold (an exchange's 5xx too), `Unavailable` when unreachable (a refresh's 5xx too); a delegation's start refuses as a value, never throws.
 - `UpstreamRefused.is` and `UpstreamMismatch.is` tell each by a mark, which every copy of upstreams in a bundle shares; a caller tells them so, never by its class.

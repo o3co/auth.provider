@@ -20,6 +20,8 @@ export interface IdpScene {
 	/** OpenID Connect (the default), or GitHub's, Google's or Apple's own at `issuer`, standing for their hosts. */
 	readonly type?: "oidc" | "github" | "google" | "apple";
 	readonly issuer: string;
+	/** GitHub only: its `issuer` setting left out, whatever `issuer` here says of its endpoints. */
+	readonly issuerUnset?: true;
 	readonly clientId: string;
 	/** Required by every type but Apple, which takes it or `signing`. */
 	readonly clientSecret?: string;

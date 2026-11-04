@@ -59,6 +59,10 @@ If your module has a section of the configuration, ship its example as `config.e
 
 `README.md` and `reference.conf` beside it are read too, as your card and your section's defaults; a `## Deployment` section of the card is pointed at from the app's guide.
 
+### Say where an IdP type's subjects are read
+
+If your module offers an IdP type (`upstreams`' `idpTypes`), `federation` declares each IdP's name to `users` with what its upstream says, and `users` holds the name to that value across starts. Where your type's settings can point away from its own endpoint for what decides who a subject is, such as the API that names the user or the key set that signs its tokens, have `open` answer that URL as `subjectsFrom`, as the URL parser writes it with no trailing slash, and leave it out at the type's own endpoint, however spelled. `issuer` stays what your upstream's answers are compared with. The `upstreams` card holds this; `idp-github`, `idp-google` and `idp-apple` do it.
+
 ## Composing a package outside the release
 
 ### Install it where the generator reads it

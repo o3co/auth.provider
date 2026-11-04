@@ -99,7 +99,7 @@ Settings that name where it reaches:
 | `audit-http.url` | `@mod/audit-http` |  | by its name |
 | `device-grant.complete-uri` | `@mod/device-grant` | `false` | by its name |
 | `device-grant.verification-uri` | `@mod/device-grant` |  | by its name |
-| `federation.idps.<name>.api` | `@mod/idp-github` | `"https://api.github.com"` | a GitHub's API, for the user's profile |
+| `federation.idps.<name>.api` | `@mod/idp-github` | `"https://api.github.com"` | a GitHub's API, which names the subject |
 | `federation.idps.<name>.authorization-endpoint` | `@mod/idp-apple` | `"https://appleid.apple.com/auth/authorize"` | by its name |
 | `federation.idps.<name>.authorization-endpoint` | `@mod/idp-github` | `"https://github.com/login/oauth/authorize"` | by its name |
 | `federation.idps.<name>.authorization-endpoint` | `@mod/idp-google` | `"https://accounts.google.com/o/oauth2/v2/auth"` | by its name |
