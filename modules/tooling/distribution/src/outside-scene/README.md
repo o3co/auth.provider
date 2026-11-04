@@ -16,7 +16,7 @@
 - The registry listens within 30 seconds, or the scene fails; it is stopped and waited for however the scene ends. Each command runs at most 10 minutes.
 - The package outside needs a module of the release and takes its bundle and zod as peers, at the release's version and the workspace's zod.
 - `create-auth-provider` is installed from the registry, the package outside into a project of its own, and the app is generated from that project by `--outside-from`, then installed by version, never from a file, through the `.npmrc` it was given.
-- The app's `check:outside` passes. With the lockfile's zod pointed at another package's tarball on zod's registry, with that package's good integrity, it exits 1 for the integrity the release recorded, and for that alone: any other answer fails the scene.
+- The app's `scripts/check-outside.mjs`, run with node, passes. With the lockfile's zod pointed at another package's tarball on zod's registry, with that package's good integrity, it exits 1 for the integrity the release recorded, and for that alone: any other answer fails the scene.
 
 ## Depends on
 - pnpm, to pack, install and run; `tar`, run, to read a tarball's manifest; `yaml`, to change the lockfile; node's `http`, for the registry; the network, for the upstream registry.

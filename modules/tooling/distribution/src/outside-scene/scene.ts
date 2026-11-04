@@ -63,7 +63,7 @@ function packOutside(dir: string, into: string, version: string, zod: string) {
  * its own; installs
  * `create-auth-provider` and, into a project of its own, the package from it; generates an app of
  * the pattern adding it; installs the app as published, by version, through the `.npmrc` it was
- * given; and runs its `check:outside`,
+ * given; and runs its `scripts/check-outside.mjs`,
  * which must pass. Then points the lockfile's zod at another package's tarball on zod's registry,
  * and the check must refuse it for the integrity the release recorded, and for that alone.
  */
@@ -112,7 +112,7 @@ export async function outsideScene(options: {
 		);
 		// Installed by the `.npmrc` the app was given, from what the project recorded.
 		must("pnpm", ["install"], app);
-		must("pnpm", ["check:outside"], app);
+		must("node", ["scripts/check-outside.mjs"], app);
 
 		const record = JSON.parse(readFileSync(join(app, "outside-modules.json"), "utf8")) as {
 			registries: { default: string };
@@ -122,7 +122,7 @@ export async function outsideScene(options: {
 		const swapped = swappedZod(readFileSync(lockfile, "utf8"), record.registries.default);
 		if ("problem" in swapped) throw new Error(swapped.problem);
 		writeFileSync(lockfile, swapped.text);
-		const refused = ran("pnpm", ["--silent", "check:outside"], app);
+		const refused = ran("node", ["scripts/check-outside.mjs"], app);
 		const expected = `zod: integrity ${swapped.integrity}, not ${record.held.zod} as the release recorded\ncheck:outside: 1 refusal(s)\n`;
 		if (refused.status !== 1 || refused.stdout !== expected) {
 			throw new Error(
