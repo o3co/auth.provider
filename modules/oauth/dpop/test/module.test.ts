@@ -41,18 +41,20 @@ const held = {
 function spentInMemory() {
 	const stand = memoryRecords<true>(() => runtime.clock.now(), { shards: 1, perShard: 1 });
 	const lifetimes: number[] = [];
+	const names: string[] = [];
 	const down = unavailableSwitch<SpentProofs>("spent proofs");
 	const module = defineModule({ name: "spent-proofs", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(spentProofs).by(() =>
 			down.wrap({
 				save: (name: string, lifetimeMs: number) => {
 					lifetimes.push(lifetimeMs);
+					names.push(name);
 					return stand.records.create(name, true, lifetimeMs);
 				},
 			}),
 		),
 	]);
-	return { module, lifetimes, down };
+	return { module, lifetimes, names, down };
 }
 
 const published = contract<readonly MetadataItem[]>("published");
@@ -586,6 +588,29 @@ describe("what a proof writes at a resource", () => {
 			expect(await by(at, generateKeyPairSync("ed25519"), "at-3", client)).toMatchObject(tooMany);
 			expect(await by(at, holder, "at-4", "another-client")).toMatchObject(admitted);
 		});
+	});
+
+	it("keeps a spent proof by a digest of its key and jti, of one length, and one key's alone", async () => {
+		const spent = spentInMemory();
+		const app = await boot({ nonce: { required: "never" } }, spent);
+		const jti = "j".repeat(256);
+		const read = async (key: typeof holder) =>
+			app.get(senderBinding).bindingOf(
+				testRequest({
+					method: "POST",
+					path: "/oauth/token",
+					headers: new Map([["dpop", await proof({ jti, key })]]),
+				}),
+				{ kind: "issue" },
+			);
+		expect((await read(holder)).kind).toBe("bound");
+		expect(spent.names).toEqual([
+			createHash("sha256").update(`${held.confirmation}.${jti}`).digest("base64url"),
+		]);
+		expect(await read(holder)).toMatchObject({ kind: "refused", error: "invalid_dpop_proof" });
+		// The same `jti` from another key is that key's own.
+		expect((await read(stranger)).kind).toBe("bound");
+		expect(new Set(spent.names).size).toBe(2);
 	});
 
 	it("bounds one subject the same from many sources", async () => {

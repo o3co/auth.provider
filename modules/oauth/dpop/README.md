@@ -37,7 +37,7 @@
 - A proof spent before the grant fails stays spent; the client signs again.
 
 ## Data
-- Spent proofs, named by the key's thumbprint and the `jti`. A thumbprint holds no dot, so a name is one key's and one `jti`'s alone.
+- Spent proofs, named by the SHA-256 of the key's thumbprint and the `jti`, so a name's length is one whatever the `jti`'s. A thumbprint holds no dot, so a name is one key's and one `jti`'s alone.
 - Each is kept for twice five minutes, the widest `proof-window` the section takes, whatever is set, plus a minute for the store's clock: a `proof-window` widened later on the same store never takes it again.
 
 ## Depends on

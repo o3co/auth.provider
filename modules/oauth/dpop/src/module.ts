@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { metadata } from "@mod/issuer";
 import { defineModule, setting } from "@mod/kernel";
 import { secretBytes } from "@mod/keys";
@@ -13,6 +14,10 @@ const widestWindow = 300;
 
 /** The member a proof's key is written in, in a token bound to it. */
 const member = "jkt";
+
+/** A spent proof's name: of one length whatever the `jti`; a thumbprint holds no dot, so it is one key's and one `jti`'s alone. */
+const spentName = (jkt: string, jti: string) =>
+	createHash("sha256").update(`${jkt}.${jti}`).digest("base64url");
 
 const section = z.strictObject({
 	algorithms: z
@@ -128,9 +133,8 @@ export default defineModule(
 					// A proof is accepted within the window on either side of its iat, so it is
 					// remembered for twice the widest window from now, not the one in force: a window
 					// widened later on the same store never outlasts it.
-					// A thumbprint holds no dot, so the name is one key's and one jti's alone.
 					const recorded = await spent.save(
-						`${checked.jkt}.${checked.jti}`,
+						spentName(checked.jkt, checked.jti),
 						2 * widestWindow * 1000 + clockAllowanceMs,
 					);
 					if (recorded !== "created") return refused("proof used before");
