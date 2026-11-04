@@ -20,6 +20,8 @@ export interface Beside {
 		| {
 				readonly copy: readonly string[];
 				readonly after: string;
+				/** What holds the lockfile to the record, node's own and nothing of the install: run before there is one. */
+				readonly check: string;
 				/** How its install takes a registry's credentials, where a scope records a registry. */
 				readonly mount?: string;
 		  }
@@ -124,6 +126,7 @@ export function besideRelease(
 		image: {
 			copy: [recordFile, scriptFile, ...(npmrc ? [npmrcFile] : [])],
 			after: `pnpm ${script}`,
+			check: `node ${scriptFile}`,
 			// Never in a layer: the install stage reads them from where pnpm looks, for that one command.
 			...(npmrc ? { mount: "--mount=type=secret,id=npmrc,target=/root/.npmrc" } : {}),
 		},

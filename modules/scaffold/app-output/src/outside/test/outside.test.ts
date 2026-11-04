@@ -112,6 +112,7 @@ describe("what an app beside packages outside the release is given", () => {
 		expect(image).toEqual({
 			copy: ["outside-modules.json", "scripts/check-outside.mjs"],
 			after: "pnpm check:outside",
+			check: "node scripts/check-outside.mjs",
 		});
 	});
 
@@ -143,6 +144,7 @@ describe("what an app beside packages outside the release is given", () => {
 			expect(image).toEqual({
 				copy: ["outside-modules.json", "scripts/check-outside.mjs", ".npmrc"],
 				after: "pnpm check:outside",
+				check: "node scripts/check-outside.mjs",
 				mount: "--mount=type=secret,id=npmrc,target=/root/.npmrc",
 			});
 			expect(guide).toContain("`.npmrc` names the registry of each scope recorded");
@@ -159,6 +161,7 @@ describe("what an app beside packages outside the release is given", () => {
 				expect(image).toEqual({
 					copy: ["outside-modules.json", "scripts/check-outside.mjs"],
 					after: "pnpm check:outside",
+					check: "node scripts/check-outside.mjs",
 				});
 				expect(guide).not.toContain(".npmrc");
 			}
