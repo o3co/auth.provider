@@ -223,7 +223,12 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
     - A proof is accepted once (its `jti` is kept where it is never evicted and survives a crash and a failover).
     - `htu` is compared with a URL built from the issuer, never from request headers.
     - A nonce is asked at the token endpoint by default (`dpop.nonce.required = as`), so a proof made ahead is refused there; `never` asks none, and every start warns `dpop.nonce_not_asked`.
+    - What proofs keep in the store at a resource is counted per token subject, whatever the key or source: `dpop.proofs` in `dpop.proofs-window`, default 60 in `1m`. A count that cannot be made answers `503`.
   - A token bound to a key or certificate is refused when presented under another scheme, so a binding cannot be stripped.
+- **Not guaranteed:**
+  - A total bound on what proofs keep: the count is per subject, so the bound across a deployment is its accounts and clients times `dpop.proofs`.
+  - A subject's count against a captured proof: whoever holds a proof with its token can use up that subject's count within `dpop.proof-window`, and the subject's requests wait until the count's window ends.
+  - A count per subject at issuance: what a proof keeps at the token endpoint is bounded per source alone, by that endpoint's limit.
 - **Left to you:**
   - Keeping the issuer's path when your proxy forwards requests: a proxy that strips it breaks every DPoP proof.
   - Choosing `mtls.revocation.on-unavailable` (`reject` refuses during a revocation outage; `allow` binds with a warning, and every start warns `mtls.binds_during_outage`). With `mtls.revocation.mode = disabled`, no certificate's revocation is checked, and every start warns `mtls.revocation_unchecked`.
