@@ -227,7 +227,8 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - A token bound to a key or certificate is refused when presented under another scheme, so a binding cannot be stripped.
 - **Not guaranteed:**
   - A total bound on what proofs keep: the count is per subject, so the bound across a deployment is its accounts and clients times `dpop.proofs`.
-  - A subject's count against a captured proof: whoever holds a proof with its token can use up that subject's count within `dpop.proof-window`, and the subject's requests wait until the count's window ends.
+  - A count of each client's own: a subject's count is shared, so any client holding that subject's token can use it up for the subject's other clients, with nothing captured, and their requests wait until the count's window ends.
+  - A subject's count against a captured proof: besides those clients, whoever holds a captured proof with its token can use up that subject's count within `dpop.proof-window`, with the same wait.
   - A count per subject at issuance: what a proof keeps at the token endpoint is bounded per source alone, by that endpoint's limit.
 - **Left to you:**
   - Keeping the issuer's path when your proxy forwards requests: a proxy that strips it breaks every DPoP proof.
