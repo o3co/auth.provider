@@ -382,6 +382,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `held` (`src/held`): the scenes of a federation login that a gate holds.
   - `link` (`src/link`): the scenes of linking an upstream identity to the account logged in.
   - `names` (`src/names`): the fault scenes of an IdP name's issuer across starts, each start a deployment of its own on one Redis.
+  - `proof-writes` (`src/proof-writes`): the fault scenes of what a DPoP proof writes at the upstream token route.
   - `revocation-boundary` (`src/revocation-boundary`): the fault scenes of a subject's revocation boundary refusing, from any instance, a federation grant established before it, and of the exception where grants keep on subject revocation (`guarantee-4-c`), the boundary written through the ledger's route.
 - `@mod/conformance-front` (verification, `modules/tooling/conformance-front`): Puts an https front before a running app, as a deployment's proxy is, for a harness whose outside party (a conformance suite, a client library) reaches the app over https.
 - `@mod/conformance-identity` (verification, `modules/tooling/conformance-identity`): Owns the conformance scenes of the identity area: password login (a form or JSON body), missing credentials, return destination, attempt limits, logout, login during a store failure, the audit events of password login, the attempt limit (over it, and unable to count) and logout.

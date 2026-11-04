@@ -54,7 +54,7 @@ Routes that count no source, by their reason:
 | POST | `/ledger/subject-revocations` | `@mod/subject-revocation-http` | It checks the source and the credential first, then counts failures and authenticated requests apart, per source, in the handler. |
 | POST | `/oauth/consent` | `@mod/consent` | The user's session is authenticated; a per-source limit belongs to unauthenticated entries. |
 | POST | `/oauth/device/verification` | `@mod/device-grant` | Every action counts against the subject in rate-limit's attempt limit, in the handler. |
-| POST | `/oauth/userinfo` | `@mod/userinfo` | It is authenticated by a bearer access token and only reads. |
+| POST | `/oauth/userinfo` | `@mod/userinfo` | It is authenticated by an access token and only reads; what a DPoP proof spends, `dpop` counts by the token's subject. |
 | POST | `/session/logout` | `@mod/logout` | It closes only the requester's own session; there is nothing to guess or spend. |
 
 Routes that take cross-origin requests (CORS):
