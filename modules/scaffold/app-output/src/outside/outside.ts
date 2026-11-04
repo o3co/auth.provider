@@ -207,10 +207,16 @@ function guideOf(modules: readonly OutsideRecord[], scoped: boolean): string {
 		"```sh",
 		"pnpm install --lockfile-only",
 		`node ${scriptFile}`,
-		"pnpm install --frozen-lockfile",
+		"pnpm install --frozen-lockfile --ignore-scripts",
 		"```",
 		"",
-		`The second command holds the lockfile to that record before anything is installed, and the image runs it before its install too. \`pnpm-workspace.yaml\` holds the release's packages and zod to one version each, and \`held\` in \`${recordFile}\` each to the integrity the release recorded of it. When upgrading the release, generate the app again with the new release's \`create-auth-provider\` and take the overrides, \`held\`, \`${scriptFile}\` and the \`Dockerfile\` from it: the overrides and \`held\` move together, and a check older than the record may not read all of it. A version published within the last day is not installed, but for those \`minimumReleaseAgeExclude\` names. The image installs with \`--ignore-scripts\`: a package needing a build fails when the app runs, not at its install.`,
+		`The second command holds the lockfile to that record before anything is installed, and the image runs it before its install too. \`pnpm-workspace.yaml\` holds the release's packages and zod to one version each, and \`held\` in \`${recordFile}\` each to the integrity the release recorded of it. A version published within the last day is not installed, but for those \`minimumReleaseAgeExclude\` names. The third command and the image install with \`--ignore-scripts\`: a package needing a build fails when the app runs, not at its install. Do not approve a build pnpm stops at (\`pnpm approve-builds\`): it runs where your credentials are, with \`node_modules/.bin\` first on PATH.`,
+		"",
+		`When upgrading the release, generate the app again with the new release's \`create-auth-provider\`, and take \`package.json\`, this README, the overrides, \`held\`, \`${scriptFile}\` and the \`Dockerfile\` from it: the overrides and \`held\` move together, and a check older than the record may not read all of it. Run the generator from outside this directory, there and wherever this guide says to generate again.`,
+		"",
+		"What pnpm links at `node_modules/.bin` is not checked: it is decided from things the lockfile does not record, so it may hold a command of a package no one named, `node` among them. The app runs nothing through it. `package.json` holds no scripts, and `pnpm start` and `pnpm run <entry>` fail. Where a document says either, run the file with node: `## Start` gives the command for the app, and an entry takes the same command and `APP_CONFIG`, naming `src/<entry>.ts`.",
+		"",
+		"These run with what `.bin` holds, in place of the command you meant: a script you add, `pnpm exec`, `pnpm node`, `pnpm <name>`, `npx` or `pnpm dlx` run from this directory, a `.bin/<cmd>` run by path, a shell with `./node_modules/.bin` on PATH, and a package's build script once its build is approved.",
 		"",
 		...(scoped
 			? [

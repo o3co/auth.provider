@@ -134,16 +134,39 @@ describe("what an app beside packages outside the release is given", () => {
 		const said = [
 			"pnpm install --lockfile-only",
 			"node scripts/check-outside.mjs",
-			"pnpm install --frozen-lockfile",
+			"pnpm install --frozen-lockfile --ignore-scripts",
 		];
 		expect(guide).toContain(said.join("\n"));
 		expect(guide).not.toContain("pnpm check:outside");
 		expect(guide).toContain("the overrides and `held` move together");
 		expect(guide).toContain(
-			"take the overrides, `held`, `scripts/check-outside.mjs` and the `Dockerfile` from it",
+			"take `package.json`, this README, the overrides, `held`, `scripts/check-outside.mjs` and the `Dockerfile` from it",
 		);
+		expect(guide).toContain("Run the generator from outside this directory");
 		expect(guide).toContain("not covered by its conformance");
 		expect(index).toContain("`outside-modules.json`");
+	});
+
+	it("tells the guide that `.bin` is not checked, that the app runs nothing through it, how each file runs, and what does use it", () => {
+		const { guide } = besideRelease(outside, app);
+		expect(guide).toContain("What pnpm links at `node_modules/.bin` is not checked");
+		expect(guide).toContain("`pnpm start` and `pnpm run <entry>` fail");
+		expect(guide).toContain(
+			"an entry takes the same command and `APP_CONFIG`, naming `src/<entry>.ts`",
+		);
+		for (const route of [
+			"a script you add",
+			"`pnpm exec`",
+			"`pnpm node`",
+			"`pnpm <name>`",
+			"`npx` or `pnpm dlx` run from this directory",
+			"a `.bin/<cmd>` run by path",
+			"a shell with `./node_modules/.bin` on PATH",
+			"a package's build script once its build is approved",
+		]) {
+			expect(guide).toContain(route);
+		}
+		expect(guide).toContain("Do not approve a build pnpm stops at");
 	});
 
 	describe("a scope recorded with a registry of its own", () => {
