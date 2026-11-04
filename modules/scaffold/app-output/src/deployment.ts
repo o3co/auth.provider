@@ -142,13 +142,20 @@ const guideAsked = ({ chosen, decides }: { chosen: string[]; decides: string[] }
 	decides: decides.join("\n"),
 });
 
-/** The install stage's install: with packages outside the release, what it checks against copied, and checked after. */
+/**
+ * The install stage's install: with packages outside the release, the lockfile held to what was
+ * recorded before anything of theirs is there, and the install, running none of it, the one command
+ * that reads a registry's credentials.
+ */
 const installed = (beside: Beside["image"]) =>
 	beside === undefined
 		? "RUN pnpm install --frozen-lockfile --prod"
-		: `# The lockfile is held to what was recorded of the packages outside the release.
+		: `# The lockfile is held to what was recorded of the packages outside the release, before any is installed.
 ${beside.copy.map((file) => `COPY ${file} ./${file}`).join("\n")}
-${beside.mount ? "# A registry's credentials come as a build secret, and stay in no layer.\n" : ""}RUN ${beside.mount ? `${beside.mount} ` : ""}pnpm install --frozen-lockfile --prod && ${beside.after}`;
+RUN ${beside.check}
+# corepack fetches pnpm here, so the install below fetches only what the lockfile names.
+RUN pnpm --version
+${beside.mount ? "# A registry's credentials come as a build secret, and stay in no layer.\n" : ""}RUN ${beside.mount ? `${beside.mount} ` : ""}pnpm install --frozen-lockfile --prod --ignore-scripts`;
 
 /** Each composed module's card, where the app installs it. */
 const cardLines = (cards: readonly Card[]) =>

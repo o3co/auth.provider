@@ -413,13 +413,25 @@ it("records the packages outside the release and checks the lockfile against the
 		zod: "sha512-ZOD",
 	});
 	const manifest = JSON.parse(await read(target, "package.json"));
-	expect(manifest.scripts["check:outside"]).toBe("node scripts/check-outside.mjs");
 	// The check holds what it uses: the app depends on nothing for it.
 	expect(manifest.dependencies).not.toHaveProperty("semver");
 	expect(manifest.dependencies).not.toHaveProperty("yaml");
 	const docker = await read(target, "Dockerfile");
 	expect(docker).toContain("COPY outside-modules.json ./outside-modules.json");
-	expect(docker).toContain("RUN pnpm install --frozen-lockfile --prod && pnpm check:outside");
+	expect(docker).toContain("RUN pnpm install --frozen-lockfile --prod --ignore-scripts\n");
+	const stage = docker.slice(docker.indexOf("AS deps"), docker.indexOf("AS runtime"));
+	const steps = stage.split("\n").filter((line) => /^(COPY|RUN)\b/.test(line));
+	// The check holds what it uses, and comes before anything is installed: the stage's first RUN, and only files copied.
+	expect(steps).toEqual([
+		"COPY package.json pnpm-lock.yaml pnpm-workspace.yam[l] ./",
+		"COPY outside-modules.json ./outside-modules.json",
+		"COPY scripts/check-outside.mjs ./scripts/check-outside.mjs",
+		"RUN node scripts/check-outside.mjs",
+		"RUN pnpm --version",
+		"RUN pnpm install --frozen-lockfile --prod --ignore-scripts",
+	]);
+	expect(stage).not.toContain("node_modules");
+	expect(await read(target, ".dockerignore")).toContain("node_modules/");
 	expect(await read(target, "README.md")).toContain("## Packages outside this release");
 	expect(await read(target, "AGENTS.md")).toContain("`outside-modules.json`");
 });
@@ -473,9 +485,17 @@ it("takes a registry's credentials as a build secret, only where a scope records
 	expect(await read(scoped, ".npmrc")).toBe("@x:registry=https://registry.x.example/\n");
 	const docker = await read(scoped, "Dockerfile");
 	expect(docker).toContain("COPY .npmrc ./.npmrc");
-	expect(docker).toContain(
-		"RUN --mount=type=secret,id=npmrc,target=/root/.npmrc pnpm install --frozen-lockfile --prod && pnpm check:outside",
-	);
+	const mounted = "RUN --mount=type=secret,id=npmrc,target=/root/.npmrc ";
+	const steps = docker.split("\n").filter((line) => line.startsWith("RUN "));
+	// The secret reaches one command, which installs alone: what the image's other RUNs do is done with none.
+	expect(steps.filter((line) => line.startsWith(mounted))).toEqual([
+		`${mounted}pnpm install --frozen-lockfile --prod --ignore-scripts`,
+	]);
+	const install = steps.findIndex((line) => line.startsWith(mounted));
+	expect(steps.slice(install - 2, install)).toEqual([
+		"RUN node scripts/check-outside.mjs",
+		"RUN pnpm --version",
+	]);
 	// The image the app runs in takes neither.
 	expect(docker.slice(docker.indexOf("AS runtime"))).not.toContain("npmrc");
 	const plain = await written({ default: "https://registry.npmjs.org" });
