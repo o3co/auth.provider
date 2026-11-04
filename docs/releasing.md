@@ -88,7 +88,7 @@ Tag the merge commit on `main` as `v<version>` and push the tag. Only those the 
 
 ## What the workflow does
 
-It runs in four jobs before the API site's. `evidence` reads the CI runs, and nothing else. `pack` runs the checks and packs, and `sbom` makes the lists; both run what the release packed, and read alone. `publish` alone holds what publishing takes (its OIDC token and writing the release), and runs nothing the release packed. The API site's own two jobs build it where nothing can write, then push it in a job that runs none of the build's code.
+It runs in four jobs before the API site's. `evidence` reads the CI runs, and nothing else. `pack` runs the checks and packs, and `sbom` makes the lists; both run what the release packed, and read alone. `publish` alone holds what publishing takes (its OIDC token and writing the release), in the `npm-publish` environment, and runs nothing the release packed. The API site's own two jobs build it where nothing can write, then push it in a job that runs none of the build's code.
 
 1. Fetches CI's runs of the push of the release branch's head the tag's commit merged, with the run's token and before anything is installed (`pnpm release:evidence-fetch`); then, holding no credential, judges them and keeps the evidence of the run that tested the tag's tree: each test's result and the compliance table (`pnpm release:evidence-judge`). It stops the release where none will do; see [When the release finds no evidence](#when-the-release-finds-no-evidence).
 2. Runs `pnpm check`.
@@ -98,16 +98,18 @@ It runs in four jobs before the API site's. `evidence` reads the CI runs, and no
 6. Holds the tarballs it is about to publish to those the lists were made of, by name, version, integrity and file, and the order beside them to the tarballs (`pnpm release:listed`).
 7. Refuses to go on where a package of this version is on npm already as another tarball, or npm's answer cannot be read (`pnpm release:published`).
 8. Creates a draft GitHub release with the version's section of the changelog as its notes, and attaches the lists as `auth-provider-<version>-sbom.tar.gz` (its `README.md` says what each file is) and the evidence as `auth-provider-<version>-evidence.tar.gz`: the CI run's artifacts with a manifest naming the run and the commit it tested (of the tag's tree), this run's own `pnpm check` results, `pnpm audit --json`, and the commands and environment they ran in.
-9. Publishes each tarball with provenance, in the order the pack wrote: the bundles the index seals over, then the scaffold, then the entrance, which depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher; no npm token is stored.
+9. Publishes each tarball with provenance, in the order the pack wrote: the bundles the index seals over, then the scaffold, then the entrance, which depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher, which names the workflow and the `npm-publish` environment; no npm token is stored.
 10. Publishes the draft release.
 11. For a final release (never a prerelease), builds its API from the bundles it published, installed from npm, into the minor's dir of the API site on GitHub Pages (`v<major>.<minor>/`, each patch writing over it), and points the site's root at the newest minor. The **API site** workflow (`api-docs.yml`) builds a released tag again by hand.
+
+What the owner sets up once, before the first tag: the `npm-publish` environment, with its `v*` tag rule, no admin bypass and no reviewer. A job naming an environment that does not exist creates it with no rules, so make it first.
 
 ## A package name never published before
 
 Trusted publishing is set in a package's settings on npm, so the name must exist first. Before the first release that adds a concern:
 
 1. From a maintainer's account, publish a placeholder `0.0.0` of the new name under the dist-tag `bootstrap`. npm also points `latest` at a name's first version, so the placeholder is `latest` until the name's first final release.
-2. In the package's settings on npm, add this repository's release workflow as its trusted publisher.
+2. In the package's settings on npm, add this repository's release workflow with the `npm-publish` environment as its trusted publisher, within 2 days of the tag, as a new one lapses without a publish.
 
 A release whose new name is missing either stops at that package; see the next section.
 
