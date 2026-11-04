@@ -43,6 +43,8 @@ export interface Twist {
 	readonly credentialId?: string;
 	/** The client data, encoded as given instead of as JSON in base64url. */
 	readonly clientDataJSON?: (json: string) => string;
+	/** The attestation object, encoded as given around the authenticator data instead of as `none`. */
+	readonly attestationObject?: (authData: Uint8Array) => Uint8Array;
 	/** Answers what a browser would refuse: the options' rules and its own limits are not checked. */
 	readonly overlook?: boolean;
 }
@@ -69,9 +71,9 @@ export interface RequestOptions {
 	readonly userVerification?: string;
 }
 
-type Cbor = number | string | Uint8Array | Map<Cbor, Cbor>;
+type Cbor = number | string | Uint8Array | Cbor[] | Map<Cbor, Cbor>;
 
-/** CBOR for the few kinds WebAuthn uses: integers, text, bytes and maps. */
+/** CBOR for the few kinds WebAuthn uses: integers, text, bytes, lists and maps. */
 function cbor(value: Cbor): number[] {
 	const head = (major: number, n: number) =>
 		n < 24
@@ -85,10 +87,29 @@ function cbor(value: Cbor): number[] {
 		return [...head(3, bytes.length), ...bytes];
 	}
 	if (value instanceof Uint8Array) return [...head(2, value.length), ...value];
+	if (Array.isArray(value)) return [...head(4, value.length), ...value.flatMap(cbor)];
 	return [...head(5, value.size), ...[...value].flatMap(([k, v]) => [...cbor(k), ...cbor(v)])];
 }
 
 const b64 = (bytes: Uint8Array | string) => Buffer.from(bytes).toString("base64url");
+
+/** A self-signed certificate of no one, naming the CRL `http://crl.example/test.crl`. */
+const certificateNamingCrl = Buffer.from(
+	"MIIBfTCCASOgAwIBAgIJANtGKqnfl6RVMAoGCCqGSM49BAMCMCMxITAfBgNVBAMMGE1hZGUtdXAgdGVzdCBhdHRlc3RhdGlvbjAgFw0yNjExMDQwNzE0MjJaGA8yMTI2MTAxMTA3MTQyMlowIzEhMB8GA1UEAwwYTWFkZS11cCB0ZXN0IGF0dGVzdGF0aW9uMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKI5sJJa88G7svSzju3uDlKyW_bUlQpT9Psq0QcF_rEvoSu1UtV5ta8pbBS45uwQh7oa-_XqW189QJEHhZ24aU6M-MDwwDAYDVR0TAQH_BAIwADAsBgNVHR8EJTAjMCGgH6AdhhtodHRwOi8vY3JsLmV4YW1wbGUvdGVzdC5jcmwwCgYIKoZIzj0EAwIDSAAwRQIhAIvlQ8dHkSF461zrE4aUkNnqLQWa1lE-IJGBrV8EvrtwAiBlucBKDB7KVTJ3qELiaB2-D_N9Q1HNtZiEfDir9ulRXQ",
+	"base64url",
+);
+
+/** For the twist `attestationObject`: an attestation of `fmt` whose statement holds that certificate. */
+export const statingCertificate = (fmt: string) => (authData: Uint8Array) =>
+	Buffer.from(
+		cbor(
+			new Map<Cbor, Cbor>([
+				["fmt", fmt],
+				["attStmt", new Map<Cbor, Cbor>([["x5c", [certificateNamingCrl]]])],
+				["authData", authData],
+			]),
+		),
+	);
 
 /** Authenticator data flags: user present, user verified, backup eligible, backed up, attested data. */
 const [UP, UV, BE, BS, AT] = [1, 4, 8, 16, 64];
@@ -206,13 +227,15 @@ export function softwareAuthenticator(
 		const data = authData(twist.rpId ?? rpId, true, verified, 0, attested);
 		const discoverable = canDiscover && residentKey !== "discouraged";
 		kept.set(b64(id), { key: privateKey, handle: options.user.id, rpId, discoverable, count: 0 });
-		const attestationObject = cbor(
-			new Map<Cbor, Cbor>([
-				["fmt", "none"],
-				["attStmt", new Map()],
-				["authData", data],
-			]),
-		);
+		const attestationObject = twist.attestationObject
+			? twist.attestationObject(data)
+			: cbor(
+					new Map<Cbor, Cbor>([
+						["fmt", "none"],
+						["attStmt", new Map()],
+						["authData", data],
+					]),
+				);
 		return {
 			id: b64(id),
 			rawId: b64(id),
