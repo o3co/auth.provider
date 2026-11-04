@@ -21,6 +21,7 @@
 - Boot is refused, at its key, where `outbound`'s destination policy refuses `token-endpoint` or `jwks-uri` with its host alone, saying which of its keys to set (`outbound.refusals`).
 - Boot is refused, at its key, on an `authorization-endpoint` or `end-session-endpoint`, which the browser goes to, that `outbound.refusals`' `browsedRefusal` refuses: plain http is taken at a loopback name alone, Google being a public service.
 - Google's own default endpoints are put to that policy too.
+- `subjectsFrom`, where the keys that vouch for a subject are read: off Google's own, `jwks-uri`'s URL as the parser writes it with no trailing slash; at Google's own, however it is spelled, none, so the name stands for Google's issuer as it always did.
 - A callback carrying an `iss` other than exactly `https://accounts.google.com`, an empty one included, is refused before its code is used.
 - A callback without `iss` is refused unless `accept-missing-iss` is set, which every start warns of (`idp-google.iss_not_required`, with the IdP's name).
 - The id_token is checked under `algorithms` (`external-jwt`'s `algorithmsSetting`, RS256 by default), Google's issuer exactly, the client among its audiences, and `clock-skew`.
