@@ -142,7 +142,7 @@ describe("what an app beside packages outside the release is given", () => {
 		expect(guide).toContain(
 			"take `package.json`, this README, the overrides, `held`, `scripts/check-outside.mjs` and the `Dockerfile` from it",
 		);
-		expect(guide).toContain("Run the generator from outside this directory");
+		expect(guide).toContain("Run the generator with `npx` from outside this directory");
 		expect(guide).toContain("not covered by its conformance");
 		expect(index).toContain("`outside-modules.json`");
 	});

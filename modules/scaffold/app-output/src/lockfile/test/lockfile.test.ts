@@ -491,6 +491,27 @@ describe("the script an app runs, the file as it ships", () => {
 		);
 	});
 
+	it("checks as well through a link where node keeps the link as the main's path", () => {
+		const app = appWith(changed((l) => (l.packages["@x/grant@1.2.0"].hasBin = true)));
+		symlinkSync(join(app, "check-outside.mjs"), join(app, "through-a-link.mjs"));
+		const entered = spawnSync("node", ["--preserve-symlinks-main", "through-a-link.mjs"], {
+			cwd: app,
+			encoding: "utf8",
+		});
+		expect(entered.status).toBe(1);
+	});
+
+	it("loads, and checks nothing, where node's main names no file", () => {
+		const app = appWith(changed((l) => (l.packages["@x/grant@1.2.0"].hasBin = true)));
+		const loaded = spawnSync(
+			"node",
+			["--input-type=module", "-e", 'await import("./check-outside.mjs")', "no-such-file"],
+			{ cwd: app, encoding: "utf8" },
+		);
+		expect(loaded.status).toBe(0);
+		expect(loaded.stdout).toBe("");
+	});
+
 	it("refuses a recorded package the lockfile says declares a command", () => {
 		const lock = changed((l) => {
 			l.packages["@x/grant@1.2.0"].hasBin = true;
