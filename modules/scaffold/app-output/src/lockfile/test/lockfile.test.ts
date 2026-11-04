@@ -1,5 +1,12 @@
-import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+	copyFileSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -434,6 +441,7 @@ describe("a recorded package declaring a command", () => {
 		expect(refusals(off)).toEqual([said]);
 	});
 
+	// Its command may be linked at the app's root; the app runs nothing through pnpm's scripts.
 	it("leaves a package the record does not name to pnpm", () => {
 		const held = changed((lock) => {
 			lock.packages["jose-lite@1.4.0"].hasBin = true;
@@ -470,7 +478,17 @@ describe("the script an app runs, the file as it ships", () => {
 	};
 
 	it("passes the lockfile the module passes", () => {
-		expect(run(appWith(appLock))).toEqual({ code: 0, out: "check:outside: ok\n" });
+		expect(run(appWith(appLock))).toEqual({ code: 0, out: "ok\n" });
+	});
+
+	it("checks as well when entered through a link", () => {
+		const app = appWith(changed((l) => (l.packages["@x/grant@1.2.0"].hasBin = true)));
+		symlinkSync(join(app, "check-outside.mjs"), join(app, "through-a-link.mjs"));
+		const entered = spawnSync("node", ["through-a-link.mjs"], { cwd: app, encoding: "utf8" });
+		expect(entered.status).toBe(1);
+		expect(entered.stdout).toBe(
+			"@x/grant: the lockfile says it declares a command\n1 refusal(s)\n",
+		);
 	});
 
 	it("refuses a recorded package the lockfile says declares a command", () => {
@@ -479,7 +497,7 @@ describe("the script an app runs, the file as it ships", () => {
 		});
 		expect(run(appWith(lock))).toEqual({
 			code: 1,
-			out: "@x/grant: the lockfile says it declares a command\ncheck:outside: 1 refusal(s)\n",
+			out: "@x/grant: the lockfile says it declares a command\n1 refusal(s)\n",
 		});
 	});
 
@@ -519,26 +537,26 @@ describe("the script an app runs, the file as it ships", () => {
 			);
 			writeFileSync(
 				join(app, "node_modules", name, "index.js"),
-				'process.stdout.write("check:outside: ok\\n");\nprocess.exit(0);\nexport const parseDocument = () => {};\nexport default {};\n',
+				'process.stdout.write("ok\\n");\nprocess.exit(0);\nexport const parseDocument = () => {};\nexport default {};\n',
 			);
 		}
 		const found = refusals(lock);
 		expect(found).not.toEqual([]);
 		expect(run(app)).toEqual({
 			code: 1,
-			out: `${found.join("\n")}\ncheck:outside: ${found.length} refusal(s)\n`,
+			out: `${found.join("\n")}\n${found.length} refusal(s)\n`,
 		});
 	});
 
 	it("says why it cannot read a lockfile, and exits 1", () => {
 		expect(run(appWith("lockfileVersion: '6.0'\n"))).toEqual({
 			code: 1,
-			out: "check:outside: lockfile version 6.0, where 9.0 is read\n",
+			out: "lockfile version 6.0, where 9.0 is read\n",
 		});
 	});
 
 	it("holds each held package to the integrity the release recorded, as the module does", () => {
-		expect(run(appWith(appLock, recorded))).toEqual({ code: 0, out: "check:outside: ok\n" });
+		expect(run(appWith(appLock, recorded))).toEqual({ code: 0, out: "ok\n" });
 		const swapped = changed((l) => {
 			l.packages["zod@4.6.7"].resolution = { integrity: "sha512-OTHER==" };
 		});
@@ -548,18 +566,18 @@ describe("the script an app runs, the file as it ships", () => {
 		]);
 		expect(run(appWith(swapped, recorded))).toEqual({
 			code: 1,
-			out: `${found.join("\n")}\ncheck:outside: ${found.length} refusal(s)\n`,
+			out: `${found.join("\n")}\n${found.length} refusal(s)\n`,
 		});
 	});
 
 	it("refuses a record holding no integrity of the held packages, or not of each one the overrides hold", () => {
 		expect(run(appWith(appLock, null))).toEqual({
 			code: 1,
-			out: "@o3co/auth-provider-oauth: the app records no integrity of it\nzod: the app records no integrity of it\ncheck:outside: 2 refusal(s)\n",
+			out: "@o3co/auth-provider-oauth: the app records no integrity of it\nzod: the app records no integrity of it\n2 refusal(s)\n",
 		});
 		expect(run(appWith(appLock, { zod: recorded.zod }))).toEqual({
 			code: 1,
-			out: "@o3co/auth-provider-oauth: the app records no integrity of it\ncheck:outside: 1 refusal(s)\n",
+			out: "@o3co/auth-provider-oauth: the app records no integrity of it\n1 refusal(s)\n",
 		});
 	});
 
@@ -574,7 +592,7 @@ describe("the script an app runs, the file as it ships", () => {
 		const found = refusals(lock);
 		expect(run(appWith(lock))).toEqual({
 			code: 1,
-			out: `${found.join("\n")}\ncheck:outside: ${found.length} refusal(s)\n`,
+			out: `${found.join("\n")}\n${found.length} refusal(s)\n`,
 		});
 	});
 });
