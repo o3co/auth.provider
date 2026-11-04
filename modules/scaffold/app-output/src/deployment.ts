@@ -101,9 +101,8 @@ export async function writeDeployment(
 	});
 	await writeProject(target, {
 		"package.json": manifestOf(
-			"node --env-file-if-exists=.env src/main.ts",
 			dependencies,
-			entries.scripts,
+			beside.scripts ? { start: run(paths.main), ...entries.scripts } : undefined,
 		),
 		...beside.files,
 		[paths.main]: await mainSource(modules, packages.importOf, keys),
@@ -128,6 +127,8 @@ export async function writeDeployment(
 				portEnv: envName("http.port"),
 				...httpLines(http),
 				comesWith: beside.comesWith,
+				install: beside.install,
+				start: beside.scripts ? "pnpm start" : run(paths.main),
 				...readme.fill,
 			})) + beside.guide,
 	});
@@ -154,7 +155,7 @@ const installed = (beside: Beside["image"]) =>
 		: `# The lockfile is held to what was recorded of the packages outside the release, before any is installed.
 ${beside.copy.map((file) => `COPY ${file} ./${file}`).join("\n")}
 RUN ${beside.check}
-# corepack fetches pnpm here, so the install below fetches only what the lockfile names.
+# corepack fetches pnpm here, so its download sees no credential below.
 RUN pnpm --version
 ${beside.mount ? "# A registry's credentials come as a build secret, and stay in no layer.\n" : ""}RUN ${beside.mount ? `${beside.mount} ` : ""}pnpm install --frozen-lockfile --prod --ignore-scripts`;
 

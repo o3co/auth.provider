@@ -9,10 +9,10 @@ Each key not written keeps its module's default.
 
 {{askedSection}}## Start
 
-1. `pnpm install`
+1. {{install}}
 2. Copy `.env.example` to `.env`, uncomment each line you set and replace its placeholder; a value of several lines, such as a PEM key, goes in the local layer instead.
 3. Copy `{{localExample}}` to `{{local}}`, uncomment each key and replace its placeholders, and add the keys this guide names that neither file holds.
-4. `APP_CONFIG={{local}},{{application}} pnpm start`
+4. `APP_CONFIG={{local}},{{application}} {{start}}`
 
 Both examples hold every value in a comment: a copy left as it is sets nothing, and boot refuses each key still needed.
 {{tryHttp}}A secret's placeholder begins `REPLACE-`; uncommented as it is, boot refuses it. Make one of random bytes, such as `REPLACE-32-RANDOM-BYTES-BASE64`, with `openssl rand -base64 32`. Delete the line of an optional key left unset.
