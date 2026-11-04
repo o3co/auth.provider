@@ -442,6 +442,16 @@ describe("where the subject is read", () => {
 		);
 	});
 
+	it("says nothing where only another endpoint is named, which reads no subject", () => {
+		for (const more of [
+			{ "token-endpoint": "https://ghe.example/login/oauth/access_token" },
+			{ "authorization-endpoint": "https://ghe.example/login/oauth/authorize" },
+		]) {
+			const { upstream } = open({}, more);
+			expect("subjectsFrom" in upstream, Object.keys(more)[0]).toBe(false);
+		}
+	});
+
 	it("still names the API beside an issuer written, which alone a callback is held to", async () => {
 		const written = "https://ghe.example/login/oauth";
 		const { upstream } = open({}, { api: moved, issuer: written });
