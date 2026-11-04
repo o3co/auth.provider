@@ -23,7 +23,7 @@ export type BindingRead =
 			readonly error: string;
 			readonly description?: string;
 			readonly unavailable?: boolean;
-			/** At a resource, too many proofs for the token: answered with this and the kind's headers, unchallenged. */
+			/** At a resource, more than the kind takes for now: answered with this and the kind's headers, unchallenged. */
 			readonly status?: 429;
 			readonly headers?: Readonly<Record<string, string>>;
 	  };
