@@ -8,9 +8,9 @@ export type Scene =
 	| {
 			readonly kind: "resource";
 			readonly token: string;
-			readonly held?: Binding;
+			readonly held: Binding;
 			/** The subject the token's issuer names, passed on unread. */
-			readonly subject?: string;
+			readonly subject: string;
 	  };
 
 /** What one binding kind reads from a request. */
@@ -56,7 +56,7 @@ export type BindingOutcome =
 export type TokenCheck =
 	| {
 			readonly kind: "valid";
-			readonly grant?: { readonly subject: string };
+			readonly grant: { readonly subject: string };
 			readonly binding?: Binding;
 	  }
 	| { readonly kind: "invalid" };

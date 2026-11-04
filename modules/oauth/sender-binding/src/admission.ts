@@ -56,12 +56,7 @@ export async function admit<C extends TokenCheck>(
 	// A bound token presented as another type is refused, so binding cannot be stripped.
 	if (tokenType !== scheme) return refuse(401, tokenType, "invalid_token");
 	if (held) {
-		const scene = {
-			kind: "resource",
-			token,
-			held,
-			...(check.grant ? { subject: check.grant.subject } : {}),
-		} as const;
+		const scene = { kind: "resource", token, held, subject: check.grant.subject } as const;
 		const read = await bindings.readBinding(request, scene);
 		if (read.kind === "refused") {
 			if (read.unavailable) throw new Unavailable("sender binding");
