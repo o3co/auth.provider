@@ -116,6 +116,8 @@ export interface FederationScene extends FederationPart {
 	readonly ledger?: LedgerScene;
 	/** Clients that run the code flow, so a scene can ask whether a browser is logged in. */
 	readonly clients?: readonly ClientScene[];
+	/** Tokens bound to a key by DPoP, for the clients above. */
+	readonly dpop?: true;
 	readonly userinfo?: boolean;
 	readonly revocations?: RevocationScene;
 	/** How recent a sign-in a link asks, in seconds: the identity part's window. */
@@ -137,7 +139,11 @@ export function federationScene(scene: FederationScene): AreaScene {
 		}),
 		...(scene.clients
 			? [
-					oauthArea.part({ issuer: scene.origin, clients: scene.clients }),
+					oauthArea.part({
+						issuer: scene.origin,
+						clients: scene.clients,
+						...(scene.dpop ? { dpop: true } : {}),
+					}),
 					// Receiving clients refresh their own tokens.
 					codeArea.part({
 						...(scene.keepsUpstreamTokens ? { refresh: {} } : {}),
