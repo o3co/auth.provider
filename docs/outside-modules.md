@@ -67,14 +67,14 @@ The generator touches no registry. Install the package with pnpm into a project 
 
 ```sh
 mkdir outside && cd outside
-pnpm init
+echo '{ "private": true }' > package.json
 pnpm add @example/did-grant@1.2.0
 cd ..
 ```
 
 The package must come from a registry, npm's or one of your own: one installed from a git repository, a directory or a file is refused.
 
-pnpm resolves it from your registry with your credentials and checks its integrity; set `minimumReleaseAge` there too, so a version published a moment ago is not taken. Use pnpm (10 or later, whose default runs no dependency's build script), keep this project on your own machine, put no `overrides` in it, and do not change it while the generator reads it.
+pnpm resolves it from your registry with your credentials and checks its integrity; set `minimumReleaseAge` there too, so a version published a moment ago is not taken. Use pnpm (10 or later, whose default runs no dependency's build script), keep this project on your own machine, put no `overrides` in it, and do not change it while the generator reads it. Write its `package.json` as above: `pnpm init` names a package manager in it, which puts a second document in the lockfile, and the generator refuses a lockfile it cannot read. Where `pnpm add` stops at a dependency's build and asks you to approve it, do not: the generator reads the project as it is.
 
 ### Generate the app
 
@@ -96,7 +96,7 @@ Only the packages you name are read, and a package outside the release brings no
 
 The app is installed with no version published within the last day, but the release's own. To take a newer one of your package, name it: `--allow-fresh @example/did-grant` lets that version alone be installed.
 
-Start the generator from outside the project, as above. Generating runs no code of the package when it is started so; started by `pnpm exec`, `npx` or `pnpm dlx` from a directory holding the package, a command linked at that directory's `node_modules/.bin` can run in its place, `node` among them. The same goes for generating an app again: not from inside the app.
+Start the generator with `npx`, from outside the project, as above. Generating runs no code of the package when it is started so. Started by `pnpm exec` from any directory, from a shell with a relative `./node_modules/.bin` on PATH, or by `npx` or `pnpm dlx` from a directory holding the package, a command linked at the project's `node_modules/.bin` can run in its place, `node` among them, and it may tell you nothing. The same goes for generating an app again: not from inside the app.
 
 ### Check the app's lockfile, then install it
 
@@ -137,7 +137,7 @@ These run with what `.bin` holds, in place of the command you meant, so keep the
 
 ## What is and is not checked
 
-Checked: that the app's lockfile holds each package outside the release as recorded (its version, its integrity, its dependencies as declared, from the registry recorded), that it holds one version and one resolution of each package of the release and of zod, the tarball whose integrity the release recorded, that each declaration and the graph of all modules keep the rules above, and that generating, [started from outside the project](#generate-the-app), runs no code of the package and uses no network.
+Checked: that the app's lockfile holds each package outside the release as recorded (its version, its integrity, its dependencies as declared, from the registry recorded), that it holds one version and one resolution of each package of the release and of zod, the tarball whose integrity the release recorded, that each declaration and the graph of all modules keep the rules above, and that generating, [started with `npx` from outside the project](#generate-the-app), runs no code of the package and uses no network.
 
 Not checked:
 
