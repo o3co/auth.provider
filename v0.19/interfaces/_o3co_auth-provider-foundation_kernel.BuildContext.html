@@ -1,0 +1,282 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>BuildContext | auth-provider API 0.19.0</title><meta name="description" content="Documentation for auth-provider API 0.19.0"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth-provider API 0.19.0</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="../modules/_o3co_auth-provider-foundation_kernel.html">@o3co/auth-provider-foundation/kernel</a></li>
+<li><a href="" aria-current="page">BuildContext</a></li></ul>
+<h1>Interface BuildContext&lt;S&gt;</h1></div>
+<div class="tsd-signature"><span class="tsd-signature-keyword">interface</span> <span class="tsd-kind-interface">BuildContext</span><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#s">S</a><span class="tsd-signature-symbol">&gt;</span> <span class="tsd-signature-symbol">{</span><br/>    <a class="tsd-kind-property" href="#clock">clock</a><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-foundation_kernel.Clock.html" class="tsd-signature-type tsd-kind-interface">Clock</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#environment">environment</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;production&quot;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">&quot;development&quot;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#log">log</a><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-foundation_kernel.Log.html" class="tsd-signature-type tsd-kind-interface">Log</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#random">random</a><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-foundation_kernel.Random.html" class="tsd-signature-type tsd-kind-interface">Random</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#section">section</a><span class="tsd-signature-symbol">:</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#s">S</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#collect-1">collect</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#collectt">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">point</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-foundation_kernel.ExtensionPoint.html" class="tsd-signature-type tsd-kind-interface">ExtensionPoint</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#collectt">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-keyword">readonly</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#collectt">T</a><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#every-1">every</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">intervalMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">task</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">signal</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">AbortSignal</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#get-1">get</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#gett">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">contract</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-foundation_kernel.Contract.html" class="tsd-signature-type tsd-kind-interface">Contract</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#gett">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#gett">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#late-1">late</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#latet">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">contract</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-foundation_kernel.Contract.html" class="tsd-signature-type tsd-kind-interface">Contract</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#latet">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">()</span> <span class="tsd-signature-symbol">=&gt;</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#latet">T</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#onbuilt-1">onBuilt</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">hook</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">()</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#onstart-1">onStart</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">hook</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">()</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#onstop-1">onStop</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">hook</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">signal</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">AbortSignal</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#readinessreport-1">readinessReport</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">deadlineMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="_o3co_auth-provider-foundation_kernel.ReadinessReport.html" class="tsd-signature-type tsd-kind-interface">ReadinessReport</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#refuse-1">refuse</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">where</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">reason</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">never</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#refuseall-1">refuseAll</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">refusals</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-keyword">readonly</span> <a href="_o3co_auth-provider-foundation_kernel.Refusal.html" class="tsd-signature-type tsd-kind-interface">Refusal</a><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">never</span><span class="tsd-signature-symbol">;</span><br/><span class="tsd-signature-symbol">}</span></div>
+<section class="tsd-panel">
+<h4>Type Parameters</h4>
+<ul class="tsd-type-parameter-list">
+<li><span id="s"><span class="tsd-kind-type-parameter">S</span></span></li></ul></section>
+<section class="tsd-panel tsd-hierarchy" data-refl="5376">
+<h4>Hierarchy (<a href="../hierarchy.html#@o3co/auth-provider-foundation/kernel.BuildContext">View Summary</a>)</h4>
+<ul class="tsd-hierarchy">
+<li class="tsd-hierarchy-item"><a href="_o3co_auth-provider-foundation_kernel.Runtime.html" class="tsd-signature-type tsd-kind-interface">Runtime</a>
+<ul class="tsd-hierarchy">
+<li class="tsd-hierarchy-item"><span class="tsd-hierarchy-target">BuildContext</span></li></ul></li></ul></section><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:6</li></ul></aside>
+<section class="tsd-panel-group tsd-index-group">
+<section class="tsd-panel tsd-index-panel">
+<details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h5 class="tsd-index-heading uppercase">Index</h5></summary>
+<div class="tsd-accordion-details">
+<section class="tsd-index-section">
+<h3 class="tsd-index-heading tsd-anchor-link" id="properties">Properties<a href="#properties" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-index-list"><a href="#clock" class="tsd-index-link tsd-is-inherited tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>clock</span></a>
+<a href="#environment" class="tsd-index-link tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>environment</span></a>
+<a href="#log" class="tsd-index-link tsd-is-inherited tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>log</span></a>
+<a href="#random" class="tsd-index-link tsd-is-inherited tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>random</span></a>
+<a href="#section" class="tsd-index-link tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>section</span></a>
+</div></section>
+<section class="tsd-index-section">
+<h3 class="tsd-index-heading tsd-anchor-link" id="methods">Methods<a href="#methods" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-index-list"><a href="#collect" class="tsd-index-link tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>collect</span></a>
+<a href="#every" class="tsd-index-link tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>every</span></a>
+<a href="#get" class="tsd-index-link tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>get</span></a>
+<a href="#late" class="tsd-index-link tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>late</span></a>
+<a href="#onbuilt" class="tsd-index-link tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>on<wbr/>Built</span></a>
+<a href="#onstart" class="tsd-index-link tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>on<wbr/>Start</span></a>
+<a href="#onstop" class="tsd-index-link tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>on<wbr/>Stop</span></a>
+<a href="#readinessreport" class="tsd-index-link tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>readiness<wbr/>Report</span></a>
+<a href="#refuse" class="tsd-index-link tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>refuse</span></a>
+<a href="#refuseall" class="tsd-index-link tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>refuse<wbr/>All</span></a>
+</div></section></div></details></section></section>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Properties"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="properties-1">Properties<a href="#properties-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary>
+<section>
+<section class="tsd-panel tsd-member tsd-is-inherited tsd-is-external">
+<h3 class="tsd-anchor-link" id="clock"><code class="tsd-tag">Readonly</code><span>clock</span><a href="#clock" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">clock</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-foundation_kernel.Clock.html" class="tsd-signature-type tsd-kind-interface">Clock</a></div><aside class="tsd-sources">
+<p>Inherited from <a href="_o3co_auth-provider-foundation_kernel.Runtime.html">Runtime</a>.<a href="_o3co_auth-provider-foundation_kernel.Runtime.html#clock">clock</a></p>
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/runtime/runtime.d.ts:57</li></ul></aside></section>
+<section class="tsd-panel tsd-member tsd-is-external">
+<h3 class="tsd-anchor-link" id="environment"><code class="tsd-tag">Readonly</code><span>environment</span><a href="#environment" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">environment</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;production&quot;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">&quot;development&quot;</span></div>
+<div class="tsd-comment tsd-typography"><p>The deployment's environment (<code>kernel.environment</code>), for a check only a build can make, such
+as of settings an owner opens while it builds. What a section alone shows is a module's
+<code>refusedInProduction</code>, refused with the preflight at once; a refusal here comes as it builds.
+No factory can write or redefine it.</p>
+</div><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:14</li></ul></aside></section>
+<section class="tsd-panel tsd-member tsd-is-inherited tsd-is-external">
+<h3 class="tsd-anchor-link" id="log"><code class="tsd-tag">Readonly</code><span>log</span><a href="#log" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">log</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-foundation_kernel.Log.html" class="tsd-signature-type tsd-kind-interface">Log</a></div><aside class="tsd-sources">
+<p>Inherited from <a href="_o3co_auth-provider-foundation_kernel.Runtime.html">Runtime</a>.<a href="_o3co_auth-provider-foundation_kernel.Runtime.html#log">log</a></p>
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/runtime/runtime.d.ts:59</li></ul></aside></section>
+<section class="tsd-panel tsd-member tsd-is-inherited tsd-is-external">
+<h3 class="tsd-anchor-link" id="random"><code class="tsd-tag">Readonly</code><span>random</span><a href="#random" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">random</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-foundation_kernel.Random.html" class="tsd-signature-type tsd-kind-interface">Random</a></div><aside class="tsd-sources">
+<p>Inherited from <a href="_o3co_auth-provider-foundation_kernel.Runtime.html">Runtime</a>.<a href="_o3co_auth-provider-foundation_kernel.Runtime.html#random">random</a></p>
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/runtime/runtime.d.ts:58</li></ul></aside></section>
+<section class="tsd-panel tsd-member tsd-is-external">
+<h3 class="tsd-anchor-link" id="section"><code class="tsd-tag">Readonly</code><span>section</span><a href="#section" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">section</span><span class="tsd-signature-symbol">:</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#s">S</a></div><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:7</li></ul></aside></section></section></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Methods"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="methods-1">Methods<a href="#methods-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary>
+<section>
+<section class="tsd-panel tsd-member tsd-is-external">
+<h3 class="tsd-anchor-link" id="collect"><span>collect</span><a href="#collect" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures tsd-is-external">
+<li class="tsd-is-external">
+<div class="tsd-signature tsd-anchor-link" id="collect-1"><span class="tsd-kind-call-signature">collect</span><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#collectt">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">point</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-foundation_kernel.ExtensionPoint.html" class="tsd-signature-type tsd-kind-interface">ExtensionPoint</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#collectt">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-keyword">readonly</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#collectt">T</a><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">&gt;</span><a href="#collect-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<section class="tsd-panel">
+<h4>Type Parameters</h4>
+<ul class="tsd-type-parameter-list">
+<li><span id="collectt"><span class="tsd-kind-type-parameter">T</span></span></li></ul></section>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">point</span>: <a href="_o3co_auth-provider-foundation_kernel.ExtensionPoint.html" class="tsd-signature-type tsd-kind-interface">ExtensionPoint</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#collectt">T</a><span class="tsd-signature-symbol">&gt;</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-keyword">readonly</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#collectt">T</a><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:16</li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member tsd-is-external">
+<h3 class="tsd-anchor-link" id="every"><span>every</span><a href="#every" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures tsd-is-external">
+<li class="tsd-is-external">
+<div class="tsd-signature tsd-anchor-link" id="every-1"><span class="tsd-kind-call-signature">every</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">intervalMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">task</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">signal</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">AbortSignal</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">void</span><a href="#every-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Runs <code>task</code> every <code>intervalMs</code> from the start, never two runs at once. Stopping aborts the
+running run's signal and waits for it, before the stop hooks. A failed run is logged, and the
+next one comes as usual.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">intervalMs</span>: <span class="tsd-signature-type">number</span></span></li>
+<li><span><span class="tsd-kind-parameter">task</span>: <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">signal</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">AbortSignal</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:46</li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member tsd-is-external">
+<h3 class="tsd-anchor-link" id="get"><span>get</span><a href="#get" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures tsd-is-external">
+<li class="tsd-is-external">
+<div class="tsd-signature tsd-anchor-link" id="get-1"><span class="tsd-kind-call-signature">get</span><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#gett">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">contract</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-foundation_kernel.Contract.html" class="tsd-signature-type tsd-kind-interface">Contract</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#gett">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#gett">T</a><span class="tsd-signature-symbol">&gt;</span><a href="#get-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<section class="tsd-panel">
+<h4>Type Parameters</h4>
+<ul class="tsd-type-parameter-list">
+<li><span id="gett"><span class="tsd-kind-type-parameter">T</span></span></li></ul></section>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">contract</span>: <a href="_o3co_auth-provider-foundation_kernel.Contract.html" class="tsd-signature-type tsd-kind-interface">Contract</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#gett">T</a><span class="tsd-signature-symbol">&gt;</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#gett">T</a><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:15</li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member tsd-is-external">
+<h3 class="tsd-anchor-link" id="late"><span>late</span><a href="#late" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures tsd-is-external">
+<li class="tsd-is-external">
+<div class="tsd-signature tsd-anchor-link" id="late-1"><span class="tsd-kind-call-signature">late</span><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#latet">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">contract</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-foundation_kernel.Contract.html" class="tsd-signature-type tsd-kind-interface">Contract</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#latet">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">()</span> <span class="tsd-signature-symbol">=&gt;</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#latet">T</a><a href="#late-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>The interface a contract names, for use once assembly is done; it builds nothing now, so a
+contributor may hold its owner's. Called during assembly, or after a refused one, it throws.</p>
+</div>
+<section class="tsd-panel">
+<h4>Type Parameters</h4>
+<ul class="tsd-type-parameter-list">
+<li><span id="latet"><span class="tsd-kind-type-parameter">T</span></span></li></ul></section>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">contract</span>: <a href="_o3co_auth-provider-foundation_kernel.Contract.html" class="tsd-signature-type tsd-kind-interface">Contract</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#latet">T</a><span class="tsd-signature-symbol">&gt;</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-symbol">()</span> <span class="tsd-signature-symbol">=&gt;</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#latet">T</a></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:21</li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member tsd-is-external">
+<h3 class="tsd-anchor-link" id="onbuilt"><span>on<wbr/>Built</span><a href="#onbuilt" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures tsd-is-external">
+<li class="tsd-is-external">
+<div class="tsd-signature tsd-anchor-link" id="onbuilt-1"><span class="tsd-kind-call-signature">onBuilt</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">hook</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">()</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">void</span><a href="#onbuilt-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Runs <code>hook</code> once every build passed, in the order registered, each awaited, before <code>assemble</code>
+answers: for what a boot may write only once no module refuses it. It uses what its factory
+holds; a late reference and readiness do not answer yet. A <code>refuse</code>, or any throw, refuses boot
+as a build's does, and the hooks after it do not run; what an earlier hook wrote is not taken back.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">hook</span>: <span class="tsd-signature-symbol">()</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:34</li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member tsd-is-external">
+<h3 class="tsd-anchor-link" id="onstart"><span>on<wbr/>Start</span><a href="#onstart" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures tsd-is-external">
+<li class="tsd-is-external">
+<div class="tsd-signature tsd-anchor-link" id="onstart-1"><span class="tsd-kind-call-signature">onStart</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">hook</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">()</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">void</span><a href="#onstart-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">hook</span>: <span class="tsd-signature-symbol">()</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:35</li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member tsd-is-external">
+<h3 class="tsd-anchor-link" id="onstop"><span>on<wbr/>Stop</span><a href="#onstop" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures tsd-is-external">
+<li class="tsd-is-external">
+<div class="tsd-signature tsd-anchor-link" id="onstop-1"><span class="tsd-kind-call-signature">onStop</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">hook</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">signal</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">AbortSignal</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">void</span><a href="#onstop-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Hooks run in reverse order, each awaited; one that fails is logged and the next runs. At the
+stop deadline the signal aborts, and the hooks left are called without waiting.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">hook</span>: <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">signal</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">AbortSignal</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:40</li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member tsd-is-external">
+<h3 class="tsd-anchor-link" id="readinessreport"><span>readiness<wbr/>Report</span><a href="#readinessreport" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures tsd-is-external">
+<li class="tsd-is-external">
+<div class="tsd-signature tsd-anchor-link" id="readinessreport-1"><span class="tsd-kind-call-signature">readinessReport</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">deadlineMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="_o3co_auth-provider-foundation_kernel.ReadinessReport.html" class="tsd-signature-type tsd-kind-interface">ReadinessReport</a><span class="tsd-signature-symbol">&gt;</span><a href="#readinessreport-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Whether every contribution to <code>probes</code> passes within <code>deadlineMs</code> (1 to 2^31-1, else it
+rejects with a TypeError), with each probe's result by name; unready and all down once stop
+begins. It rejects until assembly is done.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">deadlineMs</span>: <span class="tsd-signature-type">number</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="_o3co_auth-provider-foundation_kernel.ReadinessReport.html" class="tsd-signature-type tsd-kind-interface">ReadinessReport</a><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:27</li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member tsd-is-external">
+<h3 class="tsd-anchor-link" id="refuse"><span>refuse</span><a href="#refuse" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures tsd-is-external">
+<li class="tsd-is-external">
+<div class="tsd-signature tsd-anchor-link" id="refuse-1"><span class="tsd-kind-call-signature">refuse</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">where</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">reason</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">never</span><a href="#refuse-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">where</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">reason</span>: <span class="tsd-signature-type">string</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">never</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:47</li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member tsd-is-external">
+<h3 class="tsd-anchor-link" id="refuseall"><span>refuse<wbr/>All</span><a href="#refuseall" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures tsd-is-external">
+<li class="tsd-is-external">
+<div class="tsd-signature tsd-anchor-link" id="refuseall-1"><span class="tsd-kind-call-signature">refuseAll</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">refusals</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-keyword">readonly</span> <a href="_o3co_auth-provider-foundation_kernel.Refusal.html" class="tsd-signature-type tsd-kind-interface">Refusal</a><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">never</span><a href="#refuseall-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Refuses with every problem found at once, so the operator sees them together. The list is
+copied as given: changing it after leaves the refusal as it was.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">refusals</span>: <span class="tsd-signature-keyword">readonly</span> <a href="_o3co_auth-provider-foundation_kernel.Refusal.html" class="tsd-signature-type tsd-kind-interface">Refusal</a><span class="tsd-signature-symbol">[]</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">never</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in _temp/api-project/node_modules/@o3co/auth-provider-foundation/kernel/src/module.d.ts:52</li></ul></aside></div></li></ul></section></section></details></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details">
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Properties"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Properties</summary>
+<div><a href="#clock" class="tsd-is-inherited tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>clock</span></a><a href="#environment" class="tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>environment</span></a><a href="#log" class="tsd-is-inherited tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>log</span></a><a href="#random" class="tsd-is-inherited tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>random</span></a><a href="#section" class="tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>section</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Methods"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Methods</summary>
+<div><a href="#collect" class="tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>collect</span></a><a href="#every" class="tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>every</span></a><a href="#get" class="tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>get</span></a><a href="#late" class="tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>late</span></a><a href="#onbuilt" class="tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>on<wbr/>Built</span></a><a href="#onstart" class="tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>on<wbr/>Start</span></a><a href="#onstop" class="tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>on<wbr/>Stop</span></a><a href="#readinessreport" class="tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>readiness<wbr/>Report</span></a><a href="#refuse" class="tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>refuse</span></a><a href="#refuseall" class="tsd-is-external"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>refuse<wbr/>All</span></a></div></details></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../index.html">auth-provider API 0.19.0</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>
