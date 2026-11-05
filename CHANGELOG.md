@@ -4,64 +4,7 @@ Notable changes, newest first, in the form of [Keep a Changelog](https://keepach
 
 Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.provider/blob/v0.17.0/CHANGELOG.md).
 
-## [0.19.0-rc.2] - 2026-11-04
-
-Read the [migration guide](docs/migration.md) before upgrading: each line below that links an upgrade notice is a change an operator or the author of a module of their own must act on, and the notice says what to do. An operator of 0.18 checks off the notices of both release candidates.
-
-### Added
-
-- `consent`: the consent page is told every place a client may send the user back to ([U-0.19-137](docs/migration.md#u-0.19-137)).
-- `consent`: `canBeAgreed` tells a client a grant can never count for ([U-0.19-133](docs/migration.md#u-0.19-133)).
-- `consent`, `client-documents`: a client's section takes `under`, what a grant is agreed under, which its source sets, a document's from the `digest` its source says ([U-0.19-133](docs/migration.md#u-0.19-133)).
-- `clients-cimd`: `digest-algorithm`, `sha-256` alone, names the algorithm of a document's digest; changing it would ask each user of such a client once more.
-- `users`: `users.issuer-moved` states an IdP name's move to another issuer ([U-0.19-138](docs/migration.md#u-0.19-138)).
-- `kernel`: `onBuilt`, a hook that runs once every build passed, before `assemble` answers.
-- `federation-grants`: `federation.grant.reauthorized` says which part of the account changed (`account_changed`).
-- `tokens`: `lifetimeSecondsRange`, the range a grant's `lifetimeSeconds` is taken in ([U-0.19-50](docs/migration.md#u-0.19-50)).
-
-### Changed
-
-- 0.19.0 will end support for every version before it, as the [security policy](SECURITY.md#supported-versions) says; a release candidate ends none.
-- `code-grant`: a deployment that composes it cannot go back to a release before 0.19 once it runs 0.19 ([U-0.19-58](docs/migration.md#u-0.19-58)).
-- `clients-cimd` is marked preview, following draft-ietf-oauth-client-id-metadata-document-00.
-- `consent`: a consent makes no distinction of audience: a scope agreed to holds for every audience the client may be issued.
-- `consent`: a consent's record has a new format ([U-0.19-134](docs/migration.md#u-0.19-134)).
-- `authorize`: a client from a source that says nothing a grant could be agreed under is refused `unauthorized_client`, recorded `client_agreed_under_nothing` ([U-0.19-133](docs/migration.md#u-0.19-133)).
-- `users`: a start declaring another issuer for an IdP name than the one kept for it is refused, and a link store that cannot answer for a declared name refuses boot ([U-0.19-138](docs/migration.md#u-0.19-138)).
-- `federation-grants`, `federation-grants-connect`: a grant whose connection has come to another issuer, once a refresh is due, answers `410 reauthorization_required`, with `upstream_issuer_changed`, and its credentials are erased; reauthorizing it binds the new issuer ([U-0.19-138](docs/migration.md#u-0.19-138)).
-- `upstreams`: `of` answers an upstream's `issuer` ([U-0.19-139](docs/migration.md#u-0.19-139)).
-- `federation-grants-connect`: a login naming another issuer than the upstream says is refused `upstream_error` ([U-0.19-139](docs/migration.md#u-0.19-139)).
-- `tokens`: a `Tokens` of your own offers `accessTokenLifetimeSeconds` ([U-0.19-130](docs/migration.md#u-0.19-130)).
-- `redis`: one primary holding every key is a requirement of every composition, with no setting to loosen it ([U-0.19-7](docs/migration.md#u-0.19-7)).
-
-### Removed
-
-- `consent`: `granted`, `covers`, `grant` and `ask`, for members that take the client ([U-0.19-136](docs/migration.md#u-0.19-136)).
-- `upstream-client`: `basicAuthorization` ([U-0.19-140](docs/migration.md#u-0.19-140)).
-- `outbound`: `lookupsAtOnce`, and `outboundOver`'s earlier arguments, at `./module` ([U-0.19-141](docs/migration.md#u-0.19-141)).
-- `outbound-policy`: `hostEntryOf`, `HostEntry`, `hostList` and `withinHosts`, now `host-entries`' ([U-0.19-142](docs/migration.md#u-0.19-142)).
-- `app-output`: `mainSource`, `kernel` and `configFiles`, now `app-entries`' ([U-0.19-143](docs/migration.md#u-0.19-143)).
-
-### Fixed
-
-- `redis`: the probe sends `PING` on both connections on every run, and repeats what boot checked of the server at most once a second, counted from its start; `/readyz` and `auth_dependency_up` share this. A server change shows within about a second. The [runbook](docs/runbook.md#outages) says what the probe sends, and that `/readyz` and `/metrics` are for the orchestrator and should not be exposed publicly.
-- `redis`: a cluster node that answers a key `MOVED`, `ASK` or `CLUSTERDOWN` is refused as a cluster ([U-0.19-7](docs/migration.md#u-0.19-7)).
-- `redis`: a `CONFIG GET` answered empty reads as a setting not shown, taking the declared value or refusing boot, named.
-- `outbound`: a lookup answered with any system error code fails that lookup alone.
-- `csrf`: a refusal for want of a public origin names the setting it needs ([U-0.19-59](docs/migration.md#u-0.19-59)).
-- `refresh`: a family started under 0.18 that holds `offline_access` keeps working, and a requested `scope` naming the word drops it, as `authorize` does ([U-0.19-76](docs/migration.md#u-0.19-76)).
-- `tokens`: a grant's `null` claim is refused at `issue`, naming its path, before any issuance policy runs ([U-0.19-85](docs/migration.md#u-0.19-85)).
-- `app-output`: a scope's recorded registry reaches the app and its image ([U-0.19-132](docs/migration.md#u-0.19-132)), and the guide of an app beside packages outside the release says each package comes only as named.
-
-### Security
-
-- `consent`, `clients-cimd`, `authorize`: a consent outliving the document it was agreed under ([U-0.19-133](docs/migration.md#u-0.19-133)).
-- `redirect-uris`: a redirect URI that readers can take differently ([U-0.19-135](docs/migration.md#u-0.19-135)).
-- `users`: an IdP name's links surviving a change of its issuer ([U-0.19-138](docs/migration.md#u-0.19-138)).
-- `federation-grants`: a grant's upstream credentials reaching another issuer than the one that granted them ([U-0.19-138](docs/migration.md#u-0.19-138)).
-- `app-output`: part of what an app beside packages outside the release installs not held to the release's integrity ([U-0.19-131](docs/migration.md#u-0.19-131)).
-
-## [0.19.0-rc.1] - 2026-11-02
+## [0.19.0] - 2026-11-05
 
 Read the [migration guide](docs/migration.md) before upgrading from 0.18: each line below that links an upgrade notice is a change an operator or the author of a module of their own must act on, and the notice says what to do.
 
@@ -72,6 +15,16 @@ Read the [migration guide](docs/migration.md) before upgrading from 0.18: each l
 - `idp-oidc`: an OpenID Connect IdP can read its upstream's UserInfo ([U-0.19-56](docs/migration.md#u-0.19-56)).
 - `claims-selection`, `authorize`, `oidc`, `userinfo`, `refresh`: the `claims` request parameter is taken for standard claims ([U-0.19-58](docs/migration.md#u-0.19-58)).
 - `users-http`: the password call can answer no such user as a lookup does ([U-0.19-112](docs/migration.md#u-0.19-112)).
+- `consent`: the consent page is told every place a client may send the user back to ([U-0.19-137](docs/migration.md#u-0.19-137)).
+- `consent`: `canBeAgreed` tells a client a grant can never count for ([U-0.19-133](docs/migration.md#u-0.19-133)).
+- `consent`, `client-documents`: a client's section takes `under`, what a grant is agreed under, which its source sets, a document's from the `digest` its source says ([U-0.19-133](docs/migration.md#u-0.19-133)).
+- `clients-cimd`: `digest-algorithm`, `sha-256` alone, names the algorithm of a document's digest; changing it would ask each user of such a client once more.
+- `users`: `users.issuer-moved` states an IdP name's move to another issuer ([U-0.19-138](docs/migration.md#u-0.19-138)).
+- `kernel`: `onBuilt`, a hook that runs once every build passed, before `assemble` answers.
+- `federation-grants`: `federation.grant.reauthorized` says which part of the account changed (`account_changed`).
+- `tokens`: `lifetimeSecondsRange`, the range a grant's `lifetimeSeconds` is taken in ([U-0.19-50](docs/migration.md#u-0.19-50)).
+- `upstreams`: an upstream's optional `subjectsFrom` ([U-0.19-144](docs/migration.md#u-0.19-144)).
+- `dpop`: `dpop.proofs` and `dpop.proofs-window` ([U-0.19-145](docs/migration.md#u-0.19-145)).
 
 ### Changed
 
@@ -145,6 +98,18 @@ Read the [migration guide](docs/migration.md) before upgrading from 0.18: each l
 - `kernel`: in development, every value a production deployment refuses is warned of at every start ([U-0.19-119](docs/migration.md#u-0.19-119)).
 - `kernel`, `jwt-bearer`, `audit`, `mfa-witnessing`, `passkey-witnessing`: a warning names what it is about in a field a log line keeps ([U-0.19-120](docs/migration.md#u-0.19-120)).
 - `tokens`: an access token's lifetime counts from when it is asked for ([U-0.19-124](docs/migration.md#u-0.19-124)).
+- 0.19.0 ends support for every version before it, 0.18 included, as the [security policy](SECURITY.md#supported-versions) says.
+- `code-grant`: a deployment that composes it cannot go back to a release before 0.19 once it runs 0.19 ([U-0.19-58](docs/migration.md#u-0.19-58)).
+- `clients-cimd` is marked preview, following draft-ietf-oauth-client-id-metadata-document-00.
+- `consent`: a consent makes no distinction of audience: a scope agreed to holds for every audience the client may be issued.
+- `consent`: a consent's record has a new format ([U-0.19-134](docs/migration.md#u-0.19-134)).
+- `authorize`: a client from a source that says nothing a grant could be agreed under is refused `unauthorized_client`, recorded `client_agreed_under_nothing` ([U-0.19-133](docs/migration.md#u-0.19-133)).
+- `users`: a start declaring another issuer for an IdP name than the one kept for it is refused, and a link store that cannot answer for a declared name refuses boot ([U-0.19-138](docs/migration.md#u-0.19-138)).
+- `federation-grants`, `federation-grants-connect`: a grant whose connection has come to another issuer, once a refresh is due, answers `410 reauthorization_required`, with `upstream_issuer_changed`, and its credentials are erased; reauthorizing it binds the new issuer ([U-0.19-138](docs/migration.md#u-0.19-138)).
+- `upstreams`: `of` answers an upstream's `issuer` ([U-0.19-139](docs/migration.md#u-0.19-139)).
+- `federation-grants-connect`: a login naming another issuer than the upstream says is refused `upstream_error` ([U-0.19-139](docs/migration.md#u-0.19-139)).
+- `tokens`: a `Tokens` of your own offers `accessTokenLifetimeSeconds` ([U-0.19-130](docs/migration.md#u-0.19-130)).
+- `redis`: one primary holding every key is a requirement of every composition, with no setting to loosen it ([U-0.19-7](docs/migration.md#u-0.19-7)).
 
 ### Deprecated
 
@@ -155,6 +120,11 @@ Read the [migration guide](docs/migration.md) before upgrading from 0.18: each l
 
 - `federation-grants.revocation-skew` is gone ([U-0.19-15](docs/migration.md#u-0.19-15)).
 - `users-http`, `mfa-witness-http`: the fake HTTP ledgers are gone from the published test helpers ([U-0.19-31](docs/migration.md#u-0.19-31)).
+- `consent`: `granted`, `covers`, `grant` and `ask`, for members that take the client ([U-0.19-136](docs/migration.md#u-0.19-136)).
+- `upstream-client`: `basicAuthorization` ([U-0.19-140](docs/migration.md#u-0.19-140)).
+- `outbound`: `lookupsAtOnce`, and `outboundOver`'s earlier arguments, at `./module` ([U-0.19-141](docs/migration.md#u-0.19-141)).
+- `outbound-policy`: `hostEntryOf`, `HostEntry`, `hostList` and `withinHosts`, now `host-entries`' ([U-0.19-142](docs/migration.md#u-0.19-142)).
+- `app-output`: `mainSource`, `kernel` and `configFiles`, now `app-entries`' ([U-0.19-143](docs/migration.md#u-0.19-143)).
 
 ### Fixed
 
@@ -171,6 +141,14 @@ Read the [migration guide](docs/migration.md) before upgrading from 0.18: each l
 - `kernel`, `log-stdout`, `audit-stdout`: the provider no longer exits when its standard output's or error's reader goes away ([U-0.19-129](docs/migration.md#u-0.19-129)).
 - `audit`: an event recorded after stop that its receiver fails is counted as lost.
 - `log-stdout`: the lines it queued are written out at stop, within the stop's deadline.
+- `redis`: the probe sends `PING` on both connections on every run, and repeats what boot checked of the server at most once a second, counted from its start; `/readyz` and `auth_dependency_up` share this. A server change shows within about a second. The [runbook](docs/runbook.md#outages) says what the probe sends, and that `/readyz` and `/metrics` are for the orchestrator and should not be exposed publicly.
+- `redis`: a cluster node that answers a key `MOVED`, `ASK` or `CLUSTERDOWN` is refused as a cluster ([U-0.19-7](docs/migration.md#u-0.19-7)).
+- `redis`: a `CONFIG GET` answered empty reads as a setting not shown, taking the declared value or refusing boot, named.
+- `outbound`: a lookup answered with any system error code fails that lookup alone.
+- `csrf`: a refusal for want of a public origin names the setting it needs ([U-0.19-59](docs/migration.md#u-0.19-59)).
+- `refresh`: a family started under 0.18 that holds `offline_access` keeps working, and a requested `scope` naming the word drops it, as `authorize` does ([U-0.19-76](docs/migration.md#u-0.19-76)).
+- `tokens`: a grant's `null` claim is refused at `issue`, naming its path, before any issuance policy runs ([U-0.19-85](docs/migration.md#u-0.19-85)).
+- `app-output`: a scope's recorded registry reaches the app and its image ([U-0.19-132](docs/migration.md#u-0.19-132)), and the guide of an app beside packages outside the release says each package comes only as named.
 
 ### Security
 
@@ -218,6 +196,19 @@ Read the [migration guide](docs/migration.md) before upgrading from 0.18: each l
 - `redis`: a boot refused the store's keys names them by `redis.prefix`, never by its value.
 - `tokens`, `jwt-bearer`: a subject revocation recorded while an access token's issuance policies waited no longer leaves that token active.
 - Known gap: RFC 6750 §5.2's check that an upstream server's certificate has not been revoked is not done by `outbound`, which checks the chain and the name alone; it is left to the egress proxy or the platform ([#2519](https://github.com/o3co/auth.provider/issues/2519); [compliance report](docs/compliance/rfc6750.md)).
+- `consent`, `clients-cimd`, `authorize`: a consent outliving the document it was agreed under ([U-0.19-133](docs/migration.md#u-0.19-133)).
+- `redirect-uris`: a redirect URI that readers can take differently ([U-0.19-135](docs/migration.md#u-0.19-135)).
+- `users`: an IdP name's links surviving a change of its issuer ([U-0.19-138](docs/migration.md#u-0.19-138)).
+- `federation-grants`: a grant's upstream credentials reaching another issuer than the one that granted them ([U-0.19-138](docs/migration.md#u-0.19-138)).
+- `app-output`: part of what an app beside packages outside the release installs not held to the release's integrity ([U-0.19-131](docs/migration.md#u-0.19-131)).
+- `federation`, `idp-github`, `idp-google`, `idp-apple`: an IdP name follows where its subjects are read ([U-0.19-144](docs/migration.md#u-0.19-144)).
+- `dpop`, `sender-binding`, `federation-tokens`: DPoP proofs at resources are counted per token subject ([U-0.19-145](docs/migration.md#u-0.19-145)).
+- `create-app`, `app-output`: an app beside packages outside the release checks its lockfile before installing, and has no scripts ([U-0.19-146](docs/migration.md#u-0.19-146)).
+- `webauthn-login`: the passkey grant asks `users` ([U-0.19-147](docs/migration.md#u-0.19-147)).
+- `webauthn`: only the authenticator data of a registration response is read.
+- The release's publish job runs in an environment of its own.
+- `token-exchange`: the security model declares what the revocation of an actor's subject leaves of an exchanged token.
+- `http`: a request target not read as an origin-form path is refused `400`.
 
 ## [0.18.6] - 2026-10-25
 

@@ -9,6 +9,9 @@ import { clientSetting, endpointSetting as endpoint } from "@mod/upstream-client
 import { urlsChecked } from "@mod/url-setting";
 import { z } from "zod";
 
+/** Where Google publishes the keys that sign its id_tokens. */
+export const ownJwksUri = "https://www.googleapis.com/oauth2/v3/certs";
+
 const section = clientSetting.extend({
 	access: z
 		.enum(["offline", "online"])
@@ -29,7 +32,7 @@ const section = clientSetting.extend({
 		.prefault("https://oauth2.googleapis.com/token")
 		.describe("Where a code is exchanged for tokens; Google's own unless named."),
 	"jwks-uri": endpoint
-		.prefault("https://www.googleapis.com/oauth2/v3/certs")
+		.prefault(ownJwksUri)
 		.describe("Where the keys that sign Google's id_tokens are read; Google's own unless named."),
 	algorithms: algorithmsSetting(knownAlgorithms, ["RS256"]).describe(
 		"The algorithms Google's id_tokens may be signed with: asymmetric ones only, RS256 by default, the one Google signs with.",

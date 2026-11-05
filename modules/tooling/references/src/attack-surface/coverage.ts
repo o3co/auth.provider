@@ -393,7 +393,7 @@ export const coverage: Coverage = {
 			reaches: "each trusted issuer's `jwks-uri`, where its key set is fetched",
 		},
 		{ key: "mail-smtp.host", reaches: "the SMTP relay" },
-		{ key: "federation.idps.<name>.api", reaches: "a GitHub's API, for the user's profile" },
+		{ key: "federation.idps.<name>.api", reaches: "a GitHub's API, which names the subject" },
 		{
 			key: "federation.idps.<name>.issuer",
 			reaches:

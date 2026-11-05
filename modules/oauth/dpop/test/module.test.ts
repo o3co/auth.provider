@@ -11,12 +11,15 @@ import {
 	defineModule,
 	isUnavailable,
 	kernelConfig,
+	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
+import { type RateLimit, rateLimit } from "@mod/rate-limit";
+import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { memoryRecords } from "@mod/records/testing";
-import { type SenderBinding, senderBinding, senderBindings } from "@mod/sender-binding";
+import { type Scene, type SenderBinding, senderBinding, senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
-import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
+import { CompactSign, calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
 import dpop from "../src/module.ts";
 import { type SpentProofs, spentProofs } from "../src/store.ts";
@@ -28,22 +31,30 @@ afterEach(() => {
 const runtime = quietRuntime({ clock: { now: () => Date.now() + shift } });
 const holder = generateKeyPairSync("ed25519");
 const issuer = "https://as.example";
+/** The binding a token bound to `holder`'s key holds. */
+const held = {
+	member: "jkt",
+	confirmation: await calculateJwkThumbprint(await exportJWK(holder.publicKey)),
+	tokenType: "DPoP",
+};
 /** dpop's spent proofs in memory, on the composition's clock, keeping the lifetimes asked for, behind a switch. */
 function spentInMemory() {
 	const stand = memoryRecords<true>(() => runtime.clock.now(), { shards: 1, perShard: 1 });
 	const lifetimes: number[] = [];
+	const names: string[] = [];
 	const down = unavailableSwitch<SpentProofs>("spent proofs");
 	const module = defineModule({ name: "spent-proofs", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(spentProofs).by(() =>
 			down.wrap({
 				save: (name: string, lifetimeMs: number) => {
 					lifetimes.push(lifetimeMs);
+					names.push(name);
 					return stand.records.create(name, true, lifetimeMs);
 				},
 			}),
 		),
 	]);
-	return { module, lifetimes, down };
+	return { module, lifetimes, names, down };
 }
 
 const published = contract<readonly MetadataItem[]>("published");
@@ -56,9 +67,17 @@ const reader = defineModule(
 	],
 );
 
+/** What provides dpop's counts in a composition. */
+type Counts = Parameters<typeof assemble>[0]["modules"][number];
+
 /** The assembly of a composition with dpop, its section where given (else asking no nonce), and the issuer at `at`. */
-const assembly = (dpopSection?: unknown, spent = spentInMemory(), at = issuer) => ({
-	modules: [http, issuerModule, senderBindingModule, dpop, reader, spent.module],
+const assembly = (
+	dpopSection?: unknown,
+	spent = spentInMemory(),
+	at = issuer,
+	counts: Counts = rateLimitStandIn,
+) => ({
+	modules: [http, issuerModule, senderBindingModule, dpop, reader, spent.module, counts],
 	config: {
 		...kernelConfig(),
 		...httpConfig(),
@@ -99,7 +118,7 @@ const replayed = {
 };
 
 async function proof({
-	jti = randomUUID(),
+	jti = randomUUID() as string,
 	iat = Math.floor(runtime.clock.now() / 1000),
 	key = holder,
 	htm = "POST",
@@ -244,7 +263,7 @@ describe("dpop", () => {
 						["dpop", await proof({ jti, htm: "GET", htu: `${issuer}/resource`, ath })],
 					]),
 				}),
-				{ kind: "resource", token: "at" },
+				{ kind: "resource", token: "at", held, subject: "s" },
 			);
 		expect(await at()).toMatchObject({ description: "ath does not match the token" });
 		expect((await at(createHash("sha256").update("at").digest("base64url"))).kind).toBe("bound");
@@ -267,7 +286,7 @@ describe("server nonces (RFC 9449 §8)", () => {
 	/** A composition with this dpop section, reading at issuance or at a resource. */
 	async function reading(dpopSection: unknown) {
 		const app = await boot(dpopSection);
-		return (dpopProof: string, scene: { kind: "issue" } | { kind: "resource"; token: string }) =>
+		return (dpopProof: string, scene: Scene) =>
 			app.get(senderBinding).bindingOf(
 				testRequest({
 					method: "POST",
@@ -279,7 +298,7 @@ describe("server nonces (RFC 9449 §8)", () => {
 	}
 	const issue = { kind: "issue" } as const;
 	const token = "at-1";
-	const atResource = { kind: "resource", token } as const;
+	const atResource = { kind: "resource", token, held, subject: "s" } as const;
 	const ath = createHash("sha256").update(token).digest("base64url");
 	const toResource = () => proof({ htu: `${issuer}/api`, ath });
 	const askedAgain = { kind: "refused", error: "use_dpop_nonce" };
@@ -354,13 +373,9 @@ describe("server nonces (RFC 9449 §8)", () => {
 	it("challenges a resource's request without the nonce in the DPoP scheme as use_dpop_nonce, giving a fresh one [rfc9449-4.2-l]", async () => {
 		shift = bucketMs - (Date.now() % bucketMs) + 1;
 		const app = await boot({ nonce: { required: "as+rs", ttl: `${bucketMs / 1000}s`, secret } });
-		const jkt = await calculateJwkThumbprint(await exportJWK(holder.publicKey));
 		const tokens = {
 			verifyAccess: async () =>
-				({
-					kind: "valid",
-					binding: { member: "jkt", confirmation: jkt, tokenType: "DPoP" },
-				}) as const,
+				({ kind: "valid", grant: { subject: "s" }, binding: held }) as const,
 		};
 		const presenting = async (nonce?: string) =>
 			app.get(senderBinding).admitted(
@@ -416,6 +431,457 @@ describe("server nonces (RFC 9449 §8)", () => {
 			if (secret) expect(String((refused as BootRefused).message), secret).not.toContain(secret);
 		}
 		await expect(boot({ nonce: { required: "never" } })).resolves.toBeDefined();
+	});
+});
+
+describe("what a proof writes at a resource", () => {
+	const stranger = generateKeyPairSync("ed25519");
+	const token = "at-3";
+	const ath = createHash("sha256").update(token).digest("base64url");
+	const toResource = (key = holder, jti = randomUUID()) =>
+		proof({ htu: `${issuer}/api`, ath, key, jti });
+	const grant = { subject: "alice" };
+	const unbound = { verifyAccess: async () => ({ kind: "valid", grant }) as const };
+	const keyed = { verifyAccess: async () => ({ kind: "valid", grant, binding: held }) as const };
+	/** A composition with this much of dpop's section, presenting its token and a proof from a source. */
+	async function atResource(section: Record<string, unknown> = {}, counts?: Counts) {
+		const spent = spentInMemory();
+		const app = await boot({ nonce: { required: "never" }, ...section }, spent, issuer, counts);
+		const present = (
+			dpopProof: string | undefined,
+			scheme = "DPoP",
+			tokens: typeof keyed | typeof unbound = keyed,
+			source = "192.0.2.1",
+		) =>
+			app.get(senderBinding).admitted(
+				testRequest({
+					method: "POST",
+					path: "/api",
+					headers: new Map([
+						["authorization", `${scheme} ${token}`],
+						...(dpopProof === undefined ? [] : ([["dpop", dpopProof]] as const)),
+					]),
+					source: { address: source },
+				}),
+				tokens,
+			);
+		return { app, present, writes: spent.lifetimes, spent };
+	}
+	const admitted = { kind: "admitted" };
+	const tooMany = { kind: "refused", status: 429, error: "rate_limited" };
+	const notTheHolders = {
+		kind: "refused",
+		status: 401,
+		error: "invalid_token",
+		headers: { "www-authenticate": 'DPoP error="invalid_token"' },
+	};
+
+	it("spends and counts nothing for a proof by another key, which is refused as ever", async () => {
+		const at = await atResource({ proofs: 1 });
+		for (const _ of [1, 2, 3]) {
+			expect(await at.present(await toResource(stranger))).toEqual(notTheHolders);
+		}
+		expect(at.writes).toEqual([]);
+		// The holder's count is untouched by them.
+		expect(await at.present(await toResource())).toMatchObject(admitted);
+		expect(at.writes).toHaveLength(1);
+	});
+
+	it("answers 429 over the subject's count, with the wait and no write, and the proof comes again once the wait is over", async () => {
+		const at = await atResource({ proofs: 2, "proofs-window": "30s", "proof-window": "5m" });
+		for (const _ of [1, 2]) expect(await at.present(await toResource())).toMatchObject(admitted);
+		const over = await toResource();
+		const answer = await at.present(over);
+		expect(answer).toMatchObject(tooMany);
+		expect(answer).toEqual({
+			kind: "refused",
+			status: 429,
+			error: "rate_limited",
+			headers: { "retry-after": expect.stringMatching(/^[1-9]\d*$/) },
+		});
+		expect(at.writes).toHaveLength(2);
+		shift = 31_000;
+		expect(await at.present(over)).toMatchObject(admitted);
+		expect(at.writes).toHaveLength(3);
+	});
+
+	it("says the count's wait in whole seconds, rounded up", async () => {
+		for (const [wait, said] of [
+			[1, "1"],
+			[1500, "2"],
+			[2000, "2"],
+		] as const) {
+			const counts = defineModule({ name: "counts", replicaSafe: false, takes: [] }, (m) => [
+				m.provide(rateLimit).by(() => ({
+					hit: async () => ({ kind: "limited", retryAfterMs: wait }) as const,
+				})),
+			]);
+			const at = await atResource({}, counts);
+			expect(await at.present(await toResource()), String(wait)).toEqual({
+				...tooMany,
+				headers: { "retry-after": said },
+			});
+		}
+	});
+
+	it("takes 60 in a minute by default, and takes more once the clock is past that minute", async () => {
+		const at = await atResource();
+		for (let i = 0; i < 60; i++) {
+			expect(await at.present(await toResource()), String(i)).toMatchObject(admitted);
+		}
+		expect(await at.present(await toResource())).toMatchObject(tooMany);
+		expect(at.writes).toHaveLength(60);
+		shift = 50_000;
+		expect(await at.present(await toResource())).toMatchObject(tooMany);
+		shift = 61_000;
+		expect(await at.present(await toResource())).toMatchObject(admitted);
+		expect(at.writes).toHaveLength(61);
+	});
+
+	describe("what counts nothing", () => {
+		type At = Awaited<ReturnType<typeof atResource>>;
+		/** What this proof reads as at the resource, its reason told. */
+		const readAt = (at: At, dpopProof: string) =>
+			at.app
+				.get(senderBinding)
+				.bindingOf(
+					testRequest({ method: "POST", path: "/api", headers: new Map([["dpop", dpopProof]]) }),
+					{ kind: "resource", token, held, subject: grant.subject },
+				);
+		/** The whole count is still the holder's: this many taken, then the next one over. */
+		async function wholeCountLeft(at: At, proofs: number) {
+			for (let n = 0; n < proofs; n++) {
+				expect(await at.present(await toResource()), String(n)).toMatchObject(admitted);
+			}
+			expect(await at.present(await toResource())).toMatchObject(tooMany);
+			expect(at.writes).toHaveLength(proofs);
+		}
+		const claims = () => ({
+			htm: "POST",
+			htu: `${issuer}/api`,
+			ath,
+			iat: Math.floor(runtime.clock.now() / 1000),
+			jti: randomUUID(),
+		});
+		const jwk = () => exportJWK(holder.publicKey);
+		const header = async () => ({ alg: "EdDSA", typ: "dpop+jwt", jwk: await jwk() });
+		const refusals: readonly (readonly [string, () => Promise<string>])[] = [
+			["one DPoP header only", async () => `${await toResource()},${await toResource()}`],
+			["not a JWT", async () => "not-a-jwt"],
+			[
+				"typ must be dpop+jwt",
+				async () =>
+					new SignJWT(claims())
+						.setProtectedHeader({ ...(await header()), typ: "jwt" })
+						.sign(holder.privateKey),
+			],
+			[
+				"alg not allowed",
+				async () =>
+					new SignJWT(claims())
+						.setProtectedHeader({ ...(await header()), alg: "HS256" })
+						.sign(randomBytes(32)),
+			],
+			[
+				"jwk must be a public key",
+				async () =>
+					new SignJWT(claims())
+						.setProtectedHeader({ alg: "EdDSA", typ: "dpop+jwt" })
+						.sign(holder.privateKey),
+			],
+			[
+				"signature does not verify",
+				async () =>
+					new SignJWT(claims()).setProtectedHeader(await header()).sign(stranger.privateKey),
+			],
+			[
+				"payload is not JSON",
+				async () =>
+					new CompactSign(new TextEncoder().encode("not json"))
+						.setProtectedHeader(await header())
+						.sign(holder.privateKey),
+			],
+			[
+				"missing or malformed claims",
+				async () =>
+					new SignJWT({ ...claims(), jti: "" })
+						.setProtectedHeader(await header())
+						.sign(holder.privateKey),
+			],
+			["htm does not match", () => proof({ htu: `${issuer}/api`, ath, htm: "GET" })],
+			["htu does not match", () => proof({ htu: `${issuer}/other`, ath })],
+			[
+				"iat outside the window",
+				() => proof({ htu: `${issuer}/api`, ath, iat: claims().iat - 3600 }),
+			],
+			["ath does not match the token", () => proof({ htu: `${issuer}/api`, ath: "another" })],
+		];
+
+		it("counts nothing for a copy of the token with no proof, past `proofs`, and the holder's next proof is taken", async () => {
+			const at = await atResource({ proofs: 2 });
+			for (const n of [1, 2, 3, 4, 5]) {
+				expect(await at.present(undefined), String(n)).toEqual(notTheHolders);
+			}
+			expect(at.writes).toEqual([]);
+			await wholeCountLeft(at, 2);
+		});
+
+		it("counts nothing for a copy of the token presented under another scheme", async () => {
+			const at = await atResource({ proofs: 2 });
+			for (const n of [1, 2, 3, 4, 5]) {
+				expect(await at.present(undefined, "Bearer"), String(n)).toEqual(notTheHolders);
+			}
+			expect(at.writes).toEqual([]);
+			await wholeCountLeft(at, 2);
+		});
+
+		for (const [reason, made] of refusals) {
+			it(`counts nothing for a proof refused as "${reason}"`, async () => {
+				const at = await atResource({ proofs: 2 });
+				expect(await readAt(at, await made())).toEqual({
+					kind: "refused",
+					error: "invalid_dpop_proof",
+					description: reason,
+				});
+				for (const n of [1, 2, 3, 4, 5]) {
+					expect(await at.present(await made()), String(n)).toMatchObject({
+						kind: "refused",
+						status: 401,
+						error: "invalid_dpop_proof",
+					});
+				}
+				expect(at.writes).toEqual([]);
+				await wholeCountLeft(at, 2);
+			});
+		}
+
+		it("counts nothing for a proof asked for a nonce", async () => {
+			const secret = randomBytes(32).toString("base64");
+			const at = await atResource({ proofs: 2, nonce: { required: "as+rs", secret } });
+			let nonce = "";
+			for (const n of [1, 2, 3, 4, 5]) {
+				const asked = await at.present(await toResource());
+				expect(asked, String(n)).toMatchObject({
+					kind: "refused",
+					status: 401,
+					error: "use_dpop_nonce",
+				});
+				nonce = (asked as { headers: Record<string, string> }).headers["dpop-nonce"] ?? "";
+			}
+			expect(at.writes).toEqual([]);
+			const carrying = () => proof({ htu: `${issuer}/api`, ath, nonce });
+			for (const n of [1, 2]) {
+				expect(await at.present(await carrying()), String(n)).toMatchObject(admitted);
+			}
+			expect(await at.present(await carrying())).toMatchObject(tooMany);
+			expect(at.writes).toHaveLength(2);
+		});
+	});
+
+	describe("whose count it is", () => {
+		const hashOf = (presented: string) =>
+			createHash("sha256").update(presented).digest("base64url");
+		/** A proof by `key` with `presented`, a token bound to that key and standing for `subject`. */
+		async function by(
+			at: Awaited<ReturnType<typeof atResource>>,
+			key: typeof holder,
+			presented: string,
+			subject: string,
+		) {
+			const binding = {
+				member: "jkt",
+				confirmation: await calculateJwkThumbprint(await exportJWK(key.publicKey)),
+				tokenType: "DPoP",
+			};
+			return at.app.get(senderBinding).admitted(
+				testRequest({
+					method: "POST",
+					path: "/api",
+					headers: new Map([
+						["authorization", `DPoP ${presented}`],
+						[
+							"dpop",
+							await proof({ htu: `${issuer}/api`, ath: hashOf(presented), key, jti: randomUUID() }),
+						],
+					]),
+				}),
+				{
+					verifyAccess: async () => ({ kind: "valid", grant: { subject }, binding }) as const,
+				},
+			);
+		}
+
+		it("counts five keys and tokens of one subject as one", async () => {
+			const at = await atResource({ proofs: 5 });
+			const holders = [1, 2, 3, 4, 5].map((n) => ({
+				key: generateKeyPairSync("ed25519"),
+				presented: `at-${n}`,
+			}));
+			for (const { key, presented } of holders) {
+				expect(await by(at, key, presented, "alice"), presented).toMatchObject(admitted);
+			}
+			for (const { key, presented } of holders) {
+				expect(await by(at, key, presented, "alice"), presented).toMatchObject(tooMany);
+			}
+			expect(at.writes).toHaveLength(5);
+		});
+
+		it("counts one key under two subjects apart", async () => {
+			const at = await atResource({ proofs: 2 });
+			for (const _ of [1, 2]) {
+				expect(await by(at, holder, "at-a", "alice")).toMatchObject(admitted);
+			}
+			expect(await by(at, holder, "at-a", "alice")).toMatchObject(tooMany);
+			for (const _ of [1, 2]) {
+				expect(await by(at, holder, "at-b", "bob")).toMatchObject(admitted);
+			}
+			expect(await by(at, holder, "at-b", "bob")).toMatchObject(tooMany);
+			expect(at.writes).toHaveLength(4);
+		});
+
+		it("counts tokens of a client's own credentials under that client, whatever their keys", async () => {
+			const at = await atResource({ proofs: 2 });
+			const client = "svc";
+			expect(await by(at, holder, "at-1", client)).toMatchObject(admitted);
+			expect(await by(at, stranger, "at-2", client)).toMatchObject(admitted);
+			expect(await by(at, generateKeyPairSync("ed25519"), "at-3", client)).toMatchObject(tooMany);
+			expect(await by(at, holder, "at-4", "another-client")).toMatchObject(admitted);
+		});
+	});
+
+	it("keeps a spent proof by a digest of its key and jti, of one length, and one key's alone", async () => {
+		const spent = spentInMemory();
+		const app = await boot({ nonce: { required: "never" } }, spent);
+		const jti = "j".repeat(256);
+		const read = async (key: typeof holder) =>
+			app.get(senderBinding).bindingOf(
+				testRequest({
+					method: "POST",
+					path: "/oauth/token",
+					headers: new Map([["dpop", await proof({ jti, key })]]),
+				}),
+				{ kind: "issue" },
+			);
+		expect((await read(holder)).kind).toBe("bound");
+		expect(spent.names).toEqual([
+			createHash("sha256").update(`${held.confirmation}.${jti}`).digest("base64url"),
+		]);
+		expect(await read(holder)).toMatchObject({ kind: "refused", error: "invalid_dpop_proof" });
+		// The same `jti` from another key is that key's own.
+		expect((await read(stranger)).kind).toBe("bound");
+		expect(new Set(spent.names).size).toBe(2);
+	});
+
+	it("bounds one subject the same from many sources", async () => {
+		const at = await atResource({ proofs: 3 });
+		const answers = [];
+		for (let i = 1; i <= 5; i++) {
+			answers.push(await at.present(await toResource(), "DPoP", keyed, `192.0.2.${i}`));
+		}
+		expect(answers.map((a) => a.kind)).toEqual([
+			"admitted",
+			"admitted",
+			"admitted",
+			"refused",
+			"refused",
+		]);
+		expect(at.writes).toHaveLength(3);
+	});
+
+	it("is unavailable when the subject's count cannot be made, spending nothing", async () => {
+		const cannot: RateLimit = {
+			hit: async () => {
+				throw new Unavailable("rate-limit");
+			},
+		};
+		const counts = defineModule({ name: "counts", replicaSafe: false, takes: [] }, (m) => [
+			m.provide(rateLimit).by(() => cannot),
+		]);
+		const at = await atResource({}, counts);
+		await expect(at.present(await toResource())).rejects.toSatisfy(isUnavailable);
+		expect(at.writes).toEqual([]);
+	});
+
+	it("is unavailable when the store cannot spend a proof the count took", async () => {
+		const at = await atResource();
+		at.spent.down.failNext("save");
+		await expect(at.present(await toResource())).rejects.toSatisfy(isUnavailable);
+	});
+
+	it("writes nothing for a stray proof on a token held by another kind, and answers it bound, for sender-binding to refuse", async () => {
+		const at = await atResource({ proofs: 1 });
+		const other = { member: "x5t#S256", confirmation: held.confirmation, tokenType: "Bearer" };
+		const read = () =>
+			toResource().then((dpopProof) =>
+				at.app.get(senderBinding).bindingOf(
+					testRequest({
+						method: "POST",
+						path: "/api",
+						headers: new Map([["dpop", dpopProof]]),
+					}),
+					{ kind: "resource", token, held: other, subject: "alice" },
+				),
+			);
+		for (const _ of [1, 2]) {
+			expect(await read()).toEqual({ kind: "bound", binding: held });
+		}
+		expect(at.writes).toEqual([]);
+	});
+
+	it("neither counts nor spends a proof sent with a bearer token", async () => {
+		const at = await atResource({ proofs: 1 });
+		for (const _ of [1, 2, 3]) {
+			expect(await at.present(await toResource(), "Bearer", unbound)).toMatchObject(admitted);
+		}
+		expect(at.writes).toEqual([]);
+	});
+
+	it("refuses a replay as ever, and counts it", async () => {
+		const at = await atResource({ proofs: 2 });
+		const once = await toResource();
+		expect(await at.present(once)).toMatchObject(admitted);
+		expect(await at.present(once)).toMatchObject({
+			kind: "refused",
+			status: 401,
+			error: "invalid_dpop_proof",
+		});
+		expect(await at.present(once)).toMatchObject(tooMany);
+	});
+
+	it("counts nothing at issuance", async () => {
+		const at = await atResource({ proofs: 1 });
+		for (const _ of [1, 2, 3]) {
+			const read = await at.app.get(senderBinding).bindingOf(
+				testRequest({
+					method: "POST",
+					path: "/oauth/token",
+					headers: new Map([["dpop", await proof()]]),
+				}),
+				{ kind: "issue" },
+			);
+			expect(read.kind).toBe("bound");
+		}
+	});
+
+	it("refuses to boot without rate-limit", async () => {
+		const spent = spentInMemory();
+		const input = assembly(undefined, spent);
+		const without = input.modules.filter((m) => m !== rateLimitStandIn);
+		await expect(assemble({ ...input, modules: without })).rejects.toBeInstanceOf(BootRefused);
+	});
+
+	it("refuses a count or a window out of its range", async () => {
+		for (const section of [
+			{ proofs: 0 },
+			{ proofs: 100_001 },
+			{ proofs: 1.5 },
+			{ "proofs-window": "0s" },
+			{ "proofs-window": "2h" },
+		]) {
+			await expect(atResource(section), JSON.stringify(section)).rejects.toBeInstanceOf(
+				BootRefused,
+			);
+		}
 	});
 });
 

@@ -5,11 +5,12 @@ import { type AttributesAnswer, subjectAttributes } from "@mod/subject-attribute
 import webauthnModule from "@mod/webauthn/module";
 import {
 	softwareAuthenticator,
+	statingCertificate,
 	type Twist,
 	testOrigin,
 	webauthnConfig,
 } from "@mod/webauthn/testing";
-import { beforeEach, expect, it } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import kindModule from "../src/module.ts";
 
 /** How far the kernel's clock runs ahead of the host's; it goes back after each test. */
@@ -332,6 +333,22 @@ it("takes an answer only before its challenge's end: webauthn's own, or the call
 	expect(await at(now + 600_000, 119_000)).toBe("valid");
 	expect(await at(now + 600_000, 121_000)).toBe("invalid");
 	expect(await at(now + 60_000, 61_000)).toBe("invalid");
+});
+
+it("binds a response stating a certificate as one stating nothing, fetching nothing", async () => {
+	const fetched: unknown[] = [];
+	vi.stubGlobal("fetch", async (url: unknown) => {
+		fetched.push(url);
+		throw new Error("nothing is fetched at a binding");
+	});
+	try {
+		const twist = { attestationObject: statingCertificate("apple") };
+		const { amr } = await bound(await boot(), softwareAuthenticator(), "alice", twist);
+		expect(amr).toEqual(["pop"]);
+		expect(fetched).toEqual([]);
+	} finally {
+		vi.unstubAllGlobals();
+	}
 });
 
 it("binds only before the creation's end", async () => {

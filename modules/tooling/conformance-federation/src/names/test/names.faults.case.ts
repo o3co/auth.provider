@@ -11,9 +11,10 @@ import { keysArea } from "@mod/conformance-keys";
 import { oauthArea } from "@mod/conformance-oauth";
 import { afterEach, describe, expect, it } from "vitest";
 import { browser as openBrowser, probeClient } from "../../../test/browser.ts";
+import { fakeGithub } from "../../../test/github.ts";
 import { fakeUpstream } from "../../../test/upstream.ts";
 import { back, grantsAt, grantsScene, scopes, upstreamClient } from "../../grants/test/grants.ts";
-import { type FederationScene, federationScene, landedStatus } from "../../main.ts";
+import { type FederationScene, federationArea, federationScene, landedStatus } from "../../main.ts";
 
 const origin = "https://issuer.example";
 const landing = "https://app.example/home";
@@ -266,6 +267,109 @@ describe("an IdP name's issuer across starts", () => {
 		expect(said).toContain("jwt-bearer-users");
 		expect(said).not.toContain(before);
 		expect(said).not.toContain(after);
+	});
+});
+
+describe("a GitHub Enterprise under a name, its `issuer` left out", () => {
+	const octocat = 583231;
+	const linked = {
+		users: [{ identifier: "alice", password, upstream: { idp: "corp", subject: String(octocat) } }],
+	};
+	const aGithub = async () => {
+		const github = await fakeGithub(upstreamClient);
+		stops.push(() => github.stop());
+		return github;
+	};
+	type Github = Awaited<ReturnType<typeof aGithub>>;
+	const enterprise = (at: Github): FederationScene["idps"][number] => ({
+		name: "corp",
+		type: "github",
+		issuerUnset: true,
+		issuer: at.base,
+		clientId: upstreamClient.id,
+		clientSecret: upstreamClient.secret,
+	});
+	/** Whom a fresh browser logging in there as the numeric id is logged in as, or the status it is refused with. */
+	const githubAs = async (i: Instance, github: Github, id: number) => {
+		const b = openBrowser(() => i.baseUrl, origin);
+		const begun = await b.get(start("corp"));
+		const back = await b.get(`${start("corp")}/callback?${github.authorize(begun.location, id)}`);
+		return back.status === landedStatus() ? await b.loggedInAs() : back.status;
+	};
+
+	it("refuses boot where the name is pointed at another, a stated move alone taking it, the link going with the name", async () => {
+		const [topology, a, b] = [await aStore(), await aGithub(), await aGithub()];
+		const first = await started(topology, named([enterprise(a)], linked));
+		const alice = await githubAs(first.instance, a, octocat);
+		expect(typeof alice).toBe("string");
+		await first.stop();
+
+		const said = await refusedWith(topology, named([enterprise(b)], linked));
+		expect(said).toContain("an IdP name stands for another issuer");
+		expect(said).toContain("federation");
+		expect(said).not.toContain(a.base);
+		expect(said).not.toContain(b.base);
+
+		const wrong = await refusedWith(
+			topology,
+			named([enterprise(b)], {
+				...linked,
+				issuerMoved: [{ idp: "corp", from: "https://github.com/login/oauth", to: b.base }],
+			}),
+		);
+		expect(wrong).toContain("users.issuer-moved.0");
+
+		const moved = await started(
+			topology,
+			named([enterprise(b)], {
+				...linked,
+				issuerMoved: [{ idp: "corp", from: a.base, to: b.base }],
+			}),
+		);
+		stops.push(moved.stop);
+		expect(warnedOfNames(moved.instance).join()).toContain("users.issuer_moved");
+		expect(await githubAs(moved.instance, b, octocat)).toBe(alice);
+	});
+
+	it("boots a linked JWT bearer issuer declaring the name for the API read, and refuses one declaring it for the issuer left to the default, naming both modules", async () => {
+		const a = await aGithub();
+		const ledger = await fakeHttp(() => ({ status: 404, json: { keys: [] } }));
+		stops.push(() => ledger.stop());
+		const keysUrl = `${ledger.base}/signer-keys`;
+		const sharedWith = (issuer: string) =>
+			sceneOf(
+				keysArea.part(keys),
+				identityArea.part({ origin, users: linked.users }),
+				oauthArea.part({
+					issuer: origin,
+					clients: [
+						{
+							id: "app",
+							kind: "confidential",
+							method: "client_secret_post",
+							secret: "app-secret-0123456789abcdef",
+							grants: ["urn:ietf:params:oauth:grant-type:jwt-bearer"],
+							scopes: ["read"],
+						},
+					],
+					jwtBearer: { issuers: [{ issuer, linked: { upstream: "corp", keysUrl } }] },
+				}),
+				federationArea.part({
+					origin,
+					idps: [enterprise(a)],
+					returnTargets: [],
+					ledgerUrls: [keysUrl],
+				}),
+			);
+
+		await startedOnce(await aStore(), sharedWith(a.base));
+
+		const said = await refusedWith(await aStore(), sharedWith("https://github.com/login/oauth"));
+		expect(said).toContain("an IdP name stands for more than one issuer");
+		expect(said).toContain("federation");
+		expect(said).toContain("jwt-bearer-users");
+		expect(said).not.toContain("signer-keys-http");
+		expect(said).not.toContain(a.base);
 	});
 });
 

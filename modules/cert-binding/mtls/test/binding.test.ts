@@ -103,7 +103,8 @@ describe("reading the client's certificate", () => {
 	});
 
 	it("answers a refusal at a resource as an invalid token, and an outage as unavailable still", async () => {
-		const resource: Scene = { kind: "resource", token: "t" };
+		const held = { member: "x5t#S256", confirmation: "c", tokenType: "Bearer" };
+		const resource: Scene = { kind: "resource", token: "t", held, subject: "s" };
 		expect(await readCertificate({ kind: "malformed" }, resource, under().checking)).toMatchObject({
 			kind: "refused",
 			error: "invalid_token",

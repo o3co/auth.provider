@@ -1388,6 +1388,9 @@ importers:
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
@@ -2744,6 +2747,9 @@ importers:
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2788,6 +2794,9 @@ importers:
         specifier: 2.9.1
         version: 2.9.1
     devDependencies:
+      '@mod/docker-client':
+        specifier: workspace:*
+        version: link:../../tooling/docker-client
       rolldown:
         specifier: 1.2.14
         version: 1.2.14

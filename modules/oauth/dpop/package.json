@@ -16,6 +16,7 @@
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/keys": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
 		"jose": "6.2.13",
 		"zod": "4.6.7"

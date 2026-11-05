@@ -14,10 +14,13 @@ import {
 import { type Upstream, UpstreamRefused } from "@mod/upstreams";
 import { isLoopbackName } from "@mod/url-setting";
 import { secretOf } from "./client-secret/secret.ts";
-import type { Settings } from "./settings.ts";
+import { ownJwksUri, type Settings } from "./settings.ts";
 
 /** Apple's issuer, exactly as its id_tokens and any callback `iss` must name it. */
 export const issuer = "https://appleid.apple.com";
+
+/** A URL as the parser writes it, with no trailing slash: one spelling of one endpoint. */
+const spelled = (url: string) => new URL(url).href.replace(/\/$/, "");
 
 /** The secret to send: the fixed one, or one the team's key signs. Throws, naming no value, on a key that is no P-256 key in PKCS8. */
 function secretFrom(s: Settings, clock: Clock): () => Promise<string> {
@@ -80,8 +83,10 @@ export function opened(
 		{ hosts: [hostOf(s["token-endpoint"])] },
 	);
 	const end = s["end-session-endpoint"];
+	const subjectsFrom = spelled(s["jwks-uri"]);
 	return {
 		issuer,
+		...(subjectsFrom === spelled(ownJwksUri) ? {} : { subjectsFrom }),
 		responseMode: "form_post",
 		clockSkewMs: skewMs,
 		// Apple takes no freshness, so a browser's prompt and max age are not sent.

@@ -11,11 +11,14 @@ import {
 	tokenPostOf,
 } from "@mod/upstream-client";
 import { type Upstream, UpstreamRefused } from "@mod/upstreams";
-import type { Settings } from "./settings.ts";
+import { ownJwksUri, type Settings } from "./settings.ts";
 
 /** Google's issuer, exactly as its id_tokens and callbacks must name it. */
 export const issuer = "https://accounts.google.com";
 const scopes = ["openid", "email", "profile"];
+
+/** A URL as the parser writes it, with no trailing slash: one spelling of one endpoint. */
+const spelled = (url: string) => new URL(url).href.replace(/\/$/, "");
 
 /** Google's OpenID Connect at fixed endpoints, without discovery. */
 export function opened(
@@ -50,8 +53,10 @@ export function opened(
 		{ hosts: [hostOf(s["token-endpoint"])] },
 	);
 	const offline = s.access === "offline";
+	const subjectsFrom = spelled(s["jwks-uri"]);
 	return {
 		issuer,
+		...(subjectsFrom === spelled(ownJwksUri) ? {} : { subjectsFrom }),
 		clockSkewMs: skewMs,
 		authorizationUrl: (start) => {
 			const prompt = [start.prompt, offline ? "consent" : undefined].filter(Boolean).join(" ");

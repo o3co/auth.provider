@@ -287,6 +287,21 @@ describe("refusing a declaration", () => {
 			);
 		}
 	});
+
+	it("refuses a command, in either form its manifest declares one", () => {
+		for (const bin of ["./cli.js", { node: "./cli.js" }, {}]) {
+			refused(declaring(manifest.authProvider, { bin }), "@x/grant: it declares bin");
+		}
+		refused(
+			declaring(manifest.authProvider, { directories: { bin: "./tools" } }),
+			"@x/grant: it declares directories.bin",
+		);
+	});
+
+	it("reads no other directory of its manifest as a command", () => {
+		const root = declaring(manifest.authProvider, { directories: { lib: "./dist" } });
+		expect(read(root)[0]?.declaration?.name).toBe("@x/grant");
+	});
 });
 
 describe("refusing a second copy of the release or of zod", () => {

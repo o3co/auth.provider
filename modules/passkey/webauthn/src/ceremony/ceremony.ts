@@ -1,8 +1,11 @@
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
 import {
 	cose,
+	decodeAttestationObject,
 	decodeClientDataJSON,
 	decodeCredentialPublicKey,
+	isoBase64URL,
+	isoCBOR,
 } from "@simplewebauthn/server/helpers";
 import type {
 	Asserted,
@@ -82,6 +85,28 @@ async function libraryAnswer<T extends object>(
 	}
 }
 
+type RegistrationResponse = Parameters<typeof verifyRegistrationResponse>[0]["response"];
+
+/**
+ * The response as a `none` attestation of its `authData` alone: no attestation is asked for, so the
+ * statement sent never reaches the library. Throws on an object that is not a map, which is `malformed`.
+ */
+function statementDropped(response: unknown): RegistrationResponse {
+	// The library checks the shape it reads.
+	const sent = response as RegistrationResponse;
+	const decoded: unknown = decodeAttestationObject(
+		isoBase64URL.toBuffer(sent.response.attestationObject),
+	);
+	if (!(decoded instanceof Map)) throw new TypeError("the attestation object is not a map");
+	const kept = new Map<string, Parameters<typeof isoCBOR.encode>[0]>([
+		["fmt", "none"],
+		["attStmt", new Map()],
+		["authData", decoded.get("authData")],
+	]);
+	const attestationObject = isoBase64URL.fromBuffer(isoCBOR.encode(kept));
+	return { ...sent, response: { ...sent.response, attestationObject } };
+}
+
 // The client's transports, which the library passes on unchecked: a short list of short strings.
 const hintOf = (value: unknown): string[] | undefined =>
 	Array.isArray(value) &&
@@ -157,8 +182,7 @@ export function ceremoniesFor(
 			if (early) return refused(early);
 			const verified = await libraryAnswer(() =>
 				verifyRegistrationResponse({
-					// The library checks the shape it reads.
-					response: response as Parameters<typeof verifyRegistrationResponse>[0]["response"],
+					response: statementDropped(response),
 					...expected(challenge, v),
 					supportedAlgorithmIDs: algorithms,
 				}),

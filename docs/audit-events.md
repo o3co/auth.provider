@@ -194,4 +194,4 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `passkey.login.refused` | `client`, `reason` | a passkey assertion is not accepted, with why (`reason`, a kind from a fixed list) |
+| `passkey.login.refused` | `client`, `reason` | a passkey assertion is not accepted, with why (`reason`, a kind from a fixed list: a refusal of `passkeys`, `authentication_revoked` or `unknown_user`) |

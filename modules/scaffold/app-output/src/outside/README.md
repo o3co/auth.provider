@@ -10,15 +10,16 @@
 - Writing the files: `app-output`'s `writeDeployment`.
 
 ## Offers
-- `besideRelease` (the packages outside, as `OutsideModules`, and the app's dependencies, release version, zod, the integrity the release recorded and each bundle's dependencies on other bundles): the files, dependencies, scripts, image lines, guide section and index line to add; nothing where there is no package outside.
+- `besideRelease` (the packages outside, as `OutsideModules`, and the app's dependencies, release version, zod, the integrity the release recorded and each bundle's dependencies on other bundles): the files, image lines, guide section and index line to add, whether the app has scripts, and the first step of the guide's start; nothing to add, and scripts, where there is no package outside.
 - `OutsideModules`: the records, the registries they and the release come from, and the names let through though fresh.
 
 ## Invariants
-- `outside-modules.json` holds the records and the registries; `scripts/check-outside.mjs` is `lockfile`'s file as it ships, run by the app's `check:outside`; it holds what it uses, so the app depends on nothing for it.
+- `outside-modules.json` holds the records and the registries; `scripts/check-outside.mjs` is `lockfile`'s file as it ships, run with node; it holds what it uses, so the app depends on nothing for it.
 - `outside-modules.json` also holds (`held`) the integrity the release recorded of every package the overrides hold; one it records none of, or a release recording none, refuses the output.
 - `pnpm-workspace.yaml` overrides every release package the app depends on, or an outside package takes as a peer, and every bundle those depend on, all the way, to the version the app has (the release's for one it does not name), and zod to the app's.
 - It sets `minimumReleaseAge` to a day, excluding the release's packages by name, and each name let through as fresh at its recorded version alone; a name let through but not recorded is refused.
-- The image's install stage copies the record and the script and runs `check:outside` after installing.
+- The image's install stage copies the record and the script and runs the script with node before anything is installed. The guide says the same order: `pnpm install --lockfile-only`, the script, `pnpm install --frozen-lockfile --ignore-scripts`.
+- The manifest holds no scripts, decided from whether modules are recorded (`scripts`, the fact and not the commands): each entry is run by file with node. What pnpm links at `node_modules/.bin` is not checked, as the lockfile does not record what decides it, and the guide says so and names what runs with it. `pnpm start` falls back to `server.js` where no script exists, so the app writes none.
 - Only the packages named are read, so the guide's opening says each wiring and adapter outside the release must be listed by name, and that boot otherwise refuses, naming the contract no module provides; an app with no package outside says what comes with the release's modules.
 - Where a scope records a registry of its own, `.npmrc` names each by the origin the record holds, never a credential, a record of anything else refusing the output; the install stage copies it and takes credentials as the build secret `npmrc`, and the guide says so. Without one, none of these is written.
 

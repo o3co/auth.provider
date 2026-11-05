@@ -9,6 +9,7 @@
 - Owns the scenes of federation grants, from a client's intent through the user's connection to the upstream token, its refresh and its end.
 - Owns the fault scenes of the federation area, on a Redis topology and a deployment of their own: a subject's revocation boundary refusing a grant established before it, and the grants kept where a revocation keeps delegations (internal module `revocation-boundary`), with what they share (`faults`).
 - Owns the fault scenes of an IdP name's issuer across starts (internal module `names`), each start a deployment of its own on one Redis.
+- Owns the fault scenes of a DPoP proof's count, on Redis (internal module `proof-writes`).
 - Sets up the federation area's part (the IdPs, the landing, the held page, the return targets, federation grants' page, connections, lodging limit and whether they keep on subject revocation, a link's step-up page, a name's stated move and a sealing key kept across starts) on each of the legacy and new targets; on the new, the grants' page goes to `federation-grants-connect`, composed with the grants, and the step-up page to `federation-link`.
 - The legacy build turns federation grants on only when enabled.
 - The legacy set-up enables federation grants.
