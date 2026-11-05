@@ -167,3 +167,19 @@ export const boundaryCreated = (subject: string): Match =>
  * sessions to its closings, before it closes any.
  */
 export const closingAdded: Match = storeWrite({ prefix, space: "session-store.closings" });
+
+/** A write that spends a DPoP proof's `jti`, whatever its key. */
+export const proofSpent = storeWrite({
+	prefix,
+	space: "dpop-store.spent",
+	operations: ["putIfAbsent"],
+});
+
+/** The count of a subject's proofs at resources, in the request windows. */
+export const proofsCounted = (subject: string): Match =>
+	storeWrite({
+		prefix,
+		space: "rate-limit.windows",
+		partition: createHash("sha256").update(`dpop.proofs\n${subject}`).digest("base64url"),
+		operations: ["count"],
+	});

@@ -89,7 +89,7 @@ Tag the merge commit on `main` as `v<version>` and push the tag. Only those the 
 
 ## What the workflow does
 
-It runs in four jobs before the API site's. `evidence` reads the CI runs, and nothing else. `pack` runs the checks and packs, and `sbom` makes the lists; both run what the release packed, and read alone. `publish` alone holds what publishing takes (its OIDC token and writing the release), and runs nothing the release packed. The API site's own two jobs build it where nothing can write, then push it in a job that runs none of the build's code.
+It runs in four jobs before the API site's. `evidence` reads the CI runs, and nothing else. `pack` runs the checks and packs, and `sbom` makes the lists; both run what the release packed, and read alone. `publish` alone holds what publishing takes (its OIDC token and writing the release), in the `npm-publish` environment, and runs nothing the release packed. The API site's own two jobs build it where nothing can write, then push it in a job that runs none of the build's code.
 
 1. Fetches CI's runs of the push of the release branch's head the tag's commit merged, with the run's token and before anything is installed (`pnpm release:evidence-fetch`); then, holding no credential, judges them and keeps the evidence of the run that tested the tag's tree: each test's result and the compliance table (`pnpm release:evidence-judge`). It stops the release where none will do; see [When the release finds no evidence](#when-the-release-finds-no-evidence).
 2. Runs `pnpm check`.
@@ -99,16 +99,18 @@ It runs in four jobs before the API site's. `evidence` reads the CI runs, and no
 6. Holds the tarballs it is about to publish to those the lists were made of, by name, version, integrity and file, and the order beside them to the tarballs (`pnpm release:listed`).
 7. Refuses to go on where a package of this version is on npm already as another tarball, or npm's answer cannot be read (`pnpm release:published`).
 8. Creates a draft GitHub release with the version's section of the changelog as its notes, and attaches the lists as `auth-provider-<version>-sbom.tar.gz` (its `README.md` says what each file is) and the evidence as `auth-provider-<version>-evidence.tar.gz`: the CI run's artifacts with a manifest naming the run and the commit it tested (of the tag's tree), this run's own `pnpm check` results, `pnpm audit --json`, and the commands and environment they ran in.
-9. Publishes each tarball with provenance, in the order the pack wrote: the bundles the index seals over, then the scaffold, then the entrance, which depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher; no npm token is stored.
+9. Publishes each tarball with provenance, in the order the pack wrote: the bundles the index seals over, then the scaffold, then the entrance, which depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher, which names the workflow and the `npm-publish` environment; no npm token is stored.
 10. Publishes the draft release.
 11. For a final release (never a prerelease), builds its API from the bundles it published, installed from npm, into the minor's dir of the API site on GitHub Pages (`v<major>.<minor>/`, each patch writing over it), and points the site's root at the newest minor. The **API site** workflow (`api-docs.yml`) builds a released tag again by hand.
+
+What the owner sets up once, before the first tag: the `npm-publish` environment, with its `v*` tag rule, no admin bypass and no reviewer. A job naming an environment that does not exist creates it with no rules, so make it first.
 
 ## A package name never published before
 
 Trusted publishing is set in a package's settings on npm, so the name must exist first. Before the first release that adds a concern:
 
 1. From a maintainer's account, publish a placeholder `0.0.0` of the new name under the dist-tag `bootstrap`. npm also points `latest` at a name's first version, so the placeholder is `latest` until the name's first final release.
-2. In the package's settings on npm, add this repository's release workflow as its trusted publisher.
+2. In the package's settings on npm, add this repository's release workflow with the `npm-publish` environment as its trusted publisher, within 2 days of the tag, as a new one lapses without a publish.
 
 A release whose new name is missing either stops at that package; see the next section.
 
@@ -145,14 +147,14 @@ What the owner sets up once: the GitHub App that reads the security repository's
 
 1. Draft the advisory and request its CVE. Add the finding to the ledger.
 2. Bring the security repository's mirror of `main` up to date, after checking that `git remote get-url security` names it: `git fetch origin`, so the mirror gets this repository's current `main` and not a stale checkout's, then `git push security origin/main:refs/heads/mirror/main`. The refspec is fast-forward only; never force-push. The fix is made from `main` alone: `develop` is not mirrored, as it is reset at each release.
-3. Make the fix on `security/<finding>` from `mirror/main`: the fix, the version's commit, the changelog (the kind of hole and the module, never how to reach it) and the migration guide. Run the checks locally.
+3. Make the fix on `security/<finding>` from `mirror/main`: the fix, the version's commit, the changelog (the kind of hole and the module, never how to reach it) and the migration guide. For a final version released by this route, the fixes are merged on one branch from `mirror/main`, then one commit takes `develop`'s tree for `docs/`, `CHANGELOG.md` and `SECURITY.md`, with the fixes' changes to them kept, and the version's commit comes last. Run the checks locally.
 4. Have it reviewed.
 5. Push its head to the security repository as `release/<version>`: CI there runs every job a release needs. Wait for that run to finish and pass before going on: the release takes only a successful run as its evidence, and from step 7 the fix is public. Where it fails, fix it on `security/<finding>`, have it reviewed and push again. Run `pnpm release:sbom` locally over the release check's tarballs, the one job of the release CI does not run.
 6. Fetch both branches from the security repository, `git fetch security mirror/main release/<version>`, and check that `security/release/<version>` is the head reviewed in step 4 and tested in step 5. On top of `security/mirror/main` (`git switch --detach security/mirror/main`), make the merge commit, `git merge --no-ff security/release/<version> -m "Merge release/<version>"`, and check that its tree is the branch head's. Read that whole tree before you tag it, not only `release.yml`: the tag rules and the environment's approval stop a writer only where the owner has read every file the release will run. Then tag it, declaring the security release in the tag's message: `git tag -a v<version> -m "v<version>" -m "Release-Evidence: security"`. Add the App's ID and private key to the environment's secrets.
 7. Push the tag alone: `git push origin refs/tags/v<version>`. From here the fix is public.
 8. The release workflow reads the tag's declaration and hands over to the security repository's run: approve the `security-evidence` deployment once you have checked that it runs the tag you made.
 9. Once npm has the version, publish the advisory. Where it does not within two hours of step 7, publish the advisory then, with the versions affected and any workaround, and update it every day until the version is out; the steps of [When a publish stops partway](#when-a-publish-stops-partway) still hold.
-10. Fast-forward `main` to the merge commit, an owner's push past the required checks it has none of here, and push its second parent as `release/<version>`: CI runs every job on it in public. Bring `main` into `develop` through a pull request.
+10. Fast-forward `main` to the merge commit, an owner's push past the required checks it has none of here, and push its second parent as `release/<version>`: CI runs every job on it in public. Bring `main` into `develop` through a pull request, where a conflict on the changelog's heading resolves to `main`'s.
 11. Remove the secrets and delete the App's key.
 12. Add the public run to the change record, have it reviewed and publish it. Delete `security/<finding>` and `release/<version>` from the security repository, and mark the finding fixed.
 

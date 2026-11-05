@@ -11,6 +11,9 @@ import {
 import { urlsChecked } from "@mod/url-setting";
 import { z } from "zod";
 
+/** GitHub's own API. */
+export const ownApi = "https://api.github.com";
+
 /** Where the user is read. */
 export const userUrl = (api: string) => `${api.replace(/\/$/, "")}/user`;
 
@@ -32,7 +35,7 @@ const section = clientSetting.extend({
 			"Where a code is exchanged for a token; GitHub's own unless named (GitHub Enterprise).",
 		),
 	api: endpoint
-		.prefault("https://api.github.com")
+		.prefault(ownApi)
 		.describe("Where the user is read; GitHub's own unless named (GitHub Enterprise)."),
 	issuer: z
 		.string()

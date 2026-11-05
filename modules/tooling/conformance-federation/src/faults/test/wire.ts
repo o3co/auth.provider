@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { type Command, type Match, storeWrite, writtenValues } from "@mod/conformance/testing";
 
 // The store's own names a scene matches its writes by: the spaces and partitions subject-revocation
@@ -35,6 +36,22 @@ export const closingAdded: Match = storeWrite({ prefix, space: "session-store.cl
 
 /** A write to a grant's record: among them a read ending a grant its subject's revocation covers (`backstop`). */
 export const grantWritten: Match = storeWrite({ prefix, space: "federation-grants-store.grants" });
+
+/** A write that spends a DPoP proof's `jti`, whatever its key. */
+export const proofSpent: Match = storeWrite({
+	prefix,
+	space: "dpop-store.spent",
+	operations: ["putIfAbsent"],
+});
+
+/** The count of a subject's proofs at resources, in the request windows. */
+export const proofsCounted = (subject: string): Match =>
+	storeWrite({
+		prefix,
+		space: "rate-limit.windows",
+		partition: createHash("sha256").update(`dpop.proofs\n${subject}`).digest("base64url"),
+		operations: ["count"],
+	});
 
 /** The boundaries a write of a subject's boundary puts: `sessions` and, once a revocation moved it, `delegations`. */
 export const boundariesPut = (command: Command): { sessions?: unknown; delegations?: unknown } => {

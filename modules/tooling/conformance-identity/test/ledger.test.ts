@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { LedgerScene } from "../src/area.ts";
 import { ledgerParty, unledgered } from "../src/ledger.ts";
 import { onPattern } from "../src/new.ts";
 
@@ -50,6 +51,18 @@ describe("the scene's users on an app taking users from a ledger", () => {
 		expect(onPattern({ origin, users: [{ ...alice, bcrypt: true }] }, {}, [])).not.toHaveProperty(
 			"leaveOut",
 		);
+	});
+
+	it("are looked up by subject at a scene's own ledger only where it gives the URL", () => {
+		const origin = "https://as.example";
+		const own = { verifyUrl: "https://own.example/verify", credential: "c" };
+		const lookup = (ledger: LedgerScene) => {
+			const set = onPattern({ origin, users: [], ledger }, {}, []);
+			return "config" in set ? set.config?.["users-http"]?.["subject-url"] : undefined;
+		};
+		expect(lookup(own)).toBeUndefined();
+		const subjectUrl = "https://own.example/subject";
+		expect(lookup({ ...own, subjectUrl })).toBe(subjectUrl);
 	});
 
 	it("are looked up by subject at the ledger, none for a subject it does not hold", async () => {

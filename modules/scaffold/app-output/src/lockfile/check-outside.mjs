@@ -1,7 +1,6 @@
 // What a pnpm lockfile resolves the packages outside the release to, held to what was recorded
 // of them when the app was generated: the module app-output reads, and the script an app runs.
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import semver from "semver";
 import { parseDocument } from "yaml";
@@ -179,6 +178,7 @@ function recordRefusals(lock, record, overrides, references, registries) {
 	if (integrity !== record.integrity) {
 		return [...refusals, say(`integrity ${integrity}, not ${record.integrity} as recorded`)];
 	}
+	if (own(entry).has("hasBin")) refusals.push(say("the lockfile says it declares a command"));
 	const peers = own(record.peerDependencies);
 	const locked = own(own(entry).get("peerDependencies"));
 	for (const dep of [...new Set([...peers.keys(), ...locked.keys()])].sort()) {
@@ -281,8 +281,16 @@ export function recordOf(text, name, registries) {
 	};
 }
 
+function entered() {
+	try {
+		return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+	} catch {
+		return false;
+	}
+}
+
 /** Run as an app's script: the lockfile, the record (its packages and registries) and the overrides beside it. */
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (entered()) {
 	const read = (file) => readFileSync(file, "utf8");
 	try {
 		const workspace = parseDocument(read("pnpm-workspace.yaml"), { merge: false }).toJS({
@@ -297,15 +305,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 			outside.held,
 		);
 		for (const line of found) process.stdout.write(`${line}\n`);
-		process.stdout.write(
-			found.length === 0 ? "check:outside: ok\n" : `check:outside: ${found.length} refusal(s)\n`,
-		);
+		process.stdout.write(found.length === 0 ? "ok\n" : `${found.length} refusal(s)\n`);
 		process.exitCode = found.length === 0 ? 0 : 1;
 	} catch (error) {
 		// What cannot be read is a refusal too, said in a line.
-		process.stdout.write(
-			`check:outside: ${error instanceof Error ? error.message : String(error)}\n`,
-		);
+		process.stdout.write(`${error instanceof Error ? error.message : String(error)}\n`);
 		process.exitCode = 1;
 	}
 }

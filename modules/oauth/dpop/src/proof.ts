@@ -37,6 +37,14 @@ export const refused = (description: string): Refused => ({
 	description,
 });
 
+/** Over its subject's count: unspent, so the proof may come again once the wait is over, within its window. */
+export const tooMany = (retryAfterMs: number): Refused => ({
+	kind: "refused",
+	error: "rate_limited",
+	status: 429,
+	headers: { "retry-after": String(Math.ceil(retryAfterMs / 1000)) },
+});
+
 /** RFC 9449 §8: the proof is to come again with the nonce given. */
 const askNonce = (given: string): Refused => ({
 	kind: "refused",

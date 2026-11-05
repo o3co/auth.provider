@@ -40,6 +40,8 @@ export function testIdpType(
 					"skew-ms": z.number().default(30_000),
 					/** The type refuses its settings, so a test can see a boolean read. */
 					refuses: z.boolean().default(false),
+					/** Where its upstream says its subjects are read. */
+					"subjects-from": z.string().optional(),
 				}),
 				open: async (read) => {
 					const { issuer, path, mode } = read;
@@ -59,6 +61,7 @@ export function testIdpType(
 					return {
 						...more,
 						issuer,
+						...(read["subjects-from"] === undefined ? {} : { subjectsFrom: read["subjects-from"] }),
 						responseMode: mode,
 						clockSkewMs: read["skew-ms"],
 						authorizationUrl: (start) => {

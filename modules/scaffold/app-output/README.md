@@ -29,6 +29,7 @@
 - A target that holds anything is refused, never overwritten; a missing or empty one is taken. Every file is made before any is written.
 - A name not an npm package is refused by `namesPackages`, before anything is written.
 - The manifest names the pnpm the workspace builds with, and the app also depends on `zod` at the packages' version.
+- The manifest holds `start` and each entry's script, and the guide starts the app with `pnpm start`; beside a package outside the release it holds no `scripts` (`outside`), and the guide's start gives the command itself.
 - A scalar its owner's example gives in several lines is still read from env, but left out of the env example and listed among the keys written in the local layer; the guide and the env example say such a value goes in the local layer.
 - Git leaves out every env file but `.env.example`, the local layer, `*.pem` and `*.key`; the image's build context leaves out those, `.env.example` and `.git`.
 - The image follows one Node 24 minor, patch and digest unpinned, so a build takes its patches; a minor is fixed only until a newer one is out, so the operator moves `FROM` to the latest 24.x minor at each Node security release.

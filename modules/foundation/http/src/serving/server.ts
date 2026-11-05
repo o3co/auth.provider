@@ -44,9 +44,17 @@ export interface Serving {
 	};
 }
 
-/** The request's head; undefined when the request target is not a URL, or its query not UTF-8. */
+/**
+ * Whether a request target is in origin-form (RFC 9112 §3.2.1), a path the URL parser reads as this server's
+ * alone: a scheme, or a `/` or `\` after the first `/`, would make it name a host, and the path read would
+ * be that host's.
+ */
+const originForm = (target: string) => target.startsWith("/") && !/^\/[/\\]/.test(target);
+
+/** The request's head; undefined when the request target is not a path of this server's, or its query not UTF-8. */
 function frozenHead(message: IncomingMessage, proxies: TrustedProxies): Head | undefined {
-	const url = URL.parse(message.url ?? "/", "http://placeholder");
+	const target = message.url ?? "/";
+	const url = originForm(target) ? URL.parse(target, "http://placeholder") : null;
 	const query = url && paramsOf(url.search.slice(1));
 	if (!url || !query) return undefined;
 	const headers = new Map<string, string>();

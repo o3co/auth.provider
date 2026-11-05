@@ -12,7 +12,7 @@ import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import { senderBindings } from "@mod/sender-binding";
+import { type BindingRead, senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
 import { type Session, sessions } from "@mod/session";
 import { openedOf, sessionStandIn } from "@mod/session/testing";
@@ -63,6 +63,8 @@ export async function harness(
 		readonly offered?: Offered;
 		/** The seal section in place of the test's one key: a ring with past keys, say. */
 		readonly seal?: Readonly<Record<string, unknown>>;
+		/** What the DPoP kind answers, in place of its holder's binding. */
+		readonly bindingRead?: () => BindingRead | undefined;
 	} = {},
 ) {
 	let now = 1_800_000_000_000;
@@ -115,7 +117,8 @@ export async function harness(
 			m.contribute(senderBindings).by(() => ({
 				member: dpop.member,
 				tokenType: dpop.tokenType,
-				read: async () => ({ kind: "bound", confirmation: dpop.confirmation }),
+				read: async () =>
+					options.bindingRead?.() ?? { kind: "bound", confirmation: dpop.confirmation },
 			})),
 			m.provide(probed).by(async (c) => ({
 				route: (await c.collect(routes)).find((r) => r.path === "/oauth/federation/*") as Route,

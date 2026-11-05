@@ -286,7 +286,8 @@ jobs:
 
   # Publishing alone, with what it takes: the tarballs the pack job kept, held to those the lists
   # were made of and to what npm holds, then the draft release with its assets, then npm. Nothing
-  # the release packed runs here.
+  # the release packed runs here. Its environment, which each name's trusted publisher names, takes
+  # `v*` tags alone (docs/releasing.md).
   publish:
     name: Publish to npm
     needs: [evidence, evidence-security, pack, sbom]
@@ -299,6 +300,7 @@ jobs:
           && ((needs.evidence.outputs.route == 'public' && needs.evidence-security.result == 'skipped')
            || (needs.evidence.outputs.route == 'security' && needs.evidence-security.result == 'success')) }}
     runs-on: ubuntu-latest
+    environment: npm-publish
     permissions:
       contents: write
       id-token: write
@@ -419,7 +421,7 @@ jobs:
       # this version already on npm is passed over, so a rerun after a partial
       # publish publishes only what is missing. npm authenticates through this
       # run's OIDC token (`id-token: write`), each name bound to this workflow
-      # as its trusted publisher; no token is stored. `--provenance` ties each
+      # and its environment as its trusted publisher; no token is stored. `--provenance` ties each
       # to this run; the manifests name this repository for it.
       - name: Publish packages
         env:

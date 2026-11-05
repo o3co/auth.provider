@@ -37,11 +37,10 @@ const pnpm = "pnpm@11.28.7";
 /** The zod the packages take, so a section the app writes is read by the same copy. */
 export const zod = "4.6.7";
 
-/** The project's manifest, starting the app with `start`, and running each of `scripts` by its name. */
+/** The project's manifest, running each of `scripts` by its name; with none given, it holds no `scripts`. */
 export const manifestOf = (
-	start: string,
 	dependencies: Record<string, string>,
-	scripts: Readonly<Record<string, string>> = {},
+	scripts?: Readonly<Record<string, string>>,
 ) =>
 	`${JSON.stringify(
 		{
@@ -49,7 +48,7 @@ export const manifestOf = (
 			private: true,
 			type: "module",
 			packageManager: pnpm,
-			scripts: { start, ...scripts },
+			scripts,
 			dependencies: { ...dependencies, zod },
 		},
 		null,

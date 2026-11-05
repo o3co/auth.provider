@@ -16,7 +16,7 @@ import type { OutboundRefusals } from "@mod/outbound-policy";
 import { testTlsOptions } from "@mod/tls-options/testing";
 import { type AuthorizationStart, type CodeExchange, UpstreamRefused } from "@mod/upstreams";
 import { beforeAll, describe, expect, it } from "vitest";
-import { settingsOf } from "../src/settings.ts";
+import { type Settings, settingsOf } from "../src/settings.ts";
 import { issuer, opened } from "../src/upstream.ts";
 
 const base = "https://google.test";
@@ -577,5 +577,57 @@ describe("idp-google", () => {
 		const endSession = offered(upstream.endSession, "endSession");
 		expect(endSession(at)).toBe("https://app.example/bye?state=st");
 		expect(endSession({})).toBe("https://accounts.google.com/Logout");
+	});
+});
+
+describe("where the keys vouching for a subject are read", () => {
+	const own = "https://www.googleapis.com/oauth2/v3/certs";
+	const moved = "https://keys.example/certs";
+
+	it("says nothing at Google's own key set, so the name stands for Google's issuer as it did", async () => {
+		for (const jwks of [undefined, own, `${own}/`]) {
+			const { upstream } = await open({ settings: { "jwks-uri": jwks } });
+			expect(upstream.issuer, jwks).toBe(issuer);
+			expect("subjectsFrom" in upstream, jwks).toBe(false);
+		}
+	});
+
+	it("says nothing at a spelling of Google's own that its setting refuses, had one been read", async () => {
+		const given = { "client-id": "client", "client-secret": "s" };
+		const read = settings.parse(given);
+		const app = await assemble({
+			modules: [
+				defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
+					m.provide(outbound).by(() => ({}) as Outbound),
+				]),
+				externalJwtModule,
+			],
+			config: kernelConfig(),
+			runtime,
+		});
+		const at = { clock, log: recordingLog().log, idp: "google" };
+		for (const jwks of [
+			"https://WWW.googleapis.com/oauth2/v3/certs",
+			"https://www.googleapis.com:443/oauth2/v3/certs",
+		]) {
+			expect(() => settings.parse({ ...given, "jwks-uri": jwks }), jwks).toThrow();
+			const named = { ...read, "jwks-uri": jwks as Settings["jwks-uri"] };
+			const upstream = opened(named, {} as Outbound, app.get(externalJwt), at);
+			expect("subjectsFrom" in upstream, jwks).toBe(false);
+		}
+	});
+
+	it("names a named key set as the parser writes it, with no trailing slash, and leaves the issuer", async () => {
+		for (const jwks of [moved, `${moved}/`]) {
+			const { upstream } = await open({ settings: { "jwks-uri": jwks } });
+			expect(upstream.subjectsFrom, jwks).toBe(moved);
+			expect(upstream.issuer, jwks).toBe(issuer);
+		}
+	});
+
+	it("says nothing where only another endpoint is named, which reads no key", async () => {
+		const { upstream } = await open({ settings: { "jwks-uri": own } });
+		expect(new URL(upstream.authorizationUrl(start)).host).toBe("google.test");
+		expect("subjectsFrom" in upstream).toBe(false);
 	});
 });

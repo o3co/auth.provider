@@ -38,6 +38,8 @@ onLegacy(passkeyArea, {
 		"passkey-credential-limit",
 		// The legacy build logs in with a passkey at the token endpoint alone, never into a session, and never refuses a password for one.
 		"passkey-session-login",
+		// The legacy build's passkey login at the token endpoint asks its users nothing.
+		"passkey-grant-asks-users",
 	],
 	differs: [
 		// A framed ceremony whose browser reports no top origin is accepted with no frame listed.

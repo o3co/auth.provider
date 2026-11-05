@@ -23,7 +23,7 @@ beforeEach(() => {
 
 /**
  * A kind proving a key in a header: `bad` is refused, `nonce` asks for a header, `own` answers its
- * own challenge, `down` is unavailable.
+ * own challenge, `many` answers too many, `down` is unavailable.
  */
 const kind = (member: string, tokenType: string, header: string) =>
 	defineModule({ name: `binding-${member}`, replicaSafe: false, takes: [] }, (m) => [
@@ -41,6 +41,14 @@ const kind = (member: string, tokenType: string, header: string) =>
 				if (value === "own") {
 					return { kind: "refused", error: "own", headers: { "www-authenticate": "DPoP own" } };
 				}
+				if (value === "many") {
+					return {
+						kind: "refused",
+						error: "rate_limited",
+						status: 429,
+						headers: { "retry-after": "7" },
+					};
+				}
 				if (value === "down") return { kind: "refused", error: "down", unavailable: true };
 				return { kind: "bound", confirmation: value };
 			},
@@ -50,7 +58,7 @@ const kind = (member: string, tokenType: string, header: string) =>
 type Check =
 	| {
 			readonly kind: "valid";
-			readonly subject: string;
+			readonly grant: { readonly subject: string };
 			readonly binding?: Binding;
 	  }
 	| { readonly kind: "invalid"; readonly reason: string };
@@ -61,12 +69,16 @@ const bound = (member: string, confirmation: string, tokenType: string) => ({
 	tokenType,
 });
 const issued: Record<string, Check> = {
-	plain: { kind: "valid", subject: "alice" },
-	keyed: { kind: "valid", subject: "bob", binding: bound("jkt", "k1", "DPoP") },
-	certified: { kind: "valid", subject: "carol", binding: bound("x5t", "c1", "Bearer") },
-	stranger: { kind: "valid", subject: "dave", binding: bound("other", "o1", "Other") },
-	"s3cr3t-plain": { kind: "valid", subject: "erin" },
-	"s3cr3t-keyed": { kind: "valid", subject: "erin", binding: bound("jkt", "k9", "DPoP") },
+	plain: { kind: "valid", grant: { subject: "alice" } },
+	keyed: { kind: "valid", grant: { subject: "bob" }, binding: bound("jkt", "k1", "DPoP") },
+	certified: { kind: "valid", grant: { subject: "carol" }, binding: bound("x5t", "c1", "Bearer") },
+	stranger: { kind: "valid", grant: { subject: "dave" }, binding: bound("other", "o1", "Other") },
+	"s3cr3t-plain": { kind: "valid", grant: { subject: "erin" } },
+	"s3cr3t-keyed": {
+		kind: "valid",
+		grant: { subject: "erin" },
+		binding: bound("jkt", "k9", "DPoP"),
+	},
 };
 const tokens = {
 	verifyAccess: async (token: string): Promise<Check> => {
@@ -169,7 +181,10 @@ it("admits a bound token whose holder proves the same binding at the resource", 
 		kind: "admitted",
 		access: issued.keyed,
 	});
-	expect(reads).toEqual([{ kind: "resource", token: "keyed" }]);
+	// The kind reads what the token holds and for whom, so it can tell its holder's proof from another's.
+	expect(reads).toEqual([
+		{ kind: "resource", token: "keyed", held: bound("jkt", "k1", "DPoP"), subject: "bob" },
+	]);
 	expect(await presenting({ authorization: "Bearer certified", "x-cert": "c1" })).toEqual({
 		kind: "admitted",
 		access: issued.certified,
@@ -183,6 +198,19 @@ it("refuses a bound token when the request proves no binding or another key [gua
 	expect(await presenting({ authorization: "Bearer certified", "x-cert": "c2" })).toEqual(
 		refusal(401, 'Bearer error="invalid_token"', "invalid_token"),
 	);
+});
+
+it("answers a kind's too many with its wait, challenging nothing, and leaves a token no kind counts alone", async () => {
+	expect(await presenting({ authorization: "DPoP keyed", "x-proof": "many" })).toEqual({
+		kind: "refused",
+		status: 429,
+		error: "rate_limited",
+		headers: { "retry-after": "7" },
+	});
+	expect(await presenting({ authorization: "bearer plain", "x-proof": "many" })).toMatchObject({
+		kind: "admitted",
+	});
+	expect(reads).toHaveLength(1);
 });
 
 it("passes a kind's refusal code and headers through", async () => {

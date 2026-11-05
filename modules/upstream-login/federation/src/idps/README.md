@@ -10,7 +10,7 @@ Internal module of `federation`: opening the configured IdPs at boot.
 - What a type checks of its settings and its upstream (the type). Refusing boot (the package's module, with the reasons found here).
 
 ## Offers
-- `idpsIn`, `upstreamsIn`, `upstreamNamesIn` and `amrSourceIn`: from the build context, the opened IdPs (refusing boot with every reason), `upstreams` over them, the IdPs' names with their upstreams' issuers for `users`, and `login-gates`' amr source (what a federation login proves and what the IdPs' amr maps to).
+- `idpsIn`, `upstreamsIn`, `upstreamNamesIn` and `amrSourceIn`: from the build context, the opened IdPs (refusing boot with every reason), `upstreams` over them, the IdPs' names for `users`, each with where its upstream says its subjects are read, else its issuer, and `login-gates`' amr source (what a federation login proves and what the IdPs' amr maps to).
 - `openIdps` (the offered IdP types, the section's `idps`, `http`'s public origin and whether its cookies can be secure) → the opened IdPs by name, and the reasons to refuse boot.
 
 ## Invariants
@@ -18,6 +18,7 @@ Internal module of `federation`: opening the configured IdPs at boot.
 - An IdP is refused when no module offers its type, when its type refuses its settings (one reason per issue), with no public origin, or when its upstream does not match its settings or cannot be reached (`kernel`'s unavailable), told apart.
 - An IdP whose upstream answers in a posted form is refused when cookies cannot be secure.
 - An IdP's type sees only its own settings, without `type`, `upstream-amr` and `fresh-login-allowance`, read as a section is (`kernel`'s `readConfigured`): a string from the environment converts as the type's schema asks.
+- A name is declared with its upstream's `subjectsFrom` where it says one; `upstreams` still answers the issuer alone, what a delegation's answer is compared with.
 - With no IdP, boot goes on (a deployment may still be configuring), warning `federation.no_idps` each time: every login then answers not found.
 
 ## Depends on

@@ -164,7 +164,7 @@ flowchart LR
 | `@mod/consent` | feature | `@mod/audit`, `@mod/client-documents`, `@mod/clients`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/url-setting` |
 | `@mod/device-grant` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/clients`, `@mod/csrf`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/rate-limit`, `@mod/request-source`, `@mod/session`, `@mod/subject-revocation`, `@mod/token-endpoint`, `@mod/tokens`, `@mod/url-setting` |
 | `@mod/discovery` | feature | `@mod/http`, `@mod/issuer`, `@mod/kernel` |
-| `@mod/dpop` | feature | `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/sender-binding` |
+| `@mod/dpop` | feature | `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/rate-limit`, `@mod/sender-binding` |
 | `@mod/exchange-id-tokens` | feature | `@mod/clients`, `@mod/external-jwt`, `@mod/kernel`, `@mod/subject-revocation`, `@mod/token-exchange`, `@mod/users` |
 | `@mod/grants` | feature | `@mod/clients`, `@mod/http`, `@mod/kernel`, `@mod/sender-binding`, `@mod/tokens` |
 | `@mod/issuer` | feature | `@mod/http`, `@mod/kernel`, `@mod/url-setting` |
@@ -204,7 +204,7 @@ flowchart LR
 | `@mod/passkey-witnessing` | feature | `@mod/audit`, `@mod/kernel`, `@mod/passkey-witness`, `@mod/passkeys` |
 | `@mod/passkeys` | feature | `@mod/kernel`, `@mod/passkey-witness`, `@mod/webauthn` |
 | `@mod/webauthn` | feature | `@mod/kernel` |
-| `@mod/webauthn-login` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/passkeys`, `@mod/rate-limit`, `@mod/refresh`, `@mod/subject-revocation` |
+| `@mod/webauthn-login` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/passkeys`, `@mod/rate-limit`, `@mod/refresh`, `@mod/subject-revocation`, `@mod/users` |
 
 ### scaffold
 
