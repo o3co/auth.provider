@@ -4,7 +4,6 @@ Notable changes, newest first, in the form of [Keep a Changelog](https://keepach
 
 Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.provider/blob/v0.17.0/CHANGELOG.md).
 
-## [0.19.0] - 2026-11-01
 ## [0.19.0] - 2026-11-05
 
 Read the [migration guide](docs/migration.md) before upgrading from 0.18: each line below that links an upgrade notice is a change an operator or the author of a module of their own must act on, and the notice says what to do.
@@ -99,7 +98,6 @@ Read the [migration guide](docs/migration.md) before upgrading from 0.18: each l
 - `kernel`: in development, every value a production deployment refuses is warned of at every start ([U-0.19-119](docs/migration.md#u-0.19-119)).
 - `kernel`, `jwt-bearer`, `audit`, `mfa-witnessing`, `passkey-witnessing`: a warning names what it is about in a field a log line keeps ([U-0.19-120](docs/migration.md#u-0.19-120)).
 - `tokens`: an access token's lifetime counts from when it is asked for ([U-0.19-124](docs/migration.md#u-0.19-124)).
-- 0.19.0 ends support for every version before it, as the [security policy](SECURITY.md#supported-versions) says.
 - 0.19.0 ends support for every version before it, 0.18 included, as the [security policy](SECURITY.md#supported-versions) says.
 - `code-grant`: a deployment that composes it cannot go back to a release before 0.19 once it runs 0.19 ([U-0.19-58](docs/migration.md#u-0.19-58)).
 - `clients-cimd` is marked preview, following draft-ietf-oauth-client-id-metadata-document-00.
