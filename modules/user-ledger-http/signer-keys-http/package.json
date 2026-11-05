@@ -31,6 +31,6 @@
 		"@mod/tls-options": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/tokens": "workspace:*",
-		"jose": "6.2.13"
+		"jose": "6.2.15"
 	}
 }
