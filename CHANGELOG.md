@@ -208,6 +208,7 @@ Read the [migration guide](docs/migration.md) before upgrading from 0.18: each l
 - `webauthn`: only the authenticator data of a registration response is read.
 - The release's publish job runs in an environment of its own.
 - `token-exchange`: the security model declares what the revocation of an actor's subject leaves of an exchanged token.
+- `http`: a request target not read as an origin-form path is refused `400`.
 
 ## [0.18.6] - 2026-10-25
 
