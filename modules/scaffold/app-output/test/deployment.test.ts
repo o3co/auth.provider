@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { writeDeployment } from "../src/contract.ts";
 import { fakePackages } from "./fake.ts";
 
@@ -413,15 +413,80 @@ it("records the packages outside the release and checks the lockfile against the
 		zod: "sha512-ZOD",
 	});
 	const manifest = JSON.parse(await read(target, "package.json"));
-	expect(manifest.scripts["check:outside"]).toBe("node scripts/check-outside.mjs");
+	expect(manifest).not.toHaveProperty("scripts");
 	// The check holds what it uses: the app depends on nothing for it.
 	expect(manifest.dependencies).not.toHaveProperty("semver");
 	expect(manifest.dependencies).not.toHaveProperty("yaml");
 	const docker = await read(target, "Dockerfile");
 	expect(docker).toContain("COPY outside-modules.json ./outside-modules.json");
-	expect(docker).toContain("RUN pnpm install --frozen-lockfile --prod && pnpm check:outside");
-	expect(await read(target, "README.md")).toContain("## Packages outside this release");
+	expect(docker).toContain("RUN pnpm install --frozen-lockfile --prod --ignore-scripts\n");
+	const stage = docker.slice(docker.indexOf("AS deps"), docker.indexOf("AS runtime"));
+	const steps = stage.split("\n").filter((line) => /^(COPY|RUN)\b/.test(line));
+	// The check holds what it uses, and comes before anything is installed: the stage's first RUN, and only files copied.
+	expect(steps).toEqual([
+		"COPY package.json pnpm-lock.yaml pnpm-workspace.yam[l] ./",
+		"COPY outside-modules.json ./outside-modules.json",
+		"COPY scripts/check-outside.mjs ./scripts/check-outside.mjs",
+		"RUN node scripts/check-outside.mjs",
+		"RUN pnpm --version",
+		"RUN pnpm install --frozen-lockfile --prod --ignore-scripts",
+	]);
+	expect(stage).not.toContain("node_modules");
+	expect(await read(target, ".dockerignore")).toContain("node_modules/");
+	const guide = await read(target, "README.md");
+	expect(guide).toContain("## Packages outside this release");
+	// The start the guide opens with installs as that section says, and no other way.
+	expect(guide).toContain("1. Install as `## Packages outside this release` below says");
+	expect(guide).not.toContain("1. `pnpm install`");
 	expect(await read(target, "AGENTS.md")).toContain("`outside-modules.json`");
+});
+
+describe.each([
+	readme,
+	listedReadme("`@mod/http`"),
+	{ template: "full-readme.md", fill: { optIns: "" } },
+])("the guide's start, by $template", (guide) => {
+	const outside = {
+		modules: [
+			{
+				name: "@x/grant",
+				version: "1.2.0",
+				integrity: "sha512-AAAA",
+				dependencies: {},
+				optionalDependencies: {},
+				peerDependencies: {},
+				peerDependenciesMeta: {},
+			},
+		],
+		registries: { default: "https://registry.npmjs.org" },
+	};
+	const release = { version: "1.2.3", integrity: { zod: "sha512-ZOD" } };
+	const app = "APP_CONFIG=config/local.conf,config/application.conf";
+
+	it("beside a package outside, gives the command the app starts with, and writes each entry's file with no script", async () => {
+		const target = await mkdtemp(join(tmpdir(), "app-output-"));
+		await writeDeployment(target, ["@mod/seal"], fakePackages(release, [], outside), guide);
+		const said = await read(target, "README.md");
+		expect(said).toContain(`4. \`${app} node --env-file-if-exists=.env src/main.ts\``);
+		expect(said).not.toContain(`${app} pnpm start`);
+		expect(said).toContain("1. Install as `## Packages outside this release` below says");
+		expect(said).not.toContain("{{");
+		expect(JSON.parse(await read(target, "package.json"))).not.toHaveProperty("scripts");
+		expect(await readdir(join(target, "src"))).toContain("reseal.ts");
+	});
+
+	it("beside none, keeps the app's scripts and starts it by them", async () => {
+		const target = await mkdtemp(join(tmpdir(), "app-output-"));
+		await writeDeployment(target, ["@mod/seal"], fakePackages(), guide);
+		const said = await read(target, "README.md");
+		expect(said).toContain(`4. \`${app} pnpm start\``);
+		expect(said).toContain("1. `pnpm install`");
+		expect(said).not.toContain("{{");
+		expect(JSON.parse(await read(target, "package.json")).scripts).toEqual({
+			start: "node --env-file-if-exists=.env src/main.ts",
+			reseal: "node --env-file-if-exists=.env src/reseal.ts",
+		});
+	});
 });
 
 it("tells of what comes with the modules as it holds for the app: the release's, or beside packages outside it", async () => {
@@ -473,9 +538,17 @@ it("takes a registry's credentials as a build secret, only where a scope records
 	expect(await read(scoped, ".npmrc")).toBe("@x:registry=https://registry.x.example/\n");
 	const docker = await read(scoped, "Dockerfile");
 	expect(docker).toContain("COPY .npmrc ./.npmrc");
-	expect(docker).toContain(
-		"RUN --mount=type=secret,id=npmrc,target=/root/.npmrc pnpm install --frozen-lockfile --prod && pnpm check:outside",
-	);
+	const mounted = "RUN --mount=type=secret,id=npmrc,target=/root/.npmrc ";
+	const steps = docker.split("\n").filter((line) => line.startsWith("RUN "));
+	// The secret reaches one command, which installs alone: what the image's other RUNs do is done with none.
+	expect(steps.filter((line) => line.startsWith(mounted))).toEqual([
+		`${mounted}pnpm install --frozen-lockfile --prod --ignore-scripts`,
+	]);
+	const install = steps.findIndex((line) => line.startsWith(mounted));
+	expect(steps.slice(install - 2, install)).toEqual([
+		"RUN node scripts/check-outside.mjs",
+		"RUN pnpm --version",
+	]);
 	// The image the app runs in takes neither.
 	expect(docker.slice(docker.indexOf("AS runtime"))).not.toContain("npmrc");
 	const plain = await written({ default: "https://registry.npmjs.org" });

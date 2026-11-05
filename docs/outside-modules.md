@@ -49,15 +49,19 @@ The kernel finds contracts by the object itself, never by name, and a section's 
 - None of them is among your `dependencies` or `optionalDependencies`, bundled, or reached through an alias (`"my-zod": "npm:zod@…"`).
 - Do not bake a copy of them into your build's output: a lockfile cannot show it, and nothing refuses it.
 
-### Run nothing when installed
+### Be a module, with one way to run its code
 
-A package with a `preinstall`, `install` or `postinstall` script is refused.
+A package outside the release is a module: the app imports it, and that is the one way its code runs. So a package with a `preinstall`, `install` or `postinstall` script is refused, and so is one declaring a command (`bin`, or `directories.bin`), at generation and, as its lockfile entry says `hasBin`, by the check. This is a rule on what your package may be: it does not hold what pnpm links at `node_modules/.bin`, which [is not checked](#what-is-and-is-not-checked). The app's install and its image's run with `--ignore-scripts`, so a package needing a build fails when the app runs, not at its install.
 
 ### Write its section's example
 
 If your module has a section of the configuration, ship its example as `config.example` beside `package.json`, as the release's modules do. It holds exactly one section, whose name no other module composed takes, with placeholders only. It is read as data: a substitution (`${…}`) or an include is refused, and so is a backtick or a control character other than a line break in a key or a value, a file over 64 KiB, or a section over 32 KiB as JSON writes it (its keys and values, with the punctuation and escapes between them). `app-output`'s cards hold these rules.
 
 `README.md` and `reference.conf` beside it are read too, as your card and your section's defaults; a `## Deployment` section of the card is pointed at from the app's guide.
+
+### Say where an IdP type's subjects are read
+
+If your module offers an IdP type (`upstreams`' `idpTypes`), `federation` declares each IdP's name to `users` with what its upstream says, and `users` holds the name to that value across starts. Where your type's settings can point away from its own endpoint for what decides who a subject is, such as the API that names the user or the key set that signs its tokens, have `open` answer that URL as `subjectsFrom`, as the URL parser writes it with no trailing slash, and leave it out at the type's own endpoint, however spelled. `issuer` stays what your upstream's answers are compared with. The `upstreams` card holds this; `idp-github`, `idp-google` and `idp-apple` do it.
 
 ## Composing a package outside the release
 
@@ -67,14 +71,14 @@ The generator touches no registry. Install the package with pnpm into a project 
 
 ```sh
 mkdir outside && cd outside
-pnpm init
+echo '{ "private": true }' > package.json
 pnpm add @example/did-grant@1.2.0
 cd ..
 ```
 
 The package must come from a registry, npm's or one of your own: one installed from a git repository, a directory or a file is refused.
 
-pnpm resolves it from your registry with your credentials and checks its integrity; set `minimumReleaseAge` there too, so a version published a moment ago is not taken. Use pnpm (10 or later, whose default runs no dependency's build script), keep this project on your own machine, put no `overrides` in it, and do not change it while the generator reads it.
+pnpm resolves it from your registry with your credentials and checks its integrity; set `minimumReleaseAge` there too, so a version published a moment ago is not taken. Use pnpm (10 or later, whose default runs no dependency's build script), keep this project on your own machine, put no `overrides` in it, and do not change it while the generator reads it. Write its `package.json` as above: `pnpm init` names a package manager in it, which puts a second document in the lockfile, and the generator refuses a lockfile it cannot read. Where `pnpm add` stops at a dependency's build and asks you to approve it, do not: the generator reads the project as it is.
 
 ### Generate the app
 
@@ -96,33 +100,52 @@ Only the packages you name are read, and a package outside the release brings no
 
 The app is installed with no version published within the last day, but the release's own. To take a newer one of your package, name it: `--allow-fresh @example/did-grant` lets that version alone be installed.
 
-### Install the app, and check what it installed
+Start the generator with `npx`, from outside the project, as above. Generating runs no code of the package when it is started so. Started by `pnpm exec` from any directory, from a shell with a relative `./node_modules/.bin` on PATH, or by `npx` or `pnpm dlx` from a directory holding the package, a command linked at the project's `node_modules/.bin` can run in its place, `node` among them, and it may tell you nothing. The same goes for generating an app again: not from inside the app.
 
-The app records each package outside the release in `outside-modules.json` (its version, its integrity, the dependencies it declares and the registries it comes from), with the integrity the release recorded of each of its own packages and of zod (`held`), and holds its lockfile to that record with `pnpm check:outside`:
+### Check the app's lockfile, then install it
+
+The app records each package outside the release in `outside-modules.json` (its version, its integrity, the dependencies it declares and the registries it comes from), with the integrity the release recorded of each of its own packages and of zod (`held`), and holds its lockfile to that record with `scripts/check-outside.mjs`, before anything is installed:
 
 ```sh
 cd my-app
-pnpm install
-pnpm check:outside
+pnpm install --lockfile-only
+node scripts/check-outside.mjs
+pnpm install --frozen-lockfile --ignore-scripts
 git add pnpm-lock.yaml
 ```
 
-Commit the lockfile once the check passes. The image runs the same check after installing, and refuses to build otherwise. The check holds what it uses, so nothing of the install it checks is run by it.
+Commit the lockfile once the check passes. The image runs the same check with node, in a step of its own before its install, and refuses to build otherwise. The check holds what it uses, and runs before there is an install for it to load anything of.
 
-Where your project installs a scope from a registry of its own, the app is given `.npmrc`, naming each such registry by its origin and holding no credential. Commit it, and write a registry served under a path in it by hand. Keep credentials in your own `~/.npmrc`: the image's install stage copies the app's `.npmrc` and takes credentials as a build secret, so neither reaches the image the app runs in:
+Do not approve a build pnpm stops at (`pnpm approve-builds`): it runs where your credentials are, with `node_modules/.bin` first on PATH.
+
+Where your project installs a scope from a registry of its own, the app is given `.npmrc`, naming each such registry by its origin and holding no credential. Commit it, and write a registry served under a path in it by hand. Keep credentials in your own `~/.npmrc`: the image's install stage copies the app's `.npmrc` and takes credentials as a build secret, for its install alone, which runs no package's script, so neither reaches the image the app runs in:
 
 ```sh
 docker build --secret id=npmrc,src=$HOME/.npmrc -t auth-provider .
 ```
 
-`pnpm-workspace.yaml` holds every package of the release the app depends on, or a package outside it takes as a peer, every bundle of the release those depend on, and zod, to one version each. When you upgrade the release, generate the app again with the new release's `create-auth-provider` and take the overrides, `held` and `scripts/check-outside.mjs` from it: the overrides and `held` move together, and the check refuses one without the other. Take the check too, as one older than the record may not read all of it: an app generated before `held` was recorded has a check that does not read it.
+`pnpm-workspace.yaml` holds every package of the release the app depends on, or a package outside it takes as a peer, every bundle of the release those depend on, and zod, to one version each. When you upgrade the release, generate the app again with the new release's `create-auth-provider`, from outside the app, and take `package.json`, the README, the overrides, `held`, `scripts/check-outside.mjs` and the `Dockerfile` from it: the overrides and `held` move together, and the check refuses one without the other. Take the check too, as one older than the record may not read all of it: an app generated before `held` was recorded has a check that does not read it. A new version does not change a generated app's `Dockerfile`, manifest or check by itself.
+
+### Run the app by its files
+
+What pnpm links at `node_modules/.bin` is decided from things the lockfile does not record, so the check cannot hold it, and it may hold a command of a package no one named, `node` among them. So the app runs nothing through it: beside a package outside the release its `package.json` holds no scripts, and `pnpm start` and `pnpm run <entry>` fail. The image's start and its check run node's own: `node_modules/.bin` is not on its PATH.
+
+Each file is run with node, with what the README's start gives it. Where a document says `pnpm start` or `pnpm run <entry>`, such an app runs:
+
+```sh
+APP_CONFIG=config/local.conf,config/application.conf node --env-file-if-exists=.env src/main.ts
+APP_CONFIG=config/local.conf,config/application.conf node --env-file-if-exists=.env src/<entry>.ts
+```
+
+These run with what `.bin` holds, in place of the command you meant, so keep them away from such an app: a script you add, `pnpm exec`, `pnpm node`, `pnpm <name>`, `npx` or `pnpm dlx` run from the app's directory, a `.bin/<cmd>` run by path, a shell with `./node_modules/.bin` on PATH, and a package's build script once its build is approved.
 
 ## What is and is not checked
 
-Checked: that the app installs each package outside the release as recorded (its version, its integrity, its dependencies as declared, from the registry recorded), that the lockfile holds one version and one resolution of each package of the release and of zod, the tarball whose integrity the release recorded, that each declaration and the graph of all modules keep the rules above, and that generating runs no code of the package and uses no network.
+Checked: that the app's lockfile holds each package outside the release as recorded (its version, its integrity, its dependencies as declared, from the registry recorded), that it holds one version and one resolution of each package of the release and of zod, the tarball whose integrity the release recorded, that each declaration and the graph of all modules keep the rules above, and that generating, [started with `npx` from outside the project](#generate-the-app), runs no code of the package and uses no network.
 
 Not checked:
 
 - The code of a package outside the release. It is not part of the release, nor covered by its conformance.
-- The project you installed it into. The generator reads it as you left it; a change there between installing and generating, or a change of pnpm's store, reaches the generated app and is not found later by `pnpm check:outside`, which checks the app's install, not what was generated.
+- The project you installed it into. The generator reads it as you left it; a change there between installing and generating, or a change of pnpm's store, reaches the generated app and is not found later by `scripts/check-outside.mjs`, which checks the app's lockfile, not what was generated.
+- What pnpm links at `node_modules/.bin`, and anything run with it: [the app runs nothing through it](#run-the-app-by-its-files).
 - A registry taken over, publishing a bad version with a good integrity: `minimumReleaseAge` only delays it.

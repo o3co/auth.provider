@@ -107,6 +107,43 @@ describe("http", () => {
 		expect((await fetch(`${base}/x`)).status).toBe(204);
 	});
 
+	it("answers 400 to a request target that is not in origin-form, reaching no route", async () => {
+		let reached = 0;
+		const base = await serveWith(
+			handlers([
+				{
+					method: "GET",
+					path: "/x",
+					handle: () => {
+						reached += 1;
+						return { status: 204 };
+					},
+				},
+			]),
+		);
+		const { port } = new URL(base);
+		// Node's parser refuses a target starting with a backslash itself; these reach the module.
+		for (const target of [
+			"//evil/x",
+			"///evil/x",
+			"/\\evil/x",
+			"http://evil/x",
+			"HTTP://evil/x",
+			"*",
+		]) {
+			expect(
+				await rawStatus(
+					Number(port),
+					`GET ${target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`,
+				),
+				target,
+			).toBe(400);
+		}
+		expect(reached).toBe(0);
+		expect((await fetch(`${base}/x?a=1`)).status).toBe(204);
+		expect(reached).toBe(1);
+	});
+
 	it("answers unknown paths with 404 and wrong methods with 405", async () => {
 		const base = await serveWith(
 			handlers([{ method: "GET", path: "/x", handle: () => ({ status: 204 }) }]),

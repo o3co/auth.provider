@@ -1,29 +1,25 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { conditionOf, inputOf, type RunContext } from "../../workflow-caches/test/expression.ts";
 
+const workflowFiles = join(
+	import.meta.dirname,
+	"..",
+	"..",
+	"..",
+	"..",
+	"..",
+	"..",
+	".github",
+	"workflows",
+);
+
 /** The release workflow, read as GitHub reads it. */
-const workflow = parse(
-	readFileSync(
-		join(
-			import.meta.dirname,
-			"..",
-			"..",
-			"..",
-			"..",
-			"..",
-			"..",
-			".github",
-			"workflows",
-			"release.yml",
-		),
-		"utf8",
-	),
-) as {
+const workflow = parse(readFileSync(join(workflowFiles, "release.yml"), "utf8")) as {
 	readonly jobs: Record<
 		string,
 		{
@@ -52,6 +48,55 @@ it("gives the evidence job only what reading another run's evidence takes, and n
 		([, job]) => job.permissions?.actions !== undefined,
 	);
 	expect(reading.map(([name]) => name)).toEqual(["evidence"]);
+});
+
+type Permissions = string | Record<string, string> | null | undefined;
+
+/** `write-all` grants the token too, and a job with no permissions of its own has its workflow's. */
+const grantsOidc = (permissions: Permissions): boolean =>
+	typeof permissions === "string"
+		? permissions === "write-all"
+		: permissions?.["id-token"] === "write";
+
+/** Each job of these workflow files holding the run's OIDC token: file, name, environment. */
+const holdingOidc = (files: Record<string, string>): unknown[][] =>
+	Object.entries(files).flatMap(([file, text]) => {
+		const { permissions, jobs } = parse(text) as {
+			readonly permissions?: Permissions;
+			readonly jobs: Record<
+				string,
+				{ readonly permissions?: Permissions; readonly environment?: unknown }
+			>;
+		};
+		return Object.entries(jobs)
+			.filter(([, job]) => grantsOidc(job.permissions ?? permissions))
+			.map(([name, job]) => [file, name, job.environment]);
+	});
+
+it("gives the run's OIDC token to the publish job alone of every workflow file, in the environment that is its own", () => {
+	const names = readdirSync(workflowFiles).filter((name) => /\.ya?ml$/.test(name));
+	expect(names).toContain("release.yml");
+	const files = Object.fromEntries(
+		names.map((name) => [name, readFileSync(join(workflowFiles, name), "utf8")]),
+	);
+	expect(holdingOidc(files)).toEqual([["release.yml", "publish", "npm-publish"]]);
+});
+
+it("finds a job holding the OIDC token however its permissions grant it, in any file", () => {
+	const job = (permissions: string) => `    permissions:${permissions}\n    runs-on: x\n`;
+	expect(
+		holdingOidc({
+			"own.yml": `jobs:\n  named:\n${job("\n      id-token: write")}  all:\n${job(" write-all")}  reads:\n${job(" read-all")}  none:\n${job("\n      id-token: none")}`,
+			"all-above.yml": `permissions: write-all\njobs:\n  above:\n    runs-on: x\n  narrowed:\n${job("\n      contents: read")}`,
+			"named-above.yml":
+				"permissions:\n  id-token: write\njobs:\n  above:\n    environment: e\n    runs-on: x\n",
+		}),
+	).toEqual([
+		["own.yml", "named", undefined],
+		["own.yml", "all", undefined],
+		["all-above.yml", "above", undefined],
+		["named-above.yml", "above", "e"],
+	]);
 });
 
 it("keeps no credential in the evidence job's checkout, and fetches main's history for the judge", () => {

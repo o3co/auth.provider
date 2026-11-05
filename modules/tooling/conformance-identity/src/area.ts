@@ -30,8 +30,10 @@ export interface LedgerScene {
 	readonly credential: string;
 	/** How long the deployment waits for an answer. */
 	readonly timeoutMs?: number;
-	/** Where a user is looked up by upstream identity, `POST {"idp", "subject"}`, on the same host; with no lookup by subject beside it. */
+	/** Where a user is looked up by upstream identity, `POST {"idp", "subject"}`, on the same host. */
 	readonly upstreamUrl?: string;
+	/** Where a user is looked up by subject, `POST {"subject"}`, on the same host; none when left out. */
+	readonly subjectUrl?: string;
 }
 
 /** A ledger that revokes subjects over HTTP, from its sources with its credential. */

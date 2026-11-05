@@ -29,7 +29,7 @@ function sceneTold(backChannelBase: string): AreaScene {
 		kind: "confidential",
 		method: "client_secret_post",
 		secret: secretOf("app"),
-		grants: ["authorization_code", "refresh_token", exchangeGrant],
+		grants: ["authorization_code", "refresh_token", "client_credentials", exchangeGrant],
 		scopes: ["openid", "read"],
 		defaultScopes: ["read"],
 		redirectUris: [callback],
@@ -115,11 +115,12 @@ const redeem = (code: string) =>
 		redirect_uri: callback,
 		code_verifier: verifier,
 	});
-const exchange = (token: string | undefined) =>
+const exchange = (token: string | undefined, extra: Record<string, string> = {}) =>
 	post("/oauth/token", "app", {
 		grant_type: exchangeGrant,
 		subject_token: token ?? "",
 		subject_token_type: accessType,
+		...extra,
 	});
 const poll = (deviceCode: string) =>
 	post("/oauth/token", "tv", { grant_type: deviceGrant, device_code: deviceCode });
@@ -239,5 +240,26 @@ describe.runIf(areaTarget().can(ledgerRevocation))(
 			const again = await browser.authorize(codeRequest({ prompt: "none" }));
 			expect(again.at?.searchParams.get("code")).toBeTruthy();
 		}, 30_000);
+
+		it("leaves a token exchanged with an actor standing at the revocation of the actor's subject, and ends it at its own subject's [guarantee-4-a]", async () => {
+			const tokens = (await redeem(await codeOf())).body;
+			const actor = (await post("/oauth/token", "app", { grant_type: "client_credentials" })).body;
+			const exchanged = await exchange(tokens.access_token, {
+				actor_token: actor.access_token ?? "",
+				actor_token_type: accessType,
+			});
+			expect(exchanged.status).toBe(200);
+			expect(exchanged.body.refresh_token).toBeUndefined();
+			const claims = claimsOf(exchanged.body.access_token);
+			expect(claims).toMatchObject({ sub: subject, act: { sub: "app" } });
+			expect(claims.exp).toBeLessThanOrEqual(claimsOf(tokens.access_token).exp);
+
+			expect(await revoke("app")).toEqual({ status: 200, json: { complete: true } });
+			expect(await active(actor.access_token)).toBe(false);
+			expect(await active(exchanged.body.access_token)).toBe(true);
+
+			expect(await revoke(subject)).toEqual({ status: 200, json: { complete: true } });
+			expect(await active(exchanged.body.access_token)).toBe(false);
+		});
 	},
 );

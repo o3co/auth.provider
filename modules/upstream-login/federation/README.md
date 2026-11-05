@@ -14,7 +14,7 @@
 - A `login-gates` return path: each IdP's start.
 - Composition definition: `GET /session/oauth/federation/<idp>` (start: `redirect_to`, `prompt` (only `login` is passed on), `max_age`, `link` (`1` or `true` chooses the continuation named `link`; any other value is a login)) and `…/<idp>/callback` (`code`, `state`, `iss`, `error`; by POST for an IdP that answers in a posted form, else GET; the other method is 405); starts and callbacks are limited per source
 - Provides `upstreams`, as its default adapter.
-- Declares to `users` (`upstreamNames`) each IdP's name with the issuer its upstream says.
+- Declares to `users` (`upstreamNames`) each IdP's name with its upstream's `subjectsFrom` where it says one, else its issuer.
 - The operator section (its keys in the settings list).
 - Test configuration builders and an IdP type for tests (`./testing`)
 - Audit events for a callback that took its round trip, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`, or `refused` for a login a gate refused, or `revoked` for one `session` refused, its subject revoked since the round trip began, each answered as `unknown_user`)

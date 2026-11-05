@@ -164,7 +164,8 @@ describe("mtls", () => {
 			kind: "refused",
 			error: "invalid_client",
 		});
-		const resource = { kind: "resource", token: "t" } as const;
+		const held = { member: "x5t#S256", confirmation: "c", tokenType: "Bearer" };
+		const resource = { kind: "resource", token: "t", held, subject: "s" } as const;
 		expect(await listing.bindingOf(revoked, [intermediate], resource)).toMatchObject({
 			kind: "refused",
 			error: "invalid_token",

@@ -20,6 +20,8 @@ export interface IdpScene {
 	/** OpenID Connect (the default), or GitHub's, Google's or Apple's own at `issuer`, standing for their hosts. */
 	readonly type?: "oidc" | "github" | "google" | "apple";
 	readonly issuer: string;
+	/** GitHub only: its `issuer` setting left out, whatever `issuer` here says of its endpoints. */
+	readonly issuerUnset?: true;
 	readonly clientId: string;
 	/** Required by every type but Apple, which takes it or `signing`. */
 	readonly clientSecret?: string;
@@ -116,6 +118,8 @@ export interface FederationScene extends FederationPart {
 	readonly ledger?: LedgerScene;
 	/** Clients that run the code flow, so a scene can ask whether a browser is logged in. */
 	readonly clients?: readonly ClientScene[];
+	/** Tokens bound to a key by DPoP, for the clients above. */
+	readonly dpop?: true;
 	readonly userinfo?: boolean;
 	readonly revocations?: RevocationScene;
 	/** How recent a sign-in a link asks, in seconds: the identity part's window. */
@@ -137,7 +141,11 @@ export function federationScene(scene: FederationScene): AreaScene {
 		}),
 		...(scene.clients
 			? [
-					oauthArea.part({ issuer: scene.origin, clients: scene.clients }),
+					oauthArea.part({
+						issuer: scene.origin,
+						clients: scene.clients,
+						...(scene.dpop ? { dpop: true } : {}),
+					}),
 					// Receiving clients refresh their own tokens.
 					codeArea.part({
 						...(scene.keepsUpstreamTokens ? { refresh: {} } : {}),
