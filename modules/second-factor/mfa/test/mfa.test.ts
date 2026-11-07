@@ -90,10 +90,7 @@ const mailBack = defineModule({ name: "kind-mail-back", replicaSafe: false, take
 		addsSecondFactor: false,
 		guessable: true,
 		counts: false,
-		enroll: async () => {
-			const secret = randomBytes(6).toString("hex");
-			return { secret, show: { secret } };
-		},
+		enroll: async () => ({ secret: "back", show: { secret: "back" } }),
 		verify: async (secret, _state, proof) =>
 			proof === secret ? { kind: "valid" as const, state: null } : { kind: "invalid" as const },
 	})),
@@ -1566,8 +1563,7 @@ describe("a way back that does not count", () => {
 		const begun = await decided.begin("wen", "mail-back");
 		expect(begun.kind).toBe("begun");
 		if (begun.kind !== "begun") return;
-		const secret = String((begun.show as { secret: string }).secret);
-		const proved = await decided.provePending("wen", begun.pending, secret);
+		const proved = await decided.provePending("wen", begun.pending, "back");
 		expect(proved).toMatchObject({ kind: "valid" });
 		if (proved.kind !== "valid") return;
 		expect(proved.amr).toEqual(["email"]);
@@ -1579,8 +1575,22 @@ describe("a way back that does not count", () => {
 		expect(await decided.countingHeld("wen", "login")).toBe(false);
 	});
 
-	it("is refused to begin where mfa issues it itself (one guessing cannot beat), as before", async () => {
-		const { decided } = await serve({}, { kinds: [code, backup, mailBack] });
-		expect(await decided.begin("wen", "backup")).toEqual({ kind: "unknown-kind" });
+	// Every lookup by its kind meets the table as one not composed does (`guessableBoundAfter` included, above);
+	// the recovery codes, which mfa issues itself (one guessing cannot beat), are refused to begin as before.
+	it("is not taken under required: answered as a kind not composed, its record kept and removed by id", async () => {
+		const [place, kinds] = [memoryFactors(), [code, backup, mailBack]];
+		const taken = await serve({}, { kinds, store: place.module });
+		await taken.bindCode("wen");
+		await taken.bindKind("wen", "mail-back", "back");
+		const id = await taken.idOf("wen", "mail-back");
+		await stop();
+		const { app, decided } = await serve({ mode: "required" }, { kinds, store: place.module });
+		expect([
+			(await decided.begin("wen", "mail-back")).kind,
+			(await decided.begin("wen", "backup")).kind,
+			(await decided.held("wen")).length,
+			app.get(logins).achievable(["email"]),
+		]).toEqual(["unknown-kind", "unknown-kind", 2, false]);
+		expect(await decided.remove("wen", id, await decided.fenceOf("wen"))).toBe("removed");
 	});
 });
