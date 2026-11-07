@@ -1,12 +1,19 @@
 import { withinHosts } from "@mod/host-entries";
-import { DestinationRefused, jsonObjectOf, type Outbound } from "@mod/outbound";
+import type { Clock, Log } from "@mod/kernel";
+import { isUnavailable, Unavailable } from "@mod/kernel";
+import {
+	DestinationRefused,
+	isOutboundUnavailable,
+	jsonObjectOf,
+	type Outbound,
+} from "@mod/outbound";
 import {
 	browsedRefusalText,
 	destinationRefusal,
 	type OutboundRefusals,
 } from "@mod/outbound-policy";
 import { answerOf } from "@mod/upstream-client";
-import { UpstreamMismatch } from "@mod/upstreams";
+import { UpstreamMismatch, UpstreamRefused } from "@mod/upstreams";
 import { z } from "zod";
 import { descriptionUrl, narrowerOf, type Settings } from "../settings.ts";
 import { describedUserinfoRefusal } from "../userinfo/userinfo.ts";
@@ -37,20 +44,50 @@ export interface Reach {
 	readonly refusals: OutboundRefusals;
 }
 
+/** The endpoints and whether the description offers `iss`, once read. */
+export interface Described {
+	readonly endpoints: Endpoints;
+	readonly offersIss: boolean;
+}
+
+/** How long after one read of the description began the next may begin. */
+const readsApartMs = 60_000;
+
 /** A description that does not hold, told under `issuer`: the key it was read from. */
 const mismatch = (reason: string) => new UpstreamMismatch(reason, ["issuer"]);
 
-/** The endpoints the issuer's description names; throws, refusing boot, where they do not hold. */
-async function discovered(s: Settings, { outbound, refusals }: Reach, hosts: readonly string[]) {
+/** Why the description cannot be read now, in outbound's word or by the answer's status. */
+type Unread = { readonly kind: "unread"; readonly failure: string };
+
+/**
+ * The endpoints the issuer's description names, or why it cannot be read now: outbound could not
+ * fetch it (its own word), or the upstream answered 5xx or 429. Throws where it does not hold.
+ */
+async function discovered(
+	s: Settings,
+	{ outbound, refusals }: Reach,
+	hosts: readonly string[],
+): Promise<({ readonly kind: "read" } & Described) | Unread> {
 	const where = descriptionUrl(s.issuer);
-	// A destination outbound refuses, as an answer that does not hold, refuses boot under the issuer.
-	const fetched = await outbound
-		.fetch(where, {}, narrowerOf(hosts, s.issuer))
-		.catch((error: unknown) => {
-			if (!DestinationRefused.is(error)) throw error;
+	let fetched: Awaited<ReturnType<Outbound["fetch"]>>;
+	try {
+		fetched = await outbound.fetch(where, {}, narrowerOf(hosts, s.issuer));
+	} catch (error) {
+		// A destination outbound refuses is an answer that does not hold, told under the issuer.
+		if (DestinationRefused.is(error)) {
 			throw mismatch(`outbound's destination policy refuses the description: ${error.reason}`);
-		});
-	// Refused as the upstream's answer, which at boot refuses boot.
+		}
+		if (!isUnavailable(error)) throw error;
+		return {
+			kind: "unread",
+			failure: isOutboundUnavailable(error) ? error.failure : "unavailable",
+		};
+	}
+	// The upstream cannot answer now: its state, not the settings'.
+	if (fetched.status >= 500 || fetched.status === 429) {
+		return { kind: "unread", failure: fetched.status === 429 ? "status-429" : "status-5xx" };
+	}
+	// Any other answer that is no description does not hold.
 	const described = answerOf(jsonObjectOf(fetched), description);
 	if (described.issuer !== s.issuer) throw mismatch("the description names another issuer");
 	const endSession = described.end_session_endpoint;
@@ -98,6 +135,7 @@ async function discovered(s: Settings, { outbound, refusals }: Reach, hosts: rea
 		...(userinfo ? { userinfo } : {}),
 	};
 	return {
+		kind: "read",
 		endpoints,
 		offersIss: described.authorization_response_iss_parameter_supported === true,
 	};
@@ -113,14 +151,96 @@ const given = (s: Settings): Endpoints => ({
 });
 
 /**
- * The upstream's endpoints, and whether its description offers `iss`: read from the issuer's
- * description with discovery, else as the operator gives them. Throws, refusing boot, where the
+ * The description, as the upstream takes it: read at boot (or the endpoints given without
+ * discovery), or awaited where it could not be read then. Throws, refusing boot, where the
  * description does not hold.
  */
+export type Description =
+	| { readonly kind: "read"; readonly described: Described }
+	| {
+			readonly kind: "awaited";
+			/** The description once read; else begins a read, where one may, and answers none. */
+			now(): Described | undefined;
+			/** The description, a read awaited first where one may begin; throws Unavailable without one. */
+			when(): Promise<Described>;
+	  };
+
 export async function describedBy(
 	s: Settings,
 	reach: Reach,
 	hosts: readonly string[],
-): Promise<{ readonly endpoints: Endpoints; readonly offersIss: boolean }> {
-	return s.discovery ? discovered(s, reach, hosts) : { endpoints: given(s), offersIss: false };
+	at: { readonly clock: Clock; readonly log: Log; readonly idp: string },
+): Promise<Description> {
+	if (!s.discovery) return { kind: "read", described: { endpoints: given(s), offersIss: false } };
+	const first = await discovered(s, reach, hosts);
+	if (first.kind === "read") {
+		return { kind: "read", described: { endpoints: first.endpoints, offersIss: first.offersIss } };
+	}
+	at.log.warn("idp-oidc.description_unavailable", { idp: at.idp, failure: first.failure });
+	return awaited(() => discovered(s, reach, hosts), at);
+}
+
+/**
+ * Reads the description again when it is needed, until a read holds: one read at a time, each
+ * beginning at least a minute after the last began. A line is logged only where the outcome changes.
+ */
+function awaited(
+	read: () => ReturnType<typeof discovered>,
+	at: { readonly clock: Clock; readonly log: Log; readonly idp: string },
+): Description {
+	const { clock, log, idp } = at;
+	let held: Described | undefined;
+	let running: Promise<void> | undefined;
+	// The read at boot began this wait.
+	let began = clock.now();
+	let last: "unread" | "mismatch" = "unread";
+	const told = (outcome: "unread" | "mismatch", line: () => void) => {
+		if (last !== outcome) line();
+		last = outcome;
+	};
+	const attempt = () => {
+		if (held || running) return running;
+		if (clock.now() - began < readsApartMs) return undefined;
+		began = clock.now();
+		running = read()
+			.then(
+				(outcome) => {
+					if (outcome.kind === "read") {
+						held = { endpoints: outcome.endpoints, offersIss: outcome.offersIss };
+						log.info("idp-oidc.description_read", { idp });
+						return;
+					}
+					const { failure } = outcome;
+					told("unread", () => log.warn("idp-oidc.description_unavailable", { idp, failure }));
+				},
+				(error: unknown) => {
+					// Never used: a description that does not hold is told, and the wait goes on.
+					const reason = UpstreamMismatch.is(error)
+						? error.message
+						: UpstreamRefused.is(error)
+							? "the upstream does not match its settings"
+							: error instanceof Error
+								? error.name
+								: typeof error;
+					told("mismatch", () => log.error("idp-oidc.description_mismatch", { idp, reason }));
+				},
+			)
+			.finally(() => {
+				running = undefined;
+			});
+		return running;
+	};
+	const unavailable = () => new Unavailable("idp-oidc description");
+	return {
+		kind: "awaited",
+		now: () => {
+			if (!held) void attempt();
+			return held;
+		},
+		when: async () => {
+			if (!held) await attempt();
+			if (held) return held;
+			throw unavailable();
+		},
+	};
 }
