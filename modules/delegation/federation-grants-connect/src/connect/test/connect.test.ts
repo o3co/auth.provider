@@ -259,7 +259,7 @@ describe("the callback", () => {
 
 	it("audits a failure with the request's source", async () => {
 		const h = await connector();
-		h.script.startThrows = true;
+		h.script.startThrows = new Error("cannot build");
 		await h.started();
 		const event = h.events.find((e) => e.kind === "federation.grant.authorization_failed");
 		expect(event?.attributes?.source).toBe("127.0.0.1");
