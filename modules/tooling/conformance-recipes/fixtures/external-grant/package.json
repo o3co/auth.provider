@@ -1,7 +1,6 @@
 {
-	"name": "example-grant",
+	"name": "@example/example-grant",
 	"version": "1.0.0",
-	"private": true,
 	"type": "module",
 	"exports": {
 		"./module": {
@@ -17,5 +16,15 @@
 		"@o3co/auth-provider-identity": "<version>",
 		"@o3co/auth-provider-oauth": "<version>",
 		"zod": "^4.6.0"
+	},
+	"authProvider": {
+		"format": 1,
+		"kind": "feature",
+		"needs": [
+			"@mod/client-allowance",
+			"@mod/grants",
+			"@mod/issuer",
+			"@mod/tokens"
+		]
 	}
 }
