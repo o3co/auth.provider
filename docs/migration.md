@@ -915,7 +915,7 @@ What changes from 0.18 to 0.19. A deployment that composes `code-grant` cannot g
 | [U-0.19-20](#u-0.19-20) | Offer `registered()` and `bare(request)` | Code that provides `clients`' contract in place of `clients` | no |
 | [U-0.19-21](#u-0.19-21) | Import `kinds` and `Kind` from `kinds`, and take `protocol` | Code that imports `kinds` or `Kind` from `combinations` | no |
 | [U-0.19-22](#u-0.19-22) | Call `run` in place of `reset`, and read its answer | Code that calls `mfaReset.reset` | no |
-| [U-0.19-23](#u-0.19-23) | Compose `mfa-email-proof` beside `mfa-email`, or generate the project again | An app composed by hand or generated with 0.18 that composes `mfa-email` | yes |
+| [U-0.19-23](#u-0.19-23) | Compose `mfa-email-proof` beside `mfa-email`, or generate the project again; a code by email that does not count now binds, as a way back that stands for no second factor | An app composed by hand or generated with 0.18 that composes `mfa-email` | yes |
 | [U-0.19-24](#u-0.19-24) | Compose `federation-grants-connect`, move its four keys, and rename its two variables | An app that composes `federation-grants`, composed by hand or generated with 0.18, or a configuration that sets `page`, `login-page`, `step-up-page` or `identity-check` under `federation-grants` | no |
 | [U-0.19-25](#u-0.19-25) | Compose `login-gates` beside `acr` | An app composed by hand with `acr` and no `login-gates` | yes |
 | [U-0.19-26](#u-0.19-26) | Compose `client-credentials` beside `token-endpoint` | A client uses the client credentials grant, in an app composed by hand, generated with 0.18, or of a pattern that does not compose it | no |
