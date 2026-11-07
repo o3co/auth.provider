@@ -151,7 +151,12 @@ describe("a binding proof before a first factor", () => {
 		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
 	});
 
-	it("raises no session on a factor bound of a kind that does not count", async () => {
+	it("binds a kind that does not count under optional alone, raising no session; under required, 400 unknown kind", async () => {
+		const s = await serve({ mode: "required" }, [contactProof, mailedKind]);
+		const { tx } = await s.heldLogin("una");
+		const atLogin = { kind: "mailed", transaction_id: tx };
+		const refused = await s.call("POST", "/session/mfa/enrollment", atLogin);
+		expect([refused.status, refused.body.error_description]).toEqual([400, "unknown kind"]);
 		const optional = await serve({}, [contactProof, mailedKind]);
 		await optional.signIn("uli");
 		const old = optional.jar().get("__Host-session");
