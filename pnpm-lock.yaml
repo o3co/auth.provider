@@ -4502,12 +4502,12 @@ importers:
       '@mod/conformance-second-factor':
         specifier: workspace:*
         version: link:../conformance-second-factor
-      '@mod/distribution':
-        specifier: workspace:*
-        version: link:../distribution
       '@mod/ledger-fakes':
         specifier: workspace:*
         version: link:../ledger-fakes
+      '@mod/local-registry':
+        specifier: workspace:*
+        version: link:../local-registry
       '@mod/spec-checklist':
         specifier: workspace:*
         version: link:../spec-checklist

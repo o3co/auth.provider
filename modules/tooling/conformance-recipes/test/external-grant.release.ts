@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { baseEnv, freePort, launch } from "@mod/conformance";
-import { packedRegistry } from "@mod/distribution";
+import { localRegistry } from "@mod/local-registry";
 import { trialLayer } from "@mod/trial";
 import { afterAll, describe, expect, it } from "vitest";
 import { commands, shownCommand, transcript, withBlocks } from "../src/main.ts";
@@ -107,8 +107,10 @@ describe("the recipe for a grant of your own, outside the repository", () => {
 				`@o3co:registry=${origin}/\n${grantName.split("/")[0]}:registry=${origin}/\n`,
 			);
 
+		// The release as just published, as a reader first meets it; the grant, published two days before.
+		const release = { dir: tarballs, at: new Date() };
 		// The generator, and the published packages the grant builds against, from the release alone.
-		const building = await packedRegistry({ release: tarballs, outside: [], upstream });
+		const building = await localRegistry({ published: [release], upstream });
 		const tool = join(root, "tool");
 		const grant = join(root, "example-grant");
 		try {
@@ -141,7 +143,10 @@ describe("the recipe for a grant of your own, outside the repository", () => {
 		const outside = join(root, "outside-tarballs");
 		mkdirSync(outside);
 		run("pnpm", ["pack", "--pack-destination", outside], grant);
-		const registry = await packedRegistry({ release: tarballs, outside: [outside], upstream });
+		const registry = await localRegistry({
+			published: [release, { dir: outside, at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }],
+			upstream,
+		});
 		stopRegistry = registry.stop;
 
 		// The reader's project, the grant installed into it from the registry.
