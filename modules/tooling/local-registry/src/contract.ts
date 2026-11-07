@@ -5,34 +5,31 @@ import { join } from "node:path";
 /** How long the registry may take to listen. */
 const startLimitMs = 30_000;
 
+/** A directory of tarballs the registry serves, and when its versions were published. */
+export interface Published {
+	readonly dir: string;
+	readonly at: Date;
+}
+
 /**
- * Serves the packed release, as just published, and the packages outside it, as published before,
- * ahead of the upstream registry: its origin once it listens, and a stop that ends when it has
- * exited. Refuses one that exits, cannot be spawned, or is not listening in time, stopping it first.
+ * Serves the tarballs in the directories, each version as published when its directory says, ahead
+ * of the upstream registry: its origin once it listens, and a stop that ends when it has exited.
+ * Refuses one that exits, cannot be spawned, or is not listening in time, stopping it first.
  */
-export async function packedRegistry(options: {
-	/** The directory holding the release's tarballs. */
-	readonly release: string;
-	/** The directories holding the tarballs of packages outside the release. */
-	readonly outside: readonly string[];
+export async function localRegistry(options: {
+	readonly published: readonly Published[];
 	/** The registry answering every other name. */
 	readonly upstream: string;
 	readonly limits?: { readonly upstreamMs?: number };
 }): Promise<{ origin: string; stop: () => Promise<void> }> {
-	const upstream = options.upstream.endsWith("/") ? options.upstream : `${options.upstream}/`;
-	const upstreamMs = options.limits?.upstreamMs;
-	const child = spawn(
-		"node",
-		[join(import.meta.dirname, "registry.ts"), upstream, options.release, ...options.outside],
-		{
-			stdio: ["ignore", "pipe", "inherit"],
-			env: {
-				...process.env,
-				...(upstreamMs === undefined ? {} : { REGISTRY_UPSTREAM_LIMIT_MS: String(upstreamMs) }),
-				REGISTRY_JUST_PUBLISHED: options.release,
-			},
-		},
-	);
+	const told = {
+		upstream: options.upstream.endsWith("/") ? options.upstream : `${options.upstream}/`,
+		published: options.published.map(({ dir, at }) => ({ dir, at: at.toISOString() })),
+		...(options.limits?.upstreamMs === undefined ? {} : { upstreamMs: options.limits.upstreamMs }),
+	};
+	const child = spawn("node", [join(import.meta.dirname, "registry.ts"), JSON.stringify(told)], {
+		stdio: ["ignore", "pipe", "inherit"],
+	});
 	const exited = new Promise<void>((resolve) => child.once("close", () => resolve()));
 	const stop = async () => {
 		if (child.exitCode === null && child.signalCode === null) child.kill();

@@ -2,13 +2,16 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { packedRegistry } from "../registry/contract.ts";
+import { localRegistry } from "@mod/local-registry";
 import { swappedZod } from "./swap.ts";
 
 const grant = "@x/release-check-grant";
 
 /** How long one command may run: an install over the network included. */
 const commandLimitMs = 10 * 60_000;
+
+/** How long before the release the package outside was published: past any `minimumReleaseAge` an app sets. */
+const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
 
 /** Runs a command in `cwd`, at most `commandLimitMs`, answering its exit status, its standard output, and all it said. */
 const ran = (command: string, args: readonly string[], cwd: string) => {
@@ -86,9 +89,12 @@ export async function outsideScene(options: {
 		encoding: "utf8",
 		timeout: commandLimitMs,
 	}).trim();
-	const registry = await packedRegistry({
-		release: options.tarballs,
-		outside: [outside],
+	// The release as just published, as an operator first meets it; the package outside, two days before.
+	const registry = await localRegistry({
+		published: [
+			{ dir: options.tarballs, at: new Date() },
+			{ dir: outside, at: new Date(Date.now() - twoDaysMs) },
+		],
 		upstream,
 	});
 	try {

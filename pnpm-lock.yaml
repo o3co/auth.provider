@@ -4557,6 +4557,9 @@ importers:
       '@mod/docker-client':
         specifier: workspace:*
         version: link:../docker-client
+      '@mod/local-registry':
+        specifier: workspace:*
+        version: link:../local-registry
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
@@ -4677,6 +4680,12 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/tooling/local-registry:
     devDependencies:
       vitest:
         specifier: 5.0.5
