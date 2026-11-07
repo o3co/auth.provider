@@ -22,13 +22,15 @@ export function federationConfig(settings: Partial<FederationSettings> = {}) {
  * An IdP type for tests, "test": its upstream at `issuer` answers a code with the login the
  * test gave it (or fails as `unreachable` or `broken` says, or refuses as another copy of
  * upstreams would where it says `copied`), refuses any other code, and keeps
- * what it was asked; it offers what `more` gives.
+ * what it was asked; it offers what `more` gives. While `down.starts` is set, it cannot build a
+ * start, as an upstream not yet reached.
  */
 export function testIdpType(
 	answers: Map<string, UpstreamLogin | "unreachable" | "broken" | "copied">,
 	more: Pick<Upstream, "refresh" | "endSession" | "delegation"> = {},
 ) {
 	const asked = { starts: [] as AuthorizationStart[], exchanges: [] as CodeExchange[] };
+	const down = { starts: false };
 	const module = defineModule({ name: "test-idp-type", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(idpTypes).by(() =>
 			idpType({
@@ -65,6 +67,7 @@ export function testIdpType(
 						responseMode: mode,
 						clockSkewMs: read["skew-ms"],
 						authorizationUrl: (start) => {
+							if (down.starts) throw new Unavailable("test upstream");
 							asked.starts.push(start);
 							const url = new URL(`${issuer}${path}`);
 							url.searchParams.set("state", start.state);
@@ -88,5 +91,5 @@ export function testIdpType(
 			}),
 		),
 	]);
-	return { module, asked };
+	return { module, asked, down };
 }

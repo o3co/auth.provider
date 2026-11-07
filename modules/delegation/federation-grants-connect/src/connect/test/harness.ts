@@ -135,14 +135,15 @@ export async function connector(
 	const recorded = auditStandIn();
 	const script = {
 		exchange: async (_x: DelegatedExchange): Promise<unknown> => upstreamLogin(),
-		startThrows: false,
+		/** What the delegation's start throws, if anything. */
+		startThrows: undefined as Error | undefined,
 		startRefused: false,
 		withdrawn: false,
 	};
 	const asked = { starts: [] as DelegationStart[] };
 	const delegation = {
 		authorizationUrl: (start) => {
-			if (script.startThrows) throw new Error("cannot build");
+			if (script.startThrows) throw script.startThrows;
 			if (script.startRefused) return { kind: "refused" };
 			asked.starts.push(start);
 			return `https://up.example/authorize?state=${start.state}`;
