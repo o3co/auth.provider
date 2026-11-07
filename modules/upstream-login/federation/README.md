@@ -50,7 +50,7 @@
 - Groups and other claims never reach the session.
 - A login's upstream tokens go to their receivers through `upstream-handoff`, which keeps a held login's for `transaction-lifetime`, its resume's deadline; if they cannot be kept, the callback is unavailable.
 - An IdP's redirect URI is the public origin plus its callback path.
-- Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings (under the key and with the reason the type gives, where it gives them) or cannot be reached, told apart, no public origin, or a `held-page` off it (the page reads the held login with this deployment's cookies), one reason per issue, all at once; in production, also a `held-page` on a loopback host.
+- Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings (under the key and with the reason the type gives, where it gives them) or cannot be reached where its type refuses to open it unreached, told apart (a type may open it instead, unavailable until it can be asked), no public origin, or a `held-page` off it (the page reads the held login with this deployment's cookies), one reason per issue, all at once; in production, also a `held-page` on a loopback host.
 - An IdP that answers in a posted form refuses boot where cookies cannot be secure.
 
 ## Depends on
