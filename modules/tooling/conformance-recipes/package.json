@@ -23,6 +23,7 @@
 		"@mod/conformance-keys": "workspace:*",
 		"@mod/conformance-oauth": "workspace:*",
 		"@mod/conformance-second-factor": "workspace:*",
+		"@mod/distribution": "workspace:*",
 		"@mod/ledger-fakes": "workspace:*",
 		"@mod/spec-checklist": "workspace:*",
 		"@mod/trial": "workspace:*",

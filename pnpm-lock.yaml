@@ -4502,6 +4502,9 @@ importers:
       '@mod/conformance-second-factor':
         specifier: workspace:*
         version: link:../conformance-second-factor
+      '@mod/distribution':
+        specifier: workspace:*
+        version: link:../distribution
       '@mod/ledger-fakes':
         specifier: workspace:*
         version: link:../ledger-fakes
