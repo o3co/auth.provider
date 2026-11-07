@@ -195,7 +195,7 @@ Where staff sign in through an upstream IdP alone, such as a company's Microsoft
 - the ledger reads the `sub` through the same app registration as the provider, or
 - an administrator ties the `sub` the ledger receives at the first sign-in to the staff member, after checking who they are.
 
-A user who signs in with a password and links an upstream identity instead goes through `federation-link`: under `mfa.mode = required`, a counting factor comes before the link (its card).
+A user who signs in with a password and links an upstream identity instead goes through `federation-link`: under `mfa.mode = required`, a user signed in with a password alone binds a counting factor first (its card).
 
 ## Keeping the second-factor witness at the ledger
 
