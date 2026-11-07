@@ -212,11 +212,11 @@ function recordRefusals(lock, record, overrides, references, registries) {
  * Why the lockfile does not resolve each recorded package as recorded, with the app's `overrides`
  * (name to version) applied, why it holds an overridden package in other than one copy at its
  * version, why either comes from other than its registry in `registries` (the default origin and
- * each scope's), why it was resolved with other overrides, and why an overridden package is not the
- * tarball whose integrity the release recorded (`integrities`, one for each package the overrides
- * hold; one without refused); none where it is as recorded.
+ * each scope's), why it was resolved with other overrides, and why an overridden package, or a
+ * dependency let through though fresh (`fresh`), is not the tarball whose integrity was recorded
+ * (`integrities`, one for each package the overrides hold; one without refused); none where it is.
  */
-export function refusals(text, records, overrides, registries, integrities) {
+export function refusals(text, records, overrides, registries, integrities, fresh = []) {
 	const lock = lockOf(text);
 	const versions = (map) =>
 		new Map([...own(map)].map(([name, version]) => [name, String(version)]));
@@ -234,7 +234,29 @@ export function refusals(text, records, overrides, registries, integrities) {
 				oneCopyRefusals(lock, name, String(version), references, registries),
 			),
 		...heldIntegrityRefusals(lock, held, own(integrities)),
+		...freshRefusals(lock, fresh, registries),
 	];
+}
+
+function freshRefusals(lock, fresh, registries) {
+	if (!Array.isArray(fresh)) return ["the record of dependencies let through is not a list"];
+	return fresh.flatMap((recorded) => {
+		const fields = own(recorded);
+		const [name, version, integrity] = ["name", "version", "integrity"].map((key) =>
+			fields.get(key),
+		);
+		if (![name, version, integrity].every((field) => typeof field === "string")) {
+			return ["a dependency let through is not recorded by a name, a version and an integrity"];
+		}
+		const entry = own(lock.packages).get(`${name}@${version}`);
+		if (entry === undefined) return [];
+		const unregistered = registryRefusal(entry, name, registries);
+		if (unregistered !== undefined) return [unregistered];
+		const found = own(own(entry).get("resolution")).get("integrity");
+		return found === integrity
+			? []
+			: [`${name}: integrity ${found}, not ${integrity} as recorded to install it fresh`];
+	});
 }
 
 /**
@@ -281,6 +303,25 @@ export function recordOf(text, name, registries) {
 	};
 }
 
+export function dependencyRecordOf(text, name, registries) {
+	const lock = lockOf(text);
+	const keys = [...own(lock.packages).keys()].filter((key) => nameOf(key) === name);
+	if (keys.length === 0) throw new Error(`${name}: the project's lockfile does not hold it`);
+	const versions = keys.map((key) => bare(key).slice(name.length + 1)).sort();
+	if (versions.length > 1) {
+		throw new Error(
+			`${name}: ${versions.join(", ")} in the project's lockfile, where one is let through`,
+		);
+	}
+	const [version] = versions;
+	if (!semver.valid(version))
+		throw new Error(`${name}: the project resolves ${version}, not a version`);
+	const entry = own(lock.packages).get(`${name}@${version}`);
+	const unregistered = registryRefusal(entry, name, registries);
+	if (unregistered !== undefined) throw new Error(unregistered);
+	return { name, version, integrity: own(own(entry).get("resolution")).get("integrity") };
+}
+
 function entered() {
 	try {
 		return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
@@ -303,6 +344,7 @@ if (entered()) {
 			Object.fromEntries(own(own(workspace).get("overrides"))),
 			outside.registries,
 			outside.held,
+			outside.freshDependencies ?? [],
 		);
 		for (const line of found) process.stdout.write(`${line}\n`);
 		process.stdout.write(found.length === 0 ? "ok\n" : `${found.length} refusal(s)\n`);

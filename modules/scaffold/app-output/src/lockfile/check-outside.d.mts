@@ -21,6 +21,9 @@ export interface Registries {
 
 export function recordOf(text: string, name: string, registries: Registries): Recorded;
 
+/** The one version and integrity a project's lockfile holds of `name`, resolved anywhere, from its registry. */
+export function dependencyRecordOf(text: string, name: string, registries: Registries): Recorded;
+
 export function refusals(
 	text: string,
 	records: readonly OutsideRecord[],
@@ -28,4 +31,5 @@ export function refusals(
 	registries: Registries,
 	/** The integrity the release recorded of each package the overrides hold: one without is refused. */
 	integrities?: Readonly<Record<string, string>>,
+	fresh?: readonly Recorded[],
 ): string[];

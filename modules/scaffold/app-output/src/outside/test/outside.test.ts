@@ -303,6 +303,38 @@ describe("what an app beside packages outside the release is given", () => {
 		);
 	});
 
+	it("records each dependency let through though published within the last day, lets that version alone through, and names it in the guide and the index", () => {
+		const jose = { name: "jose-lite", version: "1.4.0", integrity: "sha512-JOSE" };
+		const beside = besideRelease({ ...outside, freshDependencies: [jose] }, app);
+		expect(JSON.parse(beside.files["outside-modules.json"] as string).freshDependencies).toEqual([
+			jose,
+		]);
+		expect(parse(beside.files["pnpm-workspace.yaml"] as string).minimumReleaseAgeExclude).toEqual([
+			"@o3co/auth-provider-identity",
+			"@o3co/auth-provider-oauth",
+			"jose-lite@1.4.0",
+		]);
+		expect(beside.guide).toContain("| `jose-lite` | `1.4.0` | `sha512-JOSE` |");
+		expect(beside.index).toContain("`jose-lite@1.4.0`");
+		const none = besideRelease(outside, app);
+		expect(JSON.parse(none.files["outside-modules.json"] as string)).not.toHaveProperty(
+			"freshDependencies",
+		);
+		expect(none.guide).not.toContain("within the last day, as a dependency");
+	});
+
+	it("refuses a dependency let through whose record is not a package name, version and integrity", () => {
+		for (const jose of [
+			{ name: "jose lite", version: "1.4.0", integrity: "sha512-JOSE" },
+			{ name: "jose-lite", version: "1.4.0|x", integrity: "sha512-JOSE" },
+			{ name: "jose-lite", version: "1.4.0", integrity: "md5-JOSE" },
+		]) {
+			expect(() => besideRelease({ ...outside, freshDependencies: [jose] }, app)).toThrow(
+				`${jose.name}: its record is not a package name, version and integrity`,
+			);
+		}
+	});
+
 	it("refuses a package let through as fresh that it does not record", () => {
 		expect(() => besideRelease({ ...outside, fresh: ["@x/other"] }, app)).toThrow(
 			"@x/other: let through as fresh, but not recorded",
