@@ -1,9 +1,27 @@
-import { createServer, request } from "node:http";
+import { request } from "node:http";
 import { type AddressInfo, connect, createServer as createNetServer } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { startTunnel } from "../src/tunnel.ts";
 
 const stops: (() => Promise<void>)[] = [];
+/** A port no test takes: `listen(0)` picks from the ephemeral range, never port 1. */
+const refusedPort = 1;
+
+beforeAll(async () => {
+	const answer = await new Promise<string>((resolve) => {
+		const socket = connect(refusedPort, "127.0.0.1");
+		socket.once("connect", () => {
+			socket.destroy();
+			resolve("connected");
+		});
+		socket.once("error", (error: NodeJS.ErrnoException) => resolve(error.code ?? "error"));
+	});
+	if (answer !== "ECONNREFUSED") {
+		throw new Error(
+			`127.0.0.1:${refusedPort} must refuse connections for these tests (got ${answer})`,
+		);
+	}
+});
 afterEach(async () => {
 	await Promise.all(stops.splice(0).map((stop) => stop()));
 });
@@ -71,11 +89,7 @@ describe("the CONNECT proxy the app's outbound goes through to the suite", () =>
 	});
 
 	it("answers 502 where the destination cannot be reached", async () => {
-		const closed = createServer();
-		await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
-		const port = (closed.address() as AddressInfo).port;
-		await new Promise<void>((resolve) => closed.close(() => resolve()));
-		const t = await startTunnel({ allow: { "suite.test:8443": `127.0.0.1:${port}` } });
+		const t = await startTunnel({ allow: { "suite.test:8443": `127.0.0.1:${refusedPort}` } });
 		stops.push(t.stop);
 		expect((await through(t.port, "suite.test:8443", "x")).status).toBe("HTTP/1.1 502 Bad Gateway");
 	});
