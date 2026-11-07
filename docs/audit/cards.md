@@ -467,6 +467,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `scene` (`src/scene`): the app the OP plans meet.
   - `suite` (`src/suite`): the suite at its pinned version, started and stopped.
 - `@mod/ledger-fakes` (verification, `modules/tooling/ledger-fakes`): Plays the operator's HTTP ledgers for tests and conformance scenes: the user ledger, and the witness ledgers of mfa and passkeys, each speaking the wire as `ledger-wire` words it.
+- `@mod/local-registry` (assembly, `modules/tooling/local-registry`): A registry of a check's own: serves the tarballs in the directories it is given, each at the publish time the caller gives, and forwards every other name to the upstream (under its path) within a limit.
 - `@mod/references` (assembly, `modules/tooling/references`): Generates the workspace's references from what each module declares: the configuration reference, each package's `reference.conf`, the audit event reference, the route reference, the attack surface reference (internal module `attack-surface`), and the audit index's generated parts, the cards and the dependencies (internal module `audit-index`).
   - `attack-surface` (`src/attack-surface`): the attack surface reference, what reaches the provider from outside and what it reaches out to.
   - `audit-index` (`src/audit-index`): the generated parts of the audit index, the cards and what each package depends on.

@@ -1,34 +1,35 @@
 #!/usr/bin/env node
 /**
- * A registry of the release check's own, serving the tarballs in the directories named after the
+ * A registry of a check's own, serving the tarballs in the directories it is told, after the
  * upstream registry's address: each package's document holds every version's manifest, its
- * tarball's address and npm's integrity of its bytes. A version in the directory the starter names
- * as just published (`REGISTRY_JUST_PUBLISHED`) was published as the registry started, as the
- * release's are when it is first installed, so `minimumReleaseAge` holds it back unless let through;
- * any other, two days before, so none holds it back. Any other name's document is the upstream's, as
- * it answers (a scope of its own may hold packages published there). It prints its origin once
- * listening.
+ * tarball's address, npm's integrity of its bytes, and when its directory says it was published.
+ * Any other name's document is the upstream's, as it answers (a scope of its own may hold packages
+ * published there). Told as one JSON argument: `upstream`, `published` (each `dir` and its `at`) and
+ * `upstreamMs`; it prints its origin once listening.
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { basename, dirname, join } from "node:path";
+import { basename, join } from "node:path";
 
+const told = JSON.parse(process.argv[2] ?? "{}") as {
+	readonly upstream: string;
+	readonly published: readonly { readonly dir: string; readonly at: string }[];
+	readonly upstreamMs?: number;
+};
+const { upstream } = told;
 /** How long the upstream may take to answer one request, body included: 30 seconds, unless the starter says less. */
-const upstreamLimitMs = Number(process.env.REGISTRY_UPSTREAM_LIMIT_MS ?? 30_000);
-const published = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-const justPublished = new Date().toISOString();
+const upstreamLimitMs = told.upstreamMs ?? 30_000;
 const tarballs = new Map<string, Buffer>();
 const documents = new Map<
 	string,
 	{ versions: Record<string, unknown>; times: Record<string, string>; latest: string }
 >();
-const [upstream = "", ...dirs] = process.argv.slice(2);
-const files = dirs.flatMap((dir) =>
+const files = told.published.flatMap(({ dir, at }) =>
 	readdirSync(dir)
 		.filter((f) => f.endsWith(".tgz"))
-		.map((f) => join(dir, f)),
+		.map((f) => ({ file: join(dir, f), at })),
 );
 
 const server = createServer(async (request, response) => {
@@ -57,21 +58,21 @@ const server = createServer(async (request, response) => {
 		return;
 	}
 	const name = path.slice(1);
-	const modified = Object.values(document.times).sort().at(-1) ?? published;
+	const times = Object.values(document.times).sort();
 	response.writeHead(200, { "content-type": "application/json" });
 	response.end(
 		JSON.stringify({
 			name,
 			"dist-tags": { latest: document.latest },
 			versions: document.versions,
-			time: { created: published, modified, ...document.times },
+			time: { created: times.at(0), modified: times.at(-1), ...document.times },
 		}),
 	);
 });
 
 server.listen(0, "127.0.0.1", () => {
 	const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-	for (const file of files) {
+	for (const { file, at: published } of files) {
 		const bytes = readFileSync(file);
 		const manifest = JSON.parse(
 			execFileSync("tar", ["-xzOf", file, "package/package.json"], { encoding: "utf8" }),
@@ -83,8 +84,7 @@ server.listen(0, "127.0.0.1", () => {
 			times: {},
 			latest: manifest.version,
 		};
-		document.times[manifest.version] =
-			dirname(file) === process.env.REGISTRY_JUST_PUBLISHED ? justPublished : published;
+		document.times[manifest.version] = published;
 		document.versions[manifest.version] = {
 			...manifest,
 			dist: {
