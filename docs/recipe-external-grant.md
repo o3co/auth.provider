@@ -120,7 +120,7 @@ If your grant calls another server, take `outbound`'s contract and send the requ
 
 ## Add it to the app
 
-Publish your package to a registry, npm's or one of your own, under a name of your own: `@example/example-grant` here stands for it. The generator reads no registry. Install the package with pnpm into a project of your own, generate the app from outside it, naming the package `npm:<name>` and the project `--outside-from`, then check the app's lockfile before installing it ([composing a package outside the release](outside-modules.md#composing-a-package-outside-the-release)):
+Publish your package to a registry, npm's or one of your own, under a name of your own: `@example/example-grant` here stands for it. Install the package with pnpm into a project of your own: the generator reads your package from that project, never from a registry. Generate the app from outside it, naming the package `npm:<name>` and the project `--outside-from`, then check the app's lockfile before installing it ([composing a package outside the release](outside-modules.md#composing-a-package-outside-the-release)):
 
 <!-- generated:command -->
 ```sh
