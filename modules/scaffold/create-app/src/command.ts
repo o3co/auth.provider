@@ -22,7 +22,7 @@ export async function run(
 		"       create-auth-provider --list   (each name --add takes)\n" +
 		"       a package outside the release is named npm:<name> (a package, --add, an axis's module),\n" +
 		"         read from --outside-from <project>, where pnpm installed it; --allow-fresh <name> lets\n" +
-		"         one published within the last day be installed\n";
+		"         one, or a package one declares, published within the last day be installed\n";
 	const usage = (): number => {
 		io.err(usageText);
 		return 64;
@@ -111,9 +111,9 @@ export async function run(
 		...(outsideNames.length > 0 && values.workspace
 			? ["a linked workspace composes no package outside the release"]
 			: []),
-		...fresh
-			.filter((name) => !outsideNames.includes(name))
-			.map((name) => `--allow-fresh ${name}: not named npm:${name}`),
+		...(outsideNames.length === 0
+			? fresh.map((name) => `--allow-fresh ${name}: no package is named npm:<name>`)
+			: []),
 	];
 	if (misnamed.length > 0) {
 		io.err(`${misnamed.join("\n")}\n`);
