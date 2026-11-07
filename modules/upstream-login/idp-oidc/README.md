@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Contributes the IdP type `oidc` to `upstreams`: an upstream OpenID Connect provider, reached through `outbound`.
-- At boot, reads the issuer's description (its OpenID Provider metadata) and checks that it names the issuer, or takes the three endpoints as the operator gives them.
+- At boot, reads the issuer's description (its OpenID Provider metadata) and checks it (the internal module `description`), or takes the three endpoints as the operator gives them.
 - Builds the authorization request (code flow with PKCE, state and nonce).
 - Exchanges the code, and checks the id_token it answers with.
 - Hands the login's tokens over, and refreshes them.
@@ -19,11 +19,8 @@
 
 ## Invariants
 - Every request to the upstream goes through `outbound`, narrowed to the issuer's host, the `endpoint-hosts` and the hosts of endpoints the operator gives, and sent for an operator's URL (`internal`; `narrower`: `internal`): the issuer for all its description names (an endpoint on another origin, another port too, reaches public addresses only), each given endpoint for itself; the client's secret goes to no other host.
-- An issuer's description that names an endpoint (its end of session included) on another host, as `outbound` matches hosts, refuses boot.
 - An endpoint the browser goes to (authorization, end of session), described or given, holds only where `outbound.refusals`' `browsedRefusal` takes it for the issuer or the given endpoint: https, or plain http at a loopback name or a `plain-internal` origin; else boot is refused, at `issuer` or the key. Plain http there carries the user's password and the IdP's cookies in the clear between browser and IdP, outside any mesh.
 - Boot is refused, at its key, on a URL this server sends to that `outbound`'s destination policy refuses with that same narrowing: the description's own URL (at `issuer`), or `token-endpoint`, `jwks-uri` and a given `userinfo-endpoint` without discovery; it says which of `outbound`'s keys to set (`outbound.refusals`).
-- A description whose token endpoint or key set that policy refuses also refuses boot.
-- A description's refusal, `outbound` refusing to fetch it included, is told at `issuer`, with its reason; one the policy gives names the endpoint and the policy's reason. A description answered other than `200`, or that cannot be read as one (no JSON object, not its shape), refuses boot at the IdP, in `federation`'s words, not under `issuer`.
 - An answer naming another issuer in `iss` is refused before its code is used.
 - An answer without `iss` is refused, unless the IdP's `accept-missing-iss` is set and its description does not offer `iss`.
 - Where `iss` is not required so, boot logs a warning naming the IdP (answers are then taken without `iss`).
