@@ -376,6 +376,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `id-token-once` (`src/id-token-once`): the fault scenes of an Apple id_token taken once, whether by the token exchange or as a JWT bearer assertion, in exchange-id-tokens' one record (`guarantee-5-j`).
   - `revocation-boundary` (`src/revocation-boundary`): the fault scenes of a subject's revocation boundary refusing, from any instance, the exchange of a token given before it (`guarantee-4-e`), the boundary written through the ledger's route.
 - `@mod/conformance-federation` (verification, `modules/tooling/conformance-federation`): Owns the conformance scenes of the federation area: logging a browser in through an upstream OpenID Connect IdP, Google, Apple, or GitHub's OAuth, the audit events of those logins, and a start while the store fails.
+  - `descriptions` (`src/descriptions`): the fault scenes of an OpenID Connect IdP whose description cannot be read at boot, each a deployment of its own on one Redis.
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `freshness` (`src/freshness`): the scenes of a federation login meeting a client's demand for a fresh login.
   - `grants` (`src/grants`): the scenes of federation grants.
