@@ -23,7 +23,7 @@ const takes = [
 export default defineModule(
 	{ name: "client-assertion", replicaSafe: true, section, takes },
 	(m) => [
-		m.contribute(metadataSections).by((c) => clientKeysIn(c)),
+		m.contribute(metadataSections).by((c) => clientKeysIn(c, c.section.algorithms)),
 		m.contribute(authMethods).by(async (c) => {
 			const { url } = await c.get(tokenEndpointLocation);
 			// A public origin is required, as written, though the token endpoint has a location without one.

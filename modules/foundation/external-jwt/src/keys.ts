@@ -38,7 +38,7 @@ export function fromPem(given: PemKey): Candidate | undefined {
  * The one algorithm a key is read under (RFC 8725 §3.1): its own `alg` where allowed, else the one
  * allowed algorithm its kind and curve fit; none where it names none and two or more fit.
  */
-function boundTo(jwk: Jwk, allowed: readonly Algorithm[]): Algorithm | undefined {
+export function boundAlgorithm(jwk: Jwk, allowed: readonly Algorithm[]): Algorithm | undefined {
 	if (jwk.alg !== undefined) return allowed.find((a) => a === jwk.alg && verifiesUnder(jwk, a));
 	const fitting = [...new Set(allowed)].filter((a) => verifiesUnder(jwk, a));
 	return fitting.length === 1 ? fitting[0] : undefined;
@@ -59,7 +59,7 @@ export function picked(
 		const { alg: _named, ...unnamed } = jwk;
 		return verifiesUnder(unnamed, alg) && (kid === undefined || jwk.kid === kid);
 	});
-	const [only, ...more] = fit.filter(({ jwk }) => boundTo(jwk, allowed) === alg);
+	const [only, ...more] = fit.filter(({ jwk }) => boundAlgorithm(jwk, allowed) === alg);
 	if (!only) return fit.length > 0 && kid !== undefined ? "unbound" : "no-key";
 	return more.length > 0 ? "ambiguous-key" : only;
 }
