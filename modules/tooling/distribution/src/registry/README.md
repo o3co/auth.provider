@@ -15,7 +15,7 @@ Internal module of `distribution`: the packed release served as a registry.
 ## Invariants
 - Each package's document holds every version its tarballs hold: the manifest as packed, the tarball's address on the registry, and npm's integrity of the tarball's bytes (their SHA-512).
 - The release's versions were published as the registry started, as they are when a release is first installed, so an app's `minimumReleaseAge` applies to them; those outside it, two days before.
-- Any other name is answered as the upstream answers it, its address written with or without a trailing slash. An upstream request that fails or takes over 30 seconds (less where its starter says so, as its test does) is answered 502, and the registry stays up for pnpm to retry.
+- Any other name is answered as the upstream answers it, under the upstream's path, its address written with or without a trailing slash. An upstream request that fails or takes over 30 seconds (less where its starter says so, as its test does) is answered 502, and the registry stays up for pnpm to retry.
 - It runs as a process of its own on loopback, listening within 30 seconds, or its start fails; so does one that exits or cannot be spawned, stopped first. Its stop ends when the process has exited.
 
 ## Depends on

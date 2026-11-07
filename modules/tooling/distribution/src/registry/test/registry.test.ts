@@ -105,15 +105,15 @@ it("refuses to start where the registry cannot", async () => {
 	).rejects.toThrow(/the registry exited/);
 });
 
-it("answers any other name from the upstream, its address written with or without a trailing slash", async () => {
+it("answers any other name from the upstream under its path, written with or without a trailing slash", async () => {
 	const upstream = await upstreamOf((request, response) => {
-		response.writeHead(request.url === "/left-pad" ? 200 : 404, {
+		response.writeHead(request.url === "/npm/left-pad" ? 200 : 404, {
 			"content-type": "application/json",
 		});
 		response.end(JSON.stringify({ name: "left-pad" }));
 	});
 	try {
-		for (const address of [upstream.origin, upstream.origin.replace(/\/$/, "")]) {
+		for (const address of [`${upstream.origin}npm/`, `${upstream.origin}npm`]) {
 			const registry = await packedRegistry({
 				release: tarballs(),
 				outside: [],
