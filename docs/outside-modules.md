@@ -98,7 +98,7 @@ The generator takes the version your project's lockfile resolved, and refuses th
 
 Only the packages you name are read, and a package outside the release brings no other. Name each wiring and adapter of your own beside the feature it serves; the app's boot otherwise refuses, naming the missing contract (`refused <module>: no module provides <contract>`).
 
-The app is installed with no version published within the last day, but the release's own. To take a newer one of your package, name it: `--allow-fresh @example/did-grant` lets that version alone be installed.
+The app is installed with no version published within the last day, but the release's own. To take a newer one of your package, name it: `--allow-fresh @example/did-grant` lets that version alone be installed. A package it declares itself, as a dependency, an optional one or a peer, is let through the same way, at the one version your project resolved: `--allow-fresh @example/did-lib`. Your project must let it through too, in its `minimumReleaseAgeExclude`, or its own install holds it back. A package the release holds, its own or zod, is never let through, and neither is a dependency of a dependency. The app records each one let through, holds its lockfile to it, and names it in its README.
 
 Start the generator with `npx`, from outside the project, as above. Generating runs no code of the package when it is started so. Started by `pnpm exec` from any directory, from a shell with a relative `./node_modules/.bin` on PATH, or by `npx` or `pnpm dlx` from a directory holding the package, a command linked at the project's `node_modules/.bin` can run in its place, `node` among them, and it may tell you nothing. The same goes for generating an app again: not from inside the app.
 
@@ -155,7 +155,7 @@ A package is read from a registry alone, so try one before it is published, in i
 3. Generate the app as [above](#generate-the-app), naming `npm:@example/did-grant` from that project, and add `--allow-fresh @example/did-grant`: a version published within the last day is otherwise not installed.
 4. Check the lockfile and install as [above](#check-the-apps-lockfile-then-install-it), then [run the app by its files](#run-the-app-by-its-files): the image's build does not reach a loopback origin of your machine.
 
-`--allow-fresh` takes only the packages named `npm:`, so a dependency of the package published to that registry within the last day is not installed: publish it a day before you try.
+A dependency of the package published to that registry within the last day is let through as [above](#generate-the-app), where the package declares it itself; publish a dependency of a dependency a day before you try.
 
 The app's `.npmrc` and `outside-modules.json` name that registry, so such an app installs only where it runs. Once the package is published, install it from its registry and generate the app again before you deploy it.
 
