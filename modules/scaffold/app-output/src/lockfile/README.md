@@ -12,8 +12,11 @@
 ## Offers
 - `outsideLock.recordOf` (lockfile text, name, registries): the version and integrity the root importer resolves the name to.
   - It refuses a name the importer lacks, a resolution to no version (a link, a file, an alias), and one from no registry.
-- `outsideLock.refusals` (lockfile text, records, overrides, registries: the default origin and each scope's, and the integrity the release recorded of each package held): why the lockfile is not as recorded; none where it is.
-- `outsideLock.script`: the file an app runs beside its `pnpm-lock.yaml`, `outside-modules.json` (`{ modules: records, registries, held }`) and `pnpm-workspace.yaml` (its `overrides`); it prints each refusal, or why a file cannot be read, and exits 1 on any, entered by its path or through a link; a main naming no file is no entry. It is `check-outside.mjs` bundled with `yaml` and `semver` inside (`pnpm check-outside` makes it, in development), so it loads nothing of the install it checks.
+- `outsideLock.dependencyRecordOf` (lockfile text, name, registries): the one version and integrity the lockfile holds of a package it resolves anywhere, as a dependency is.
+  - It refuses a name the lockfile does not hold, holds at more than one version, or resolves from no registry.
+- `outsideLock.refusals` (lockfile text, records, overrides, registries: the default origin and each scope's, and the integrity the release recorded of each package held, and each dependency let through though fresh): why the lockfile is not as recorded; none where it is.
+- `outsideLock.script`: the file an app runs beside its `pnpm-lock.yaml`, `outside-modules.json` (`{ modules: records, registries, held, freshDependencies? }`) and `pnpm-workspace.yaml` (its `overrides`); it prints each refusal, or why a file cannot be read, and exits 1 on any, entered by its path or through a link; a main naming no file is no entry.
+  - It is `check-outside.mjs` bundled with `yaml` and `semver` inside (`pnpm check-outside` makes it, in development), so it loads nothing of the install it checks.
 
 ## Invariants
 - A lockfile is read as data, as `reading` reads it: pnpm's version 9.0 alone, at most 16 MiB, no anchor's alias resolved, no unknown tag and no duplicate key; only own keys are read, never inherited ones.
@@ -24,6 +27,7 @@
 - Every resolution of a recorded package (not the root's alone) resolves each required dependency and peer as required, and each optional one as optional; an optional declaration takes the place of a required one of its name. Each resolves to a version in its range, the overrides applied, or, declared as an alias, to a version of the package the alias names; nothing undeclared is resolved.
 - A package the overrides hold resolves, wherever it is referenced (by an importer's dependencies of any kind or by a resolution), to the held version from its registry under its own name, and to a resolution the lockfile holds, with the package's entry; the lockfile holds no other version, and one resolution, of it.
 - Each package the overrides hold has the integrity the release recorded of it (`held` in `outside-modules.json`), and its entry at its held version (the package, not a resolution with peers) holds that integrity: one recorded without, or a record holding none, is refused.
+- A dependency let through though fresh is recorded by its name, version and integrity; where the lockfile holds that version, its entry is from its registry with that integrity. A record of it that is no list of those, or such an entry otherwise, is refused.
 - The file imports nothing of the workspace: `yaml`, `semver` and node only. Its bundle requires node's builtins alone, and a test holds it to what the file bundles to.
 
 ## Depends on

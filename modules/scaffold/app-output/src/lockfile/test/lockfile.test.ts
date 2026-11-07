@@ -452,7 +452,11 @@ describe("a recorded package declaring a command", () => {
 
 describe("the script an app runs, the file as it ships", () => {
 	/** An app's directory holding the script beside the lockfile, the record and the overrides. */
-	const appWith = (lock: string, held: Record<string, string> | null = recorded) => {
+	const appWith = (
+		lock: string,
+		held: Record<string, string> | null = recorded,
+		more: Record<string, unknown> = {},
+	) => {
 		const app = mkdtempSync(join(tmpdir(), "check-outside-"));
 		copyFileSync(outsideLock.script, join(app, "check-outside.mjs"));
 		// What the app installed is beside the script; the script reads none of it.
@@ -460,7 +464,7 @@ describe("the script an app runs, the file as it ships", () => {
 		writeFileSync(join(app, "pnpm-lock.yaml"), lock);
 		writeFileSync(
 			join(app, "outside-modules.json"),
-			JSON.stringify({ modules: [record], registries, ...(held ? { held } : {}) }),
+			JSON.stringify({ modules: [record], registries, ...(held ? { held } : {}), ...more }),
 		);
 		writeFileSync(join(app, "pnpm-workspace.yaml"), stringify({ overrides }));
 		return app;
@@ -602,6 +606,22 @@ describe("the script an app runs, the file as it ships", () => {
 		});
 	});
 
+	it("holds each dependency let through to the integrity recorded, as the module does", () => {
+		const jose = parse(appLock).packages["jose-lite@1.4.0"].resolution.integrity as string;
+		const freshDependencies = [{ name: "jose-lite", version: "1.4.0", integrity: jose }];
+		expect(run(appWith(appLock, recorded, { freshDependencies }))).toEqual({
+			code: 0,
+			out: "ok\n",
+		});
+		const swapped = changed((l) => {
+			l.packages["jose-lite@1.4.0"].resolution = { integrity: "sha512-OTHER==" };
+		});
+		expect(run(appWith(swapped, recorded, { freshDependencies }))).toEqual({
+			code: 1,
+			out: `jose-lite: integrity sha512-OTHER==, not ${jose} as recorded to install it fresh\n1 refusal(s)\n`,
+		});
+	});
+
 	it("refuses with the module's words, and exits 1", () => {
 		const lock = changed(
 			(l) =>
@@ -615,5 +635,71 @@ describe("the script an app runs, the file as it ships", () => {
 			code: 1,
 			out: `${found.join("\n")}\n${found.length} refusal(s)\n`,
 		});
+	});
+});
+
+describe("a dependency of a recorded package, let through though published within the last day", () => {
+	const jose = parse(appLock).packages["jose-lite@1.4.0"].resolution.integrity as string;
+	const fresh = [{ name: "jose-lite", version: "1.4.0", integrity: jose }];
+	const freshly = (lock: string, list: unknown = fresh) =>
+		outsideLock.refusals(lock, [record], overrides, registries, recorded, list as never);
+
+	it("reads its one version and integrity from the project pnpm installed it into", () => {
+		expect(outsideLock.dependencyRecordOf(stagingLock, "jose-lite", registries)).toEqual({
+			name: "jose-lite",
+			version: "1.4.0",
+			integrity: parse(stagingLock).packages["jose-lite@1.4.0"].resolution.integrity,
+		});
+	});
+
+	it("refuses one the project's lockfile does not hold, holds at two versions, or resolves from no registry", () => {
+		expect(() => outsideLock.dependencyRecordOf(stagingLock, "none-lite", registries)).toThrow(
+			"none-lite: the project's lockfile does not hold it",
+		);
+		const second = changed(
+			(l) => (l.packages["jose-lite@1.5.0"] = { resolution: { integrity: "sha512-SECOND==" } }),
+			stagingLock,
+		);
+		expect(() => outsideLock.dependencyRecordOf(second, "jose-lite", registries)).toThrow(
+			"jose-lite: 1.4.0, 1.5.0 in the project's lockfile, where one is let through",
+		);
+		const directory = changed(
+			(l) => (l.packages["jose-lite@1.4.0"].resolution = { type: "directory", directory: "../j" }),
+			stagingLock,
+		);
+		expect(() => outsideLock.dependencyRecordOf(directory, "jose-lite", registries)).toThrow(
+			"jose-lite: resolved from no registry",
+		);
+	});
+
+	it("passes the app's lockfile installing it as recorded, or holding no such version of it", () => {
+		expect(freshly(appLock)).toEqual([]);
+		expect(freshly(appLock, [{ ...fresh[0], version: "1.9.0" }])).toEqual([]);
+		expect(freshly(appLock, [])).toEqual([]);
+	});
+
+	it("refuses it at another integrity, or from other than its registry", () => {
+		const swapped = changed((l) => {
+			l.packages["jose-lite@1.4.0"].resolution = { integrity: "sha512-SWAPPED==" };
+		});
+		expect(freshly(swapped)).toEqual([
+			`jose-lite: integrity sha512-SWAPPED==, not ${jose} as recorded to install it fresh`,
+		]);
+		const elsewhere = changed((l) => {
+			l.packages["jose-lite@1.4.0"].resolution.tarball =
+				"https://elsewhere.example/jose-lite/-/jose-lite-1.4.0.tgz";
+		});
+		expect(freshly(elsewhere)).toEqual([
+			"jose-lite: its tarball lies at https://elsewhere.example, not at its registry http://127.0.0.1:4873",
+		]);
+	});
+
+	it("refuses a record of it that is no list of a name, a version and an integrity", () => {
+		expect(freshly(appLock, { "jose-lite": "1.4.0" })).toEqual([
+			"the record of dependencies let through is not a list",
+		]);
+		expect(freshly(appLock, [{ name: "jose-lite", version: "1.4.0" }])).toEqual([
+			"a dependency let through is not recorded by a name, a version and an integrity",
+		]);
 	});
 });

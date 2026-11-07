@@ -481,3 +481,49 @@ describe("asking pnpm for the project's registries", () => {
 		expect(read.registries).toEqual({ default: "http://127.0.0.1:4873" });
 	});
 });
+
+describe("a dependency let through though published within the last day", () => {
+	const fresh = (names: string[], root = project()) =>
+		readOutside(root, ["@x/grant"], release, {}, names);
+
+	it("records one a package named npm: declares, as a dependency, an optional one or a peer, at the one version the project resolved", () => {
+		const records = fresh(["jose-lite", "fast-path"]).freshDependencies;
+		expect(records).toEqual([
+			{
+				name: "jose-lite",
+				version: "1.4.0",
+				integrity: parse(lock).packages["jose-lite@1.4.0"].resolution.integrity,
+			},
+			{
+				name: "fast-path",
+				version: "2.1.0",
+				integrity: parse(lock).packages["fast-path@2.1.0"].resolution.integrity,
+			},
+		]);
+		expect(fresh(["@x/grant"]).freshDependencies).toBeUndefined();
+	});
+
+	it("refuses one no package named npm: declares, one the release holds, and one the project holds at two versions", () => {
+		const second = (text: string) => {
+			const l = parse(text);
+			l.packages["jose-lite@1.5.0"] = { resolution: { integrity: "sha512-SECOND==" } };
+			return stringify(l);
+		};
+		for (const [names, why] of [
+			[
+				["@x/other"],
+				"--allow-fresh @x/other: neither named npm:@x/other nor declared by a package named so",
+			],
+			[["zod"], "--allow-fresh zod: held to the release's version"],
+			[
+				["@o3co/auth-provider-oauth"],
+				"--allow-fresh @o3co/auth-provider-oauth: held to the release's version",
+			],
+		] as const) {
+			expect(() => fresh([...names])).toThrow(why);
+		}
+		expect(() => fresh(["jose-lite"], project({ lock: second(lock) }))).toThrow(
+			"--allow-fresh jose-lite: 1.4.0, 1.5.0 in the project's lockfile, where one is let through",
+		);
+	});
+});
