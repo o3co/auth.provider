@@ -4554,6 +4554,9 @@ importers:
       '@mod/docker-client':
         specifier: workspace:*
         version: link:../docker-client
+      '@mod/local-registry':
+        specifier: workspace:*
+        version: link:../local-registry
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
