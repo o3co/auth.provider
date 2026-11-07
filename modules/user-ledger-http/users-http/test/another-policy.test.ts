@@ -21,6 +21,7 @@ it("logs a refusal a second copy of outbound-policy throws by its reason, not as
 		credential: undefined,
 		narrowerOf: () => ({}),
 		warn: (event, fields) => void warned.push([event, fields]),
+		now: Date.now,
 	});
 	await expect(
 		ledger.verify(configuredUrl("https://users.example/v"), "alice", "pw"),

@@ -10,12 +10,13 @@ import {
 import type { ConfiguredUrl } from "@mod/url-setting";
 import { isWellFormedSubject, userAttribute, type Verified } from "@mod/users";
 
-/** What the calls are made with: outbound, the credential if any, the narrower of each URL, and the log. */
+/** What the calls are made with: outbound, the credential if any, the narrower of each URL, the log and the clock. */
 export interface CallParts {
 	readonly out: Outbound;
 	readonly credential: string | undefined;
 	readonly narrowerOf: (url: ConfiguredUrl) => Narrower;
 	readonly warn: Log["warn"];
+	readonly now: () => number;
 }
 
 /** The ledger's calls: the password call, and a lookup that posts what it looks up. */
@@ -25,6 +26,8 @@ export interface Calls {
 }
 
 const none: Verified = deepFreeze({ kind: "none" });
+/** How often a deprecated answer is told at most. */
+const deprecatedEveryMs = 60 * 60 * 1000;
 /** The ledger's fields kept as given, each with users' name for it. */
 const keptFields = [
 	["email", userAttribute.email],
@@ -58,7 +61,17 @@ function userOf(answer: Readonly<Record<string, unknown>>) {
 }
 
 export function calls(parts: CallParts): Calls {
-	const { out, credential, narrowerOf, warn } = parts;
+	const { out, credential, narrowerOf, warn, now } = parts;
+	let deprecatedAt: number | undefined;
+	/** None, telling at most once an hour that the ledger still answers the deprecated 401. */
+	const deprecatedNone = () => {
+		const at = now();
+		if (deprecatedAt === undefined || at - deprecatedAt >= deprecatedEveryMs) {
+			deprecatedAt = at;
+			warn("users-http.ledger_deprecated_refusal", { status: usersWire.refused });
+		}
+		return none;
+	};
 	/** Logs why the ledger failed, by its kind or status alone, and answers unavailable. */
 	const failed = (why: { reason: string } | { status: number; reason?: string }) => {
 		warn("users-http.ledger_failed", why);
@@ -97,7 +110,7 @@ export function calls(parts: CallParts): Calls {
 			if (answer.status === usersWire.refused) {
 				// A challenge refuses the credential; with none sent, it can only refuse the user.
 				const challenged = challengesBearer(answer.headers.get("www-authenticate"));
-				if (credential === undefined || !challenged) return none;
+				if (credential === undefined || !challenged) return deprecatedNone();
 				throw failed({ reason: "credential-refused" });
 			}
 			return (
