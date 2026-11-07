@@ -32,10 +32,10 @@ interface Granted extends Authorized {
 	used?: boolean;
 }
 
-/** Where a fake upstream answers, and the issuer it names: its own base unless one is given. */
 /** How a fake upstream's description answers: as itself, with a status alone, or naming another issuer. */
 export type Describing = "itself" | number | { readonly issuer: string };
 
+/** Where a fake upstream answers, and the issuer it names: its own base unless one is given. */
 export interface UpstreamShape {
 	readonly issuer?: string;
 	readonly authorize: string;
