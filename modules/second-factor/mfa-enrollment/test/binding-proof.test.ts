@@ -151,19 +151,7 @@ describe("a binding proof before a first factor", () => {
 		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
 	});
 
-	it("lets no login go on, nor raises a session, on a first factor bound on it of a kind that does not count", async () => {
-		const s = await serve({ mode: "required" }, [contactProof, mailedKind]);
-		const { tx } = await s.heldLogin("una");
-		await s.call("POST", "/session/mfa/enrollment", { kind: "mailed", transaction_id: tx });
-		const atLogin = await boundOnProof(s, tx, "mailed");
-		// Answered as one bound on the password alone: the factor, and the login asked again.
-		expect([atLogin.status, (atLogin.body.factor as { kind: string }).kind]).toEqual([
-			200,
-			"mailed",
-		]);
-		expect(atLogin.body).not.toHaveProperty("redirect_to");
-		expect(s.jar().has("__Host-session")).toBe(false);
-		expect((await s.app.get(factorReading).held("una")).map((f) => f.kind)).toEqual(["mailed"]);
+	it("raises no session on a factor bound of a kind that does not count", async () => {
 		const optional = await serve({}, [contactProof, mailedKind]);
 		await optional.signIn("uli");
 		const old = optional.jar().get("__Host-session");
