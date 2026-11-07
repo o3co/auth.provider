@@ -4,7 +4,10 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { served } from "../serve.ts";
+import { packedRegistry } from "../contract.ts";
+
+/** A directory holding no tarball. */
+const none = () => mkdtempSync(join(tmpdir(), "registry-none-"));
 
 /** A directory holding one tarball of a package, as pnpm packs one. */
 function tarballs(): string {
@@ -22,7 +25,11 @@ function tarballs(): string {
 
 it("serves its own packages, answers 502 where the upstream fails, and stays up", async () => {
 	// No server listens on port 9 here: every upstream request fails.
-	const registry = await served("http://127.0.0.1:9/", [tarballs()]);
+	const registry = await packedRegistry({
+		release: tarballs(),
+		outside: [],
+		upstream: "http://127.0.0.1:9/",
+	});
 	try {
 		const own = await fetch(`${registry.origin}/@x%2fheld`);
 		expect(own.status).toBe(200);
@@ -36,15 +43,9 @@ it("serves its own packages, answers 502 where the upstream fails, and stays up"
 	}
 });
 
-it("stamps the versions of a directory named as just published with its start, and any other two days before", async () => {
-	const fresh = tarballs();
-	const other = tarballs();
-	const ageOf = async (dirs: string[], justPublished?: string) => {
-		const registry = await served(
-			"http://127.0.0.1:9/",
-			dirs,
-			justPublished ? { justPublished } : {},
-		);
+it("stamps the release's versions with its start, and those outside it two days before", async () => {
+	const ageOf = async (release: string, outside: string[]) => {
+		const registry = await packedRegistry({ release, outside, upstream: "http://127.0.0.1:9/" });
 		try {
 			const answer = await fetch(`${registry.origin}/@x%2fheld`);
 			const { time } = (await answer.json()) as { time: Record<string, string> };
@@ -53,10 +54,9 @@ it("stamps the versions of a directory named as just published with its start, a
 			await registry.stop();
 		}
 	};
-	expect(await ageOf([fresh], fresh)).toBeLessThan(60_000);
+	expect(await ageOf(tarballs(), [])).toBeLessThan(60_000);
 	const twoDays = 2 * 24 * 60 * 60 * 1000;
-	expect(await ageOf([other], fresh)).toBeGreaterThan(twoDays - 60_000);
-	expect(await ageOf([other])).toBeGreaterThan(twoDays - 60_000);
+	expect(await ageOf(none(), [tarballs()])).toBeGreaterThan(twoDays - 60_000);
 });
 
 /** An upstream of the test's own, listening on a free port: its origin and how to close it. */
@@ -83,7 +83,12 @@ it("answers 502 where the upstream's body breaks off or it answers too late, and
 		}
 		// Any other name is never answered.
 	});
-	const registry = await served(upstream.origin, [tarballs()], { upstreamMs: 500 });
+	const registry = await packedRegistry({
+		release: tarballs(),
+		outside: [],
+		upstream: upstream.origin,
+		limits: { upstreamMs: 500 },
+	});
 	try {
 		expect((await fetch(`${registry.origin}/broken`)).status).toBe(502);
 		expect((await fetch(`${registry.origin}/slow`)).status).toBe(502);
@@ -95,7 +100,34 @@ it("answers 502 where the upstream's body breaks off or it answers too late, and
 });
 
 it("refuses to start where the registry cannot", async () => {
-	await expect(served("http://127.0.0.1:9/", ["/no/such/directory"])).rejects.toThrow(
-		/the registry exited/,
-	);
+	await expect(
+		packedRegistry({ release: "/no/such/directory", outside: [], upstream: "http://127.0.0.1:9/" }),
+	).rejects.toThrow(/the registry exited/);
+});
+
+it("answers any other name from the upstream, its address written with or without a trailing slash", async () => {
+	const upstream = await upstreamOf((request, response) => {
+		response.writeHead(request.url === "/left-pad" ? 200 : 404, {
+			"content-type": "application/json",
+		});
+		response.end(JSON.stringify({ name: "left-pad" }));
+	});
+	try {
+		for (const address of [upstream.origin, upstream.origin.replace(/\/$/, "")]) {
+			const registry = await packedRegistry({
+				release: tarballs(),
+				outside: [],
+				upstream: address,
+			});
+			try {
+				const answer = await fetch(`${registry.origin}/left-pad`);
+				expect(answer.status).toBe(200);
+				expect(await answer.json()).toEqual({ name: "left-pad" });
+			} finally {
+				await registry.stop();
+			}
+		}
+	} finally {
+		await upstream.close();
+	}
 });

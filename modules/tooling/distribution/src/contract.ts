@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+export { packedRegistry } from "./registry/contract.ts";
+
 export interface Member {
 	readonly name: string;
 	readonly dir: string;

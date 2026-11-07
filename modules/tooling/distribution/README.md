@@ -18,6 +18,7 @@
 - `pnpm release:sbom <tarballs> <dir>`: before anything is published, the release's lists of what it ships, made from its tarballs; see the internal module `release-sbom`.
 - `pnpm release:listed <tarballs> <tarballs.json>`: where the release publishes, the tarballs held to those the lists were made of; see the internal module `release-listed`.
 - `pnpm release:notes <version> <file>`: where the release publishes, its notes from the version's section of the changelog; see the internal module `release-notes`.
+- `packedRegistry`: the packed release served as a registry, as an operator first meets it; any other name from the upstream. See the internal module `registry`.
 
 ## Invariants
 - Bundles come only from the directory structure and the bundle manifests.

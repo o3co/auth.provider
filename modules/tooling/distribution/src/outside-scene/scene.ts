@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { served } from "./serve.ts";
+import { packedRegistry } from "../registry/contract.ts";
 import { swappedZod } from "./swap.ts";
 
 const grant = "@x/release-check-grant";
@@ -86,11 +86,11 @@ export async function outsideScene(options: {
 		encoding: "utf8",
 		timeout: commandLimitMs,
 	}).trim();
-	const registry = await served(
-		upstream.endsWith("/") ? upstream : `${upstream}/`,
-		[options.tarballs, outside],
-		{ justPublished: options.tarballs },
-	);
+	const registry = await packedRegistry({
+		release: options.tarballs,
+		outside: [outside],
+		upstream,
+	});
 	try {
 		const { origin } = registry;
 		const npmrc = `@o3co:registry=${origin}/\n@x:registry=${origin}/\n`;

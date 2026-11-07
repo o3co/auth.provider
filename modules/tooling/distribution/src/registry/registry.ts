@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * A registry of the release check's own, serving the tarballs in the directories named after the
+ * A registry of a check's own, serving the tarballs in the directories named after the
  * upstream registry's address: each package's document holds every version's manifest, its
  * tarball's address and npm's integrity of its bytes. A version in the directory the starter names
  * as just published (`REGISTRY_JUST_PUBLISHED`) was published as the registry started, as the
