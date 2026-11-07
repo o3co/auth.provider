@@ -78,7 +78,7 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 				.boolean()
 				.prefault(true)
 				.describe(
-					"Reads the endpoints from the issuer's own description, checking it names the issuer; without it, the three endpoints are given.",
+					"Reads the endpoints from the issuer's own description, checking it names the issuer; without it, the three endpoints are given. One that cannot be read at boot leaves the IdP unavailable, not boot refused, until a read holds.",
 				),
 			"authorization-endpoint": endpoint
 				.optional()

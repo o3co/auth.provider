@@ -8,7 +8,7 @@ import { opened } from "./upstream.ts";
 
 export default defineModule(
 	// Safe on many instances given the same settings on each (deployment-guarantees, Several instances); each
-	// reads the issuer's discovery document once, at boot.
+	// reads the issuer's discovery document once, at boot, or, where it cannot be read then, once a read holds.
 	{ name: "idp-oidc", replicaSafe: true, takes: [externalJwt, outbound, outboundRefusals] },
 	(m) => [
 		m.contribute(idpTypes).by(async (c) => {

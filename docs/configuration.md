@@ -1000,7 +1000,7 @@ From `@mod/idp-oidc`.
 | `federation.idps.<name>.client-secret` | string |  | yes | The client secret the IdP gave this provider, sent to its token endpoint. |
 | `federation.idps.<name>.issuer` | string |  | yes | The IdP's issuer, which its id_tokens name and its description sits under. |
 | `federation.idps.<name>.token-auth` | client_secret_basic \| client_secret_post | `client_secret_basic` |  | How the client authenticates at the token endpoint. |
-| `federation.idps.<name>.discovery` | boolean | `true` |  | Reads the endpoints from the issuer's own description, checking it names the issuer; without it, the three endpoints are given. |
+| `federation.idps.<name>.discovery` | boolean | `true` |  | Reads the endpoints from the issuer's own description, checking it names the issuer; without it, the three endpoints are given. One that cannot be read at boot leaves the IdP unavailable, not boot refused, until a read holds. |
 | `federation.idps.<name>.authorization-endpoint` | string |  |  | Where the browser is sent to log in, without discovery. |
 | `federation.idps.<name>.token-endpoint` | string |  |  | Where a code is exchanged for tokens, without discovery. |
 | `federation.idps.<name>.jwks-uri` | string |  |  | Where the keys that sign the IdP's id_tokens are read, without discovery. |
