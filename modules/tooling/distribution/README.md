@@ -33,7 +33,8 @@
 - An outside package a member requires as a peer is a required peer, in that range, of every bundle depending on it, not a dependency: the app then holds the one copy the public types name, where a bundle's own copy beside the app's would make two types of one name and fail the app's type check.
 
 ## Depends on
-- `create-app` (its patterns, for the release check), `trial` (the layer the release check boots each image on), `combinations` (the features that opt in, for the release's lists); it asks pnpm for the workspace packages, reads their manifests, and compiles with TypeScript; the release check builds and runs images with Docker, through `docker-client`. Sealing reads the lockfile with `yaml` and tarballs with `tar`; the publish check asks the registry with `npm view`.
+- `create-app` (its patterns, for the release check), `trial` (the layer the release check boots each image on), `combinations` (the features that opt in, for the release's lists); it asks pnpm for the workspace packages, reads their manifests, and compiles with TypeScript. Sealing reads the lockfile with `yaml` and tarballs with `tar`; the publish check asks the registry with `npm view`.
+- The release check builds and runs images with Docker, through `docker-client`; its outside scene serves its packages through `local-registry`.
 
 ## Vocabulary
 - bundle: the distribution unit of one concern directory.
