@@ -152,7 +152,7 @@ A package is read from a registry alone, so try one before it is published, in i
    ```
 
    Where the project sets `minimumReleaseAge`, as above, name the package in its `minimumReleaseAgeExclude` too, or its install takes no version published within that time.
-3. Generate the app with `--allow-fresh @example/did-grant`: a version published within the last day is otherwise not installed.
+3. Generate the app as [above](#generate-the-app), naming `npm:@example/did-grant` from that project, and add `--allow-fresh @example/did-grant`: a version published within the last day is otherwise not installed.
 4. Check the lockfile and install as [above](#check-the-apps-lockfile-then-install-it), then [run the app by its files](#run-the-app-by-its-files): the image's build does not reach a loopback origin of your machine.
 
 `--allow-fresh` takes only the packages named `npm:`, so a dependency of the package published to that registry within the last day is not installed: publish it a day before you try.
