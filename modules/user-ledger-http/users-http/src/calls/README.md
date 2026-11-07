@@ -11,7 +11,8 @@
 - `calls(parts)`: `verify(url, identifier, password)`, the password call, and `lookup(url, asked)`, which posts `asked`; for both, a `404` or `410` is none only with its word (`not_found`, `gone`) in a JSON object body.
 
 ## Invariants
-- A destination refused, a redirect, no answer in time or size, and every answer read as unavailable throw `Unavailable`, logging one `users-http.ledger_failed` warning with the status, or the kind alone: outbound's refusal reason or failure, `credential-refused`, `no-answer` or `malformed`; for a `404` or `410` without the ledger's word, with both its status and `reason: "unmarked"`. None is not logged.
+- A destination refused, a redirect, no answer in time or size, and every answer read as unavailable throw `Unavailable`, logging one `users-http.ledger_failed` warning with the status, or the kind alone: outbound's refusal reason or failure, `credential-refused`, `no-answer` or `malformed`; for a `404` or `410` without the ledger's word, with both its status and `reason: "unmarked"`. None is not logged, but for the deprecated `401` below.
+- The password call's deprecated `401`, read as none, logs one `users-http.ledger_deprecated_refusal` warning with its status, at most once an hour.
 - An error or log line carries no text or bytes from the ledger, and no password.
 - A user is a new frozen value. Attributes keep the ledger's values as given.
 
