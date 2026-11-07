@@ -429,13 +429,22 @@ describe("the upstream logout route", () => {
 		expect((await h.ask(h.token)).status).toBe(404);
 	});
 
-	it("answers disconnected where the upstream has no end of session, or it fails", async () => {
+	it("answers disconnected where the upstream has no end of session, has found it has none, cannot tell yet, or fails", async () => {
 		const failing: Offered = {
 			endSession: () => {
 				throw new RangeError("no");
 			},
 		};
-		for (const offered of [{}, failing]) {
+		const notYet: Offered = {
+			endSession: () => {
+				throw new Unavailable("upstream");
+			},
+		};
+		const kinds = new Map<Offered, string>([
+			[failing, "RangeError"],
+			[notYet, "Unavailable"],
+		]);
+		for (const offered of [{}, { endSession: () => undefined }, failing, notYet]) {
 			const h = await linked({ offered });
 			expect(await h.logout(h.token)).toMatchObject({ status: 200, json: { disconnected: true } });
 			expect(h.events.map((e) => [e.kind, e.attributes?.redirected])).toEqual([
@@ -443,9 +452,8 @@ describe("the upstream logout route", () => {
 			]);
 			expect((await h.ask(h.token)).status).toBe(404);
 			const warned = h.logged().filter((l) => l.event === "federation-tokens.end_session_failed");
-			expect(warned.map((l) => l.fields)).toEqual(
-				offered === failing ? [{ idp: "corp", kind: "RangeError" }] : [],
-			);
+			const kind = kinds.get(offered);
+			expect(warned.map((l) => l.fields)).toEqual(kind ? [{ idp: "corp", kind }] : []);
 		}
 	});
 

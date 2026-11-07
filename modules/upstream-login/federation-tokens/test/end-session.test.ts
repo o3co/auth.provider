@@ -1,3 +1,4 @@
+import { Unavailable } from "@mod/kernel";
 import { expect, it } from "vitest";
 import { upstreamEndSessions } from "../src/contract.ts";
 import { harness, type Offered } from "./harness.ts";
@@ -51,4 +52,25 @@ it("answers none when the upstream cannot build its end of session, warning with
 			fields: { idp: "corp", kind: "Error" },
 		},
 	]);
+});
+
+it("answers none, warning nothing, where the upstream has found it has none, and warns while it cannot tell yet", async () => {
+	const told = async (offered: Offered) => {
+		const h = await harness({ offered });
+		const session = await h.login();
+		await h.receive(session, { idToken: "id-1" });
+		const answered = await h.app.get(upstreamEndSessions).of(session.id, {});
+		const warned = h.logged().filter((l) => l.event === "federation-tokens.end_session_failed");
+		return { answered, warned: warned.map((l) => l.fields) };
+	};
+	expect(await told({ endSession: () => undefined })).toEqual({ answered: undefined, warned: [] });
+	const notYet: Offered = {
+		endSession: () => {
+			throw new Unavailable("upstream");
+		},
+	};
+	expect(await told(notYet)).toEqual({
+		answered: undefined,
+		warned: [{ idp: "corp", kind: "Unavailable" }],
+	});
 });
