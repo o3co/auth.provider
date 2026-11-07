@@ -5,7 +5,7 @@
 
 ## Not here
 - Which scopes an install asks it for: the caller's `.npmrc` routes them, and it holds no list of scopes.
-- What its packages are, and when each should seem published: the caller's (the release check's `outside-scene`; `conformance-recipes`).
+- What its packages are, and when each should seem published: the caller's.
 - Anything a product reads: it is assembly, unpublished.
 
 ## Offers
