@@ -412,6 +412,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `fence` (`src/fence`): the fault scenes of a subject's fence refusing, from another instance, a change to her second factors that her revocation overtook (`guarantee-4-d`), the revocation sent through the ledger's route.
   - `recovery-code-once` (`src/recovery-code-once`): the fault scenes of a recovery code used once (`guarantee-5-g`).
+  - `way-back` (`src/way-back`): the fault scene of a code by mail bound as a way back, then a deployment started again under a required second factor, on one Redis.
 - `@mod/conformance-tunnel` (verification, `modules/tooling/conformance-tunnel`): Gives a harness's app a way out to a party on this machine that it may reach over https by its name alone: an HTTP CONNECT proxy on loopback, set as the app's `outbound.proxy`.
 - `@mod/distribution` (assembly, `modules/tooling/distribution`): Forms one distribution bundle per concern directory, whose members are the packages placed in it.
   - `fetched` (`src/fetched`): the packages of this version npm already holds, taken from the registry for a release run again.
