@@ -14,12 +14,14 @@
   - A type sees only its own settings, never `type` or the others the implementation reads.
   - `open` gets the IdP's name as `idp`, the word `upstreams.of` and the receivers use, and its redirect URI.
   - `open` throws `UpstreamMismatch(reason, at)` to say why it refuses the settings and at which of their keys; the reason names no configuration value.
+  - `open` throws only to refuse. An upstream it cannot reach yet it may open instead: each operation that needs the upstream (an authorization URL, an exchange, a refresh, an end of session, a delegation's) throws `Unavailable` until it can be asked.
 - An upstream: its issuer, how it answers (in the query or a posted form), its clock allowance, authorization URL, and code exchange → upstream login, with its tokens and profile if the type gives them
   - It may say `subjectsFrom`, where its subjects are read when the type's settings point that away from its own endpoint: what the IdP's name stands for in place of the issuer. The issuer stays what its answers are compared with.
   - The code exchange gets the verifier, nonce, redirect URI and the callback's `iss`.
-- Exchanges and refreshes throw `UpstreamRefused` for an answer that does not hold (an exchange's 5xx too), `Unavailable` when unreachable (a refresh's 5xx too); a delegation's start refuses as a value, never throws.
+- Exchanges and refreshes throw `UpstreamRefused` for an answer that does not hold (an exchange's 5xx too), `Unavailable` when the upstream cannot be asked now (a refresh's 5xx too); a delegation's start refuses as a value, and throws `Unavailable` only while the type cannot build it.
 - `UpstreamRefused.is` and `UpstreamMismatch.is` tell each by a mark, which every copy of upstreams in a bundle shares; a caller tells them so, never by its class.
 - An upstream may also offer a refresh, an end-session URL and an offline delegation
+  - An end of session answers its URL, none where the type has found the upstream has none, or throws `Unavailable` while it cannot tell yet; an upstream offering no end of session has none.
 - A refresh answers new tokens, `invalid_grant` (the grant is gone), `interaction_required` (the grant stands, but the user must act at the upstream first) or `limited` (with when to ask again, where said).
 - `refreshedExpiry` (the answer's access token and end, what was held): where the upstream hands the same access token again, the earlier of the two ends, so a refresh never lengthens a token; else the answer's end. Every holder of refreshed tokens reads them by it.
 - An offline delegation: its authorization URL, or a refusal of the start as a value; its code exchange given the scopes and resource its start asked for, naming the upstream's own issuer; and its refresh
