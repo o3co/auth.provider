@@ -188,6 +188,21 @@ it("refuses boot for a client's written key that none of the algorithms taken re
 			],
 		});
 	}
+	// Each such key is named, in one refusal.
+	await expect(
+		boot({ keys: [unnamed, publicJwk(ec.publicKey, "ec"), { ...unnamed, alg: "RS512" }] }, true, [
+			"RS256",
+			"PS256",
+			"ES256",
+		]),
+	).rejects.toMatchObject({
+		refusals: [
+			{
+				reason:
+					"keys.0, keys.2 are read under none of client-assertion.algorithms: give each an alg among them, or take only one for its kind",
+			},
+		],
+	});
 	// Named, or one taken for its kind, it is read under that one.
 	await boot({ keys: [{ ...unnamed, alg: "PS256" }] }, true, ["RS256", "PS256"]);
 	await boot({ keys: [unnamed] }, true, ["RS256", "ES256"]);

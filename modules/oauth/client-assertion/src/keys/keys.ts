@@ -70,9 +70,13 @@ export function clientKeysUnder(
 	return {
 		...clientKeys,
 		checkAtBoot: (section) => {
-			const unread = section.keys.findIndex((jwk) => boundAlgorithm(jwk, algorithms) === undefined);
-			if (unread >= 0) {
-				return `keys.${unread} is read under none of client-assertion.algorithms: give it an alg among them, or take only one for its kind`;
+			// Every such key at once, so one boot names all there is to change.
+			const unread = section.keys.flatMap((jwk, i) =>
+				boundAlgorithm(jwk, algorithms) === undefined ? [`keys.${i}`] : [],
+			);
+			if (unread.length > 0) {
+				const [is, it] = unread.length === 1 ? ["is", "it"] : ["are", "each"];
+				return `${unread.join(", ")} ${is} read under none of client-assertion.algorithms: give ${it} an alg among them, or take only one for its kind`;
 			}
 			const source = keysOf(section);
 			if (!("jwks" in source)) return undefined;
