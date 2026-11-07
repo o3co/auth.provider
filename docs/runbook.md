@@ -10,6 +10,7 @@ How to run auth-provider 0.19: Redis, rotating keys, upgrading, and what to watc
 - [Rotating the sealing key](#rotating-the-sealing-key)
 - [Upgrading](#upgrading)
 - [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)
+- [Staff who sign in through an upstream IdP only](#staff-who-sign-in-through-an-upstream-idp-only)
 - [Keeping the second-factor witness at the ledger](#keeping-the-second-factor-witness-at-the-ledger)
 - [Second factors left without their claim](#second-factors-left-without-their-claim)
 - [Passkey list entries 0.18 left](#passkey-list-entries-018-left)
@@ -179,6 +180,22 @@ When the outside user ledger suspends a user, its answers stop new logins and gr
 - Every subject revoked keeps its record with no end, so the records grow with the subjects you revoke. With `mfa-revocation`, each revocation also writes the subject's factor list in `mfa`'s store, empty for a subject who never enrolled, so that store grows with them too.
 - With second factors composed, `mfa-revocation` makes a revocation complete only once no enrollment begun before it can bind; an app composed by hand must compose it, as `combinations` does.
 - Likewise `mfa-entry` holds sessions to second factors; `mfa` refuses to boot without it, whatever the mode, so an app composed by hand must compose it.
+
+## Staff who sign in through an upstream IdP only
+
+Where staff sign in through an upstream IdP alone, such as a company's Microsoft Entra ID, provision them in the user ledger, not by linking:
+
+- Set `users-http.upstream-url`. The ledger looks a user up by upstream identity (`{"idp", "subject"}`), and its answer is the last word: the provider reads and writes no link of its own (`users`' card). Without `upstream-url`, the provider keeps the links itself, and the ledger does not see them.
+- Give such a user no password in the ledger: its password call answers `404` with `{"error":"not_found"}` for them, and no temporary password is issued. There is no link to make, and no password to retire later.
+- Map the IdP's word for its own MFA into `federation.idps.<name>.upstream-amr`. A login whose amr holds `mfa` passes the second-factor gate unasked (`mfa-flows`' card), so it meets `mfa.mode = required` without a local factor. A login the IdP says no `mfa` of is held at binding a first factor, as any login without one. Changing credentials, such as binding a factor, also needs the IdP to say when the user signed in (`auth_time`; `mfa-entry`'s card).
+- The ledger must know, before the first sign-in, the subject the provider reads for the user at that IdP: the ID token's `sub` (`upstream-client`'s ID token reader). Until it does, the lookup answers that the ledger knows no such user, and the sign-in is refused `unknown_user`.
+
+**Microsoft Entra ID.** Entra's `sub` is pairwise, one value per app registration, and is not the user's directory object ID (`oid`), so a staff member cannot be provisioned from their `oid` before their first sign-in. This rests on Microsoft's description of the ID token's claims; it was not run against Entra here. Provision a staff member where the ledger can know the provider's `sub`:
+
+- the ledger reads the `sub` through the same app registration as the provider, or
+- an administrator ties the `sub` the ledger receives at the first sign-in to the staff member, after checking who they are.
+
+A user who signs in with a password and links an upstream identity instead goes through `federation-link`: under `mfa.mode = required`, a counting factor comes before the link (its card).
 
 ## Keeping the second-factor witness at the ledger
 
