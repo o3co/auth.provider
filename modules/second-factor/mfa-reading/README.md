@@ -15,6 +15,7 @@
 - `Shown`, `Fence` (compared, never computed with), `Proved`, `Challenged`.
 
 ## Invariants
+- The kinds this deployment takes are those composed; under "required", only those whose proof adds `mfa`. A factor of another kind is not held, asked, challenged or proved, as one of a kind not composed; `guessableBoundAfter` reads it as bound before.
 - A counting factor is one of a kind declared counting. "optional" stops only subjects holding a factor; "required" asks one with no counting factor for a first binding. A factor of a unique value not yet claimed counts there and for `countingHeld`, being the subject's own and provable; only the readings as written leave it out.
 - A factor's state is written only over the state judged, so a proof of a kind whose state moves (a counter, codes used) passes once; a factor gone meanwhile is raced. A kind proved by a challenge, whose state does not move, passes once because its caller hands each challenge once (`mfa-flows` takes it with the attempt). A store that cannot answer is unavailable, never a refusal.
 - A sealed value given back comes only from mfa's records or `mfa-flows`' transactions, so one that will not open is unavailable.

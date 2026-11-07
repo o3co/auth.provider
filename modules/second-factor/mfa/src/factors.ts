@@ -19,7 +19,7 @@ import {
 } from "./shared.ts";
 import { standingWith } from "./standing/standing.ts";
 
-export { addsMfa, byKind, counting, type FactorParts, guessing } from "./shared.ts";
+export { addsMfa, byKind, counting, type FactorParts, guessing, leftOut } from "./shared.ts";
 
 /** mfa's decisions: the members of the three contracts it provides, one implementation in each app. */
 export type Decisions = FactorReading & FactorBinding & FactorManaging;
