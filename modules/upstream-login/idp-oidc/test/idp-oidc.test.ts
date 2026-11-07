@@ -1240,7 +1240,7 @@ describe("idp-oidc", () => {
 				idTokenHint: "idt",
 				postLogoutRedirectUri: "https://app.example/bye",
 				state: "st",
-			}),
+			}) ?? "",
 		);
 		expect(`${url.origin}${url.pathname}`).toBe(`${issuer}/logout`);
 		expect(Object.fromEntries(url.searchParams)).toEqual({
@@ -1250,7 +1250,7 @@ describe("idp-oidc", () => {
 			state: "st",
 			client_id: "client",
 		});
-		expect(new URL(endSession({})).search).toBe("?ui=1&client_id=client");
+		expect(new URL(endSession({}) ?? "").search).toBe("?ui=1&client_id=client");
 		expect((await open()).upstream.endSession).toBeUndefined();
 		const configured = await open({
 			settings: { ...givenEndpoints, "end-session-endpoint": `${issuer}/bye` },
