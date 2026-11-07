@@ -139,6 +139,26 @@ APP_CONFIG=config/local.conf,config/application.conf node --env-file-if-exists=.
 
 These run with what `.bin` holds, in place of the command you meant, so keep them away from such an app: a script you add, `pnpm exec`, `pnpm node`, `pnpm <name>`, `npx` or `pnpm dlx` run from the app's directory, a `.bin/<cmd>` run by path, a shell with `./node_modules/.bin` on PATH, and a package's build script once its build is approved.
 
+### Try a package before it is published
+
+A package is read from a registry alone, so try one before it is published, in its CI say, through a registry of your own on a loopback origin, which is taken as any registry is:
+
+1. Publish the package to that registry.
+2. In the project you install it into, name the registry for the package's scope in `.npmrc`, then install it as [above](#install-it-where-the-generator-reads-it):
+
+   ```sh
+   echo '@example:registry=http://127.0.0.1:4873/' > .npmrc
+   pnpm add @example/did-grant@1.2.0
+   ```
+
+   Where the project sets `minimumReleaseAge`, as above, name the package in its `minimumReleaseAgeExclude` too, or its install takes no version published within that time.
+3. Generate the app as [above](#generate-the-app), naming `npm:@example/did-grant` from that project, and add `--allow-fresh @example/did-grant`: a version published within the last day is otherwise not installed.
+4. Check the lockfile and install as [above](#check-the-apps-lockfile-then-install-it), then [run the app by its files](#run-the-app-by-its-files): the image's build does not reach a loopback origin of your machine.
+
+`--allow-fresh` takes only the packages named `npm:`, so a dependency of the package published to that registry within the last day is not installed: publish it a day before you try.
+
+The app's `.npmrc` and `outside-modules.json` name that registry, so such an app installs only where it runs. Once the package is published, install it from its registry and generate the app again before you deploy it.
+
 ## What is and is not checked
 
 Checked: that the app's lockfile holds each package outside the release as recorded (its version, its integrity, its dependencies as declared, from the registry recorded), that it holds one version and one resolution of each package of the release and of zod, the tarball whose integrity the release recorded, that each declaration and the graph of all modules keep the rules above, and that generating, [started with `npx` from outside the project](#generate-the-app), runs no code of the package and uses no network.
