@@ -172,12 +172,13 @@ export async function describedBy(
 	at: { readonly clock: Clock; readonly log: Log; readonly idp: string },
 ): Promise<Description> {
 	if (!s.discovery) return { kind: "read", described: { endpoints: given(s), offersIss: false } };
+	const began = at.clock.now();
 	const first = await discovered(s, reach, hosts);
 	if (first.kind === "read") {
 		return { kind: "read", described: { endpoints: first.endpoints, offersIss: first.offersIss } };
 	}
 	at.log.warn("idp-oidc.description_unavailable", { idp: at.idp, failure: first.failure });
-	return awaited(() => discovered(s, reach, hosts), at);
+	return awaited(() => discovered(s, reach, hosts), at, began);
 }
 
 /**
@@ -187,12 +188,13 @@ export async function describedBy(
 function awaited(
 	read: () => ReturnType<typeof discovered>,
 	at: { readonly clock: Clock; readonly log: Log; readonly idp: string },
+	/** When the read at boot began, the first of the wait. */
+	bootBegan: number,
 ): Description {
 	const { clock, log, idp } = at;
 	let held: Described | undefined;
 	let running: Promise<void> | undefined;
-	// The read at boot began this wait.
-	let began = clock.now();
+	let began = bootBegan;
 	let last: "unread" | "mismatch" = "unread";
 	const told = (outcome: "unread" | "mismatch", line: () => void) => {
 		if (last !== outcome) line();

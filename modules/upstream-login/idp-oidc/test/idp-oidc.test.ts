@@ -1740,6 +1740,23 @@ describe("idp-oidc", () => {
 			]);
 		});
 
+		it("counts the minute from when the read at boot began, however long it took", async () => {
+			let down = true;
+			const { upstream, asked } = await open({
+				describes: () => {
+					if (!down) return described();
+					// The read at boot takes 30 seconds to fail, as a timeout does.
+					now += 30_000;
+					return answered(503);
+				},
+			});
+			down = false;
+			now += 30_000;
+			expect(thrownBy(() => upstream.authorizationUrl(authorizationStart))).toBe("unavailable");
+			await settled();
+			expect(reads(asked)).toBe(2);
+		});
+
 		it("lets what awaits a read go on at once where it holds, every caller sharing the one read", async () => {
 			const token = await idToken();
 			let down = true;
