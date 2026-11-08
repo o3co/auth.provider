@@ -4,7 +4,7 @@ import { isFloor, tlsOptions } from "@mod/tls-options";
 import { Redis } from "ioredis";
 import { z } from "zod";
 import { clientDebugs, clientOptions, inTheClear, queryRefusal } from "./client/client.ts";
-import { redisProbe } from "./probe/probe.ts";
+import { goodReplicaProblems, redisProbe } from "./probe/probe.ts";
 import {
 	clusterRefused,
 	redisStore,
@@ -413,7 +413,18 @@ export default defineModule(
 		}),
 		m.contribute(probes).by(async (c) => {
 			const { client, confirmer, declared } = await c.get(connections);
-			const recheck = async () => (await unmet(client, confirmer, declared, c.section)).problems;
+			// Too few good replicas only the probe asks: boot waits unready rather than failing on a passing state.
+			const goodReplicas = async () => {
+				if (c.section.replication !== "replicas") return [];
+				const settings = serverSettings(client, c.section["server-settings"] ?? {});
+				const needed = await settings.read("min-replicas-to-write");
+				const info = await client.info("replication");
+				return goodReplicaProblems(info, needed === undefined ? undefined : Number(needed));
+			};
+			const recheck = async () => {
+				const { problems } = await unmet(client, confirmer, declared, c.section);
+				return problems.length > 0 ? problems : goodReplicas();
+			};
 			return redisProbe([client, confirmer], recheck, c.log, c.clock);
 		}),
 	],

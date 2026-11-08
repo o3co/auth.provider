@@ -14,7 +14,7 @@ import type { Redis } from "ioredis";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeRedis } from "../../../test/fake-redis.ts";
 import redisModule from "../../module.ts";
-import { redisProbe } from "../probe.ts";
+import { goodReplicaProblems, redisProbe } from "../probe.ts";
 
 /** Waits until `holds`, checking every 10 ms, for 2 s at most: on the event, not on a guess of its time. */
 async function until(holds: () => boolean | Promise<boolean>) {
@@ -252,4 +252,16 @@ describe("the redis probe's check of what boot checked", () => {
 		await expect(p.run()).rejects.toThrow("Connection is closed.");
 		expect(p.counts.checks).toBe(1);
 	});
+});
+
+it("counts fewer good replicas than min-replicas-to-write, and nothing where either is not shown", () => {
+	const info = (good: number) =>
+		`# Replication\r\nrole:master\r\nmin_slaves_good_slaves:${good}\r\n`;
+	expect(goodReplicaProblems(info(0), 1)).toEqual([
+		"fewer good replicas (0) than min-replicas-to-write (1): the server refuses writes",
+	]);
+	expect(goodReplicaProblems(info(1), 2)).toHaveLength(1);
+	expect(goodReplicaProblems(info(2), 2)).toEqual([]);
+	expect(goodReplicaProblems("# Replication\r\nrole:master\r\n", 1)).toEqual([]);
+	expect(goodReplicaProblems(info(0), undefined)).toEqual([]);
 });
