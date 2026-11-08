@@ -86,6 +86,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/tls-options` (foundation, `modules/foundation/tls-options`): Owns the floor of the provider's own TLS connections as a client: the least version and the suites they take, and that each checks its peer's certificate.
 - `@mod/url-setting` (foundation, `modules/foundation/url-setting`): Decides which configured URLs boot, for every module that takes one by `urlSetting`, and when a section's own check of the URLs it holds may read them.
 - `@mod/x509-path` (foundation, `modules/foundation/x509-path`): Validates an X.509 certification path to the anchors, under rules its caller gives, with its signature rules. Knows no feature.
+  - `choice` (`src/choice`): choosing the one chain a path is validated along, within bounds, from what a peer sent and what the caller trusts.
   - `revocation` (`src/revocation`): reading a certificate's revocation material, CRLs and OCSP answers, and what it says.
   - `signatures` (`src/signatures`): Internal module of `x509-path`, shared by its path rules and by `revocation`: which signature algorithms are taken, and checking a signature.
 
