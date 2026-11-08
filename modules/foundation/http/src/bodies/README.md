@@ -16,7 +16,7 @@ Internal module of `http`: the values a request is sent with, by name, from its 
 - Values by name, read-only, from a map, a query, a form, or a JSON object's fields: `single` gives a name's value when it holds exactly one, and `repeated` the names that hold more.
 
 ## Invariants
-- A form and a JSON body share one size limit of 64 KiB: a larger form is read as empty, and a larger JSON body is `413`.
+- A form and a JSON body share one size limit of 64 KiB: a larger form is read as empty, and a larger JSON body is `413`. The limit is fixed: every value a route takes has its own bound far below it, so it only guards the server.
 - A JSON body is one object in well-formed UTF-8, frozen, naming no member twice in one object; anything else is `400`.
 - A route may take a form, JSON, none, or several.
 - A request's fields are its body's values by name.
