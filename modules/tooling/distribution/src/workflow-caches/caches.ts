@@ -91,7 +91,7 @@ const known: Readonly<
 		],
 	},
 	"pnpm/action-setup": {
-		refs: ["v4", "b906affcce14559ad1aafd4ab0e942779e9f58b1"],
+		refs: ["73e46992e05b19abd31f2f3c20e0e7370d762115"],
 		rules: [onlyAs("cache", [false, "false"]), onlyAs("run_install", [false, "false"])],
 	},
 	"softprops/action-gh-release": {
