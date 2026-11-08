@@ -38,7 +38,7 @@ const policyRefusal = (refused: IssuanceRefused): Decision => ({
 export interface Trusted {
 	readonly client: Client;
 	readonly redirectUri: string;
-	/** A parameter's single value; none when it is repeated or too long. */
+	/** A parameter's single value; none when it is absent or repeated, each held to its reader's bound. */
 	readonly one: (name: string) => string | undefined;
 	/** Each parameter's first value. */
 	readonly params: ReadonlyMap<string, string>;
