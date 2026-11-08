@@ -10,6 +10,8 @@
 - Reading a manifest into a record, and writing the record, the script and the overrides into an app: their callers.
 
 ## Offers
+- `outsideLock.wellRecorded` (a record): whether it is a package name, a version as `semver` spells it (build metadata kept), and an sha256, sha384 or sha512 integrity at its full length; the writer holds every record to it.
+- `outsideLock.exemptable` (a record): whether it is well recorded at a version with no build metadata, as an exemption names it; the script holds what it lets through to it, and the writer each record let through.
 - `outsideLock.recordOf` (lockfile text, name, registries): the version and integrity the root importer resolves the name to.
   - It refuses a name the importer lacks, a resolution to no version (a link, a file, an alias), and one from no registry.
 - `outsideLock.dependencyRecordOf` (lockfile text, name, registries): the one version and integrity the lockfile holds of a package it resolves anywhere, as a dependency is.
@@ -27,9 +29,9 @@
 - Every resolution of a recorded package (not the root's alone) resolves each required dependency and peer as required, and each optional one as optional; an optional declaration takes the place of a required one of its name. Each resolves to a version in its range, the overrides applied, or, declared as an alias, to a version of the package the alias names; nothing undeclared is resolved.
 - A package the overrides hold resolves, wherever it is referenced (by an importer's dependencies of any kind or by a resolution), to the held version from its registry under its own name, and to a resolution the lockfile holds, with the package's entry; the lockfile holds no other version, and one resolution, of it.
 - Each package the overrides hold has the integrity the release recorded of it (`held` in `outside-modules.json`), and its entry at its held version (the package, not a resolution with peers) holds that integrity: one recorded without, or a record holding none, is refused.
-- A dependency let through though fresh is recorded by its name, version (as `semver` writes it) and integrity (sha256, sha384 or sha512, at its full length); where the lockfile holds that version, its entry is from its registry with that integrity. A record of it that is no list of those, or such an entry otherwise, is refused.
+- A dependency let through though fresh is recorded as `exemptable` reads one; where the lockfile holds that version, its entry is from its registry with that integrity. A record of it that is no list of those, or such an entry otherwise, is refused.
 - What `minimumReleaseAgeExclude` lets through is held to the record: each entry is a name the overrides hold, or a recorded package or dependency let through at its version as `semver` writes it (`name@version`). Any other entry, or a setting that is no list, is refused.
-- An entry of a name held, recorded or let through names no `version` but its key's, and a snapshot of one no `resolution` or `version` of its own; any other is refused.
+- Anywhere in the lockfile, an entry keyed by a version names no other `version`, and a snapshot no `resolution` or `version` of its own; any other is refused.
 - The file imports nothing of the workspace: `yaml`, `semver` and node only. Its bundle requires node's builtins alone, and a test holds it to what the file bundles to.
 
 ## Depends on

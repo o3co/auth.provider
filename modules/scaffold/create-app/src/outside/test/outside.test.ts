@@ -524,7 +524,7 @@ describe("a dependency let through though published within the last day", () => 
 		}
 		// Declared under an alias, the name is another package's: none a package declares itself.
 		expect(() => fresh(["real-alias"])).toThrow(
-			"--allow-fresh real-alias: neither named npm:real-alias nor declared by a package named so",
+			"--allow-fresh real-alias: declared only as an alias of another package, so no package named so declares it itself",
 		);
 		// An optional dependency left unresolved, its name held at another version by another package.
 		const elsewhere = parse(lock);
