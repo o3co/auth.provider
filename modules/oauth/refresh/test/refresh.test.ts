@@ -1706,12 +1706,19 @@ describe("lineage", () => {
 		expect(named.body.error).toBe("invalid_scope");
 	});
 
-	it("binds a confidential client's family too where the section says so", async () => {
+	it("binds a confidential client's family too where the section says so, and a public client's as ever", async () => {
 		const s = await serve({ bindConfidential: true });
 		const binding = { member: "test", confirmation: "k1", tokenType: "Test" };
 		const app = await s.app.get(lineage).start({ ...(await beginning(s, "app")), binding });
 		expect((await s.refresh(app)).body.error).toBe("invalid_grant");
 		expect((await s.refresh(app, "app", { bind: "k1" })).status).toBe(200);
+		const pub = await s.app.get(lineage).start({ ...(await beginning(s, "pub")), binding });
+		expect((await s.refresh(pub, "pub")).body.error).toBe("invalid_grant");
+		expect((await s.refresh(pub, "pub", { bind: "k2" })).body.error).toBe("invalid_grant");
+		const next = await s.refresh(pub, "pub", { bind: "k1" });
+		expect(next.status).toBe(200);
+		// The token the family turns to is held to the same key.
+		expect((await s.refresh(next.body.refresh_token, "pub")).body.error).toBe("invalid_grant");
 	});
 
 	it("starts a family only for a client allowed to refresh, bound only for a public client", async () => {
