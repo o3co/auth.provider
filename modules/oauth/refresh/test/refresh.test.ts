@@ -1006,7 +1006,10 @@ describe("refresh tokens", () => {
 		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
 		expect(await s.active(first.access_token)).toBe(false);
 		expect((await s.refresh(first.refresh_token)).body.error).toBe("invalid_grant");
-		// Marked already: a retry has nothing left to do.
+		// Marked already, a retry writes the mark again, confirmed, before it answers: unwritable, 503.
+		s.stores.down.families.unavailable("update");
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
+		s.stores.down.families.restore();
 		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
 	});
 
@@ -1299,7 +1302,8 @@ describe("lineage", () => {
 		const s = await serve();
 		const first = await s.redeem();
 		const held = await familyOf(s, first);
-		expect(held.session).toBeUndefined();
+		// Named for its session, so a token issued from it is issued from that session.
+		expect(held.session).toBe(s.session.id);
 		expect(await tieOf(s, (await issue(s)).id)).toEqual({ kind: "none" });
 		const joined = await issue(s, held.ends);
 		expect(await held.join(joined)).toBe(true);
@@ -1327,6 +1331,24 @@ describe("lineage", () => {
 		expect(await s.active(exchanged.body.access_token)).toBe(false);
 		// The family's end revoked the subject token too, so it no longer validates.
 		expect((await exchange()).body).toMatchObject({ error: "invalid_request" });
+	});
+
+	it("has every access token of a session's family, its rounds' and one exchanged from it, end when the session closes, through session-tokens", async () => {
+		const s = await serve({ extra: [tokenExchange] });
+		const first = await s.redeem("exchanger");
+		const next = await s.refresh(first.refresh_token, "exchanger");
+		const exchanged = await s.grant(exchangeType, "exchanger", {
+			subject_token: String(next.body.access_token),
+			subject_token_type: "urn:ietf:params:oauth:token-type:access_token",
+		});
+		expect(exchanged.status).toBe(200);
+		const all = [first.access_token, next.body.access_token, exchanged.body.access_token];
+		for (const token of all) expect(await s.active(token)).toBe(true);
+		await s.app.get(sessions).close(s.session.id);
+		for (const token of all) expect(await s.active(token)).toBe(false);
+		expect((await s.refresh(next.body.refresh_token, "exchanger")).body.error).toBe(
+			"invalid_grant",
+		);
 	});
 
 	it("revokes the token and answers ended for a family that has ended", async () => {

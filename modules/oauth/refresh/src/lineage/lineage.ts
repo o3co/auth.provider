@@ -15,7 +15,13 @@ declare const handle: unique symbol;
 type FamilyHandle = { readonly [handle]: true };
 
 type TokenFamily =
-	| { readonly kind: "family"; readonly family: FamilyHandle; readonly expiresAt: number }
+	| {
+			readonly kind: "family";
+			readonly family: FamilyHandle;
+			readonly expiresAt: number;
+			/** The session the family is bound to, which a token issued from it is issued from. */
+			readonly session?: string;
+	  }
 	| { readonly kind: "none" }
 	| { readonly kind: "ended" };
 
@@ -67,7 +73,12 @@ export function lineageOver(
 			if (id === undefined) return { kind: "none" };
 			const family = await unended(id);
 			if (!family) return { kind: "ended" };
-			return { kind: "family", family: handleOf(tokenId), expiresAt: family.expiresAt };
+			return {
+				kind: "family",
+				family: handleOf(tokenId),
+				expiresAt: family.expiresAt,
+				...(family.session === undefined ? {} : { session: family.session }),
+			};
 		},
 		adopt: async (handle, issued) => {
 			const id = await familyOf(tokenOf(handle));
@@ -113,6 +124,8 @@ export const familyTie = (kept: Pick<Families, "of" | "adopt">): TokenTie => ({
 		return {
 			kind: "held",
 			ends: found.expiresAt,
+			// Issued from the family's session, it is recorded there, so the session's close ends it.
+			...(found.session === undefined ? {} : { session: found.session }),
 			join: async (issued) => (await kept.adopt(found.family, issued)) === "adopted",
 		};
 	},

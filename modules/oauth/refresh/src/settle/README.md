@@ -13,7 +13,7 @@ Internal module of `refresh`: the stores, the revoker, and what revokes families
 
 ## Invariants
 - Revocation is the mark alone, written even with no record, so a family mid-start never comes alive; its access tokens are not revoked by id, nor is it listed or swept.
-- A revocation `token-control` asks of a family already marked is answered `done`, whoever asks; another client's live family is left alone and answered `done` too.
+- A revocation `token-control` asks of a family already marked writes the mark again, confirmed, before it is answered `done`, whoever asks, as one read before its write was confirmed could be lost in a failover; another client's live family is left alone and answered `done` too.
 
 ## Deprecated
 - The store interfaces for each session's families, each family's access tokens and the families to revoke, with their needs and their parts of the contract test (`./testing`): neither read nor written. A later release removes them.

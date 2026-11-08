@@ -91,8 +91,12 @@ export async function revocableOver(c: BuildContext<Settings>) {
 			const kept = fromStored(await stores.families.read(parsed.id));
 			if (!kept) return "unknown" as const;
 			const live = liveOf(kept);
-			// Marked already: the mark refuses its tokens, and names no client, so it is answered alike to all.
-			if (!live) return "done" as const;
+			// Marked already, the mark is written again, confirmed, before it is answered: one read before its
+			// write was confirmed could be lost in a failover. It names no client, so it is answered alike to all.
+			if (!live) {
+				await revoker.revokeFamily(parsed.id);
+				return "done" as const;
+			}
 			// Another client's token is left alone but answered the same, so it learns nothing.
 			if (live.clientId !== client.id) return "done" as const;
 			await revoker.revokeFamily(parsed.id);

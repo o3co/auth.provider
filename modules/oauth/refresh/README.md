@@ -11,7 +11,7 @@
 - Grant `refresh_token` for `grants`, taking its audience from the request; a `code-grant` addition `refresh_token`, for a client allowed the grant; taking it back revokes the family its redemption started, or marks that none may start.
 - A `tokens` access condition: a token whose family has ended is revoked.
 - A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family, answered as written so it is audited; another client is answered the same, and a family already marked revoked is finished before it is answered.
-- `grants`' token tie `family`: a token's family, `ended` (`family has ended`) or held to its end; a token issued from it is adopted.
+- `grants`' token tie `family`: a token's family, `ended` (`family has ended`) or held to its end, naming the family's session, if any, to issue from; a token issued from it is adopted.
 - Contract `lineage`: `start(...)` → a family's first refresh token, or nothing for a client not allowed to refresh.
 - Operator section `refresh`, with `lifetime` (written with its unit, in whole seconds) and `bind-confidential-clients` (false, as 0.17); its keys are in the configuration reference.
 - Audit event `refresh.family_revoked`, with the subject and the client, when a reuse revokes a family; never a token, its secret or the family's name: declared in `./audit-events`, listed in the audit event reference.
@@ -22,7 +22,7 @@
 - A refresh token is `<family>.<secret>`: the family's name, 16 random bytes, and the secret, 32 random bytes, each in base64url, 66 characters in all (RFC 6749 §5.1 asks its size be documented).
 - Only a family's current token is usable, and each use swaps it for a new one. Any other token of the family is reuse and revokes the family; so is the loser of two concurrent uses.
 - A token with anything after it, another client's token, and one without the family's binding are refused without spending it.
-- A family's end is fixed when it starts; no access token from it outlives it. One from a family bound to a session is recorded to that session (`token-endpoint` through `session-tokens`), which ends it when the session closes, and the family's next round is refused then.
+- A family's end is fixed when it starts; no access token from it outlives it. One from a family bound to a session is issued from that session, its rounds' and a tie's joiner's alike, and so recorded there (`session-tokens`), which ends it when the session closes, and the family's next round is refused then.
 - Each access token from a family carries the amr, authentication time and acr the family started with, and one from a family bound to no session stands from that time; a time not known when it started is stated by none. None carries claims a grant added to the access token its family began with: a family keeps none.
 - A family started from a code keeps, through `claims-selection`, what the code's request asked beyond its scope, before its record is written and from the same end, read once before it, so the selection outlives the family; failing, the code is voided. Each round keeps for its access token that selection, its names cut to what is allowed and agreed to now, before the rotation; failing, that access token is revoked, the round fails and the refresh token stays usable.
 - Scope narrows only within the original grant, for that round's access token, each value once; omitted or empty is all of it. The audience asked narrows that round alone, within the family's and the client's.
