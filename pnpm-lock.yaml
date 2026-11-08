@@ -624,6 +624,9 @@ importers:
 
   modules/identity/login-attributes:
     dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
       '@mod/users':
         specifier: workspace:*
         version: link:../users

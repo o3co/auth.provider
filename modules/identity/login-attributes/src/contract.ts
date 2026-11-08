@@ -24,7 +24,11 @@ export interface AttributesKept {
 	readonly others: number;
 }
 
-export { keptAttributes } from "./keeping/keeping.ts";
+export {
+	type AttributeCaps,
+	attributeCaps,
+	keepingWith,
+} from "./keeping/keeping.ts";
 
 /** The form a kept copy is read back in, by name and type only: its caps are judged by keeping it again. */
 export const sourcedAttributesShape = z.strictObject({

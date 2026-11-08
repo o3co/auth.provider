@@ -14,7 +14,7 @@ import {
 	sessionRules,
 } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
-import { keptAtLogin, keptAttributes } from "../attributes.ts";
+import type { AttributesKeeping } from "../attributes.ts";
 import type {
 	ChangedSession,
 	ClosingList,
@@ -46,6 +46,7 @@ export interface LifecycleParts {
 	readonly log: Log;
 	readonly lifetimeMs: number;
 	readonly sweepMs: number;
+	readonly attributes: AttributesKeeping;
 	/** Whether a time is within the recent-authentication window, the floor's for changing credentials. */
 	readonly recent: (at: number) => boolean;
 }
@@ -90,7 +91,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		close: (handle) => close(handle),
 	});
 	const contextOf = (record: AuthContext): AuthContext => {
-		const attributes = keptAttributes(record.attributes);
+		const attributes = parts.attributes.read(record.attributes);
 		return Object.freeze({
 			subject: record.subject,
 			amr: Object.freeze([...record.amr]),
@@ -241,7 +242,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		// A new session every time, under a new handle: a login never carries on an earlier one.
 		const handle = freshToken(parts.random);
 		const openedAt = clock.now();
-		const attributes = keptAtLogin(facts.attributes, log);
+		const attributes = parts.attributes.atLogin(facts.attributes, log);
 		const context = {
 			subject: facts.subject,
 			amr: [...facts.amr],

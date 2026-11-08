@@ -210,6 +210,24 @@ describe("session attributes", () => {
 		expect(JSON.stringify(recorded.lines())).not.toMatch(/secret|nnn/);
 	});
 
+	it("keeps a login's attributes under the section's caps, and a read under a cap lowered since drops a value past it", async () => {
+		const values = { name: "Al", groups: Array.from({ length: 80 }, (_, n) => `g${n}`) };
+		const wide = await boot({ attributes: { "groups-limit": 100 } });
+		const opened = openedOf(
+			await wide.s.open(testRequest(), { ...facts(), attributes: { source: "users", values } }),
+		);
+		expect(opened.session.context.attributes?.values).toEqual(values);
+		const { s, withCookie, stores, login, handleOf } = await boot();
+		const cookie = await login();
+		await stores.kept.records.change(await handleOf(cookie), (r) => ({
+			value: {
+				...(r as object),
+				attributes: { source: "users", values },
+			} as unknown as StoredSession,
+		}));
+		expect((await s.enter(withCookie(cookie)))?.context.attributes?.values).toEqual({ name: "Al" });
+	});
+
 	it("rechecks a record's attributes on every read", async () => {
 		const { s, withCookie, stores, login, handleOf } = await boot();
 		const cookie = await login();

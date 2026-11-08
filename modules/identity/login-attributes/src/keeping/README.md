@@ -11,16 +11,16 @@ Internal module of `login-attributes`: keeping a login's attributes within caps.
 - Whether `users` takes a value (`users`).
 
 ## Offers
-- `keptAttributes`, as `login-attributes` offers it.
+- `attributeCaps` and `keepingWith`, as `login-attributes` offers them.
 
 ## Invariants
 - A value `users` does not take (`acceptedAttributes`) is dropped whole.
 - A value over its cap is dropped whole, never cut.
-- The caps, in UTF-8 bytes: name 512, picture 2048, each group 256.
-- More than 64 groups are dropped whole.
+- The caps, in UTF-8 bytes: name 512 and a source 128, fixed; picture and each group as the caps given.
+- More groups than the caps allow are dropped whole.
 - An empty or ill-formed value is dropped whole.
 - A verification without its email is dropped.
 - A source that is empty, ill-formed, over 128 bytes or holding a control character drops every attribute.
 
 ## Depends on
-- `users` (`acceptedAttributes` and the attribute names); `login-attributes`' contract types.
+- `users` (`acceptedAttributes` and the attribute names); `kernel` (`setting`); `login-attributes`' contract types.
