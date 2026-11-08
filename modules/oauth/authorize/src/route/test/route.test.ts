@@ -9,7 +9,7 @@ import { redirectsFor } from "@mod/redirect-uris/testing";
 import { describe, expect, it } from "vitest";
 import { type Decision, recorded as refused } from "../../decision.ts";
 import type { Flow } from "../../flow/flow.ts";
-import { routeWith } from "../route.ts";
+import { type RouteParts, routeWith } from "../route.ts";
 
 const callback = "https://app.example/cb";
 const sections: Record<string, unknown> = redirectsFor([callback]);
@@ -27,6 +27,7 @@ function route(
 	flow: Flow = async () => refused("unauthorized_client", "grant_type_not_allowed"),
 	find = async (id: string) => (id === nocode.id ? nocode : undefined),
 	stateLimit = 512,
+	rule: RouteParts["rule"] = {},
 ) {
 	const recorded: AuditRecord[] = [];
 	const logged = recordingLog();
@@ -37,8 +38,8 @@ function route(
 		audit: { record: (event: AuditRecord) => void recorded.push(event) },
 		flow,
 		log: logged.log,
-		// No rule composed: a repeated parameter is a malformed request.
-		rule: {},
+		// No rule composed by default: a repeated parameter is a malformed request.
+		rule,
 		stateLimit,
 	});
 	return { answer: declared.handle, declared, recorded, lines: logged.lines };
@@ -211,6 +212,22 @@ describe("route: an OpenID Connect request", () => {
 		expect([taken[2], taken[4]]).toEqual(["c1", state]);
 		const refused = await sentBack(longer.answer, oidc({ state: `${state}s` }));
 		expect([refused[3], refused[4]]).toEqual(["invalid_request", null]);
+	});
+
+	it("sends a rule's description back in RFC 6749's characters alone, any other shown as ? [rfc6749-4.1.2.1-e]", async () => {
+		const flow: Flow = async ({ refused }) => refused ?? { kind: "code", code: "c1", subject: "a" };
+		const loud = route(flow, find, 512, {
+			repeated: () => ({
+				kind: "error",
+				error: "invalid_target",
+				description: 'one "resource", caf\u00e9\n\\',
+			}),
+		});
+		const sent = oidc();
+		sent.set("resource", ["https://two", "https://api"]);
+		const res = await loud.answer(testRequest({ query: sent }));
+		const at = new URL(res.headers?.location ?? "");
+		expect(at.searchParams.get("error_description")).toBe("one ?resource?, caf???");
 	});
 
 	it("hands a repeated or too long parameter's refusal to the flow, and answers one the flow keeps at the endpoint by 400 [rfc9700-4.11.2-b]", async () => {
