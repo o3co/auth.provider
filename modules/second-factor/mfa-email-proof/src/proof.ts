@@ -6,9 +6,6 @@ import { z } from "zod";
 import { proofName } from "./name.ts";
 import { purposes } from "./purposes.ts";
 
-/** How long the proof before a first binding stays good, at most. */
-const proofMs = 600_000;
-
 /** What a proof keeps: the address, the code mailed there, and when it stops being good. */
 const keptShape = z.strictObject({
 	code: z.string().min(1),
@@ -48,10 +45,10 @@ export function accountEmailProof(p: ProofParts): BindingProof {
 			const address = await mailed.addressNow(subject, from);
 			if (!address) return { kind: "refused" };
 			const code = longCode(p.random);
-			const until = Math.min(p.now() + proofMs, latest);
-			const sent = await mailed.send(purposes.accountEmail, address, code, until);
+			// Good until the transaction it is asked in ends: the caller's end.
+			const sent = await mailed.send(purposes.accountEmail, address, code, latest);
 			if (sent.kind !== "sent") return sent;
-			return { ...sent, kept: JSON.stringify({ address, code, until }) };
+			return { ...sent, kept: JSON.stringify({ address, code, until: latest }) };
 		},
 		check: async (subject, kept, given) => {
 			const asked = read(kept);
