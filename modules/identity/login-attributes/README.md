@@ -21,13 +21,13 @@
 - `sourcedAttributesShape`: the form a kept copy is read back in, by name and type only.
 - A copy read back has its caps judged by keeping it again.
 
+## Deprecated
+- `keptAttributes` (given attributes of any shape) → as `keepingWith` keeps them under the default caps; use `keepingWith(attributeCaps.parse({}))`. A later release removes it.
+
 ## Invariants
 - Attributes are only the named set.
 - A value `users` does not take (`acceptedAttributes`), empty or ill-formed, is dropped whole, never cut.
-- A value over its cap is dropped whole, never cut.
 - Lowering a cap changes an open session's attributes when they are read back: a value past it is dropped then.
-- A verification without its email is dropped.
-- A source empty, ill-formed, over 128 bytes or holding a control character drops them all.
 - A dropped attribute is reported by name, never by value.
 - Names outside the set are reported only as a count.
 - An `email` without `email_verified` is not verified.
@@ -36,7 +36,7 @@
 - An upstream source never equals the `users` source, whatever the IdP's name.
 
 ## Depends on
-- `users` (the attribute names and the forms each value takes).
+- `users` (the attribute names and the forms each value takes); `kernel` (`setting`, a size's unit).
 
 ## Vocabulary
 - attributes: what a login says of the user from `users`' named set (`userAttribute`, by those names).
