@@ -187,7 +187,8 @@ it("writes the image, and what git and the image leave out", async () => {
 		/^HEALTHCHECK --interval=30s --timeout=5s --start-period=\d+s --retries=3 .*\/_healthcheck/m,
 	);
 	const manifest = JSON.parse(await read(target, "package.json"));
-	expect(manifest.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
+	// An exact version, and the sha512 corepack checks it by.
+	expect(manifest.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+\+sha512\.[0-9a-f]{128}$/);
 	expect(docker).not.toContain("/readyz");
 	expect(docker).toMatch(/^ENV HTTP_HOST=0\.0\.0\.0$/m);
 	// The port is http's, read from HTTP_PORT by the generated configuration, and the health check follows it.

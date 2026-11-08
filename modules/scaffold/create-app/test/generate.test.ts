@@ -108,6 +108,7 @@ it("refuses a target that holds anything, leaving it as it was", async () => {
 			"README.md",
 			"config",
 			"package.json",
+			"pnpm-workspace.yaml",
 			"src",
 		]);
 	}
