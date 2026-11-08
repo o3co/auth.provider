@@ -14,7 +14,7 @@ Internal module of `federation-grants`: handing a grant's upstream token, and re
 ## Invariants
 - A token is due near its end, below the asked `min_ttl`, or lacking an asked scope, and only past half its life.
 - One lock holder per grant refreshes, under a mark of 128 random bits, and reads the grant again under the lock; it hands out nothing (`gone`) unless the grant read then is in use, not past its end, and not ended by its subject's revocation, so a revocation or an end that came while it waited holds.
-- While the upstream is asked, the lock is kept for its life again every half of it, only under that mark; once lost, nothing the upstream answered is written, and a store that cannot answer stops the keeping. It is kept no longer, then let go (ending a millisecond later) only while it holds that mark, never one another took after it ran out.
+- While the upstream is asked, the lock is kept for its life again every half of it, only under that mark; once lost, nothing the upstream answered is written, and a store that cannot answer stops the keeping. It is kept no longer, then let go (ending a millisecond later, `records`' conditional removal) only while it holds that mark, never one another took after it ran out.
 - A write lands only as its own write over the version read, and never on a grant no longer in use.
 - A rotation is written before the upstream is asked; with the window spent, the held token serves, else `limited`.
 - The upstream down, limiting or refusing leaves the credential, and a live held token serves; of the upstream's answers, only `invalid_grant`, or `interaction_required` (the user must act at the upstream), removes it, each under its own reason (`upstream_invalid_grant`, `upstream_interaction_required`).
