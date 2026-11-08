@@ -16,7 +16,7 @@
 - `loginSource.users`: the source for `users`' ledger.
 - `loginSource.upstream(idp)`: the source for an upstream IdP.
 - `attributeCaps`, the schema part a section takes for the caps an operator may set: `groups-limit` (1–200, default 64), `group-limit` and `picture-limit` (UTF-8 bytes, written with a unit: 1B–1KiB, default `256B`; 1B–8KiB, default `2KiB`).
-- `keepingWith` (the caps read) → keeping: given attributes of any shape → the kept copy or none, the names dropped, and the count of names outside the set. `keptAttributes` keeps under the defaults.
+- `keepingWith` (the caps read) → keeping: given attributes of any shape → the kept copy or none, the names dropped, and the count of names outside the set.
 - Keeping logs nothing.
 - `sourcedAttributesShape`: the form a kept copy is read back in, by name and type only.
 - A copy read back has its caps judged by keeping it again.

@@ -11,7 +11,7 @@ Internal module of `login-attributes`: keeping a login's attributes within caps.
 - Whether `users` takes a value (`users`).
 
 ## Offers
-- `attributeCaps`, `keepingWith` and `keptAttributes`, as `login-attributes` offers them.
+- `attributeCaps` and `keepingWith`, as `login-attributes` offers them.
 
 ## Invariants
 - A value `users` does not take (`acceptedAttributes`) is dropped whole.

@@ -115,6 +115,3 @@ export function keepingWith(caps: AttributeCaps): (given: unknown) => Attributes
 		});
 	};
 }
-
-/** Keeping under the caps' defaults. */
-export const keptAttributes = keepingWith(attributeCaps.parse({}));

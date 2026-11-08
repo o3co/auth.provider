@@ -3,11 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
 	attributeCaps,
 	keepingWith,
-	keptAttributes,
 	loginSource,
 	sourcedAttributesShape,
 } from "../src/contract.ts";
 
+/** Keeping under the default caps. */
+const keptAttributes = keepingWith(attributeCaps.parse({}));
 const keptOf = (source: unknown, values: unknown) => keptAttributes({ source, values }).kept;
 const bytes = (count: number) => `${"é".repeat(Math.floor(count / 2))}${"a".repeat(count % 2)}`;
 const groups = (count: number) => Array.from({ length: count }, (_, n) => `g${n}`);
