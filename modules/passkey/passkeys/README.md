@@ -10,10 +10,8 @@
 
 ## Offers
 - `passkeys`: a challenge the same for everyone, made for a requester (`Requester`: who asks, by its own name, and an id of its own), and the assertion of a discoverable passkey redeemed by the same alone → subject, challenge time, user verified, backup eligible; or a refusal. A requester whose part is no non-empty string is thrown, the caller's mistake, before the store is read.
-- `registrations`: options for a subject's new passkey, and keeping the one a response creates → the credential, or a refusal (the ceremony's, `unreadable`, `no-challenge`, `conflict`, `full`, `revoked`).
-  - A caller's check (`admitted`) is asked before the record is written and once after; its write's record (by token) becomes a passkey only as the last write, both asks admitting. A `false` (`revoked`), a throw or a failed write ends it, best effort; what that leaves open, the internal module `registration` says.
+- `registrations`: options for a subject's new passkey, and keeping the one a response creates → the credential, or a refusal (the ceremony's, `unreadable`, `no-challenge`, `conflict`, `full`, `revoked`). Its members and the caller's check are on the internal module `registration`'s card.
   - The caller answers for who the subject is: only a module that authenticated it may ask.
-  - A registration answers when its challenge was made (`challengedAt`). `listed` (id, nickname, transports, backup state, and when registered where kept), `renamed` (`renamed` / `unknown`) and `removed` (`removed`: this call ended it; `empty`: none left) take only the subject's own.
 - `passkeyHolders`, taken only by `login-passkey` and `passkey-reset`: whether subjects hold passkeys, and ending them; its members are on the internal module `holders`' card.
 - Extension point `passkeyWitnessing` (at most one, two refusing boot), for `passkey-witnessing`: `settle` and `emptied`, asked where this package settles, handed reads anew that write nothing (`holds`, and after a write that emptied the list `after`, an `AfterRemoval`: the mark goes only on `none`).
 - `passkeyReading`, taken only by `passkey-witnessing` (its backfill): `writtenHolding` (what the subject's list names as written, read anew: `passkey`, only `pending` ones, or `none`).
