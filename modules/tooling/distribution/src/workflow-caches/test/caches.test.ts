@@ -133,14 +133,21 @@ describe("cacheProblems", () => {
 	});
 
 	it("passes pnpm's cache and install only left out or written false", () => {
-		expect(step("pnpm/action-setup@v4")).toEqual([]);
-		expect(step("pnpm/action-setup@v4", "          cache: false\n")).toEqual([]);
+		expect(step("pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115")).toEqual([]);
+		expect(
+			step(
+				"pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115",
+				"          cache: false\n",
+			),
+		).toEqual([]);
 		for (const inputs of [
 			"          cache: true\n",
 			"          cache: ${{ false }}\n",
 			"          run_install: true\n",
 		]) {
-			expect(step("pnpm/action-setup@v4", inputs)).toHaveLength(1);
+			expect(
+				step("pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115", inputs),
+			).toHaveLength(1);
 		}
 	});
 

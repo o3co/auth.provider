@@ -82,18 +82,23 @@ export function besideRelease(
 	if (outside === undefined || outside.modules.length === 0) return nothing;
 	const freshDependencies = outside.freshDependencies ?? [];
 	for (const m of [...outside.modules, ...freshDependencies]) {
-		// Each goes into a table of the guide: only the text a package name, a version and an integrity are made of.
-		if (
-			!/^[@a-z0-9._~/-]+$/.test(m.name) ||
-			!/^[0-9A-Za-z.+-]+$/.test(m.version) ||
-			!/^sha(256|384|512)-[A-Za-z0-9+/]+=*$/.test(m.integrity)
-		) {
+		// Each goes into a table of the guide, and the app's script holds it by the same rule.
+		if (!outsideLock.wellRecorded(m)) {
 			throw new Error(`${m.name}: its record is not a package name, version and integrity`);
 		}
 	}
+	const letThrough = [
+		...outside.modules.filter((m) => outside.fresh?.includes(m.name)),
+		...freshDependencies,
+	];
 	for (const name of outside.fresh ?? []) {
 		if (!outside.modules.some((m) => m.name === name))
 			throw new Error(`${name}: let through as fresh, but not recorded`);
+	}
+	for (const m of letThrough) {
+		// pnpm's exemption names a version as semver writes it, with no build metadata.
+		if (!outsideLock.exemptable(m))
+			throw new Error(`${m.name}: let through as fresh at ${m.version}, which no exemption names`);
 	}
 	const npmrc = npmrcOf(outside.registries);
 	const release = new Map(

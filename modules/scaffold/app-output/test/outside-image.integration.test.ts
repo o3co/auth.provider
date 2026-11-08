@@ -210,16 +210,15 @@ describe("the image's build", () => {
 		"stops at the check, before the install, for a package with a command and a wrong record",
 		async () => {
 			served = packed({ bin: { node: "./run.js" } }, { "run.js": "process.exit(0);\n" });
-			const app = await appOf("sha512-AAAA");
+			const wrong = `sha512-${"A".repeat(86)}==`;
+			const app = await appOf(wrong);
 			const failed = await built(app).then(
 				(wrote) => new Error(`the build passed:\n${wrote}`),
 				(error: unknown) => error,
 			);
 			expect(failed).toBeInstanceOf(DockerFailed);
 			const said = (failed as DockerFailed).wrote;
-			expect(said).toContain(
-				`${scoped}: integrity ${served.integrity}, not sha512-AAAA as recorded`,
-			);
+			expect(said).toContain(`${scoped}: integrity ${served.integrity}, not ${wrong} as recorded`);
 			expect(said).toMatch(/\[deps \d+\/\d+\] RUN node scripts\/check-outside\.mjs/);
 			// A step started is told by its header; the Dockerfile's excerpt beside the failure is no step.
 			expect(said).not.toMatch(/\[deps \d+\/\d+\] RUN .*pnpm install/);

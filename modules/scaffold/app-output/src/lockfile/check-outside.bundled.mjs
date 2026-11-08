@@ -8488,7 +8488,7 @@ function refusals(text, records, overrides, registries, integrities, fresh = [],
 	const held = versions(overrides);
 	const references = referencesIn(lock);
 	const resolvedWith = versions(lock.overrides);
-	const named = [...records, ...Array.isArray(fresh) ? fresh : []].map(own);
+	const named = [...records, ...Array.isArray(fresh) ? fresh : []];
 	return [
 		...sameMap(resolvedWith, held) ? [] : ["the lockfile was resolved with other overrides than the app's"],
 		...records.flatMap((record) => recordRefusals(lock, record, held, references, registries)),
@@ -8496,23 +8496,36 @@ function refusals(text, records, overrides, registries, integrities, fresh = [],
 		...heldIntegrityRefusals(lock, held, own(integrities)),
 		...freshRefusals(lock, fresh, registries, references),
 		...exclusionRefusals(excluded, named, held),
-		...ownedRefusals(lock, /* @__PURE__ */ new Set([...held.keys(), ...named.map((fields) => fields.get("name"))]))
+		...ownedRefusals(lock)
 	];
 }
 const packageName = /^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/;
-const recordedRight = (name, version, integrity) => typeof name === "string" && packageName.test(name) && typeof version === "string" && import_semver.default.valid(version) === version && typeof integrity === "string" && /^(sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)$/.test(integrity);
+const spelled = (version) => {
+	const parsed = typeof version === "string" ? import_semver.default.parse(version) : null;
+	const build = parsed?.build.length ? `+${parsed.build.join(".")}` : "";
+	return parsed !== null && `${parsed.version}${build}` === version;
+};
+const wellRecorded = (recorded) => {
+	const [name, version, integrity] = [
+		"name",
+		"version",
+		"integrity"
+	].map((key) => own(recorded).get(key));
+	return typeof name === "string" && packageName.test(name) && spelled(version) && typeof integrity === "string" && /^(sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)$/.test(integrity);
+};
+const exemptable = (recorded) => wellRecorded(recorded) && import_semver.default.valid(own(recorded).get("version")) === own(recorded).get("version");
 function exclusionRefusals(excluded, named, held) {
 	if (!Array.isArray(excluded)) return ["minimumReleaseAgeExclude is not a list"];
-	const recorded = new Set(named.filter((fields) => import_semver.default.valid(fields.get("version")) === fields.get("version")).map((fields) => `${fields.get("name")}@${fields.get("version")}`));
+	const recorded = new Set(named.filter(exemptable).map((r) => `${own(r).get("name")}@${own(r).get("version")}`));
 	return excluded.filter((entry) => typeof entry !== "string" || !(held.has(entry) || recorded.has(entry))).map((entry) => `minimumReleaseAgeExclude lets ${String(entry)} through, which the record does not`);
 }
-/** An entry of a name held, recorded or let through naming a version but its key's, or a snapshot of one naming its own source or version. */
-function ownedRefusals(lock, names) {
+/** An entry keyed by a version naming another, or a snapshot naming its own source or version, anywhere in the lockfile. */
+function ownedRefusals(lock) {
 	const keyed = (key) => bare(key).slice(nameOf(key).length + 1);
 	return [...[...own(lock.packages)].flatMap(([key, entry]) => {
 		const version = own(entry).get("version");
-		return names.has(nameOf(key)) && version !== void 0 && String(version) !== keyed(key) ? [`${key}: its entry names version ${String(version)}, not its key's`] : [];
-	}), ...[...own(lock.snapshots)].flatMap(([key, snapshot]) => names.has(nameOf(key)) ? [...own(snapshot).has("resolution") ? ["source"] : [], ...own(snapshot).has("version") ? ["version"] : []].map((what) => `${nameOf(key)}: a resolution of ${key} names its own ${what}`) : [])];
+		return import_semver.default.valid(keyed(key)) !== null && version !== void 0 && String(version) !== keyed(key) ? [`${key}: its entry names version ${String(version)}, not its key's`] : [];
+	}), ...[...own(lock.snapshots)].flatMap(([key, snapshot]) => [...own(snapshot).has("resolution") ? ["source"] : [], ...own(snapshot).has("version") ? ["version"] : []].map((what) => `${nameOf(key)}: a resolution of ${key} names its own ${what}`))];
 }
 function freshRefusals(lock, fresh, registries, references) {
 	if (!Array.isArray(fresh)) return ["the record of dependencies let through is not a list"];
@@ -8523,7 +8536,7 @@ function freshRefusals(lock, fresh, registries, references) {
 			"version",
 			"integrity"
 		].map((key) => fields.get(key));
-		if (!recordedRight(name, version, integrity)) return ["a dependency let through is not recorded by a name, a version and an integrity"];
+		if (!exemptable(recorded)) return ["a dependency let through is not recorded by a name, a version and an integrity"];
 		const at = `${name}@${version}`;
 		const snapshots = [...own(lock.snapshots)].filter(([key]) => bare(key) === at);
 		const entry = own(lock.packages).get(at);
@@ -8609,4 +8622,4 @@ if (entered()) {
 }
 
 //#endregion
-export { dependencyRecordOf, recordOf, refusals };
+export { dependencyRecordOf, exemptable, recordOf, refusals, wellRecorded };

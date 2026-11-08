@@ -58,7 +58,7 @@ jobs:
           # The commit-message scan and the per-commit install check walk the
           # pull request's own commits.
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
@@ -205,7 +205,7 @@ jobs:
             '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
             > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
@@ -368,7 +368,7 @@ jobs:
           # A pull request's change is read against its base, from where they part; a moved file by both
           # its paths.
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -427,7 +427,7 @@ jobs:
           # The legacy build checks out its commit from this clone's history.
           fetch-depth: 0
           fetch-tags: true
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -504,7 +504,7 @@ jobs:
         with:
           # The commit the plan fixed: on the daily run, develop as the plan found it.
           ref: ${{ needs.conformance-plan.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -577,7 +577,7 @@ jobs:
         with:
           # The commit the plan fixed: on the daily run, develop as the plan found it.
           ref: ${{ needs.conformance-plan.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -653,7 +653,7 @@ jobs:
         with:
           # The commit the plan fixed: on the daily run, develop as the plan found it.
           ref: ${{ needs.conformance-plan.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -777,7 +777,7 @@ jobs:
           echo "oidf=$([ "$scope" != none ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "oidf-scope=$scope" >> "$GITHUB_OUTPUT"
           echo "clients=$(touches "^modules/tooling/interop-clients/|$shared")" >> "$GITHUB_OUTPUT"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -824,7 +824,7 @@ jobs:
         with:
           # The commit interop-due fixed: on the daily run, develop as it found it.
           ref: ${{ needs.interop-due.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -898,7 +898,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.interop-due.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -1021,7 +1021,7 @@ jobs:
             '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
             > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -1077,7 +1077,7 @@ jobs:
         with:
           # The commit the conformance and interop jobs tested, where they ran; else the event's.
           ref: ${{ needs.conformance-plan.outputs.sha || needs.interop-due.outputs.sha || '' }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -1133,7 +1133,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
