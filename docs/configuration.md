@@ -185,6 +185,7 @@ From `@mod/federation-grants`.
 | `federation-grants.default-lifetime` | string | `30d` |  |  |  | A grant's lifetime from its activation when a client asks for none: a duration with a unit, from 1m to 365d, e.g. 30d. |
 | `federation-grants.max-lifetime` | string | `30d` |  |  |  | The most a grant may live from its activation: a duration with a unit, from 1m to 365d, e.g. 90d. |
 | `federation-grants.retention` | string | `30d` |  |  |  | How long a grant's record, and its subject listing, are kept once it can no longer be used, so its status still answers why: past its end, its revocation, or for one never connected, the connect time's end. It is set as the record is written, so a change applies to grants lodged, connected or revoked after it: a duration with a unit, from 1d to 365d, e.g. 30d. |
+| `federation-grants.lock-lifetime` | string | `10s` |  |  |  | How long a refresh's lock lasts unless kept, as it is every half of this while the refresh runs, and half of which another request waits for it, from 1s to 1m. |
 | `federation-grants.connect-lifetime` | string | `10m` |  |  |  | How long a connection may take, from the intent to the callback: a duration with a unit, from 1m to 1h, e.g. 10m. |
 | `federation-grants.refresh-before` | string | `30s` |  |  |  | A token this close to its end is refreshed, once half its life is spent: a duration with a unit, from 0s to 1h, e.g. 30s. |
 | `federation-grants.rotations` | integer (1–1000) | `24` |  |  |  | Upstream refreshes a grant may take in each rotation-window, from 1 to 1000. |
