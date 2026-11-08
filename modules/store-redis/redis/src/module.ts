@@ -3,7 +3,7 @@ import { type Space, spaces, store } from "@mod/store";
 import { isFloor, tlsOptions } from "@mod/tls-options";
 import { Redis } from "ioredis";
 import { z } from "zod";
-import { clientDebugs, clientOptions, inTheClear, queryRefusal } from "./client/client.ts";
+import { clientDebugs, clientOptions, plaintextWarning, queryRefusal } from "./client/client.ts";
 import { goodReplicaProblems, redisProbe } from "./probe/probe.ts";
 import {
 	clusterRefused,
@@ -21,6 +21,12 @@ const section = z.strictObject({
 			if (refused !== undefined) ctx.addIssue({ code: "custom", message: refused });
 		})
 		.describe("The Redis server to connect to, with no query: each option is its own setting."),
+	"accept-plaintext": z
+		.boolean()
+		.prefault(false)
+		.describe(
+			"Accepts `redis://` at a host not loopback by its name, the store's traffic and the URL's password readable and changeable on the way, in production too; every start warns `redis.plaintext`. Without it, production warns at every start too: deprecated, a later release refuses boot for it.",
+		),
 	"address-family": z
 		.enum(["ipv4", "ipv6"])
 		.optional()
@@ -330,9 +336,8 @@ export default defineModule(
 	(m) => [
 		m.provide(connections).by(async (c) => {
 			// On every boot: what the store keeps, and the URL's password, go in the clear; no host is told.
-			if (inTheClear(c.section.url)) {
-				c.log.warn("redis.plaintext", { reason: "the connection to Redis is not encrypted" });
-			}
+			const clear = plaintextWarning(c.section.url, c.section["accept-plaintext"], c.environment);
+			if (clear !== undefined) c.log.warn("redis.plaintext", { reason: clear });
 			const floor = await c.get(tlsOptions);
 			if (!isFloor(floor)) {
 				return c.refuse(
