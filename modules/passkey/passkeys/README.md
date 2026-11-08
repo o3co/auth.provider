@@ -14,7 +14,7 @@
   - The caller answers for who the subject is: only a module that authenticated it may ask.
 - `passkeyHolding`, which any module may take: the read side of holding, whether subjects hold passkeys.
 - `passkeyClearing`, taken only by `passkey-reset`: the write side of holding, ending a subject's passkeys and settling its witness's mark.
-- `passkeyHolders`, taken only by `login-passkey` and `passkey-reset`: both sides. The members of all three are on the internal module `holders`' card.
+- `passkeyHolders` and its type `PasskeyHolders`, taken only by `login-passkey` and `passkey-reset`: both sides. Deprecated: read with `passkeyHolding`, clear with `passkeyClearing`; a release no earlier than 0.22 removes them. The members of all three are on the internal module `holders`' card.
 - Extension point `passkeyWitnessing` (at most one, two refusing boot), for `passkey-witnessing`: `settle` and `emptied`, asked where this package settles, handed reads anew that write nothing (`holds`, and after a write that emptied the list `after`, an `AfterRemoval`: the mark goes only on `none`).
 - `passkeyReading`, taken only by `passkey-witnessing` (its backfill): `writtenHolding` (what the subject's list names as written, read anew: `passkey`, only `pending` ones, or `none`).
 - Store interfaces, which the assembly wires. The store never sees what a record holds.

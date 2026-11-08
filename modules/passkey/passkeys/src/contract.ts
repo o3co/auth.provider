@@ -115,10 +115,16 @@ export const passkeyClearing = contract<PasskeyClearing>("passkeys.clearing", {
 	takenBy: ["passkey-reset"],
 });
 
-/** Whether subjects hold passkeys, kept in line with the witness composed: both sides of holding. */
+/**
+ * Whether subjects hold passkeys, kept in line with the witness composed: both sides of holding.
+ * @deprecated Use `PasskeyHolding` and `PasskeyClearing`; removed no earlier than 0.22.
+ */
 export interface PasskeyHolders extends PasskeyHolding, PasskeyClearing {}
 
-/** Taken by the modules that log in with passkeys and reset them, as it can end every passkey a subject holds. */
+/**
+ * Taken by the modules that log in with passkeys and reset them, as it can end every passkey a subject holds.
+ * @deprecated Read with `passkeyHolding`, clear with `passkeyClearing`; removed no earlier than 0.22.
+ */
 export const passkeyHolders = contract<PasskeyHolders>("passkeys.holders", {
 	takenBy: ["login-passkey", "passkey-reset"],
 });
