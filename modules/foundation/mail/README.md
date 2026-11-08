@@ -7,8 +7,7 @@
 - Holds the address rule, a plain-text template part, and the logging-only sender.
 
 ## Not here
-- The list of purposes and what they mean: the sending side's vocabulary.
-- Any wording: templates, contributed apart.
+- The list of purposes and what they mean (the sending side's vocabulary), and any wording (templates, contributed apart).
 - Delivery over a network, and its limits: the sender (an adapter).
 
 ## Offers
