@@ -17,7 +17,7 @@ Internal module of `federation-grants`: what a grant and a browser step are, and
 - `listingWith` (listing, log): lists a grant under its subject, logging a failed write.
 - `credentialsFrom` (tokens, now, longest life, scopes shown, held refresh token, the access token kept) → held, or refused with why and any rotated refresh token. Its end is `upstreams`' `refreshedExpiry`: the access token kept, answered again, keeps the earlier of the two ends, its life counted from now.
 - `connectionsIn` (settings, upstreams): a connection by name, and one with its IdP's delegation.
-- `clientSection`, `permits`, `returnsTo`, `scopeTokens`, `within`, `withoutCredentials`, `secretFrom`, `retentionMs`.
+- `clientSection`, `permits`, `returnsTo`, `scopeTokens`, `within`, `withoutCredentials`, `secretFrom`.
 
 ## Invariants
 - A record of another shape is none; credentials open only under the grant they were sealed for.

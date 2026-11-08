@@ -200,6 +200,15 @@ describe("the client routes", () => {
 		expect((await h.grantCall(id, "token")).status).toBe(200);
 	});
 
+	it("keeps a grant's record retention past the point it can no longer be used, one never connected included", async () => {
+		const h = await harness({ settings: { retention: "1d" } });
+		const id = String((await h.lodge()).json?.grant_id);
+		h.advance(600_000 + 86_400_000 - 1);
+		expect(h.stores.peek(id)).toMatchObject({ status: "pending" });
+		h.advance(1);
+		expect(h.stores.peek(id)).toBeUndefined();
+	});
+
 	it("erases the credentials of a grant past its life on any route, keeping its status", async () => {
 		for (const step of ["status", "token", "reauthorize"]) {
 			const h = await harness();

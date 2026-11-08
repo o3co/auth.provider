@@ -24,6 +24,7 @@
 - Operator section:
   - `connections.<name>` (`idp`, `scopes` with `openid`, `resource?` an absolute URI with no fragment or query, `max-access-token-lifetime`, `scope-subsets`)
   - `default-lifetime`, `max-lifetime` (`30d`)
+  - `retention` (`30d`, from `1d` to `365d`)
   - `connect-lifetime` (`10m`)
   - `refresh-before` (`30s`)
   - `rotations` per `rotation-window` (24 per `1h`)
@@ -52,3 +53,4 @@
 ## Vocabulary
 - intent: a client's asking for a grant, connected once by the user. connection: an entry of the operator's `connections`, and the user's steps for an intent.
 - grant: the credentials held for a client and subject at a connection, with its state.
+- retention: how long a grant's record is kept once it can no longer be used (ended, revoked or never connected), so its status still answers why.
