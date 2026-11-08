@@ -181,6 +181,7 @@ From `@mod/federation-grants`.
 | `federation-grants.connections` | map | `{}` |  |  |  | What a grant may be for, by a name (a-z, 0-9 and -, at most 32): idp (a federation IdP that offers delegation), scopes (holding openid), resource, max-access-token-lifetime and scope-subsets. |
 | `federation-grants.default-lifetime` | string | `30d` |  |  |  | A grant's lifetime from its activation when a client asks for none: a duration with a unit, from 1m to 365d, e.g. 30d. |
 | `federation-grants.max-lifetime` | string | `30d` |  |  |  | The most a grant may live from its activation: a duration with a unit, from 1m to 365d, e.g. 90d. |
+| `federation-grants.retention` | string | `30d` |  |  |  | How long a grant's record is kept once it can no longer be used, whether ended, revoked or never connected, so its status still answers why: a duration with a unit, from 1d to 365d, e.g. 30d. |
 | `federation-grants.connect-lifetime` | string | `10m` |  |  |  | How long a connection may take, from the intent to the callback: a duration with a unit, from 1m to 1h, e.g. 10m. |
 | `federation-grants.refresh-before` | string | `30s` |  |  |  | A token this close to its end is refreshed, once half its life is spent: a duration with a unit, from 0s to 1h, e.g. 30s. |
 | `federation-grants.rotations` | integer (1–1000) | `24` |  |  |  | Upstream refreshes a grant may take in each rotation-window, from 1 to 1000. |
