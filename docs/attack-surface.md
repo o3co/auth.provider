@@ -191,6 +191,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `dpop.nonce.required` | `@mod/dpop` | `"as"` | `never`: no nonce is asked, so a proof made ahead is taken within its window |
 | `exchange-id-tokens.max-age` | `@mod/exchange-id-tokens` | `"10m"` | past the default ten minutes, up to an hour: an older id_token is taken for an exchange |
 | `external-jwt.key-set-max-age` | `@mod/external-jwt` | `"1d"` | past the default day, up to 30: a key set is still used that long after its fetch while no new one can be had, a key removed upstream among it |
+| `external-jwt.key-set-refresh` | `@mod/external-jwt` | `"1h"` | past the default hour, up to `key-set-max-age`: a key removed upstream is still taken that long after the set's fetch |
 | `federation-grants-connect.identity-check` | `@mod/federation-grants-connect` | `"required"` | `none`: a callback whose upstream account another user holds is not refused |
 | `federation-grants.keep-on-subject-revocation` | `@mod/federation-grants` | `false` | an established grant answers only to the `delegations` boundary when a revocation asks to keep delegations |
 | `federation-grants.max-lifetime` | `@mod/federation-grants` | `"30d"` | past the default 30 days, up to 365: a federation grant answers that long from its activation |
