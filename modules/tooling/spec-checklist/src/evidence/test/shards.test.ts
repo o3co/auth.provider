@@ -76,6 +76,35 @@ describe("a run's shards", () => {
 		expect(kept).toEqual([first, again]);
 	});
 
+	it("hold a run's whole and its shards to each other's marks, the later form standing", () => {
+		const runs = [{ entry, kind: "faults", matrix: "@mod/x", shards: 2 }];
+		const of = { commit: "c1", run: "r1" };
+		const mark = (attempt: number, shard?: string) => ({
+			attempted: {
+				run: "r1",
+				attempt,
+				job: "faults",
+				kind: "faults",
+				matrix: "@mod/x",
+				...(shard ? { shard } : {}),
+			},
+		});
+		const one = report("1/2", [{ file: "a.faults.case.ts", name: "a" }]);
+		const two = report("2/2", [{ file: "b.faults.case.ts", name: "b" }]);
+		const whole = report(undefined, [{ file: "a.faults.case.ts", name: "a" }]);
+		const select = (reports: EvidenceReport[], marks: ReturnType<typeof mark>[]) =>
+			selectReports(reports, of, attemptsOf(marks, runs, "r1"));
+		// The whole attempted again, reporting nothing: the shards' older reports do not stand for it.
+		expect(select([one, two], [mark(1, "1/2"), mark(1, "2/2"), mark(2)])).toEqual([]);
+		// A shard attempted again, reporting nothing: an older whole report does not cover it.
+		expect(select([whole], [mark(1), mark(2, "2/2")])).toEqual([]);
+		// Of whole and shard reports, the later form stands.
+		const later = report(undefined, [{ file: "a.faults.case.ts", name: "a" }], 2);
+		expect(select([one, two, later], [])).toEqual([later]);
+		const laterShard = report("1/2", [{ file: "a.faults.case.ts", name: "a" }], 2);
+		expect(select([whole, laterShard], [])).toEqual([laterShard]);
+	});
+
 	it("report a run only with every shard, or whole, naming each shard missing, and leave out a report of another count", () => {
 		const a = report("1/3", [{ file: "a.faults.case.ts", name: "a" }]);
 		const c = report("3/3", [{ file: "c.faults.case.ts", name: "c" }]);

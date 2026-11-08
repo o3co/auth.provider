@@ -106,27 +106,49 @@ export function attemptsOf(
 }
 
 /**
- * Of the reports given, this commit's and run's for the new system, all of each entry and job's last
- * attempt, and none older than the last attempt its job was marked in: a job that failed before it
- * reported leaves its earlier attempt's evidence behind.
+ * Of the reports given, this commit's and run's for the new system, every report of each leg and
+ * job's last attempt, and none older than the last attempt its leg was marked in: a leg that failed
+ * before it reported leaves its earlier attempt's evidence behind, and another leg's stands. A run's
+ * whole and its shards cover each other: a mark of the whole holds every shard's reports to it, a
+ * shard's mark holds a whole report to it, and of whole and shard reports the later form stands.
  */
 export function selectReports<R extends Report>(
 	reports: readonly R[],
 	of: { readonly commit: string; readonly run: string },
 	attempted: ReadonlyMap<string, number> = new Map(),
 ): R[] {
+	const whole = (r: R) =>
+		legOf(r.identity.entry, r.identity.shard) === legOf(r.identity.entry, undefined);
+	const marked = (entry: string) =>
+		[...attempted].filter(([leg]) => JSON.parse(leg)[0] === entry).map(([, at]) => at);
+	const floorOf = (r: R) =>
+		whole(r)
+			? Math.max(0, ...marked(r.identity.entry))
+			: Math.max(
+					attempted.get(legOf(r.identity.entry, r.identity.shard)) ?? 0,
+					attempted.get(legOf(r.identity.entry, undefined)) ?? 0,
+				);
 	const ours = reports.filter(
 		(r) =>
 			r.identity.commit === of.commit &&
 			r.identity.run === of.run &&
 			r.identity.target === "new" &&
-			r.identity.attempt >= (attempted.get(legOf(r.identity.entry, r.identity.shard)) ?? 0),
+			r.identity.attempt >= floorOf(r),
 	);
 	const keyOf = (r: R) =>
 		JSON.stringify([legOf(r.identity.entry, r.identity.shard), r.identity.job]);
 	const lastAttempt = new Map<string, number>();
-	for (const r of ours)
+	const latest = new Map<string, number>();
+	for (const r of ours) {
 		lastAttempt.set(keyOf(r), Math.max(lastAttempt.get(keyOf(r)) ?? 0, r.identity.attempt));
-	// Every report of the last attempt: two processes of one entry, job and attempt both count.
-	return ours.filter((r) => r.identity.attempt === lastAttempt.get(keyOf(r)));
+		const form = JSON.stringify([r.identity.entry, whole(r)]);
+		latest.set(form, Math.max(latest.get(form) ?? 0, r.identity.attempt));
+	}
+	// Every report of its leg's last attempt, two processes of one leg, job and attempt both, and
+	// none older than the latest report of the run's other form.
+	return ours.filter(
+		(r) =>
+			r.identity.attempt === lastAttempt.get(keyOf(r)) &&
+			r.identity.attempt >= (latest.get(JSON.stringify([r.identity.entry, !whole(r)])) ?? 0),
+	);
 }

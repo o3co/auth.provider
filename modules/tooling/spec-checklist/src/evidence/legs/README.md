@@ -16,6 +16,7 @@ Internal module of `spec-checklist`, inside `evidence`: a run's legs, each a sha
 
 ## Invariants
 - A run reports when one report ran it whole, or each of its shards has a report; a report of a shard of another count than its run's is not counted.
+- A run's whole and its shards cover each other: a mark of the whole holds every shard's reports to it, a shard's mark holds a whole report to it, and of whole and shard reports the later form stands.
 - It reads a report's entry and shard alone, by shape: it imports nothing of `evidence`.
 
 ## Depends on
