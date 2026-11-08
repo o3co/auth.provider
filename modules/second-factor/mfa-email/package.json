@@ -12,6 +12,7 @@
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
 		"@mod/mail": "workspace:*",
+		"@mod/mail-address": "workspace:*",
 		"@mod/mfa": "workspace:*",
 		"@mod/mfa-binding-proof": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",

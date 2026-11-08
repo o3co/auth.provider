@@ -19,7 +19,7 @@
 - Operator section: `adds-second-factor` (whether a proof adds `mfa`, and so whether the factor counts; default false), `code-lifetime` (1m–30m, default `10m`, written with its unit).
 
 ## Invariants
-- The address is the account's claimed `email` contact in `users`, in NFC and `mail`'s canonical form (its domain in ASCII, lower case), so one mailbox has one form; none or one `mail` does not take refuses the kind.
+- The address is the account's claimed `email` contact in `users`, in NFC and `mail-address`'s canonical form (its domain in ASCII, lower case), so one mailbox has one form; none or one `mail-address` does not take refuses the kind.
 - Without one, it is the `email` the login gave when `users` vouches for it (an outside ledger's answer): a held login's as `mfa` passes it on, `vouched`, or the session's by `subject-attributes`. An upstream's claim is never read. With neither, the kind refuses, and a factor's challenge is `contact-changed`, as when the address changes.
 - Before anything is sent, an address the subject already holds a factor at is a duplicate; another subject's factors are not compared.
 - A challenge to an address the account no longer states (changed or gone) is refused with the reason `contact-changed`, and nothing is sent.
@@ -28,4 +28,4 @@
 - A long code is read from ASCII letters, digits, hyphens and spaces only, in any case, O read as 0 and I or L as 1; six digits are read with white space around them only (as `trim` takes it).
 
 ## Depends on
-- `kernel`, `mail`, `mfa-extensions` (the kind's contract), `mfa` (composed for it: it stays among this package's dependencies, so adding this kind composes `mfa`), `mfa-binding-proof` (its binding proofs, read to check `account-email` is composed; composed for it, as the proof's host), `users` (claimed contacts), `subject-attributes` (a session's vouched login attributes)
+- `kernel`, `mail`, `mail-address` (the address's one form), `mfa-extensions` (the kind's contract), `mfa` (composed for it: it stays among this package's dependencies, so adding this kind composes `mfa`), `mfa-binding-proof` (its binding proofs, read to check `account-email` is composed; composed for it, as the proof's host), `users` (claimed contacts), `subject-attributes` (a session's vouched login attributes)

@@ -225,7 +225,7 @@ flowchart LR
 | `@mod/mfa` | feature | `@mod/audit`, `@mod/kernel`, `@mod/labels`, `@mod/login-gates`, `@mod/mfa-binding`, `@mod/mfa-extensions`, `@mod/mfa-managing`, `@mod/mfa-reading`, `@mod/mfa-witness`, `@mod/seal` |
 | `@mod/mfa-binding` | feature | `@mod/kernel`, `@mod/mfa-extensions`, `@mod/mfa-reading` |
 | `@mod/mfa-binding-proof` | feature | `@mod/kernel`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading`, `@mod/seal` |
-| `@mod/mfa-email` | feature | `@mod/kernel`, `@mod/mail`, `@mod/mfa`, `@mod/mfa-binding-proof`, `@mod/mfa-extensions`, `@mod/subject-attributes`, `@mod/users` |
+| `@mod/mfa-email` | feature | `@mod/kernel`, `@mod/mail`, `@mod/mail-address`, `@mod/mfa`, `@mod/mfa-binding-proof`, `@mod/mfa-extensions`, `@mod/subject-attributes`, `@mod/users` |
 | `@mod/mfa-email-proof` | feature | `@mod/kernel`, `@mod/mfa-binding-proof`, `@mod/mfa-email`, `@mod/users` |
 | `@mod/mfa-email-wording` | adapter | `@mod/kernel`, `@mod/mail`, `@mod/mfa-email` |
 | `@mod/mfa-enrollment` | feature | `@mod/http`, `@mod/kernel`, `@mod/labels`, `@mod/mfa`, `@mod/mfa-binding`, `@mod/mfa-binding-proof`, `@mod/mfa-extensions`, `@mod/mfa-flows`, `@mod/mfa-managing`, `@mod/session`, `@mod/subject-revocation` |
