@@ -16,7 +16,7 @@
   - `POST …/<id>/reauthorize` (the same, `connection` optional): `201` alike.
   - `POST …/<id>/token` (`sub`, `scope?`, `min_ttl?`, `connection?`, `resource?`): `200` with `access_token`, `token_type`, `expires_in`, `scope`. `min_ttl` is advisory, capped by the grant's end, so `expires_in` may be less.
   - `POST …/<id>/status` (`sub`): `200`, with `last_used_at` once a token was handed, to a client still allowed the connection. `…/<id>/revoke` (`sub`): `204`.
-  - Errors: `grant_not_found` (404), `authorization_pending`, `invalid_request`, `invalid_scope`, `invalid_target` (400), `access_denied` (403), `grant_revoked`, `grant_expired`, `reauthorization_required` (410), `rate_limited` (429), `upstream_token_ineligible`, `upstream_rejected` (502, `retry-after: 300`), `temporarily_unavailable` (503).
+  - Errors: as `api`'s card lists them.
 - Browser routes: `GET …/session/federation-grants/connect?request=`, `GET` and `POST …/consent` (`challenge`, `decision`; the POST under `csrf`), `GET …/callback/<connection>`, which returns to the intent's URI with `grant_id`, `state` and any `error`. Their connect path is a `login-gates` return path, so a browser sent to log in or raise its session comes back to it.
 - The client routes and the connect and callback `GET`s take other sites' requests, each with its reason declared (a client's own authenticated call, the client's navigation, the upstream's redirect); the consent's `POST` is checked by `csrf` before its source is counted.
 - `grantIntents`: the browser half's intent steps on an opaque `IntentRef`; `grantsBrowsers`: its route handlers, exactly one.

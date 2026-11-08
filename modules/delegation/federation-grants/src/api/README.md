@@ -11,6 +11,7 @@ Internal module of `federation-grants`: the client routes, and the revocation fo
 
 ## Offers
 - `apiOver` (the build context) → the handler of `/oauth/federation-grants/…`, through `apiWith` (clients, stores, attempt limit, `grant`'s parts, `refresh`, upstreams, audit, settings, origin, runtime).
+- The errors the client routes answer: `grant_not_found` (404), `authorization_pending`, `invalid_request`, `invalid_scope`, `invalid_target` (400), `access_denied` (403), `grant_revoked`, `grant_expired`, `reauthorization_required` (410), `rate_limited` (429), `upstream_token_ineligible`, `upstream_rejected` (502, `retry-after: 300`), `temporarily_unavailable` (503).
 - `bodyOf`: a route's body by the names it takes, as text or whole numbers.
 - `followerOver` (the build context) → the follower, through `followerWith` (grants, listing, records, the judge once built, audit).
 
