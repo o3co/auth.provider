@@ -24,7 +24,16 @@ it("answers unavailable where a number is no whole number, never reading it as o
 });
 
 it("answers unavailable for a reply holding no run id and JSON object", () => {
-	for (const text of ["", "{}", "run1\n", "run1\nnot json", "run1\nnull", "run1\n[]", "run1\n7"]) {
+	for (const text of [
+		"",
+		"{}",
+		"\n{}",
+		"run1\n",
+		"run1\nnot json",
+		"run1\nnull",
+		"run1\n[]",
+		"run1\n7",
+	]) {
 		expect(() => answerOf(text), JSON.stringify(text)).toThrow(Unavailable);
 	}
 });

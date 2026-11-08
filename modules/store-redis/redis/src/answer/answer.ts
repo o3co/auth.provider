@@ -47,7 +47,7 @@ const parsed = (text: string) => {
  */
 export function answerOf(reply: string) {
 	const split = reply.indexOf("\n");
-	const answer = split < 0 ? undefined : parsed(reply.slice(split + 1));
+	const answer = split < 1 ? undefined : parsed(reply.slice(split + 1));
 	if (answer === null || typeof answer !== "object" || Array.isArray(answer)) {
 		throw new Unavailable("store");
 	}
