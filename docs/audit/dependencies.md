@@ -107,6 +107,7 @@ flowchart LR
 | `@mod/keys` | foundation | `@mod/http`, `@mod/kernel` |
 | `@mod/labels` | foundation | none |
 | `@mod/mail` | foundation | `@mod/kernel` |
+| `@mod/mail-address` | foundation | none |
 | `@mod/metrics` | foundation | `@mod/kernel` |
 | `@mod/outbound` | foundation | `@mod/address-reach`, `@mod/host-entries`, `@mod/kernel`, `@mod/outbound-policy`, `@mod/tls-options`, `@mod/url-setting` |
 | `@mod/outbound-policy` | foundation | `@mod/address-reach`, `@mod/host-entries`, `@mod/kernel`, `@mod/url-setting` |

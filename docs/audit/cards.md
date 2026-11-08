@@ -66,6 +66,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `signing` (`src/signing`): the provider's own key ring, read at boot, signing and verifying with it.
 - `@mod/labels` (foundation, `modules/foundation/labels`): Owns the rule for a name a user gives something that a page shows back as it is, such as a second factor's label or a passkey's nickname.
 - `@mod/mail` (foundation, `modules/foundation/mail`): Owns the contract for sending mail: the sending side gives a purpose, one address, values, and optionally a locale and an expiry.
+- `@mod/mail-address` (foundation, `modules/foundation/mail-address`): Owns the rule for an address mail takes, and its one form to compare by.
 - `@mod/metrics` (foundation, `modules/foundation/metrics`): Owns the contract of counters, histograms and gauges: a name, help, every value each label can take, and a histogram's buckets.
 - `@mod/outbound` (foundation, `modules/foundation/outbound`): Sends every outbound HTTP request, applying `outbound-policy`'s destination policy to its URL before sending and its addresses before connecting.
   - `credential` (`src/credential`): how a request's credential is sent, and the headers a caller may not write.
