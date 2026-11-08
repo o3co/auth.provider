@@ -1,7 +1,7 @@
 export { bundlesIn } from "./bundles.ts";
 export {
 	type Asking,
-	declares,
+	declaredRanges,
 	type Outside,
 	type Read,
 	type Release,

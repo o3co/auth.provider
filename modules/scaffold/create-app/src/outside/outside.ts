@@ -389,14 +389,22 @@ export function readOutside(
 	}
 	const freshDependencies: Recorded[] = [];
 	for (const name of dependencies) {
-		if (!read.some(({ record }) => declares(record, name))) {
+		const ranges = read.flatMap(({ record }) => declaredRanges(record, name));
+		if (ranges.length === 0) {
 			refusals.push(
 				`--allow-fresh ${name}: neither named npm:${name} nor declared by a package named so`,
 			);
 			continue;
 		}
 		try {
-			freshDependencies.push(outsideLock.dependencyRecordOf(lock, name, registries));
+			const recorded = outsideLock.dependencyRecordOf(lock, name, registries);
+			if (ranges.every((range) => semver.satisfies(recorded.version, range))) {
+				freshDependencies.push(recorded);
+			} else {
+				refusals.push(
+					`--allow-fresh ${name}: the project resolves ${recorded.version}, outside the range a package declares it by`,
+				);
+			}
 		} catch (error) {
 			refusals.push(`--allow-fresh ${(error as Error).message}`);
 		}
@@ -411,8 +419,14 @@ export function readOutside(
 
 const isReleaseName = (name: string) => releaseScopes.some((scope) => name.startsWith(scope));
 
-/** Whether a record declares `name` itself, as a dependency, an optional one or a peer: each resolves beside it. */
-export const declares = (record: OutsideRecord, name: string) =>
-	[record.dependencies, record.optionalDependencies, record.peerDependencies].some((declared) =>
-		Object.hasOwn(declared, name),
+/**
+ * Every registry range a record declares `name` by itself, as a dependency, an optional one or a peer
+ * (each resolves beside it); none where it does not, or declares it anywhere as an alias of another package.
+ */
+export function declaredRanges(record: OutsideRecord, name: string): readonly string[] {
+	const groups = [record.dependencies, record.optionalDependencies, record.peerDependencies];
+	const declared = groups.flatMap((group) =>
+		Object.hasOwn(group, name) ? [group[name] as string] : [],
 	);
+	return declared.every((range) => semver.validRange(range) !== null) ? declared : [];
+}

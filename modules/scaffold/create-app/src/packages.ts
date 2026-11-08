@@ -10,7 +10,7 @@ import {
 	type Sampled,
 	sampleFile,
 } from "@mod/app-output";
-import { bundlesIn, declares, type Outside, type Read } from "./outside/contract.ts";
+import { bundlesIn, declaredRanges, type Outside, type Read } from "./outside/contract.ts";
 import { dependenciesOf, workspacePackages } from "./project.ts";
 
 /** Where an entry's files lie in the app: under `node_modules`, the entry's own path. */
@@ -221,7 +221,7 @@ export function publishedIn(index: Indexed, beside?: Beside): Packages {
 			const fresh = (beside.fresh ?? []).filter((name) => names.includes(name));
 			// A dependency let through goes with the packages of this plan that declare it.
 			const freshDependencies = (beside.read.freshDependencies ?? []).filter((dependency) =>
-				modules.some((record) => declares(record, dependency.name)),
+				modules.some((record) => declaredRanges(record, dependency.name).length > 0),
 			);
 			return {
 				modules,
