@@ -155,6 +155,17 @@ it("names the purpose that has no template when it refuses to boot", async () =>
 	});
 });
 
+it("names the purpose a template words when nothing declares it, refusing to boot", async () => {
+	const stray = defineModule({ name: "stray-wording", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(mailTemplates).by(() => plainText("stray", { subject: "Stray", text: "x\n" })),
+	]);
+	const booting = boot([stray]);
+	await expect(booting).rejects.toBeInstanceOf(BootRefused);
+	await expect(booting).rejects.toMatchObject({
+		refusals: [{ where: "mail.templates", reason: "a template for an undeclared purpose: stray" }],
+	});
+});
+
 it("fills the plain-text wording literally, the same for every locale", () => {
 	const t = plainText("p", { subject: "Code {code}", text: "Use {code} before {until}.\n" });
 	const values = { code: "{until}", until: "noon" };
