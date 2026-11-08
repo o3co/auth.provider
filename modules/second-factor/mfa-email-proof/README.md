@@ -7,7 +7,7 @@
 - Whether a proof is asked, and the pass it gives (`mfa-binding-proof`). The address users stands behind, mailing a code and its forms (`account-mail-code`, over `mail`, `users` and `subject-attributes`). The wording of its mail (`mfa-email-proof-wording`, which a deployment replaces). The account's addresses (`users`).
 
 ## Offers
-- A bridge of `mfa-email`: it comes wherever `mfa-email` is composed, through `combinations`; it opts in, so the full template takes it only with `mfa-email`.
+- Composed on its own: it opts in, so the full template takes it only where it is added or a composed module needs it.
 - Contribution to `mfa-binding-proof`'s binding proofs (boot is refused without `mfa-binding-proof` composed): `account-email`, available while the account has an address `account-mail-code` takes; a 16-character code good for ten minutes at most, mailed under its purpose `mfa-email-proof.account-email`, declared to `mail`.
 - `purposes` (`mfa-email-proof.account-email`) and their type `Purpose`, for the module that words them; `proofName` (`account-email`), for the modules that ask for the proof.
 - A proof that passes tells `users` the address is the subject's (`verifiedContact`); past the contacts `users` keeps, it still passes, logging `mfa-email.contact_not_kept` without the address.
