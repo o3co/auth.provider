@@ -1,17 +1,9 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expectedOf, packageDirs, readChecklist, runsOf, workspaceTests } from "../repo.ts";
+import { type Attempted, attemptsOf, reportedOf, selectReports } from "./legs/legs.ts";
 import type { EvidenceReport } from "./reporter.ts";
-import {
-	type Attempted,
-	attemptsOf,
-	blocksRelease,
-	checkpoint,
-	complianceTable,
-	gateFailures,
-	itemStatuses,
-	selectReports,
-} from "./runs.ts";
+import { blocksRelease, checkpoint, complianceTable, gateFailures, itemStatuses } from "./runs.ts";
 
 const walk = (dir: string): string[] =>
 	readdirSync(dir).flatMap((f) => {
@@ -39,14 +31,11 @@ export function complianceOf(
 ) {
 	const read = walk(dir).map((f) => JSON.parse(readFileSync(f, "utf8")) as unknown);
 	const runs = runsOf(root);
-	const reports = selectReports(
-		read.filter(isReport),
-		of,
-		attemptsOf(read.filter(isMark), runs, of.run),
-	);
 	const expected = expectedOf(runs, of.release);
-	const present = new Set(reports.map((r) => r.identity.entry));
-	const missingRuns = expected.entries.filter((e) => !present.has(e));
+	const { reports, missing: missingRuns } = reportedOf(
+		selectReports(read.filter(isReport), of, attemptsOf(read.filter(isMark), runs, of.run)),
+		expected,
+	);
 	const items = readChecklist().specs.flatMap((s) => s.items);
 	const statuses = itemStatuses(
 		items,

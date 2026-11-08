@@ -45,7 +45,8 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		const script = plan.steps.find((s) => s.id === "plan")?.run ?? "";
 		expect(script).toContain("@mod/spec-checklist run plan area");
 		expect(script).toContain("@mod/spec-checklist run plan pattern");
-		expect(script).toContain("@mod/spec-checklist run plan faults");
+		// The fault job's legs: each area as many times as its run has shards.
+		expect(script).toContain("@mod/spec-checklist run plan faults --legs");
 		expect(script).toContain('echo "sha=$(git rev-parse HEAD)"');
 		expect(plan.outputs?.sha).toBe(expr("steps.plan.outputs.sha"));
 		expect(plan.outputs?.faults).toBe(expr("steps.plan.outputs.faults"));
@@ -55,9 +56,21 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		expect(job("conformance-pattern").strategy?.matrix?.pattern).toBe(
 			expr("fromJSON(needs.conformance-plan.outputs.patterns)"),
 		);
-		expect(job("conformance-faults").strategy?.matrix?.area).toBe(
+		expect(job("conformance-faults").strategy?.matrix?.leg).toBe(
 			expr("fromJSON(needs.conformance-plan.outputs.faults)"),
 		);
+	});
+
+	it("print the fault legs with no space, as the conformance gate reads each list as one word", {
+		timeout: 60_000,
+	}, () => {
+		const legs = execFileSync(
+			"pnpm",
+			["--silent", "--filter", "@mod/spec-checklist", "run", "plan", "faults", "--legs"],
+			{ cwd: root, encoding: "utf8" },
+		).trim();
+		expect(JSON.parse(legs).length).toBeGreaterThan(0);
+		expect(legs).not.toMatch(/\s/);
 	});
 
 	it("run on a pull request to develop every area and its fault scenes where its files may reach a scene, else none, no pattern, and pass where nothing was planned", () => {
@@ -137,9 +150,22 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		const faults = job("conformance-faults");
 		const scenes = faults.steps.find((s) => s.name === "Fault scenes");
 		expect(scenes?.env?.CONFORMANCE_FAULTS).toBe("1");
-		expect(scenes?.run).toContain("run conformance:faults");
+		expect(scenes?.env?.AREA).toBe(expr("matrix.leg.matrix"));
+		expect(scenes?.env?.SHARD).toBe(expr("matrix.leg.shard"));
+		expect(scenes?.run).toContain('args=("--shard=$SHARD")');
+		expect(scenes?.run).toContain('[ "$SHARD" = 1/1 ] || args+=(--passWithNoTests)');
+		expect(scenes?.run).toContain(`pnpm --filter "$AREA" run conformance:faults "$${"{"}args[@]}"`);
 		// What a scene ran on is kept apart from the evidence, every file of which compliance reads.
 		expect(scenes?.env?.CONFORMANCE_FAULTS_DIR).not.toContain("evidence");
+		// Every leg at once, each on a runner of its own; its mark names its shard.
+		const strategy = faults.strategy as { readonly "max-parallel"?: number } | undefined;
+		expect(strategy?.["max-parallel"]).toBeUndefined();
+		const [mark] = faults.steps;
+		expect([mark?.env?.MATRIX, mark?.env?.SHARD]).toEqual([
+			expr("matrix.leg.matrix"),
+			expr("matrix.leg.shard"),
+		]);
+		expect(mark?.run).toContain("shard: $shard");
 		const gate = jobs.conformance as unknown as {
 			needs: readonly string[];
 			steps: readonly Step[];

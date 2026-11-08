@@ -386,7 +386,7 @@ jobs:
           set -euo pipefail
           areas=$(pnpm --silent --filter @mod/spec-checklist run plan area)
           patterns=$(pnpm --silent --filter @mod/spec-checklist run plan pattern)
-          faults=$(pnpm --silent --filter @mod/spec-checklist run plan faults)
+          faults=$(pnpm --silent --filter @mod/spec-checklist run plan faults --legs)
           if [ "$EVENT" = pull_request ] && [ "$BASE" = develop ]; then
             changed=$(git diff --no-renames --name-only "origin/$BASE...HEAD" | jq -Rsc 'split("\n") | map(select(. != ""))')
             reaches=$(jq -c "$REACHES" <<<"$changed")
@@ -617,37 +617,40 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-  # One area's fault scenes (`*.faults.case.ts`), on the new system alone: each scene on a Redis
-  # topology and app instances of its own (conformance's relay, topology and deployment). They run
-  # when conformance does (conformance-plan decides): on a pull request to main, on the release
-  # branches, every five merges to develop, and on the daily run, which checks out develop, not the
-  # default branch the schedule runs on, as the plan fixes. An area is in the matrix where its
-  # `evidence-runs` names a run of kind `faults`; its `conformance:faults` reports as
-  # `<area>#faults`. With CONFORMANCE_FAULTS=1 a scene that cannot run (no Docker, no libfaketime
-  # that moves Node's clock) fails rather than skips. Two at a time: each holds several Redis
-  # containers and app instances. One leg also runs conformance's deployment tests, which move an
-  # instance's clock: only this job holds the library they need.
+  # One leg of an area's fault scenes (`*.faults.case.ts`), on the new system alone: each scene on a
+  # Redis topology and app instances of its own (conformance's relay, topology and deployment). They
+  # run when conformance-plan plans them: on a pull request to develop whose change may reach a
+  # scene, on a pull request to main, on the release branches, every five merges to develop, and on
+  # the daily run, which checks out develop, not the default branch the schedule runs on. An area is
+  # in the matrix where its `evidence-runs` names a run of kind `faults`; its `conformance:faults`
+  # reports as `<area>#faults`. Its legs are `run plan faults --legs`: as many as the run has shards,
+  # each running the shard of its scenes vitest gives it, and every leg at once, each on a runner of
+  # its own. With CONFORMANCE_FAULTS=1 a scene that cannot run (no Docker, no libfaketime that moves
+  # Node's clock) fails rather than skips. One leg also runs conformance's deployment tests, which
+  # move an instance's clock: only this job holds the library they need.
   conformance-faults:
+    name: conformance-faults (${{ matrix.leg.matrix }} ${{ matrix.leg.shard }})
     needs: conformance-plan
     if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.conformance-plan.outputs.faults != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
-      max-parallel: 2
       matrix:
-        area: ${{ fromJSON(needs.conformance-plan.outputs.faults) }}
+        leg: ${{ fromJSON(needs.conformance-plan.outputs.faults) }}
     steps:
       # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      # It names the leg's shard, so a leg attempted again leaves the others' reports standing.
       - name: Mark this attempt
         env:
           KIND: faults
-          MATRIX: ${{ matrix.area }}
+          MATRIX: ${{ matrix.leg.matrix }}
+          SHARD: ${{ matrix.leg.shard }}
         run: |
           mkdir -p "$RUNNER_TEMP/evidence"
           jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
-            --arg kind "$KIND" --arg matrix "$MATRIX" \
-            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            --arg kind "$KIND" --arg matrix "$MATRIX" --arg shard "$SHARD" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind, matrix: $matrix, shard: $shard})}' \
             > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
         with:
@@ -692,9 +695,18 @@ jobs:
         env:
           CONFORMANCE_FAULTS: '1'
           SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
-          # What each scene ran on, beside the evidence and apart from it: compliance reads every file there.
+          # What each scene ran on, apart from the evidence, every file of which compliance reads: kept
+          # below for whoever looks into a scene; no job reads it.
           CONFORMANCE_FAULTS_DIR: ${{ runner.temp }}/fault-setups
-        run: pnpm --filter "${{ matrix.area }}" run conformance:faults
+          AREA: ${{ matrix.leg.matrix }}
+          SHARD: ${{ matrix.leg.shard }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=("--shard=$SHARD")
+          # A shard of more than one may hold no scene; its report then says it ran none.
+          [ "$SHARD" = 1/1 ] || args+=(--passWithNoTests)
+          pnpm --filter "$AREA" run conformance:faults "${args[@]}"
       # The deployment's tests that move an instance's clock, in one leg alone (the integration job runs
       # the rest); with CONFORMANCE_FAULTS=1 a missing library fails them rather than skips. They report
       # no evidence. A name filter that matches nothing passes with every test skipped, so the step

@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checklistFindings } from "./checklist.ts";
 import { complianceOf } from "./evidence/compliance.ts";
+import { legsOf } from "./evidence/legs/legs.ts";
 import { commitOf } from "./evidence/reporter.ts";
 import { planOf } from "./evidence/runs.ts";
 import {
@@ -79,7 +80,9 @@ if (command === "report") {
 } else if (command === "expected") {
 	say(JSON.stringify(expectedOf(runsOf(root), args.includes("--release")).entries));
 } else if (command === "plan" && args[0]) {
-	say(JSON.stringify(planOf(runsOf(root), args[0])));
+	const runs = runsOf(root);
+	// `--legs`: each leg of the kind's jobs, its matrix value and its shard.
+	say(JSON.stringify(args.includes("--legs") ? legsOf(runs, args[0]) : planOf(runs, args[0])));
 } else if (command === "compliance" && args[0]) {
 	if (!heldToRules(readChecklist(), workspaceTests(root))) process.exit();
 	const of = {
@@ -93,7 +96,7 @@ if (command === "report") {
 	process.exitCode = args.includes("--release") && !releasable ? 1 : 0;
 } else {
 	say(
-		"usage: report | summary | check | ledger <spec> <the spec's plain text file> | expected [--release] | plan <kind> | compliance <reports dir> [--release]",
+		"usage: report | summary | check | ledger <spec> <the spec's plain text file> | expected [--release] | plan <kind> [--legs] | compliance <reports dir> [--release]",
 	);
 	process.exitCode = 2;
 }

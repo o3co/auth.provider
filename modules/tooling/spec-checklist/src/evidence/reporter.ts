@@ -13,6 +13,8 @@ export interface EvidenceReport {
 		/** The run it stands for: `unit`, `integration`, a package, `<package>@<pattern>` or `<package>#<run>`. */
 		readonly entry: string;
 		readonly target: "new" | "legacy";
+		/** The shard of the entry's files it ran (`i/n`); none where it ran them whole. */
+		readonly shard?: string;
 	};
 	readonly tests: readonly EvidenceTest[];
 	/** Errors no test owns; any makes the run's tests unproven. */
@@ -111,6 +113,10 @@ export function evidenceReporter(env: NodeJS.ProcessEnv = process.env): Reporter
 			const config = String(vitest.vite.config.configFile ?? vitest.config.config ?? "");
 			const entry = entryOf(config, packageOf(dirname(config)), env);
 			const target = env.CONFORMANCE_TARGET === "legacy" ? "legacy" : "new";
+			// vitest's own shard, so the report names what ran: one of one is the whole.
+			const sharded = vitest.config.shard;
+			const shard =
+				sharded && sharded.count > 1 ? { shard: `${sharded.index}/${sharded.count}` } : {};
 			const report: EvidenceReport = {
 				identity: {
 					commit: commitOf(env),
@@ -119,12 +125,14 @@ export function evidenceReporter(env: NodeJS.ProcessEnv = process.env): Reporter
 					job: env.GITHUB_JOB ?? "local",
 					entry,
 					target,
+					...shard,
 				},
 				tests: modules.flatMap(testsOf),
 				errors: errors.length,
 			};
 			mkdirSync(dir, { recursive: true });
-			const name = `${entry}-${target}-${process.pid}`.replace(/[^\w@#.+-]/g, "_");
+			const legName = shard.shard ? `-${shard.shard.replace("/", "of")}` : "";
+			const name = `${entry}${legName}-${target}-${process.pid}`.replace(/[^\w@#.+-]/g, "_");
 			writeFileSync(join(dir, `${name}.json`), JSON.stringify(report));
 		},
 	};
