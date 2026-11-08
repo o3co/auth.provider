@@ -1888,9 +1888,6 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
-      '@mod/session-participants':
-        specifier: workspace:*
-        version: link:../../identity/session-participants
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1919,6 +1916,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/session-requirements':
         specifier: workspace:*
         version: link:../../identity/session-requirements
