@@ -56,7 +56,10 @@ type Upstream =
  * The refresher over memory stores on a test clock, and an active grant `g` holding an upstream
  * token of `life` seconds obtained now.
  */
-async function refresher(life: number, settings: { rotations?: number; windowMs?: number } = {}) {
+async function refresher(
+	life: number,
+	settings: { rotations?: number; windowMs?: number; lockMs?: number } = {},
+) {
 	let now = 1_800_000_000_000;
 	const stores = memoryStores(() => now);
 	const records = recordsWith(seal);
@@ -72,6 +75,7 @@ async function refresher(life: number, settings: { rotations?: number; windowMs?
 		endOf: () => boundary.endsAt,
 		...runtime,
 		refreshBeforeMs: 30_000,
+		lockMs: settings.lockMs ?? 10_000,
 		rotations: settings.rotations ?? 24,
 		rotationWindowMs: settings.windowMs ?? 3_600_000,
 	});
@@ -567,6 +571,23 @@ describe("refreshing alongside other writers", () => {
 			await vi.advanceTimersByTimeAsync(5100);
 			expect(said(await waiting)).toBe("lock_timeout");
 			expect(r.asked).toEqual([]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("waits for another holder's lock half the lock-lifetime set, asking every 100 ms", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout"] });
+		try {
+			const r = await refresher(4, { lockMs: 2000 });
+			r.advance(4100);
+			await r.stores.lockStore.hold("g", "another", 60_000);
+			const askedForLock = vi.spyOn(r.stores.lockStore, "hold");
+			const waiting = r.call();
+			await vi.advanceTimersByTimeAsync(1100);
+			expect(said(await waiting)).toBe("lock_timeout");
+			expect(askedForLock).toHaveBeenCalledTimes(11);
+			expect(askedForLock.mock.calls.every(([, , ms]) => ms === 2000)).toBe(true);
 		} finally {
 			vi.useRealTimers();
 		}

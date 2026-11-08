@@ -27,6 +27,7 @@
   - `retention` (`30d`, from `1d` to `365d`)
   - `connect-lifetime` (`10m`)
   - `refresh-before` (`30s`)
+  - `lock-lifetime` (`10s`)
   - `rotations` per `rotation-window` (24 per `1h`)
   - `lodges` per `lodge-window` (60 per `1m`), lodgings and renewals together
   - `keep-on-subject-revocation` (false)

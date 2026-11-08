@@ -56,6 +56,11 @@ export const section = z.strictObject({
 		.describe(
 			"How long a grant's record, and its subject listing, are kept once it can no longer be used, so its status still answers why: past its end, its revocation, or for one never connected, the connect time's end. It is set as the record is written, so a change applies to grants lodged, connected or revoked after it: a duration with a unit, from 1d to 365d, e.g. 30d.",
 		),
+	"lock-lifetime": seconds(1, 60)
+		.prefault("10s")
+		.describe(
+			"How long a refresh's lock lasts unless kept, as it is every half of this while the refresh runs, and half of which another request waits for it, from 1s to 1m.",
+		),
 	"connect-lifetime": seconds(60, 3600)
 		.prefault("10m")
 		.describe(
