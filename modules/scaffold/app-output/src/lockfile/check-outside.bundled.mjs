@@ -8496,7 +8496,7 @@ function refusals(text, records, overrides, registries, integrities, fresh = [],
 		...heldIntegrityRefusals(lock, held, own(integrities)),
 		...freshRefusals(lock, fresh, registries, references),
 		...exclusionRefusals(excluded, named, held),
-		...ownedRefusals(lock, /* @__PURE__ */ new Set([...held.keys(), ...named.map((fields) => fields.get("name"))]))
+		...ownedRefusals(lock)
 	];
 }
 const packageName = /^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/;
@@ -8506,13 +8506,13 @@ function exclusionRefusals(excluded, named, held) {
 	const recorded = new Set(named.filter((fields) => import_semver.default.valid(fields.get("version")) === fields.get("version")).map((fields) => `${fields.get("name")}@${fields.get("version")}`));
 	return excluded.filter((entry) => typeof entry !== "string" || !(held.has(entry) || recorded.has(entry))).map((entry) => `minimumReleaseAgeExclude lets ${String(entry)} through, which the record does not`);
 }
-/** An entry of a name held, recorded or let through naming a version but its key's, or a snapshot of one naming its own source or version. */
-function ownedRefusals(lock, names) {
+/** An entry keyed by a version naming another, or a snapshot naming its own source or version, anywhere in the lockfile. */
+function ownedRefusals(lock) {
 	const keyed = (key) => bare(key).slice(nameOf(key).length + 1);
 	return [...[...own(lock.packages)].flatMap(([key, entry]) => {
 		const version = own(entry).get("version");
-		return names.has(nameOf(key)) && version !== void 0 && String(version) !== keyed(key) ? [`${key}: its entry names version ${String(version)}, not its key's`] : [];
-	}), ...[...own(lock.snapshots)].flatMap(([key, snapshot]) => names.has(nameOf(key)) ? [...own(snapshot).has("resolution") ? ["source"] : [], ...own(snapshot).has("version") ? ["version"] : []].map((what) => `${nameOf(key)}: a resolution of ${key} names its own ${what}`) : [])];
+		return import_semver.default.valid(keyed(key)) !== null && version !== void 0 && String(version) !== keyed(key) ? [`${key}: its entry names version ${String(version)}, not its key's`] : [];
+	}), ...[...own(lock.snapshots)].flatMap(([key, snapshot]) => [...own(snapshot).has("resolution") ? ["source"] : [], ...own(snapshot).has("version") ? ["version"] : []].map((what) => `${nameOf(key)}: a resolution of ${key} names its own ${what}`))];
 }
 function freshRefusals(lock, fresh, registries, references) {
 	if (!Array.isArray(fresh)) return ["the record of dependencies let through is not a list"];

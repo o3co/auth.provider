@@ -253,7 +253,7 @@ export function refusals(
 		...heldIntegrityRefusals(lock, held, own(integrities)),
 		...freshRefusals(lock, fresh, registries, references),
 		...exclusionRefusals(excluded, named, held),
-		...ownedRefusals(lock, new Set([...held.keys(), ...named.map((fields) => fields.get("name"))])),
+		...ownedRefusals(lock),
 	];
 }
 
@@ -283,23 +283,23 @@ function exclusionRefusals(excluded, named, held) {
 		);
 }
 
-/** An entry of a name held, recorded or let through naming a version but its key's, or a snapshot of one naming its own source or version. */
-function ownedRefusals(lock, names) {
+/** An entry keyed by a version naming another, or a snapshot naming its own source or version, anywhere in the lockfile. */
+function ownedRefusals(lock) {
 	const keyed = (key) => bare(key).slice(nameOf(key).length + 1);
 	return [
 		...[...own(lock.packages)].flatMap(([key, entry]) => {
 			const version = own(entry).get("version");
-			return names.has(nameOf(key)) && version !== undefined && String(version) !== keyed(key)
+			return semver.valid(keyed(key)) !== null &&
+				version !== undefined &&
+				String(version) !== keyed(key)
 				? [`${key}: its entry names version ${String(version)}, not its key's`]
 				: [];
 		}),
 		...[...own(lock.snapshots)].flatMap(([key, snapshot]) =>
-			names.has(nameOf(key))
-				? [
-						...(own(snapshot).has("resolution") ? ["source"] : []),
-						...(own(snapshot).has("version") ? ["version"] : []),
-					].map((what) => `${nameOf(key)}: a resolution of ${key} names its own ${what}`)
-				: [],
+			[
+				...(own(snapshot).has("resolution") ? ["source"] : []),
+				...(own(snapshot).has("version") ? ["version"] : []),
+			].map((what) => `${nameOf(key)}: a resolution of ${key} names its own ${what}`),
 		),
 	];
 }

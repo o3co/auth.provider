@@ -784,6 +784,27 @@ describe("a dependency of a recorded package, let through though published withi
 		]);
 	});
 
+	it("holds every entry keyed by a version to it, and every snapshot to its entry, whatever the package", () => {
+		const other = parse(appLock).packages["jose-lite@1.4.0"].resolution.integrity as string;
+		const real = Object.keys(parse(appLock).snapshots).find((key) => key.startsWith("real-lib@"));
+		const anywhere = changed((l) => {
+			l.packages["real-lib@1.1.0"].version = "1.0.0";
+			l.snapshots[real as string].resolution = { integrity: other };
+		});
+		expect(freshly(anywhere, [])).toEqual([
+			"real-lib@1.1.0: its entry names version 1.0.0, not its key's",
+			`real-lib: a resolution of ${real} names its own source`,
+		]);
+		// An entry keyed by its source, not a version, names its version as pnpm writes it.
+		const sourced = changed((l) => {
+			l.packages["local-lib@file:../local-lib"] = {
+				version: "1.0.0",
+				resolution: { directory: "../local-lib", type: "directory" },
+			};
+		});
+		expect(freshly(sourced, [])).toEqual([]);
+	});
+
 	it("refuses a record of it that is no list of a name, a version and an integrity", () => {
 		expect(freshly(appLock, { "jose-lite": "1.4.0" })).toEqual([
 			"the record of dependencies let through is not a list",

@@ -29,7 +29,7 @@
 - Each package the overrides hold has the integrity the release recorded of it (`held` in `outside-modules.json`), and its entry at its held version (the package, not a resolution with peers) holds that integrity: one recorded without, or a record holding none, is refused.
 - A dependency let through though fresh is recorded by its name, version (as `semver` writes it) and integrity (sha256, sha384 or sha512, at its full length); where the lockfile holds that version, its entry is from its registry with that integrity. A record of it that is no list of those, or such an entry otherwise, is refused.
 - What `minimumReleaseAgeExclude` lets through is held to the record: each entry is a name the overrides hold, or a recorded package or dependency let through at its version as `semver` writes it (`name@version`). Any other entry, or a setting that is no list, is refused.
-- An entry of a name held, recorded or let through names no `version` but its key's, and a snapshot of one no `resolution` or `version` of its own; any other is refused.
+- Anywhere in the lockfile, an entry keyed by a version names no other `version`, and a snapshot no `resolution` or `version` of its own; any other is refused.
 - The file imports nothing of the workspace: `yaml`, `semver` and node only. Its bundle requires node's builtins alone, and a test holds it to what the file bundles to.
 
 ## Depends on
