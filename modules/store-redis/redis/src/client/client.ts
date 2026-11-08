@@ -37,6 +37,22 @@ export const inTheClear = (url: string): boolean => {
 	return protocol === "redis:" && !isLoopbackName(hostname);
 };
 
+/**
+ * Why boot warns of a URL in the clear, if it does: accepted by `accept-plaintext`, or, in
+ * production without it, deprecated; never a host nor the URL.
+ */
+export function plaintextWarning(
+	url: string,
+	accepted: boolean,
+	environment: "production" | "development",
+): string | undefined {
+	if (!inTheClear(url)) return undefined;
+	const clear = "the connection to Redis is not encrypted";
+	if (accepted) return `${clear}, as redis.accept-plaintext accepts`;
+	if (environment === "development") return clear;
+	return `${clear}; deprecated: a later release refuses boot for it in production unless redis.url is rediss or redis.accept-plaintext is true`;
+}
+
 /** Whether `DEBUG` turns on the client's `ioredis:redis` log, which writes AUTH's password, read as the `debug` library reads it. */
 export function clientDebugs(debug: string | undefined): boolean {
 	const names = (debug ?? "").split(/[\s,]+/).filter((name) => name !== "");
