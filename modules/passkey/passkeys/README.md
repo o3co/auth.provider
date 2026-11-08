@@ -14,7 +14,7 @@
   - A caller's check (`admitted`) is asked before the record is written and once after; its write's record (by token) becomes a passkey only as the last write, both asks admitting. A `false` (`revoked`), a throw or a failed write ends it, best effort; what that leaves open, the internal module `registration` says.
   - The caller answers for who the subject is: only a module that authenticated it may ask.
   - A registration answers when its challenge was made (`challengedAt`). `listed` (id, nickname, transports, backup state, and when registered where kept), `renamed` (`renamed` / `unknown`) and `removed` (`removed`: this call ended it; `empty`: none left) take only the subject's own.
-- `passkeyHolders`, taken only by `login-passkey` and `passkey-reset`: `held` (settled first), `cleared` (ends every passkey of the subject, making its holder where it has none, and has its mark go → how many list entries it took off), `settle`, and `witnessed` (whether a witness is composed).
+- `passkeyHolders`, taken only by `login-passkey` and `passkey-reset`: whether subjects hold passkeys, and ending them; its members are on the internal module `holders`' card.
 - Extension point `passkeyWitnessing` (at most one, two refusing boot), for `passkey-witnessing`: `settle` and `emptied`, asked where this package settles, handed reads anew that write nothing (`holds`, and after a write that emptied the list `after`, an `AfterRemoval`: the mark goes only on `none`).
 - `passkeyReading`, taken only by `passkey-witnessing` (its backfill): `writtenHolding` (what the subject's list names as written, read anew: `passkey`, only `pending` ones, or `none`).
 - Store interfaces, which the assembly wires. The store never sees what a record holds.

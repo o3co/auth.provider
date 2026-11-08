@@ -10,6 +10,7 @@ Internal module of `passkeys`: whether subjects hold passkeys, and the settle th
 
 ## Offers
 - `holdersOver` (records, the witnessing contributed, a fresh handle) → `holders` (the package's `PasskeyHolders`) and `settle` (subject, where asked, the holder its call's write left where it emptied the list), for the package's registrations.
+- `PasskeyHolders`' members: `held` (settled first), `cleared` (ends every passkey of the subject, making its holder where it has none, and has its mark go → how many list entries it took off), `settle`, and `witnessed` (whether a witness is composed).
 
 ## Invariants
 - Where a witnessing is contributed, a settle asks it: `settle` (held, a registration, a removal that leaves a passkey, `settle`) or `emptied` (a removal or an end that empties the list, a reset). It hands `holds`, whether the subject's list names a passkey, and after an emptying write `after`, what the holder that write left holds (the records' `afterRemoval`). Both read anew each time and write nothing.
