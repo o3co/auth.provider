@@ -54,7 +54,7 @@ export const section = z.strictObject({
 	retention: seconds(86_400, 31_536_000)
 		.prefault("30d")
 		.describe(
-			"How long a grant's record is kept once it can no longer be used, whether ended, revoked or never connected, so its status still answers why: a duration with a unit, from 1d to 365d, e.g. 30d.",
+			"How long a grant's record, and its subject listing, are kept once it can no longer be used, so its status still answers why: past its end, its revocation, or for one never connected, the connect time's end. It is set as the record is written, so a change applies to grants lodged, connected or revoked after it: a duration with a unit, from 1d to 365d, e.g. 30d.",
 		),
 	"connect-lifetime": seconds(60, 3600)
 		.prefault("10m")

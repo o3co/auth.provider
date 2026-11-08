@@ -3,7 +3,7 @@
 Internal module of `federation-grants`: erasing the credentials of grants no request reads.
 
 ## Responsibilities
-- On each host, every `sweep-interval`, walks every grant kept and erases the credentials of one past its end, or ended by its subject's revocation.
+- On each host, every `sweep-interval`, walks every grant kept and erases the credentials of one past its end, or ended by its subject's revocation, which it revokes and unlists by `retention`'s rules.
 
 ## Not here
 - Answering a grant's state (the routes, which judge it on each read). Ending a grant's intent (judged when the intent is used). The listing a revocation's follower walks (`api`).

@@ -7,6 +7,7 @@ import { type Upstreams, upstreams } from "@mod/upstreams";
 import type { Judge, Listing, Records } from "../grant/grant.ts";
 import { shared } from "../grant/shared.ts";
 import { type Refresh, refreshOver, refreshTakes } from "../refresh/refresh.ts";
+import type { Revocation, Unlisting } from "../retention/retention.ts";
 import type { Settings } from "../section.ts";
 import {
 	type GrantStore,
@@ -31,6 +32,8 @@ export interface ApiParts {
 	readonly records: Records;
 	readonly judge: Judge;
 	readonly listed: Listing;
+	readonly unlisted: Unlisting;
+	readonly revocation: Revocation;
 	readonly refresh: Refresh;
 	readonly upstreams: Upstreams;
 	readonly audit: Audit;

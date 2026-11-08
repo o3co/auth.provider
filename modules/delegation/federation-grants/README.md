@@ -5,7 +5,7 @@
 - Holds the upstream credentials apart from any session, and hands the client the upstream's bearer token, refreshed under a lock within a rotation budget.
 - Seals again, for `seal`'s resealers (as `federation-grants`), credentials a `previous` key sealed: walking every grant, writing only over the credentials read and keeping the grant's lifetime, counting those no key opens. A refresh seals under the current key anyway.
 - Answers a grant's status, renewal and revocation, and follows a subject's revocation.
-- Internal modules: `grant` (records, sealing, shared judgments), `api` (client routes and the follower), `sweep` (erasing credentials), `intents` (for the browser half), `refresh` (tokens).
+- Internal modules: `grant` (records, sealing, shared judgments), `api` (client routes and the follower), `sweep` (erasing credentials), `retention` (how long an unusable grant is kept), `intents` (for the browser half), `refresh` (tokens).
 
 ## Not here
 - The browser half, whose upstream account a callback reached, and the browser settings (`federation-grants-connect`). The upstream's requests (`upstreams`' IdP type), revocation boundaries (`subject-revocation`), consent to this provider's clients (`consent`).
@@ -53,4 +53,4 @@
 ## Vocabulary
 - intent: a client's asking for a grant, connected once by the user. connection: an entry of the operator's `connections`, and the user's steps for an intent.
 - grant: the credentials held for a client and subject at a connection, with its state.
-- retention: how long a grant's record is kept once it can no longer be used (ended, revoked or never connected), so its status still answers why.
+- retention: how long a grant's record, and its subject listing, are kept once it can no longer be used, so its status still answers why; from when, `retention`'s card says.

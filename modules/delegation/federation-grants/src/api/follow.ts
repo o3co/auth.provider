@@ -1,9 +1,10 @@
 import { type Audit, audit, declaredAudit } from "@mod/audit";
-import { type BuildContext, Unavailable } from "@mod/kernel";
+import { type BuildContext, type Clock, Unavailable } from "@mod/kernel";
 import type { RevocationFollower } from "@mod/subject-revocation";
 import events from "../audit-events.ts";
-import { type Grant, type Judge, type Records, withoutCredentials } from "../grant/grant.ts";
+import type { Grant, Judge, Records } from "../grant/grant.ts";
 import { recordsOver, shared } from "../grant/shared.ts";
+import type { Revocation } from "../retention/retention.ts";
 import type { Settings } from "../section.ts";
 import { type GrantStore, grantStore, type SubjectGrants, subjectGrants } from "../store.ts";
 
@@ -13,6 +14,9 @@ export interface FollowParts {
 	readonly records: Records;
 	/** The judge, once the composition is built: it reads the boundaries this follows. */
 	readonly judge: () => Judge;
+	/** The revocation's rewrite, once the composition is built, as the judge. */
+	readonly revocation: () => Revocation;
+	readonly clock: Clock;
 	readonly audit: Audit;
 }
 
@@ -41,6 +45,7 @@ export function followerWith(p: FollowParts): RevocationFollower {
 				await p.subjects.remove(subject, id);
 			return;
 		}
+		const at = p.clock.now();
 		const changed = await p.grants.change(id, (stored) => {
 			const now = records.grantOf(stored);
 			// Written only over the state judged, so a renewal or revocation since is left alone.
@@ -51,8 +56,8 @@ export function followerWith(p: FollowParts): RevocationFollower {
 				};
 			}
 			if (judged !== "ended") return undefined;
-			const ended: Grant = { ...withoutCredentials(now), status: "revoked", reason: "backstop" };
-			return { value: records.stored(ended) };
+			const ended = p.revocation()(now, "backstop", at);
+			return { value: records.stored(ended.grant), lifetimeMs: ended.lifetimeMs };
 		});
 		const was = records.grantOf(changed?.before);
 		const now = records.grantOf(changed?.after);
@@ -89,6 +94,8 @@ export async function followerOver(c: BuildContext<Settings>) {
 		subjects: await c.get(subjectGrants),
 		records: await recordsOver(c),
 		judge: () => parts().judge,
+		revocation: () => parts().revocation,
+		clock: c.clock,
 		audit: await c.get(audit),
 	});
 }

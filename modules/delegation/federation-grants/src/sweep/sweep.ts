@@ -8,6 +8,7 @@ import {
 	secretFrom,
 	withoutCredentials,
 } from "../grant/grant.ts";
+import type { Revocation, Unlisting } from "../retention/retention.ts";
 import type { Settings } from "../section.ts";
 import { type GrantStore, grantStore } from "../store.ts";
 
@@ -15,6 +16,8 @@ export interface SweepParts {
 	readonly grants: GrantStore;
 	readonly records: Records;
 	readonly judge: Judge;
+	readonly revocation: Revocation;
+	readonly unlisted: Unlisting;
 	readonly audit: Audit;
 	readonly clock: Clock;
 	readonly random: Random;
@@ -46,22 +49,19 @@ export function sweepWith(p: SweepParts) {
 	 * judgement to the subject and the authorization it was made on. Answers whether it wrote.
 	 */
 	const revoke = async (id: string, judged: Grant) => {
+		const at = p.clock.now();
 		const changed = await grants.change(id, (stored) => {
 			const now = records.grantOf(stored);
 			if (!now?.sealed || now.status === "revoked") return undefined;
 			if (now.subject !== judged.subject || now.authorizedAt !== judged.authorizedAt)
 				return undefined;
-			return {
-				value: records.stored({
-					...withoutCredentials(now),
-					status: "revoked",
-					reason: "backstop",
-				}),
-			};
+			const revoked = p.revocation(now, "backstop", at);
+			return { value: records.stored(revoked.grant), lifetimeMs: revoked.lifetimeMs };
 		});
 		const after = records.grantOf(changed?.after);
 		if (records.grantOf(changed?.before)?.status === "revoked" || after?.status !== "revoked")
 			return false;
+		await p.unlisted(after);
 		audited.record("federation.grant.revoked", {
 			subject: after.subject,
 			attributes: { client: after.client, connection: after.connection, outcome: "backstop" },
@@ -111,7 +111,7 @@ export const sweepTakes = [grantStore] as const;
 /** Starts the sweep on this host every `sweep-interval`, over the contracts the assembly gives. */
 export async function sweepIn(
 	c: BuildContext<Settings>,
-	parts: { readonly records: Records; readonly judge: Judge },
+	parts: Pick<SweepParts, "records" | "judge" | "revocation" | "unlisted">,
 	audit: Audit,
 ) {
 	const sweep = sweepWith({
