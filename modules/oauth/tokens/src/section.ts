@@ -29,6 +29,6 @@ export const section = z.strictObject({
 		.optional()
 		.describe("Stated where no module checks subject revocation on access tokens."),
 	"added-claims": addedClaimsLimits.describe(
-		"The limits of the claims a grant adds to an access token, as added-claims reads them, each raised only: one value holds both issuing and reading back, so lowering a raised one leaves the tokens issued while it was raised unreadable until they expire.",
+		"The limits of the claims a grant adds to an access token, as added-claims reads them, each raised only: one value holds both issuing and reading back, so lowering a raised one leaves the tokens issued while it was raised unreadable until they expire. Raise a value on every instance before any issues under it: an instance on a lower one, 0.19 included, refuses those tokens until they expire.",
 	),
 });
