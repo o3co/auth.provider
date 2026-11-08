@@ -49,9 +49,6 @@ export interface TransactionListings {
 
 export const transactionListings = contract<TransactionListings>("mfa-flows.transaction-listings");
 
-/** The live transactions one holder keeps; one more pushes out the one ending first. A constant, not a setting. */
-export const transactionsPerHolder = 5;
-
 /** A transaction counts only while listed, so a listing that loses or misreads a member refuses a live one. */
 export const transactionListingsNeeds = {
 	neverEvicted: true,

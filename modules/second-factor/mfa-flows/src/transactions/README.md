@@ -33,6 +33,7 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 - Taking marks the transaction; a marked one is kept until its lifetime and read as gone.
 - A start whose identifier is already held is unavailable.
 - A start lists the transaction under its holder (the session it is tied to, or the held login's subject) by a digest of its identifier, after keeping it; a listing that cannot answer makes the start unavailable.
+- A transaction counts only while its holder's listing still holds it, read once each time it is used (`503` when the listing cannot tell). A holder keeps up to its listing's cap, the store wiring's: one more pushes out the one ending first, so one device's held login can push out another's. A taken one, or one out of attempts, leaves the listing; a removal that fails is logged and passed.
 - `find` answers a transaction only while its holder's listing holds it and an attempt is left; taking it takes it off the listing, logging `mfa-flows.listing_failed` when that fails. Every caller takes it once its last attempt is judged.
 
 ## Depends on

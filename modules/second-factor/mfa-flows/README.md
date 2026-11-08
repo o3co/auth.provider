@@ -18,7 +18,7 @@
 - Operator section: `transaction-lifetime` (1m–30m, default `10m`), `attempts-per-transaction` (2–10, default 5), `requests` (POSTs per source in each window, over every route, 1–100000, default 60), `window` (1s–1d, default `5m`).
 - `lockout` in the section holds the lockout numbers (by default `threshold` 5, `backoff` `15m`, `max-backoff` `1d`, `budget` 10, `budget-window` `7d`, `hard-limit` 100, `memory` `1d`): `threshold`, `budget` and `hard-limit` at most 100, the most consecutive failures NIST SP 800-63B rev 4 §3.2.2 allows, and `memory` at least `1h`; `rate-limit` judges their shape, refusing boot when it does not fit.
 - Store interface for transactions by their unguessable identifier, never kept in clear: save for a lifetime, read, change from what it holds (the lifetime stays). Contents are not shown to it. Its needs: never evicted, survives a crash, never back after a failover.
-- Store interface for each holder's live transactions (a session's handle, or a held login's subject), each by a digest of its identifier for its lifetime: add (answering those pushed out past 5, a constant), members, remove. Its needs: never evicted, survives a crash and a failover, confirmed reads.
+- Store interface for each holder's live transactions (a session's handle, or a held login's subject), each by a digest of its identifier for its lifetime: add (answering those pushed out past its cap, the wiring's), members, remove. Its needs: never evicted, survives a crash and a failover, confirmed reads.
 - Extension point `enrollmentFlow` (exactly one, boot refused otherwise): the handlers of `POST enrollment` and `POST enrollment/complete`, and the answer to a challenge in an enrollment's transaction. `mfa-enrollment` contributes it, coming wherever this package is composed.
 - Contract `flowParts`, for the module binding factors: the transactions, the resume of a held login, recording through this package's declaration, the common answers, the request helpers, and the lockout's name and policy (`seams`' card).
 - `./testing`: test configuration builders and the section's keys (`flowKeys`), and the store interfaces' contract tests for every implementation (see `transactions`' card).
@@ -32,7 +32,7 @@
 - `GET transaction` naming none answers the browser's own transaction, whatever its purpose, by its cookie alone, with its identifier: the page a navigation lands on reads it so. No other route takes a transaction from the cookie alone.
 - A challenge sent is held sealed by `mfa`, and the next attempt takes it once; asking again voids it.
 - An attempt is used before the proof is judged, and success takes the transaction exactly once. A proof that cannot be judged (unavailable) is `503` and gives its attempt back. When `rate-limit` cannot settle a success once it is taken, the transaction stays spent and the answer is `503`. Lockout counts only kinds where guessing works; while locked out, even a correct proof gets `429`.
-- A transaction counts only while its holder's listing still holds it, read once each time it is used (`503` when the listing cannot tell). A holder keeps 5 at most: one more pushes out the one ending first, so a sixth device's held login can push out the first's. A taken one, or one out of attempts, leaves the listing; a removal that fails is logged and passed.
+- A transaction counts only while its holder's listing holds it, up to the listing's cap (`transactions`' card).
 - A step-up raises only the session that started it, under a new cookie.
 
 ## Data
