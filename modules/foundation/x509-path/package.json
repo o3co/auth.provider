@@ -1,0 +1,18 @@
+{
+	"name": "@mod/x509-path",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "foundation",
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts"
+	},
+	"dependencies": {
+		"asn1js": "4.0.0",
+		"pkijs": "4.0.1"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5"
+	}
+}
