@@ -106,6 +106,11 @@ export const coverage: Coverage = {
 	],
 	loosening: [
 		{
+			key: "redis.accept-plaintext",
+			weakens:
+				"`true`: `redis://` off this host is taken in production too, the store's traffic and the URL's password readable and changeable on the way; warned at every boot",
+		},
+		{
 			key: "mail-smtp.security",
 			weakens:
 				"`none`: no TLS, so the relay's authentication and the mail go in the clear, to a loopback relay only",
