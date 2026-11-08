@@ -1,6 +1,6 @@
+import { crlSays, distributionPointsOf, type Judged, verifyCrl } from "@mod/x509-path";
 import type * as pkijs from "pkijs";
 import type { PathPolicy, RevocationPolicy, Sources } from "../contract.ts";
-import { crlUrlsOf, type Judged, judgeCrl } from "./crl.ts";
 import type { Alone, Expiring } from "./kept.ts";
 import {
 	type Failed,
@@ -13,6 +13,25 @@ import {
 	type Said,
 	worse,
 } from "./outcome.ts";
+
+/** What the CRL says of `cert`, verified with its issuer's key and then judged, as of `now`. */
+async function judgeCrl(
+	der: Uint8Array,
+	cert: pkijs.Certificate,
+	issuer: pkijs.Certificate,
+	now: number,
+	skewMs: number,
+	taken: Parameters<typeof verifyCrl>[4],
+): Promise<Judged> {
+	const verified = await verifyCrl(der, issuer, now, skewMs, taken);
+	return verified.kind === "unusable" ? verified : crlSays(verified.crl, cert, issuer, now);
+}
+
+/** Where a certificate's CRL is: its usable points' URLs; none where it names none, or they are unreadable. */
+const crlUrlsOf = (cert: pkijs.Certificate) => {
+	const points = distributionPointsOf(cert);
+	return points.kind === "points" ? points.urls : [];
+};
 
 const saidOf = (judged: Exclude<Judged, { kind: "unusable" }>): Said =>
 	judged.kind === "revoked" ? { kind: "revoked", held: judged.held } : good;

@@ -8,7 +8,7 @@
 - Reading the certificate off a trusted proxy's header: `client-certificate`.
 - Authenticating clients by certificate.
 - Stamping and checking a token's binding: `tokens`.
-- Path validation and revocation rules: `pki`.
+- Path validation and revocation rules: `pki`, over `x509-path`.
 
 ## Offers
 - Composition definition only. The binding kind: `cnf` member `x5t#S256`, named `mtls` for operators, token type `Bearer`.
@@ -36,4 +36,4 @@
 - Revocation caches in the process, held by `pki`'s internal module `revocation`; nothing is stored.
 
 ## Depends on
-- `kernel`, `client-certificate`, `issuer`, `sender-binding`, `outbound`, `host-entries` (the hosts list read as an operator writes hosts)
+- `kernel`, `client-certificate`, `issuer`, `sender-binding`, `outbound`, `host-entries` (the hosts list read as an operator writes hosts), `x509-path` (inside `pki`)

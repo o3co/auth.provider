@@ -1,7 +1,7 @@
+import { crlOf, ecKeys, issue, ocspOf, rsaKeys } from "@mod/x509-path/testing";
 import { expect, it } from "vitest";
 import type { Fetched, RevocationPolicy } from "../contract.ts";
 import { isCertificate, pkiOver, signatureAlgorithms } from "../pki.ts";
-import { crlOf, ecKeys, issue, ocspOf, rsaKeys } from "./authority.ts";
 
 const revocation = (served: Record<string, Uint8Array | "down">) => ({
 	policy: {

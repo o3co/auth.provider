@@ -16,9 +16,9 @@ import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { type SignedOutbound, signedOutbound } from "@mod/outbound";
 import { type Scene, senderBinding, senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
+import { crlOf, type Issued, issue, pemOf, rsaKeys } from "@mod/x509-path/testing";
 import { describe, expect, it } from "vitest";
 import mtls from "../src/module.ts";
-import { crlOf, type Issued, issue, pemOf, rsaKeys } from "../src/pki/test/authority.ts";
 
 const runtime = quietRuntime();
 const thumbprint = (der: Uint8Array) => createHash("sha256").update(der).digest("base64url");

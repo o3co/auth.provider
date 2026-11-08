@@ -1,4 +1,4 @@
-import type { SignatureAlgorithm } from "./signatures/signatures.ts";
+import type { SignatureAlgorithm } from "@mod/x509-path";
 
 /** What a client certificate is held to. */
 export interface PathPolicy {
