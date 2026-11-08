@@ -299,6 +299,11 @@ export const coverage: Coverage = {
 				"past the default five minutes, up to 15: a logout token is taken that long, and one without `sid`, replayed where the client keeps no `jti`, ends the subject's later sessions there",
 		},
 		{
+			key: "mfa-totp.period",
+			weakens:
+				"`60s`: a code is taken for up to three steps of a minute (with `drift-steps` 1), twice the default's window, so a code phished or read over a shoulder works for an attacker that much longer; it applies to factors enrolled under it",
+		},
+		{
 			key: "client-assertion.max-lifetime",
 			weakens: "past the default hour, up to a day: a client assertion is taken that long",
 		},
