@@ -5,10 +5,10 @@ import {
 	type transactionListingsNeeds,
 	transactionStore,
 	type transactionStoreNeeds,
-	transactionsPerHolder,
 } from "@mod/mfa-flows";
 import { keyedSetsIn, secretRecordsIn } from "@mod/records";
 import { type Guarantee, type Space, spaces, store } from "@mod/store";
+import { section } from "./section.ts";
 
 /** Each need mfa-flows states, as what meets it: a guarantee its space declares, or records under a secret. */
 const { namesFromSecret: recordsFor, ...guaranteeFor } = {
@@ -33,22 +33,30 @@ const listings: Space = {
 
 // Safe on many instances: a flow's expiry is set by the writing instance's clock, kept in step with the
 // others' by the operator (deployment-guarantees, Several instances).
-export default defineModule({ name: "mfa-flows-store", replicaSafe: true, takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => transactions),
-	m.contribute(spaces).by(() => listings),
-	m.provide(transactionStore).by(async (c) => {
-		const place = { store: await c.get(store), space: transactions, log: c.log, random: c.random };
-		const records = recordsFor<StoredTransaction>(place);
-		return { save: records.create, read: records.read, update: records.change };
-	}),
-	m.provide(transactionListings).by(async (c) =>
-		keyedSetsIn({
-			store: await c.get(store),
-			space: listings,
-			log: c.log,
-			random: c.random,
-			cap: transactionsPerHolder,
-			clock: c.clock,
+export default defineModule(
+	{ name: "mfa-flows-store", replicaSafe: true, section, takes: [store] },
+	(m) => [
+		m.contribute(spaces).by(() => transactions),
+		m.contribute(spaces).by(() => listings),
+		m.provide(transactionStore).by(async (c) => {
+			const place = {
+				store: await c.get(store),
+				space: transactions,
+				log: c.log,
+				random: c.random,
+			};
+			const records = recordsFor<StoredTransaction>(place);
+			return { save: records.create, read: records.read, update: records.change };
 		}),
-	),
-]);
+		m.provide(transactionListings).by(async (c) =>
+			keyedSetsIn({
+				store: await c.get(store),
+				space: listings,
+				log: c.log,
+				random: c.random,
+				cap: c.section["transactions-per-holder"],
+				clock: c.clock,
+			}),
+		),
+	],
+);
