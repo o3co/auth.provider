@@ -269,7 +269,8 @@ describe.each([
 	it("is on the pinned pnpm, with a command named node linked at its .bin", async () => {
 		const pinned = JSON.parse(readFileSync(join(app, "package.json"), "utf8")).packageManager;
 		const { stdout } = await ran(app, "pnpm", ["--version"]);
-		expect(`pnpm@${stdout.trim()}`).toBe(pinned);
+		// The pin names the version, then the sha512 corepack checks it by.
+		expect(`pnpm@${stdout.trim()}`).toBe(pinned.split("+")[0]);
 		expect(existsSync(join(app, "node_modules", ".bin", "node"))).toBe(true);
 	});
 
