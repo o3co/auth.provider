@@ -172,5 +172,17 @@ export function mailContract(name: string, harness: MailHarness): void {
 			);
 			await expect(harness.boot([bare])).rejects.toSatisfy(BootRefused.is);
 		});
+
+		it("refuses to boot when a template's purpose is undeclared", async () => {
+			const stray = defineModule(
+				{ name: "mail-contract-stray", replicaSafe: true, takes: [] },
+				(m) => [
+					m
+						.contribute(mailTemplates)
+						.by(() => plainText("contract.stray", { subject: "Stray", text: "x\n" })),
+				],
+			);
+			await expect(harness.boot([contractTemplates, stray])).rejects.toSatisfy(BootRefused.is);
+		});
 	});
 }

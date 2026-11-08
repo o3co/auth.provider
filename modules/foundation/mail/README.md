@@ -3,6 +3,7 @@
 ## Responsibilities
 - Owns the contract for sending mail: the sending side gives a purpose, one address, values, and optionally a locale and an expiry.
 - Collects the purposes sending sides declare and the templates (wording per purpose); refuses boot when a declared purpose has no template.
+- Refuses boot when a template's purpose is undeclared, naming it: its owner is not composed, or no longer sends it.
 - Prepares each message for every sender: copies and checks it, renders it, checks the rendered result.
 - Holds a plain-text template part and the logging-only sender.
 
@@ -26,6 +27,7 @@
 - Values that are not a plain object of strings, a locale that is not a string, and an undeclared purpose are TypeErrors.
 - A template whose subject is not one line, or whose text holds control characters other than line feed and tab, is a TypeError.
 - A message whose expiry has come is unavailable and is not sent.
+- Every template is for a declared purpose, and every declared purpose has one; otherwise boot is refused at `mail.templates`, naming the purpose.
 - Failures are unavailable or limited, never with the remote side's words.
 - The plain-text part refuses a missing value and a value that breaks a line, and never reads a placeholder inside a value.
 - The logging-only sender refuses boot unless `accept-unsent` is set, which every start warns of (`mail.unsent_accepted`); it is not safe on multiple instances, and logs no address and no value.
