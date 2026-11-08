@@ -2,9 +2,8 @@ import { createHash } from "node:crypto";
 import { type BuildContext, type Clock, type Random, Unavailable } from "@mod/kernel";
 import type { Reauths } from "./contract.ts";
 import { fromStored, toStored } from "./record.ts";
+import type { Settings } from "./section.ts";
 import { type ReauthStore, reauthStore } from "./store.ts";
-
-const lifetimeMs = 600_000;
 
 const digest = (params: ReadonlyMap<string, string>) =>
 	createHash("sha256").update(canonical(params)).digest("base64url");
@@ -24,9 +23,11 @@ export interface ReauthsParts {
 	readonly store: ReauthStore;
 	readonly clock: Clock;
 	readonly random: Random;
+	/** How long a record lives (the section's `record-lifetime`). */
+	readonly lifetimeMs: number;
 }
 
-export function reauthsWith({ store, clock, random }: ReauthsParts): Reauths {
+export function reauthsWith({ store, clock, random, lifetimeMs }: ReauthsParts): Reauths {
 	const newName = () => Buffer.from(random.bytes(32)).toString("base64url");
 	return {
 		async remember(params, at, stepUp) {
@@ -71,5 +72,10 @@ export function reauthsWith({ store, clock, random }: ReauthsParts): Reauths {
 }
 
 /** The records over the store the assembly gives. */
-export const reauthsOver = async (c: BuildContext<unknown>) =>
-	reauthsWith({ store: await c.get(reauthStore), clock: c.clock, random: c.random });
+export const reauthsOver = async (c: BuildContext<Settings>) =>
+	reauthsWith({
+		store: await c.get(reauthStore),
+		clock: c.clock,
+		random: c.random,
+		lifetimeMs: c.section["record-lifetime"],
+	});
