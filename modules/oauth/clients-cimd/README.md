@@ -32,7 +32,7 @@
 - A failed fetch or a refused document is no client (not unavailable). Other fields (keys, logo) are not read.
 - A document whose record `clients`' `checkRecord` refuses (a redirect URI `redirect-uris` refuses, say) is refused before it is kept, logged with where the record fails (`record at sections.authorize.redirect-uris.0`), never a value; a check that throws is a failed fetch.
 - A refused document, destination or outbound failure is remembered for `refused-lifetime`; running out of time or of `outbound`'s places is not.
-- Fetches have no limit per time or per host beyond `max-concurrent`. Operators keep outside hosts from blocking them by narrowing the document hosts in `outbound`'s `allow`.
+- Fetches, and the name lookups before them, have no limit per time or per host beyond `max-concurrent` and `outbound`'s share for outside names. `allow` is what keeps one host from filling them: one can only where `allow-any-host` is set or `allow` names a domain outsiders can add names under.
 - Without that, a host that does not answer can fill the `max-concurrent` places (8 by default), and an id not kept is none meanwhile.
 - A refused document's log line carries the id without control characters, cut to 200 characters, and the reason.
 - A refused host's log line carries only the id's host and the reason (`denied` or `not allowed`).
