@@ -207,6 +207,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `jwt-bearer.max-assertion-lifetime` | `@mod/jwt-bearer` | `"1h"` | past the default hour, up to a day: a jwt-bearer assertion is taken with its `exp` that far ahead, and its `exp` no further from its `iat` |
 | `kernel.deployment` | `@mod/kernel` |  | `single`: modules unsafe on several instances (the memory store, mail that only logs) are taken |
 | `kernel.environment` | `@mod/kernel` | `"production"` | `development`: plain-http origins and pages are taken |
+| `keys.jwks-cache` | `@mod/keys` | `"5m"` | past the default five minutes, up to a day: a verifier may keep taking a key removed from the published set that long |
 | `login-passkey.attempts` | `@mod/login-passkey` | `20` | raised, up to 100: more requests from one source in each window |
 | `login-passkey.password-exempt-group` | `@mod/login-passkey` |  | its members keep password logins where passkey holders are refused them |
 | `login-password.account-attempts` | `@mod/login-password` | `10` | raised, up to 100: more failed guesses at one identifier before each next one waits |
