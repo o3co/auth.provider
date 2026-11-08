@@ -8,7 +8,7 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
-import { type Message, mail } from "@mod/mail";
+import { type Message, mail, mailPurposes, mailTemplates } from "@mod/mail";
 import {
 	type BindingProof,
 	type BindingProofs,
@@ -18,6 +18,7 @@ import {
 import { subjectAttributes } from "@mod/subject-attributes";
 import { type Users, users } from "@mod/users";
 import { beforeEach, expect, it } from "vitest";
+import { proofName } from "../src/contract.ts";
 import proofModule from "../src/module.ts";
 
 let now = 1_800_000_000_000;
@@ -45,8 +46,10 @@ beforeEach(() => {
 });
 
 const seen = contract<BindingProof>("seen");
+/** The purposes declared to mail and the templates contributed for them, by purpose. */
+const told = contract<{ purposes: readonly string[]; templates: readonly string[] }>("told");
 const outside = defineModule(
-	{ name: "outside", replicaSafe: false, takes: [bindingProofs] },
+	{ name: "outside", replicaSafe: false, takes: [bindingProofs, mailPurposes, mailTemplates] },
 	(m) => [
 		m.provide(mail).by(() => ({
 			send: async (message) => {
@@ -77,6 +80,10 @@ const outside = defineModule(
 			},
 		})),
 		m.provide(seen).by(async (c) => (await c.collect(bindingProofs))[0] as BindingProof),
+		m.provide(told).by(async (c) => ({
+			purposes: (await c.collect(mailPurposes)).map((p) => p.purpose),
+			templates: (await c.collect(mailTemplates)).map((t) => t.purpose),
+		})),
 	],
 );
 
@@ -113,7 +120,10 @@ it("proves the account's address before a first binding, by a long code good for
 	expect([await proof.available("ann"), await proof.available("bob")]).toEqual([true, false]);
 	const asked = await proof.send("ann", now + 3_600_000);
 	if (asked.kind !== "sent") throw new Error("not sent");
-	expect(last()).toMatchObject({ purpose: "mfa-email.proof", values: { minutes: "10" } });
+	expect(last()).toMatchObject({
+		purpose: "mfa-email-proof.account-email",
+		values: { minutes: "10" },
+	});
 	const code = String(last().values.code);
 	expect(await proof.check("ann", asked.kept, "0".repeat(16))).toBe(false);
 	expect(verified).toEqual([]);
@@ -128,6 +138,12 @@ it("proves the account's address before a first binding, by a long code good for
 	expect(last().values.minutes).toBe("1");
 	answer = "limited";
 	expect(await proof.send("ann", now + 3_600_000)).toEqual({ kind: "limited" });
+});
+
+it("declares the purpose it mails under, and words none: its wording module does", async () => {
+	const app = await assemble(composition);
+	expect(app.get(told)).toEqual({ purposes: ["mfa-email-proof.account-email"], templates: [] });
+	expect(app.get(seen).name).toBe(proofName);
 });
 
 it("passes a right code though users keeps no more verified contacts, logging that it kept none and never the address", async () => {

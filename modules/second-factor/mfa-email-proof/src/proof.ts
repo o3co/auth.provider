@@ -1,8 +1,10 @@
+import { longCode, type MailedCodes, readLongCode } from "@mod/account-mail-code";
 import { type Log, Unavailable } from "@mod/kernel";
 import type { BindingProof } from "@mod/mfa-binding-proof";
-import { longCode, type MailedCodes, purposes, readLongCode } from "@mod/mfa-email";
 import type { Users } from "@mod/users";
 import { z } from "zod";
+import { proofName } from "./name.ts";
+import { purposes } from "./purposes.ts";
 
 /** How long the proof before a first binding stays good, at most. */
 const proofMs = 600_000;
@@ -28,7 +30,7 @@ const read = (text: string): z.output<typeof keptShape> => {
 };
 
 export interface ProofParts {
-	/** `mfa-email`'s rules for the address, mailing the code and checking it typed back. */
+	/** `account-mail-code`'s rules for the address, mailing the code and checking it typed back. */
 	readonly mailed: MailedCodes;
 	readonly users: Pick<Users, "verifiedContact">;
 	readonly log: Pick<Log, "warn">;
@@ -40,14 +42,14 @@ export interface ProofParts {
 export function accountEmailProof(p: ProofParts): BindingProof {
 	const { mailed } = p;
 	return {
-		name: "account-email",
+		name: proofName,
 		available: async (subject, from) => (await mailed.addressNow(subject, from)) !== undefined,
 		send: async (subject, latest, from) => {
 			const address = await mailed.addressNow(subject, from);
 			if (!address) return { kind: "refused" };
 			const code = longCode(p.random);
 			const until = Math.min(p.now() + proofMs, latest);
-			const sent = await mailed.send(purposes.proof, address, code, until);
+			const sent = await mailed.send(purposes.accountEmail, address, code, until);
 			if (sent.kind !== "sent") return sent;
 			return { ...sent, kept: JSON.stringify({ address, code, until }) };
 		},

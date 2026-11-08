@@ -3057,15 +3057,18 @@ importers:
 
   modules/second-factor/mfa-email-proof:
     dependencies:
+      '@mod/account-mail-code':
+        specifier: workspace:*
+        version: link:../account-mail-code
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/mail':
+        specifier: workspace:*
+        version: link:../../foundation/mail
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
-      '@mod/mfa-email':
-        specifier: workspace:*
-        version: link:../mfa-email
       '@mod/users':
         specifier: workspace:*
         version: link:../../identity/users
@@ -3073,9 +3076,6 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@mod/mail':
-        specifier: workspace:*
-        version: link:../../foundation/mail
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes
