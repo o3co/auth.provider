@@ -19,7 +19,7 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 - A token is due within `refresh-before` of its end, once half its life is spent; at once with less than a second left, or no time it was obtained.
 - A token with less than a second left is unavailable, never handed.
 - The lock is taken per session and IdP for `lock-lifetime`, under a mark of 128 random bits; a request waits for it up to that long between its asks, the time each ask takes to answer coming on top, then reads the entry again.
-- While the refresh runs, the lock is kept for its lifetime again every half of it, only under that mark; once lost, nothing the refresh answered is written, and a store that cannot answer stops the keeping. It is kept no longer, then let go (ending a millisecond later) only while it holds that mark.
+- While the refresh runs, the lock is kept for its lifetime again every half of it, only under that mark; once lost, nothing the refresh answered is written, and a store that cannot answer stops the keeping. It is kept no longer, then let go (ending a millisecond later, `records`' conditional removal) only while it holds that mark.
 - Writes land only over the version read; a new version is 128 random bits.
 - What the upstream says is read once: a part that cannot be read refuses the answer, never counts as absent.
 - An entry that does not open is removed.
