@@ -35,7 +35,7 @@
 - Each key is read under one algorithm (`external-jwt`): a key naming no `alg` where two are taken for its kind (RS256 and PS256), or naming one not taken, is read under none. Written for a registered client, it is warned of at every start (below); in a key set at a `jwks-uri`, or for a client whose metadata is fetched when it asks (`clients-cimd`), it is found only at the request, as no key.
 - Each written key of a registered client read under none is logged at every start as a `client-assertion.key_unread` warning, with the client and the key's place (`keys.<n>`), never its value. Deprecated: a later release refuses boot for such a key. Give it an `alg` among `algorithms`, or take only one for its kind.
 - The longest lifetime is `max-lifetime`; the clock allowance is `clock-skew`.
-- `jti` is a well-formed string of 1–256 characters.
+- `jti` is a well-formed string of 1–256 characters, a fixed bound as it becomes a store key (clients send UUID-like values).
 - The `jti` is spent last, after every other check.
 - A spent `jti` is kept per client, past the assertion's end by five minutes, the widest `clock-skew` a section takes, whatever is set, and a minute for the store's clock: a `clock-skew` widened later on the same store never takes it again.
 - A spent `jti` is refused. One the store cannot answer for is unavailable.
