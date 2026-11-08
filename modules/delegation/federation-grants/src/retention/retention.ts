@@ -1,6 +1,8 @@
-import type { Log } from "@mod/kernel";
+import { type BuildContext, contract, type Log } from "@mod/kernel";
 import { type Grant, type Judge, withoutCredentials } from "../grant/grant.ts";
-import type { SubjectGrants } from "../store.ts";
+import { shared } from "../grant/shared.ts";
+import type { Settings } from "../section.ts";
+import { type SubjectGrants, subjectGrants } from "../store.ts";
 
 /** Takes a grant off its subject's listing; a failed write is logged and passed, as a listing's is. */
 export function unlistingWith(subjects: SubjectGrants, log: Log) {
@@ -30,3 +32,21 @@ export function revocationWith(judge: Judge, retentionMs: number) {
 }
 
 export type Revocation = ReturnType<typeof revocationWith>;
+
+/** The revoked rewrite and the unlisting, built once over the shared parts. */
+export const retention = contract<{
+	readonly revocation: Revocation;
+	readonly unlisted: Unlisting;
+}>("federation-grants.retention");
+
+/** What `retentionOver` takes besides the shared parts. */
+export const retentionTakes = [subjectGrants] as const;
+
+/** The revocation over the shared judge and the section's `retention`, and the unlisting over the listing. */
+export async function retentionOver(c: BuildContext<Settings>) {
+	const { judge } = await c.get(shared);
+	return {
+		revocation: revocationWith(judge, c.section.retention * 1000),
+		unlisted: unlistingWith(await c.get(subjectGrants), c.log),
+	};
+}

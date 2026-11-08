@@ -4,7 +4,7 @@ import type { RevocationFollower } from "@mod/subject-revocation";
 import events from "../audit-events.ts";
 import type { Grant, Judge, Records } from "../grant/grant.ts";
 import { recordsOver, shared } from "../grant/shared.ts";
-import type { Revocation } from "../retention/retention.ts";
+import { type Revocation, retention } from "../retention/retention.ts";
 import type { Settings } from "../section.ts";
 import { type GrantStore, grantStore, type SubjectGrants, subjectGrants } from "../store.ts";
 
@@ -89,12 +89,13 @@ export const followerTakes = [grantStore, subjectGrants, audit] as const;
 export async function followerOver(c: BuildContext<Settings>) {
 	// The shared parts read the revocations this follower is collected into: taken once built.
 	const parts = c.late(shared);
+	const kept = c.late(retention);
 	return followerWith({
 		grants: await c.get(grantStore),
 		subjects: await c.get(subjectGrants),
 		records: await recordsOver(c),
 		judge: () => parts().judge,
-		revocation: () => parts().revocation,
+		revocation: () => kept().revocation,
 		clock: c.clock,
 		audit: await c.get(audit),
 	});

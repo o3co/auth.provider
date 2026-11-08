@@ -3,12 +3,6 @@ import { type BuildContext, contract } from "@mod/kernel";
 import { seal } from "@mod/seal";
 import { revocations } from "@mod/subject-revocation";
 import { upstreams } from "@mod/upstreams";
-import {
-	type Revocation,
-	revocationWith,
-	type Unlisting,
-	unlistingWith,
-} from "../retention/retention.ts";
 import { name, type Settings } from "../section.ts";
 import { subjectGrants } from "../store.ts";
 import {
@@ -31,8 +25,6 @@ export const shared = contract<{
 	readonly records: Records;
 	readonly judge: Judge;
 	readonly listed: Listing;
-	readonly unlisted: Unlisting;
-	readonly revocation: Revocation;
 }>("federation-grants.shared");
 
 /** Builds the shared parts, refusing connections the deployment cannot serve. */
@@ -52,17 +44,13 @@ export async function sharedOver(c: BuildContext<Settings>) {
 			reason: "an established grant answers only to the delegations boundary of a revocation",
 		});
 	}
-	const judge = judgeWith(await c.get(revocations), {
-		keep: c.section["keep-on-subject-revocation"],
-		maxMs,
-	});
-	const subjects = await c.get(subjectGrants);
 	return {
 		origin: origin ?? "",
 		records: await recordsOver(c),
-		judge,
-		listed: listingWith(subjects, c.log),
-		unlisted: unlistingWith(subjects, c.log),
-		revocation: revocationWith(judge, c.section.retention * 1000),
+		judge: judgeWith(await c.get(revocations), {
+			keep: c.section["keep-on-subject-revocation"],
+			maxMs,
+		}),
+		listed: listingWith(await c.get(subjectGrants), c.log),
 	};
 }

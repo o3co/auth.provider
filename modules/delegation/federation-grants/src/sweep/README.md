@@ -24,4 +24,4 @@ Internal module of `federation-grants`: erasing the credentials of grants no req
 - How soon credentials go is not bounded: while passes keep running, those of an ended grant go; with the store answering and a pass done within `sweep-interval`, about that long after the end.
 
 ## Depends on
-- `kernel` (the build context, the clock, randomness, every), `audit`; the package's grant records, judge, store interfaces and audit events.
+- `kernel` (the build context, the clock, randomness, every), `audit`; the package's grant records, judge, store interfaces and audit events; `retention` (the revoked rewrite and the unlisting).
