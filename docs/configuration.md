@@ -320,6 +320,7 @@ From `@mod/keys`.
 | `keys.next.alg` | EdDSA \| ES256 \| RS256 |  | when `keys.next` is set |  |  | The algorithm the next key will sign with. |
 | `keys.next.public-key` | string |  | when `keys.next` is set |  |  | The next key's public half, as PEM; a private PEM is taken too. |
 | `keys.previous` | list of map | `[]` |  |  |  | Past signing keys that still verify tokens until each one's `expires-at`. |
+| `keys.jwks-cache` | string | `5m` |  |  |  | How long verifiers may cache the published key set (its `Cache-Control` max-age), from 1m to 1d: publish a `next` key at least this long before it signs. |
 
 ## login-gates
 

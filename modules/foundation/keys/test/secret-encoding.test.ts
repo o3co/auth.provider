@@ -6,7 +6,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { describe, expect, it } from "vitest";
 import { keys } from "../src/contract.ts";
 import keysModule from "../src/module.ts";
-import { section } from "../src/signing/section.ts";
+import { section } from "../src/section.ts";
 
 const runtime = quietRuntime();
 const signing = (secret: string, encoding?: string) => ({
