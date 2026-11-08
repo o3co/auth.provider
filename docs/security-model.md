@@ -311,7 +311,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - The replicas' own persistence.
   - Leaving the server's settings as they were at boot.
   - Setting `store.accept-volatile` only where losing what was used is accepted: the spaces needing durable or replicated storage boot on memory, and a restart forgets them. Every start that boots such spaces warns `store.volatile_accepted`, naming them.
-  - Reaching a Redis off the host by a `rediss` URL: with a `redis` one in `redis.url`, what the store keeps and the password the URL carries go in the clear. Boot does not refuse it, and warns `redis.plaintext` at every start where the host is not loopback by its name.
+  - Reaching a Redis off the host by a `rediss` URL: with a `redis` one in `redis.url`, what the store keeps and the password the URL carries go in the clear. Boot does not refuse it, and warns `redis.plaintext` at every start where the host is not loopback by its name. In production that is deprecated unless `redis.accept-plaintext` is set, and a later release refuses boot for it; set it only where the server offers no TLS.
   - Stating `redis.replication = none` only where there is no failover: a failover would lose the replicated spaces' writes, confirmed ones too, and every start warns `redis.replication_none`, naming those spaces.
 
 ## Audit
