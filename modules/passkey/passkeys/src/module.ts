@@ -4,7 +4,10 @@ import { ceremonies, freshHandle } from "@mod/webauthn";
 import { keptChallenges } from "./challenges/challenges.ts";
 import {
 	challengeStore,
+	type PasskeyHolders,
+	passkeyClearing,
 	passkeyHolders,
+	passkeyHolding,
 	passkeyReading,
 	passkeyStore,
 	passkeys,
@@ -23,6 +26,8 @@ const tokenOf = (c: Context) => () => Buffer.from(c.random.bytes(16)).toString("
 /** The passkey records, made once for the module's parts. */
 const kept = contract<KeptPasskeys>("passkeys.records");
 const passkeysOf = (c: Context) => c.get(kept);
+/** The holders, made once for each face of holding. */
+const made = contract<PasskeyHolders>("passkeys.holders-made");
 // A challenge lives as long as the relying party lets one be answered.
 const challengesOf = async (c: Context) =>
 	keptChallenges(await c.get(challengeStore), c.clock.now, (await c.get(ceremonies)).lifetimeMs);
@@ -93,10 +98,19 @@ export default defineModule(
 			const records = await passkeysOf(c);
 			return { writtenHolding: (subject) => records.writtenHolding(subject) };
 		}),
-		m.provide(passkeyHolders).by(async (c) => {
+		m.provide(made).by(async (c) => {
 			const held = await holdingOf(c);
 			if ("refused" in held) return c.refuse("passkeys", held.refused);
 			return held.holding.holders;
+		}),
+		m.provide(passkeyHolders).by((c) => c.get(made)),
+		m.provide(passkeyHolding).by(async (c) => {
+			const { held, witnessed } = await c.get(made);
+			return { held, witnessed };
+		}),
+		m.provide(passkeyClearing).by(async (c) => {
+			const { cleared, settle } = await c.get(made);
+			return { cleared, settle };
 		}),
 	],
 );
