@@ -1,5 +1,5 @@
 import { type BuildContext, Unavailable } from "@mod/kernel";
-import { isAddress } from "./address.ts";
+import { isAddress } from "@mod/mail-address";
 import { type Message, mailPurposes, mailTemplates } from "./contract.ts";
 import { bodyControls, controls } from "./lines.ts";
 
