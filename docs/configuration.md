@@ -607,6 +607,8 @@ From `@mod/rp-logout`.
 | `rp-logout.notify-within` | string | `1d` |  |  |  | How long an undelivered back-channel notice is tried again, from 1m to 7d. |
 | `rp-logout.sweep-interval` | string | `1m` |  |  |  | How often each host sweeps the kept notices, from 1s to 1h. |
 | `rp-logout.confirm-within` | string | `5m` |  |  |  | How long a logout that asks the person waits for them, from 1m to 15m: the request the logout carries to the confirmation, and the confirmation page. |
+| `rp-logout.logout-token-lifetime` | string | `5m` |  |  |  | How long a back-channel logout token lives, from 1m to 15m: each try makes its own, sent at once, so a notice tried again needs none longer. |
+| `rp-logout.hint-max-age` | string | `1d` |  |  |  | How long ago an `id_token_hint` may have been issued and still be taken, from 1m to 1d; an older one is refused, by GET or POST, as a logout another site may have started, so it never grows past a day. |
 | `rp-logout.error-page` | string |  |  |  |  | Where a browser's refused logout request is sent, with `error` and `error_description` in its query: an https URL (http only on a loopback host, with `kernel.environment = development`). Without it, every refusal is answered as JSON. |
 | `rp-logout.requests` | integer (1–100000) | `60` |  |  |  | Logout requests allowed per source in each window, a GET and a POST together, before any hint is checked. |
 | `rp-logout.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
