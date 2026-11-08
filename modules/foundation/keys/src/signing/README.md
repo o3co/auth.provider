@@ -9,7 +9,7 @@ Internal module of `keys`: the provider's own key ring, read at boot, signing an
 - Publishing the public keys (`jwks`). Reading an outside party's keys (`material`).
 
 ## Offers
-- `section` (the operator section), `readRing` (the section → the ring), `signer` (the ring → `keys`), and the ring's `expired`.
+- `sectionWith` (the operator section: the ring's keys, each `kid` unique, with the parts given beside them), `readRing` (the section → the ring), `signer` (the ring → `keys`), and the ring's `expired`.
 
 ## Invariants
 - The next key verifies and is published but never signs; a previous key verifies until its `expires-at`.

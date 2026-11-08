@@ -1,10 +1,23 @@
 import { createHash } from "node:crypto";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
+import { setting } from "@mod/kernel";
+import { z } from "zod";
 import { expired, type Ring } from "../signing/ring.ts";
 
 function etagMatches(header: string | undefined, etag: string): boolean {
 	return header?.split(",").some((tag) => tag.trim() === etag) ?? false;
 }
+
+/** The section's part on publishing the set, which the package composes beside the ring's keys. */
+export const jwksSettings = {
+	"jwks-cache": setting
+		.duration("s")
+		.pipe(z.number().int().min(60).max(86_400))
+		.prefault("5m")
+		.describe(
+			"How long verifiers may cache the published key set (its `Cache-Control` max-age), from 1m to 1d: publish a `next` key at least this long before it signs.",
+		),
+};
 
 /** The set, cached `cacheSeconds` by whoever reads it. */
 export function jwksResponse(

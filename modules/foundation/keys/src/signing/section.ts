@@ -1,4 +1,3 @@
-import { setting } from "@mod/kernel";
 import { z } from "zod";
 import { secretProblem } from "../secret/secret.ts";
 
@@ -69,35 +68,33 @@ const next = z.strictObject({
 		.describe("The next key's public half, as PEM; a private PEM is taken too."),
 });
 
-export const section = z
-	.strictObject({
-		signing: signing.describe("The key the provider signs with now."),
-		next: next
-			.optional()
-			.describe(
-				"The key that signs next: published and verifying now, never signing, so verifiers know it before it signs.",
-			),
-		previous: z
-			.array(previous)
-			.prefault([])
-			.describe("Past signing keys that still verify tokens until each one's `expires-at`."),
-		"jwks-cache": setting
-			.duration("s")
-			.pipe(z.number().int().min(60).max(86_400))
-			.prefault("5m")
-			.describe(
-				"How long verifiers may cache the published key set (its `Cache-Control` max-age), from 1m to 1d: publish a `next` key at least this long before it signs.",
-			),
-	})
-	.refine(
-		(s) => new Set([s.signing.kid, ...s.previous.map((p) => p.kid)]).size === 1 + s.previous.length,
-		{ message: "duplicate kid", path: ["previous"] },
-	)
-	.refine(
-		(s) =>
-			s.next === undefined ||
-			![s.signing.kid, ...s.previous.map((p) => p.kid)].includes(s.next.kid),
-		{ message: "duplicate kid", path: ["next"] },
-	);
+/** The ring's keys, the section's own part. */
+const ringKeys = {
+	signing: signing.describe("The key the provider signs with now."),
+	next: next
+		.optional()
+		.describe(
+			"The key that signs next: published and verifying now, never signing, so verifiers know it before it signs.",
+		),
+	previous: z
+		.array(previous)
+		.prefault([])
+		.describe("Past signing keys that still verify tokens until each one's `expires-at`."),
+};
 
-export type Section = z.output<typeof section>;
+const ring = z.strictObject(ringKeys);
+/** The ring's keys as read. */
+export type Section = z.output<typeof ring>;
+
+const kidsUnique = (s: Section) =>
+	new Set([s.signing.kid, ...s.previous.map((p) => p.kid)]).size === 1 + s.previous.length;
+const nextUnique = (s: Section) =>
+	s.next === undefined || ![s.signing.kid, ...s.previous.map((p) => p.kid)].includes(s.next.kid);
+
+/** The operator section: the ring's keys, each `kid` unique, with the parts `more` gives beside them. */
+export const sectionWith = <M extends z.ZodRawShape>(more: M) =>
+	z
+		.strictObject({ ...ringKeys, ...more })
+		// The output holds the ring's keys whatever `more` adds; zod cannot tell so over a shape not yet known.
+		.refine((s) => kidsUnique(s as Section), { message: "duplicate kid", path: ["previous"] })
+		.refine((s) => nextUnique(s as Section), { message: "duplicate kid", path: ["next"] });

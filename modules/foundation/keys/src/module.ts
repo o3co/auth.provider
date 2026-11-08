@@ -2,8 +2,8 @@ import { routes } from "@mod/http";
 import { contract, defineModule } from "@mod/kernel";
 import { accessTokenSigning, keys } from "./contract.ts";
 import { jwksResponse } from "./jwks/jwks.ts";
+import { section } from "./section.ts";
 import { type Ring, readRing } from "./signing/ring.ts";
-import { section } from "./signing/section.ts";
 import { accessSigner, signer } from "./signing/signer.ts";
 
 const ring = contract<Ring>("keys.ring");
