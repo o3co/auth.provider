@@ -72,7 +72,7 @@ it("takes the account's address in one form: NFC, its domain in ASCII and lower 
 	expect(await mailed.addressNow("amy")).toBe("Amélie@example.com");
 });
 
-it("gives no address for an account without one, one mail does not take, or a users that cannot tell", async () => {
+it("gives no address for an account without one, one mail-address does not take, or a users that cannot tell", async () => {
 	contacts.set("cal", "not an address");
 	contacts.set("dee", null);
 	for (const subject of ["bob", "cal", "dee"]) {

@@ -10,6 +10,7 @@
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
 		"@mod/mail": "workspace:*",
+		"@mod/mail-address": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",
 		"@mod/subject-attributes": "workspace:*",
 		"@mod/users": "workspace:*"

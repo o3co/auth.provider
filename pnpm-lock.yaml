@@ -2884,6 +2884,9 @@ importers:
       '@mod/mail':
         specifier: workspace:*
         version: link:../../foundation/mail
+      '@mod/mail-address':
+        specifier: workspace:*
+        version: link:../../foundation/mail-address
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
