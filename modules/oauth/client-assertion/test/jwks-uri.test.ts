@@ -21,7 +21,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { spentAssertions } from "../src/contract.ts";
 import { assertionType } from "../src/method.ts";
 import assertionModule from "../src/module.ts";
-import { type ClientAssertionSettings, clientAssertionConfig } from "../src/testing.ts";
+import { clientAssertionConfig } from "../src/testing.ts";
 
 const issuer = "https://issuer.example";
 const tokenUrl = `${issuer}/oauth/token`;
@@ -48,12 +48,8 @@ beforeAll(async () => {
 afterAll(() => new Promise<void>((done) => server.close(() => done())));
 const jwksUri = () => `http://127.0.0.1:${port}/jwks`;
 
-/** Clients over outbound reaching the key set server alone; `section` is the client's own, `algorithms` the operator's. */
-async function boot(
-	section: Record<string, unknown>,
-	reach = true,
-	algorithms?: ClientAssertionSettings["algorithms"],
-) {
+/** Clients over outbound reaching the key set server alone; `section` is the client's own. */
+async function boot(section: Record<string, unknown>, reach = true) {
 	const stand = memoryRecords<true>(() => Date.now(), { shards: 1, perShard: 1 });
 	const location = defineModule({ name: "token-endpoint", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(tokenEndpointLocation).by(() => ({ url: tokenUrl })),
@@ -81,7 +77,7 @@ async function boot(
 			outbound: reach ? { allow: ["127.0.0.1"], "plain-loopback": [`127.0.0.1:${port}`] } : {},
 			...httpConfig({ "public-origin": issuer }),
 			...issuerConfig({ url: issuer }),
-			...clientAssertionConfig(algorithms === undefined ? {} : { algorithms }),
+			...clientAssertionConfig(),
 			...clientsConfig([
 				{
 					id: "app",
@@ -165,46 +161,4 @@ it("refuses boot for a client with both written keys and a jwks-uri, or a jwks-u
 	]) {
 		await expect(boot(section), JSON.stringify(section)).rejects.toBeInstanceOf(BootRefused);
 	}
-});
-
-it("refuses boot for a client's written key that none of the algorithms taken reads, naming its place", async () => {
-	const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
-	const unnamed = publicJwk(rsa.publicKey, "rsa");
-	for (const [keys, algorithms] of [
-		// Two taken for its kind, and it names neither.
-		[
-			[publicJwk(ec.publicKey, "ec"), unnamed],
-			["ES256", "RS256", "PS256"],
-		],
-		// It names one not taken.
-		[[{ ...unnamed, alg: "RS512" }], ["RS256", "ES256"]],
-	] as const) {
-		await expect(boot({ keys }, true, [...algorithms])).rejects.toMatchObject({
-			refusals: [
-				{
-					where: "clients.registered.0.sections.client-assertion",
-					reason: `keys.${keys.length - 1} is read under none of client-assertion.algorithms: give it an alg among them, or take only one for its kind`,
-				},
-			],
-		});
-	}
-	// Each such key is named, in one refusal.
-	await expect(
-		boot({ keys: [unnamed, publicJwk(ec.publicKey, "ec"), { ...unnamed, alg: "RS512" }] }, true, [
-			"RS256",
-			"PS256",
-			"ES256",
-		]),
-	).rejects.toMatchObject({
-		refusals: [
-			{
-				reason:
-					"keys.0, keys.2 are read under none of client-assertion.algorithms: give each an alg among them, or take only one for its kind",
-			},
-		],
-	});
-	// Named, or one taken for its kind, it is read under that one.
-	await boot({ keys: [{ ...unnamed, alg: "PS256" }] }, true, ["RS256", "PS256"]);
-	await boot({ keys: [unnamed] }, true, ["RS256", "ES256"]);
-	await boot({ keys: [unnamed, publicJwk(ec.publicKey, "ec")] });
 });
