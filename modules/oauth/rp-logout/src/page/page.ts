@@ -16,8 +16,6 @@ export const returnUrl = (back: LogoutReturn): string | undefined => {
 	return url.href;
 };
 
-/** The frames get this long to load before the browser moves on. */
-const delayMs = 2000;
 const script =
 	"const b=document.body;setTimeout(()=>{location.href=b.dataset.target},Number(b.dataset.delay))";
 /** A Content-Security-Policy host source holds no IPv6 literal or `_`; a frame there could not load. */
@@ -27,7 +25,13 @@ const escaped = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCod
 /** The front-channel page, or none when no frame can load; `next` is where the browser goes after. */
 export function frontChannelPage(
 	frames: readonly Frame[],
-	at: { readonly issuer: string; readonly session: string; readonly next?: string | undefined },
+	at: {
+		readonly issuer: string;
+		readonly session: string;
+		readonly next?: string | undefined;
+		/** How long the frames get to load before the browser moves on (the package's `frame-wait`). */
+		readonly waitMs: number;
+	},
 ): { readonly html: string; readonly loads: Loads; readonly skipped: number } | undefined {
 	const loadable = frames
 		.map((frame) => ({ url: new URL(frame.uri), withSession: frame.withSession }))
@@ -41,7 +45,7 @@ export function frontChannelPage(
 		})
 		.join("");
 	const origins = [...new Set(loadable.map(({ url }) => url.origin))];
-	const page = pageOf(iframes, origins, at.next, delayMs);
+	const page = pageOf(iframes, origins, at.next, at.waitMs);
 	return { ...page, skipped: frames.length - loadable.length };
 }
 

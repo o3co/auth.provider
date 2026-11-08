@@ -108,6 +108,7 @@ function serve(
 		confirmUrl,
 		logoutUrl,
 		withinSeconds: options.within ?? 300,
+		frameWaitMs: 2000,
 		now: () => at,
 		log: logged.log,
 	});

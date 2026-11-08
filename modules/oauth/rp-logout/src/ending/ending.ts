@@ -32,6 +32,8 @@ export interface EndingParts {
 	readonly now: () => number;
 	/** A hint issued longer ago than this is refused, by GET or POST, as a logout another site may have started. */
 	readonly hintMaxAgeMs: number;
+	/** How long the front-channel page's frames get to load (the package's `frame-wait`). */
+	readonly frameWaitMs: number;
 	readonly log: Log;
 }
 
@@ -119,7 +121,12 @@ export function endingOver(p: EndingParts) {
 	): Promise<HttpResponse> => {
 		const { cookies } = closed;
 		const page = wantsPage(request)
-			? frontChannelPage(await closed.frames(), { issuer: p.issuer, session: sid, next })
+			? frontChannelPage(await closed.frames(), {
+					issuer: p.issuer,
+					session: sid,
+					next,
+					waitMs: p.frameWaitMs,
+				})
 			: undefined;
 		if (page) {
 			if (page.skipped > 0) p.log.warn("rp-logout.frames_skipped", { count: page.skipped });
@@ -236,6 +243,7 @@ export async function endingFrom(
 		...(c.section["error-page"] === undefined ? {} : { errorPage: c.section["error-page"] }),
 		now: c.clock.now,
 		hintMaxAgeMs: c.section["hint-max-age"] * 1000,
+		frameWaitMs: c.section["frame-wait"],
 		log: c.log,
 	});
 }
