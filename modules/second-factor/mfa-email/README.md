@@ -12,7 +12,7 @@
   - Challenge: six digits mailed to the factor's address, good until the earlier of `code-lifetime` and the end the caller gives.
   - Both show `{sent_to, expires_in}`: the address's first character and its domain, and the seconds the code lives.
 - Boot is refused where no binding proof `account-email` is composed (`mfa-email-proof`'s), or where `mfa-binding-proof`, which hears it, is not: a code by email comes with the proof of the account's address, so a first factor is never bound unproved.
-- Mail purposes `mfa-email.enrollment`, `mfa-email.login`, `mfa-email.proof`, taking `code` and `minutes`; `mfa-email-wording` words them.
+- Mail purposes `mfa-email.enrollment` and `mfa-email.login`, taking `code` and `minutes`; `mfa-email-wording` words them.
 - `purposes` and their type `Purpose`, for the module that words them.
 - Operator section: `adds-second-factor` (whether a proof adds `mfa`, and so whether the factor counts; default false), `code-lifetime` (1m–30m, default `10m`, written with its unit).
 

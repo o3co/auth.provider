@@ -376,11 +376,7 @@ it("fails as unavailable, sending nothing and judging no code, on a stored value
 
 it("declares each purpose it sends, and words none: its wording module does", async () => {
 	const { purposes, templates } = await boot();
-	expect([...purposes].sort()).toEqual([
-		"mfa-email.enrollment",
-		"mfa-email.login",
-		"mfa-email.proof",
-	]);
+	expect([...purposes].sort()).toEqual(["mfa-email.enrollment", "mfa-email.login"]);
 	expect(templates).toEqual([]);
 });
 
