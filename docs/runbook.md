@@ -193,7 +193,7 @@ Until then, it lives to its own end: never past the subject token's expiry, at m
 
 **Finding them.** The audit cannot list the tokens exchanged from one: `token.issued` names no parent or child token, subject, session or family.
 
-**Ending them now.** Revoke their subject ([Revoking a user from the ledger](#revoking-a-user-from-the-ledger)): its boundary ends every token for it, exchanged ones included, and closes its sessions. Ending a session or a refresh family reaches the tokens exchanged under it too, where you know which one from elsewhere.
+**Ending them now.** Revoke their subject (`POST /ledger/subject-revocations`, with `subject-revocation-http` composed: [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)): its boundary ends every token for it, exchanged ones included, and closes its sessions. Without it, the levers are the session, the family, or waiting out the lifetime. Ending a session or a refresh family reaches the tokens exchanged under it too, where you know which one from elsewhere.
 
 **Keeping the window short.** Set `token-exchange.max-lifetime` below `tokens.access-token-lifetime` where an exchanged token reaches an API of high value.
 
