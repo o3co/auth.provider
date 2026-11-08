@@ -93,7 +93,7 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/added-claims` | foundation | none |
+| `@mod/added-claims` | foundation | `@mod/kernel` |
 | `@mod/address-reach` | foundation | `@mod/url-setting` |
 | `@mod/audit` | foundation | `@mod/kernel`, `@mod/metrics` |
 | `@mod/client-certificate` | foundation | `@mod/kernel` |

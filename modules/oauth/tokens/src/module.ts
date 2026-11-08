@@ -1,3 +1,4 @@
+import { addedClaimsWith } from "@mod/added-claims";
 import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { accessTokenSigning, keys } from "@mod/keys";
@@ -105,7 +106,14 @@ export default defineModule(
 			const iss = (await c.get(issuer)).url;
 			const lifetime = c.section["access-token-lifetime"];
 
-			const check = checkingWith({ signing, bindings, iss, now: c.clock.now });
+			const added = addedClaimsWith(c.section["added-claims"]);
+			const check = checkingWith({
+				signing,
+				bindings,
+				iss,
+				now: c.clock.now,
+				readBack: added.readBack,
+			});
 
 			const timeout = c.section["issuance-timeout"];
 			const judge = judging(await c.collect(issuancePolicies), c.clock.now, () =>
@@ -157,7 +165,7 @@ export default defineModule(
 				revocable: () => denylist.revocable,
 				accessTokenLifetimeSeconds: () => lifetime,
 				subjectsChecked: () => !unchecked,
-				...issuing(judge, issueAccess, c.clock.now),
+				...issuing(judge, issueAccess, c.clock.now, added.of),
 				verifyAccess: async (token) => {
 					const checked = await check(token);
 					if (checked.kind === "invalid") return checked;

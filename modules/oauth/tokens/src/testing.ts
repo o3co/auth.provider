@@ -1,3 +1,4 @@
+import { addedClaimsLimits, addedClaimsWith } from "@mod/added-claims";
 import { defineModule, isUnavailable, Unavailable } from "@mod/kernel";
 import { type Binding, senderBindings } from "@mod/sender-binding";
 import { denylistAllowanceMs, denylistOver } from "@mod/token-denylist";
@@ -708,7 +709,13 @@ export function tokensStandIn(
 					revocable: () => denylist.revocable,
 					accessTokenLifetimeSeconds: () => configured,
 					subjectsChecked: () => options.subjectsChecked ?? true,
-					...issuing(judge, issueAccess, c.clock.now),
+					// The stand-in holds added claims to added-claims' defaults, as an app that raises none.
+					...issuing(
+						judge,
+						issueAccess,
+						c.clock.now,
+						addedClaimsWith(addedClaimsLimits.parse({})).of,
+					),
 					verifyAccess: verify,
 					issuedToOf: async (token) => {
 						const kept = live(token, denylistAllowanceMs);

@@ -1,4 +1,4 @@
-import { addedClaimsOf } from "@mod/added-claims";
+import type { AddedClaims } from "@mod/added-claims";
 import { deepFreeze, Unavailable } from "@mod/kernel";
 import type {
 	Admitted,
@@ -101,12 +101,15 @@ const noLifetimeLeft = {
  * an empty set is none. Throws TypeError, the grant's maker's mistake, on claims outside the rules
  * or an actor chain deeper than tokens reads, counted before anything copies it.
  */
-function checkedRequest(request: IssuanceRequest): IssuanceRequest {
+function checkedRequest(
+	request: IssuanceRequest,
+	addedOf: (given: unknown) => AddedClaims | undefined,
+): IssuanceRequest {
 	// Each of the caller's properties is read once: what is checked is what is copied and signed.
 	const { grant: given, ...rest } = request;
 	const { claims: added, actor: chain, ...grant } = given;
 	const actor = actorSnapshot(chain);
-	const claims = addedClaimsOf(added);
+	const claims = addedOf(added);
 	return {
 		...rest,
 		grant: { ...grant, ...(actor ? { actor } : {}), ...(claims ? { claims } : {}) },
@@ -123,13 +126,17 @@ export function issuing(
 	judge: (request: IssuanceRequest) => Promise<Admitted>,
 	issueAccess: IssueAccess,
 	now: () => number,
+	/** `added-claims`' check of a grant's claims, under the section's limits. */
+	addedOf: (given: unknown) => AddedClaims | undefined,
 ): Pick<Tokens, "admits" | "issue"> {
 	return {
-		admits: async (request) => judge(checkedRequest(request)),
+		admits: async (request) => judge(checkedRequest(request, addedOf)),
 		issue: async (request, limits) => {
 			// One frozen copy, taken before anything waits, is both what the policies judge and what is
 			// signed: a caller changing its own grant or limits meanwhile changes neither.
-			const taken = deepFreeze(structuredClone({ request: checkedRequest(request), limits }));
+			const taken = deepFreeze(
+				structuredClone({ request: checkedRequest(request, addedOf), limits }),
+			);
 			// When it was asked, with that copy: the token's iat, so the policies' wait cannot move it past a boundary.
 			const askedAt = now();
 			const judged = await judge(taken.request);
