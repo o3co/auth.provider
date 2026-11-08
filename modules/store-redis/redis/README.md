@@ -11,7 +11,7 @@
 
 ## Offers
 - Composition definition only.
-- The probe `redis` at `kernel`'s `probes`: each run PINGs both connections and, at most once a second, checks again what boot checked of the server, answering unready and logging `redis.settings_unmet` with what no longer holds when that changes.
+- The probe `redis` at `kernel`'s `probes` (internal module `probe`), given what boot checked of the server to check again.
 - Operator section:
   - `url` (`redis` or `rediss`, with no query), `address-family` (`ipv4`, `ipv6`, or either unset), `prefix` (lower-case letters, digits and `-`; default `store`).
   - `connect-timeout` (default `2s`), `command-timeout` (default `1s`), `replication-timeout` (default `1s`); times written with their unit, a bare number refused.

@@ -1,6 +1,21 @@
 import type { Clock, Log, Probe } from "@mod/kernel";
 import type { Redis } from "ioredis";
 
+/**
+ * Fewer good replicas (`INFO replication`'s `min_slaves_good_slaves`) than the server's
+ * `min-replicas-to-write`, which then refuses every write while reads still answer; nothing where
+ * either is not shown.
+ */
+export function goodReplicaProblems(info: string, needed: number | undefined): string[] {
+	const good = /min_slaves_good_slaves:(\d+)/.exec(info);
+	if (!good || needed === undefined) return [];
+	const count = Number(good[1]);
+	if (count >= needed) return [];
+	return [
+		`fewer good replicas (${count}) than min-replicas-to-write (${needed}): the server refuses writes`,
+	];
+}
+
 /** How long a start of `unmet` serves later probes, counted from that start. */
 const recheckMs = 1000;
 
