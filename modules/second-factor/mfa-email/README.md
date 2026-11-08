@@ -1,7 +1,7 @@
 # mfa-email
 
 ## Responsibilities
-- Contributes a code sent by mail as a kind of second factor (`email`), and owns how a code is mailed to the account's address, which `mfa-email-proof`'s proof before a first binding uses too.
+- Contributes a code sent by mail as a kind of second factor (`email`), and owns how a code is mailed to the account's address.
 
 ## Not here
 - Delivering mail and its limits (`mail` and its sender). The account's address (`users`). Keeping factors, challenges and transactions (`mfa`, `mfa-flows`). The proof of the account's address before a first binding (`mfa-email-proof`).
