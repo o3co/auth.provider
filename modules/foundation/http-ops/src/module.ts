@@ -33,6 +33,6 @@ export default defineModule(
 			.provide(duration)
 			.by(async (c) => requestDuration((await c.collect(routes)).map((route) => route.path))),
 		m.contribute(instruments).by((c) => c.get(duration)),
-		m.contribute(requestEnds).by(async (c) => timing(await c.get(duration))),
+		m.contribute(requestEnds).by(async (c) => timing(await c.get(duration), c.log)),
 	],
 );
