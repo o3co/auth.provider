@@ -176,7 +176,8 @@ export function registry(
 		}
 		return undefined;
 	};
-	return {
+	// Every taker shares this one object: none may reassign a member for the others.
+	return Object.freeze<Clients>({
 		checkRecord: async (record) => {
 			const result = await checked(record);
 			return "refusals" in result ? result.refusals : undefined;
@@ -231,5 +232,5 @@ export function registry(
 				challenges: challenges.length > 0 ? challenges : every,
 			};
 		},
-	};
+	});
 }

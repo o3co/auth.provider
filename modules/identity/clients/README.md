@@ -13,7 +13,7 @@
 - An authenticated answer carries the challenges for a later 401 to that client: its method's, or every method's when its method has none.
 - `bare` (request → whether it carries nothing a client authenticates with, whichever methods are composed). `authenticate`'s `no_credentials` says only that no composed method claimed the request.
 - `registered` (→ the clients the operator registered, in the settings' order, the `i`th at `clients.registered.<i>`), for a boot check that names one by its place, never its id.
-- `methods` names the usable authentication methods, built in and contributed; `signingAlgorithms` names the algorithms they take signed credentials in.
+- `methods` names the usable authentication methods, built in and contributed; `signingAlgorithms` names the algorithms they take signed credentials in. Every taker shares these in one frozen object: none can reassign a member for the others.
 - A client gives its metadata by section, and says whether the operator registered it or another source named it.
 - Asking a client for a section no module contributed throws; it never answers undefined.
 - Extension point `authMethods`: a method names its challenge for a refusal and its signing algorithms (at least one where it names any, never the JWS algorithm `none` in any case: boot refuses a method that breaks either), may say a request carries its credentials malformed, and may say it authenticates by an assertion (RFC 7521), when it names at least one signing algorithm (boot refuses one that does not).
