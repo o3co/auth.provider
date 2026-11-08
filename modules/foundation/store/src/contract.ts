@@ -51,11 +51,17 @@ export interface WriteOptions {
 	readonly deadline?: number;
 	/**
 	 * Resends of the same request with the same mark in the partition get the first answer until
-	 * the deadline plus a second of skew, or five minutes and a second without a deadline; a
-	 * different request under a used mark is refused.
+	 * the deadline plus a second of skew, or five minutes and a second without a deadline
+	 * (`idempotencyWindows`); a different request under a used mark is refused.
 	 */
 	readonly idempotency?: string;
 }
+
+/** How long every store keeps an idempotency mark, in ms: past its deadline, or from now without one; then past that too. */
+export const idempotencyWindows = Object.freeze({
+	withoutDeadlineMs: 300_000,
+	pastDeadlineMs: 1000,
+});
 
 /**
  * Opaque, compared for equality only, never repeating for a key. Counters go back on restart,

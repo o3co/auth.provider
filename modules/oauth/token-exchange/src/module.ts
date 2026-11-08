@@ -2,7 +2,7 @@ import { clients, metadataSections, type Section } from "@mod/clients";
 import { grants, tokenTies } from "@mod/grants";
 import { issuer } from "@mod/issuer";
 import { defineModule, setting } from "@mod/kernel";
-import { tokens } from "@mod/tokens";
+import { lifetimeSecondsRange, tokens } from "@mod/tokens";
 import { z } from "zod";
 import { selfIssued } from "./answer.ts";
 import { exchangeVerifiers } from "./contract.ts";
@@ -18,8 +18,8 @@ const section = z.strictObject({
 		.describe("The longest chain of actors an exchanged token may carry."),
 	"max-lifetime": setting
 		.duration("s")
-		// From two seconds, the shortest lifetime `tokens` issues.
-		.pipe(z.number().int().min(2).max(86_400))
+		// Within the lifetimes `tokens` issues, from two seconds to a day.
+		.pipe(z.number().int().min(lifetimeSecondsRange.min).max(lifetimeSecondsRange.max))
 		.optional()
 		.describe(
 			"The longest lifetime an exchange may ask for, from 2s to 1d, even past `tokens`' lifetime.",

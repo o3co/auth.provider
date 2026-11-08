@@ -22,7 +22,7 @@
 - Failures are unavailable, apart from absent and conflict; only declared spaces are accepted, with the guarantees they declare.
 - Input is copied once at the boundary and checked: plain JSON only (no accessors, classes, `__proto__` or hidden properties; -0 is 0), well-formed strings, integers in range.
 - A batch is checked whole before anything is written, never writes a key twice, and never reaches outside its partition. A batch across is checked the same, and refuses spaces of other guarantees, so a fault keeps or drops it whole.
-- An idempotency mark binds the partition and the request: a resend gets the first answer, refusals included, and another request is refused as reused.
+- An idempotency mark binds the partition and the request: a resend gets the first answer, refusals included, and another request is refused as reused. Every implementation keeps a mark for `idempotencyWindows`: a second past its deadline, or five minutes and a second without one.
   - A batch across keeps its mark, with one answer and one end, in every partition it touches, those it only reads included, and looks for it in all of them first: a resend meets it in any, another request meeting it in any is reused (its keys' order is part of the request), and a late answer is not kept.
 - A write past its deadline is refused as late; a mark is forgotten 1 second past the deadline, or 5 minutes 1 second after the write without one.
 - In a replicated space, a written answer confirms every state the store held before it; exists, conflict, missing, limited, `mutate`'s keep and a later unavailable write confirm nothing.
