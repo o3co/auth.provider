@@ -39,6 +39,19 @@ it("posts each client of a closing session a logout token, however the session c
 	expect(await keptNotices(h)).toEqual([]);
 });
 
+it("gives a logout token the lifetime the section sets", async () => {
+	const h = await serve({ settings: { "logout-token-lifetime": "1m" } });
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	const token = new URLSearchParams(String(h.sent[0]?.request?.body)).get("logout_token") ?? "";
+	const verified = await h.app.get(keys).verify(token, "logout+jwt");
+	if (verified.kind !== "valid") throw new Error(verified.reason);
+	expect(Number(verified.claims.exp) - Number(verified.claims.iat)).toBe(60);
+	await settled(h, 500);
+});
+
 it("leaves out the session for a client that did not ask for it, and tells no client without a URL", async () => {
 	const h = await serve({
 		sections: {
