@@ -289,6 +289,11 @@ export const coverage: Coverage = {
 				"past the default hour, up to `key-set-max-age`: a key removed upstream is still taken that long after the set's fetch",
 		},
 		{
+			key: "keys.jwks-cache",
+			weakens:
+				"past the default five minutes, up to a day: a verifier may keep taking a key removed from the published set that long",
+		},
+		{
 			key: "client-assertion.max-lifetime",
 			weakens: "past the default hour, up to a day: a client assertion is taken that long",
 		},

@@ -148,7 +148,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | (from the issuer) | `http.public-origin` | Cookies are `__Host-` and `Secure` when it is https |
 | (Node's defaults: a minute for the headers, five for the request) | `http.headers-timeout` (default `10s`), `http.request-timeout` (default `30s`) | A request slower to arrive is answered `408` and its connection closed; raise them for clients on slow links |
 | (no cap) | `http.max-connections` (default 10000) | A connection past it is closed as it arrives |
-| `jwks.path`, `jwks.cacheMaxAge` | removed | Fixed at the key set's well-known path (`jwks.json` under `.well-known`), cached five minutes |
+| `jwks.path`, `jwks.cacheMaxAge` | removed | Fixed at the key set's well-known path (`jwks.json` under `.well-known`), cached five minutes; `keys.jwks-cache` sets how long from 0.20 |
 
 ### Issuer and signing keys
 
@@ -412,7 +412,7 @@ Compose `userinfo` and `oidc` for the userinfo endpoint and ID tokens, `rp-logou
 | (ID token lifetime fixed at 3600 s) | `oidc.id-token-lifetime` | Default `1h`; `1m` to `1d` |
 | `oauth.oidcMode` | `authorize.oidc-mode` (`oidc-required` or `dual`) | Default `oidc-required`, as before |
 | `/oauth/logout` (with the oauth endpoints) | compose `rp-logout` + `rp-logout-store` | `oidc` judges the `id_token_hint` |
-| (an old `id_token_hint` led to a page asking to confirm) | (no setting) | A hint issued more than 24 hours ago is refused `400 invalid_token`, by GET or POST, and the session stays open; the RP sends a fresher hint, or the user logs out at `POST /session/logout` |
+| (an old `id_token_hint` led to a page asking to confirm) | (no setting; `rp-logout.hint-max-age` lowers it from 0.20) | A hint issued more than 24 hours ago is refused `400 invalid_token`, by GET or POST, and the session stays open; the RP sends a fresher hint, or the user logs out at `POST /session/logout` |
 | `POST /session/logout` (session module) | compose `logout` | |
 | upstream end-session from `/oauth/logout` | compose `rp-logout-federation` | Needs `federation-tokens` |
 | `core.sessionLifecycle.sweepIntervalSeconds` | `session-lifecycle.sweep-interval` (pending closes), `rp-logout.sweep-interval` (pending notices) | Defaults `30s` and `1m`; `0` (no sweep) is gone |
@@ -852,7 +852,7 @@ After upgrading an app with a second-factor witness, run its `witness-backfill` 
 ### A module of your own
 
 - **`client.authentication.failure` is declared by `clients`** (`@mod/clients/audit-events`), no longer by `token-endpoint`, with the same name and attributes: a receiver needs no change, and a check of your own that reads the declarations finds it there. A route of your own that calls `clients`' `authenticate` records its refusal through `recordRefusedAuthentication`, handing it the `audit` your module takes.
-- **A grant of your own that needs claims of its own in the access token**: put them in `AccessGrant.claims` and issue through `issue`. A module that signed an `at+jwt` with `keys.sign` moves to `issue`, and one that verified it with `keys.verify` to `verifyAccess`: both now refuse that type (a TypeError). Such a module's tokens still pass `verifyAccess` until their `exp`, which may lie up to a day after their `iat`, and an `iat` may stand up to 60 seconds ahead of the clock. A resource server that checks tokens against the published key set alone applies none of these checks. To end them at once, after upgrading [rotate the signing key](runbook.md#rotating-the-signing-key) and then remove the old key from `keys.previous` rather than waiting for its `expires-at`. The key set is advertised as cacheable for 300 seconds, but nothing makes a verifier drop it then.
+- **A grant of your own that needs claims of its own in the access token**: put them in `AccessGrant.claims` and issue through `issue`. A module that signed an `at+jwt` with `keys.sign` moves to `issue`, and one that verified it with `keys.verify` to `verifyAccess`: both now refuse that type (a TypeError). Such a module's tokens still pass `verifyAccess` until their `exp`, which may lie up to a day after their `iat`, and an `iat` may stand up to 60 seconds ahead of the clock. A resource server that checks tokens against the published key set alone applies none of these checks. To end them at once, after upgrading [rotate the signing key](runbook.md#rotating-the-signing-key) and then remove the old key from `keys.previous` rather than waiting for its `expires-at`. The key set is advertised as cacheable for 300 seconds (`keys.jwks-cache` from 0.20), but nothing makes a verifier drop it then.
 - **Access tokens not issued by `tokens`**: an `at+jwt` carrying a name reserved for what `tokens` never writes (`nbf`, `roles`, `email` and the like) is refused by `verifyAccess`, which retires such tokens on purpose; so is one whose `exp` comes before its `iat`, whose `iat` is over 60 seconds ahead of the clock, or with over a day between them.
 - **Added claims and restrictions**: a refreshed or exchanged token carries no added claim; never use one for a restriction that must hold on.
 - **Audit**: `token.issued` may carry `claims`, the names of the claims a grant added, and `claims_left`, how many names did not fit.

@@ -1,14 +1,31 @@
 import { createHash } from "node:crypto";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
+import { setting } from "@mod/kernel";
+import { z } from "zod";
 import { expired, type Ring } from "../signing/ring.ts";
-
-const cacheControl = "public, max-age=300";
 
 function etagMatches(header: string | undefined, etag: string): boolean {
 	return header?.split(",").some((tag) => tag.trim() === etag) ?? false;
 }
 
-export function jwksResponse(ring: Ring, now: number, request: HttpRequest): HttpResponse {
+/** The section's part on publishing the set, which the package composes beside the ring's keys. */
+export const jwksSettings = {
+	"jwks-cache": setting
+		.duration("s")
+		.pipe(z.number().int().min(60).max(86_400))
+		.prefault("5m")
+		.describe(
+			"How long verifiers may cache the published key set (its `Cache-Control` max-age), from 1m to 1d: publish a `next` key at least this long before it signs.",
+		),
+};
+
+/** The set, cached `cacheSeconds` by whoever reads it. */
+export function jwksResponse(
+	ring: Ring,
+	now: number,
+	request: HttpRequest,
+	cacheSeconds: number,
+): HttpResponse {
 	const published = ring.publicKeys.filter((k) => !expired(k, () => now));
 	if (published.length === 0) {
 		return jsonAnswer(404, { error: "jwks_not_published" });
@@ -22,7 +39,7 @@ export function jwksResponse(ring: Ring, now: number, request: HttpRequest): Htt
 		})),
 	});
 	const etag = `"${createHash("sha256").update(body).digest("base64url")}"`;
-	const headers = { etag, "cache-control": cacheControl };
+	const headers = { etag, "cache-control": `public, max-age=${cacheSeconds}` };
 	if (etagMatches(request.headers.get("if-none-match"), etag)) return { status: 304, headers };
 	return { status: 200, headers: { ...headers, "content-type": "application/json" }, body };
 }

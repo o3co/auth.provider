@@ -27,6 +27,20 @@ export const section = z.strictObject({
 		.describe(
 			"How long a logout that asks the person waits for them, from 1m to 15m: the request the logout carries to the confirmation, and the confirmation page.",
 		),
+	"logout-token-lifetime": setting
+		.duration("s")
+		.pipe(z.number().int().min(60).max(900))
+		.prefault("5m")
+		.describe(
+			"How long a back-channel logout token lives, from 1m to 15m: each try makes its own, sent at once, so a notice tried again needs none longer.",
+		),
+	"hint-max-age": setting
+		.duration("s")
+		.pipe(z.number().int().min(60).max(86_400))
+		.prefault("1d")
+		.describe(
+			"How long ago an `id_token_hint` may have been issued and still be taken, from 1m to 1d; an older one is refused, by GET or POST, as a logout another site may have started, so it never grows past a day.",
+		),
 	"error-page": urlSetting({ schemes: ["https"], loopbackHttp: true })
 		.optional()
 		.describe(
