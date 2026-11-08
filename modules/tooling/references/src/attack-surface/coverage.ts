@@ -463,6 +463,10 @@ export const coverage: Coverage = {
 			why: "how deep forwarding is followed through trusted proxies: part of naming them",
 		},
 		{
+			key: "metrics-prometheus.path",
+			why: "only where the scrape route answers; keeping it from outside the deployment is the layer in front's, whatever the path, as the security model leaves it",
+		},
+		{
 			key: "outbound.direct-despite-proxy",
 			why: "only whether boot goes on while a proxy variable is set; the variables are never read",
 		},
