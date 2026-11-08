@@ -16,6 +16,7 @@ const setUp = (part: SecondFactorPart): NewPart => ({
 			? [
 					"@mod/mail-smtp",
 					"@mod/mfa-email",
+					"@mod/mfa-email-proof",
 					"@mod/mfa-email-wording",
 					"@mod/mfa-email-proof-wording",
 				]
