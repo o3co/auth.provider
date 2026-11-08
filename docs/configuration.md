@@ -558,6 +558,14 @@ From `@mod/rate-limit`.
 |---|---|---|---|---|---|---|
 | `rate-limit.fail-mode` | open \| closed | `closed` |  |  |  | What a route's request limit does when the store cannot count: `closed` answers 503, `open` lets the request through. |
 
+## reauth
+
+From `@mod/reauth`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `reauth.record-lifetime` | string | `10m` |  |  |  | How long a re-authentication record lives, from 1m to 1h: a login that `prompt=login`, `max_age` or an essential `auth_time` asked, back later than this, is asked again. |
+
 ## redis
 
 From `@mod/redis`.

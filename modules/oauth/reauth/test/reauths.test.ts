@@ -6,8 +6,9 @@ import { describe, expect, it } from "vitest";
 import { reauthStore, reauths, type StoredReauth } from "../src/contract.ts";
 import reauthModule from "../src/module.ts";
 import { reauthsWith } from "../src/reauths.ts";
+import { section } from "../src/section.ts";
 
-const setUp = () => {
+const setUp = (lifetimeMs = 600_000) => {
 	let now = 1_000_000;
 	const stand = memoryRecords<StoredReauth>(() => now, { shards: 1, perShard: 1 });
 	const store = { save: stand.records.create, update: stand.records.change };
@@ -15,6 +16,7 @@ const setUp = () => {
 		store,
 		clock: { now: () => now },
 		random: { bytes: (n) => randomBytes(n) },
+		lifetimeMs,
 	});
 	return {
 		reauths,
@@ -60,6 +62,18 @@ describe("re-authentication records", () => {
 		expect(await reauths.take(name, params({}))).toBeUndefined();
 	});
 
+	it("keeps a record as long as it is told, to the millisecond", async () => {
+		const { reauths, advance } = setUp(3_600_000);
+		const [kept, gone] = [
+			await reauths.remember(params({}), 5),
+			await reauths.remember(params({}), 5),
+		];
+		advance(3_599_999);
+		expect((await reauths.take(kept, params({})))?.at).toBe(5);
+		advance(1);
+		expect(await reauths.take(gone, params({}))).toBeUndefined();
+	});
+
 	it("reads a record of another format or shape as none", async () => {
 		const { reauths, store } = setUp();
 		const name = "x".repeat(43);
@@ -74,6 +88,7 @@ describe("re-authentication records", () => {
 			store: held,
 			clock: { now: () => 0 },
 			random: { bytes: (n) => new Uint8Array(n) },
+			lifetimeMs: 600_000,
 		});
 		await expect(clashing.remember(params({}), 5)).rejects.toBeInstanceOf(Unavailable);
 		expect(reauths).toBeDefined();
@@ -134,4 +149,16 @@ it("provides the records over the store the assembly wires, taking all it names"
 	const records = app.get(reauths);
 	const name = await records.remember(params({ a: "1" }), 5);
 	expect((await records.take(name, params({ a: "1" })))?.at).toBe(5);
+});
+
+it("reads record-lifetime written with its unit, from 1m to 1h, 10m where unset", () => {
+	const takes = (value: unknown) => section.safeParse({ "record-lifetime": value });
+	expect(section.parse({})).toEqual({ "record-lifetime": 600_000 });
+	expect(["1m", "1h", "59s", "61m", 600_000].map((v) => takes(v).success)).toEqual([
+		true,
+		true,
+		false,
+		false,
+		false,
+	]);
 });

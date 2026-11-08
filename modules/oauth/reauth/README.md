@@ -13,10 +13,11 @@
   - `take` (name, the request's parameters → the record, or none).
   - `fresh` (`prompt=login` asked, `max_age` in ms, whether a known authentication time is needed; the session's authentication time or that it is unknown; the taken record → yes / no).
 - Store interface (the assembly wires the implementation): re-authentications (per name, an unguessable value the place never keeps in clear; save / update from the current contents). Record contents are not shown to the store. Needs (`reauthStoreNeeds`): survives a crash, never rolled back by failover, names that derive from the unguessable value.
+- Operator section: `record-lifetime` (1m–1h, default `10m`, written with its unit), how long a record lives.
 - `./testing`: the contract test of the store interface, for every implementation.
 
 ## Invariants
-- A record lives 10 minutes. A new record's name is made from 32 random bytes; if the name is already held, unavailable.
+- A record lives `record-lifetime`, 10 minutes unless set. A new record's name is made from 32 random bytes; if the name is already held, unavailable.
 - The request's hash covers its parameters (each one's first value) except the record's own name, independent of their order and of the order of prompt words.
 - Taking rewrites the record as taken; it counts only when that rewrite found it untaken and made for the same request. A name that is not 43 base64url characters is not looked up.
 - A login whose authentication time `session` answers as unknown is never fresh: it meets no record, no `max_age` and no need for a known time.
