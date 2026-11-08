@@ -22,6 +22,7 @@ export const mfaWeb: Pattern = {
 			"@mod/mfa-acr",
 			"@mod/mfa-totp",
 			"@mod/mfa-email",
+			"@mod/mfa-email-proof",
 			"@mod/mfa-recovery",
 		],
 	},
