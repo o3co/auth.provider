@@ -94,15 +94,18 @@ jobs:
       - name: Provide npmrc secret file
         run: touch ~/.npmrc
 
-      # Docker Compose builds the images with the classic builder, not Bake.
-      # Bake refuses to read a secret file outside the working directory
-      # unless `--allow fs.read=<path>` grants it, and Compose passes that
-      # grant for build contexts only, never for the ~/.npmrc secret. The
-      # classic builder reads only the files the compose file declares.
+      # Docker Compose builds the images with Bake, as o3co/auth's own E2E
+      # workflow does. Bake refuses to read a secret file outside the working
+      # directory unless `--allow fs.read=<path>` grants it, and Compose passes
+      # that grant for build contexts only, never for the ~/.npmrc secret.
+      # Turning the filesystem entitlement check off is safe here: the only
+      # build definitions are the ones Compose derives from the umbrella's
+      # compose file, and the only host file they read outside a context is
+      # the empty ~/.npmrc made above.
       - name: Run the umbrella E2E suite with this change as auth.provider
         working-directory: umbrella
         env:
-          COMPOSE_BAKE: "false"
+          BUILDX_BAKE_ENTITLEMENTS_FS: "0"
           PROVIDER_SHA: ${{ steps.revs.outputs.provider }}
         run: make test-e2e PROVIDER_REV="$PROVIDER_SHA"
 
