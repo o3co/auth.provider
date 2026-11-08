@@ -834,9 +834,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/mail':
+      '@mod/mail-address':
         specifier: workspace:*
-        version: link:../../foundation/mail
+        version: link:../../foundation/mail-address
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash

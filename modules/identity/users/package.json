@@ -19,13 +19,10 @@
 	},
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
-		"@mod/mail": "workspace:*",
+		"@mod/mail-address": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"zod": "4.6.7"
 	},
-	"helpers": [
-		"@mod/mail"
-	],
 	"peerDependencies": {
 		"vitest": "5.0.5"
 	},

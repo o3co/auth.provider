@@ -136,7 +136,7 @@ flowchart LR
 | `@mod/session-requirements` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/subject-attributes` | feature | `@mod/kernel`, `@mod/login-attributes`, `@mod/session`, `@mod/users` |
 | `@mod/subject-revocation` | feature | `@mod/kernel` |
-| `@mod/users` | feature | `@mod/kernel`, `@mod/mail`, `@mod/secret-hash` |
+| `@mod/users` | feature | `@mod/kernel`, `@mod/mail-address`, `@mod/secret-hash` |
 
 ### log-sinks
 
