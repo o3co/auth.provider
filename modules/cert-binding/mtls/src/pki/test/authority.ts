@@ -60,7 +60,7 @@ export interface Issuing {
 	readonly ca?: boolean;
 	readonly pathLen?: number;
 	readonly eku?: readonly string[] | undefined;
-	readonly hash?: "SHA-1" | "SHA-256";
+	readonly hash?: "SHA-1" | "SHA-256" | "SHA-384";
 	readonly serial?: number;
 	/** Epoch ms. */
 	readonly notBefore?: number;
@@ -187,7 +187,7 @@ export interface Revoking {
 	/** Names this issuer instead. */
 	readonly issuer?: string;
 	readonly revoked?: readonly Issued[];
-	readonly hash?: "SHA-1" | "SHA-256";
+	readonly hash?: "SHA-1" | "SHA-256" | "SHA-384";
 	/** Epoch ms. */
 	readonly thisUpdate?: number;
 	/** Epoch ms; none when null. */
@@ -247,7 +247,7 @@ export interface Answering {
 	/** The signer named by its key hash rather than its name. */
 	readonly byKey?: boolean;
 	readonly certs?: readonly Issued[];
-	readonly hash?: "SHA-1" | "SHA-256";
+	readonly hash?: "SHA-1" | "SHA-256" | "SHA-384";
 	/** The answer is about this serial instead. */
 	readonly serialOf?: Issued;
 	readonly responseStatus?: number;
@@ -340,3 +340,29 @@ export const subtree = (
 	base: pkijs.GeneralName,
 	more: Partial<pkijs.GeneralSubtreeParameters> = {},
 ) => new pkijs.GeneralSubtree({ base, ...more });
+
+/** The DER with another algorithm stated beside its signature, what was signed left as it is. */
+export function restated(
+	kind: "certificate" | "crl" | "ocsp",
+	der: Uint8Array,
+	algorithmId: string,
+): Uint8Array {
+	const stated = new pkijs.AlgorithmIdentifier({ algorithmId });
+	const schema = asn1js.fromBER(der).result;
+	if (kind !== "ocsp") {
+		const signed =
+			kind === "crl"
+				? new pkijs.CertificateRevocationList({ schema })
+				: new pkijs.Certificate({ schema });
+		signed.signatureAlgorithm = stated;
+		return new Uint8Array(signed.toSchema(true).toBER(false));
+	}
+	const response = new pkijs.OCSPResponse({ schema });
+	const bytes = response.responseBytes as pkijs.ResponseBytes;
+	const basic = new pkijs.BasicOCSPResponse({
+		schema: asn1js.fromBER(bytes.response.valueBlock.valueHexView).result,
+	});
+	basic.signatureAlgorithm = stated;
+	bytes.response = new asn1js.OctetString({ valueHex: basic.toSchema().toBER(false) });
+	return new Uint8Array(response.toSchema().toBER(false));
+}

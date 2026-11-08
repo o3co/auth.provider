@@ -11,7 +11,12 @@ import {
 	usage,
 } from "../der.ts";
 import { hasMalformedExtension, hasUnknownCritical, rsaBits } from "../path.ts";
-import { isStrong, signedBy } from "../signatures.ts";
+import {
+	isSignedAsTaken,
+	isTaken,
+	type SignatureAlgorithm,
+	signedBy,
+} from "../signatures/signatures.ts";
 
 /**
  * What a responder says of one certificate, until its next update or its signer's end; a delegated
@@ -36,6 +41,8 @@ export interface Asked {
 	readonly freshMs: number;
 	/** The smallest RSA key a delegated responder may sign with, as on the path. */
 	readonly minRsaBits: number;
+	/** The signature algorithms the answer and a delegated responder may be signed with, as on the path. */
+	readonly signatureAlgorithms: readonly SignatureAlgorithm[];
 	/** The nonce the request carried; the answer must carry it back. */
 	readonly nonce?: Uint8Array;
 }
@@ -89,7 +96,8 @@ async function isDelegated(
 	if (!keyUsageAllows(cert, usage.digitalSignature)) return false;
 	const bits = rsaBits(cert);
 	if (bits !== undefined && bits < asked.minRsaBits) return false;
-	if (!cert.issuer.isEqual(issuer.subject) || !isStrong(cert.signatureAlgorithm)) return false;
+	if (!cert.issuer.isEqual(issuer.subject)) return false;
+	if (!isSignedAsTaken(cert, issuer, asked.signatureAlgorithms)) return false;
 	const { now } = asked;
 	if (now < cert.notBefore.value.getTime() || cert.notAfter.value.getTime() < now) return false;
 	const eku = parsedExtension<pkijs.ExtKeyUsage>(cert, oid.extKeyUsage);
@@ -154,7 +162,8 @@ export async function judgeOcsp(
 	} catch {
 		return unusable("malformed");
 	}
-	if (!isStrong(basic.signatureAlgorithm)) return unusable("signature algorithm");
+	if (!isTaken(basic.signatureAlgorithm, asked.signatureAlgorithms))
+		return unusable("signature algorithm");
 	const signer = await signerOf(basic, issuer, asked);
 	if (!signer) return unusable("signer");
 	const data = basic.tbsResponseData;

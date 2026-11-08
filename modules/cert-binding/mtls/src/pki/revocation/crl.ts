@@ -8,7 +8,12 @@ import {
 	parsedExtension,
 	usage,
 } from "../der.ts";
-import { isStrong, signedBy } from "../signatures.ts";
+import {
+	isTaken,
+	type SignatureAlgorithm,
+	sameAlgorithm,
+	signedBy,
+} from "../signatures/signatures.ts";
 
 const scoping = new Set<string>([oid.deltaCrlIndicator, oid.issuingDistributionPoint]);
 
@@ -33,7 +38,8 @@ export function crlUrlsOf(cert: pkijs.Certificate): readonly string[] {
 
 /**
  * What the CRL says of `cert`, as of `now`. Nothing in it is used before its signature is checked
- * with the issuer's key; a this update past `now` by more than `skewMs` is not yet in force.
+ * with the issuer's key, by an algorithm `taken`; a this update past `now` by more than `skewMs` is
+ * not yet in force.
  */
 export async function judgeCrl(
 	der: Uint8Array,
@@ -41,11 +47,13 @@ export async function judgeCrl(
 	issuer: pkijs.Certificate,
 	now: number,
 	skewMs: number,
+	taken: readonly SignatureAlgorithm[],
 ): Promise<Judged> {
 	const unusable = (reason: string): Judged => ({ kind: "unusable", reason });
 	const crl = decoded(der, (schema) => new pkijs.CertificateRevocationList({ schema }));
 	if (!crl) return unusable("malformed");
-	if (!isStrong(crl.signatureAlgorithm)) return unusable("signature algorithm");
+	if (!isTaken(crl.signatureAlgorithm, taken)) return unusable("signature algorithm");
+	if (!sameAlgorithm(crl.signature, crl.signatureAlgorithm)) return unusable("signature algorithm");
 	if (!crl.issuer.isEqual(cert.issuer)) return unusable("issuer");
 	if (!keyUsageAllows(issuer, usage.cRLSign)) return unusable("issuer cannot sign crls");
 	// The signature alone: what the CRL's extensions mean is judged here, not by the engine.

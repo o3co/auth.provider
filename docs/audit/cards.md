@@ -13,6 +13,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/mtls` (feature, `modules/cert-binding/mtls`): Binds tokens to the client's certificate (RFC 8705), as a binding kind of `sender-binding`.
   - `pki` (`src/pki`): Validates a client certificate's path to the anchors. Knows no feature.
   - `revocation` (`src/pki/revocation`): Checks the revocation of every certificate on a validated path but the anchor, by CRL, OCSP or both.
+  - `signatures` (`src/pki/signatures`): Internal module of `pki`, shared by its path rules and by `revocation`: which signature algorithms are taken, and checking a signature.
 
 ## delegation
 
