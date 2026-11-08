@@ -12,7 +12,7 @@ import {
 	type Store,
 } from "@mod/store";
 import { type Redis, ReplyError } from "ioredis";
-import { list, numbers } from "./answer/answer.ts";
+import { answerOf, list } from "./answer/answer.ts";
 import { keysUnder } from "./keys.ts";
 import { confirmationPipeline, confirmationRounds } from "./round/round.ts";
 import * as scripts from "./scripts.ts";
@@ -203,10 +203,8 @@ export function redisStore(
 		} catch {
 			throw new Unavailable("store");
 		}
-		const text = String(reply);
-		const split = text.indexOf("\n");
-		const answer = numbers(JSON.parse(text.slice(split + 1)));
-		Object.defineProperty(answer, servedBy, { value: text.slice(0, split), enumerable: false });
+		const { server, answer } = answerOf(String(reply));
+		Object.defineProperty(answer, servedBy, { value: server, enumerable: false });
 		return answer;
 	};
 	const confirmed = confirmationRounds(confirmer, options);

@@ -9,7 +9,7 @@ Internal module of `redis`: a store script's answer read as data.
 - Running a script, and which server answered: the package's.
 
 ## Offers
-- `numbers` (a parsed answer): the answer with its times, counts and times left as numbers, or unavailable.
+- `answerOf` (a script's reply): the server that ran it, and its answer with its times, counts and times left as numbers; a reply holding no run id and JSON object is unavailable.
 - `list` (a value cjson wrote, its count): the list it stands for.
 
 ## Invariants
