@@ -391,8 +391,15 @@ export function readOutside(
 	for (const name of dependencies) {
 		const ranges = read.flatMap(({ record }) => declaredRanges(record, name));
 		if (ranges.length === 0) {
+			const aliased = read.some(({ record }) =>
+				[record.dependencies, record.optionalDependencies, record.peerDependencies].some((group) =>
+					Object.hasOwn(group, name),
+				),
+			);
 			refusals.push(
-				`--allow-fresh ${name}: neither named npm:${name} nor declared by a package named so`,
+				aliased
+					? `--allow-fresh ${name}: declared only as an alias of another package, so no package named so declares it itself`
+					: `--allow-fresh ${name}: neither named npm:${name} nor declared by a package named so`,
 			);
 			continue;
 		}
