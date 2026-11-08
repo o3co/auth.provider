@@ -228,6 +228,7 @@ flowchart LR
 | `@mod/mfa-binding-proof` | feature | `@mod/kernel`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading`, `@mod/seal` |
 | `@mod/mfa-email` | feature | `@mod/kernel`, `@mod/mail`, `@mod/mail-address`, `@mod/mfa`, `@mod/mfa-binding-proof`, `@mod/mfa-extensions`, `@mod/subject-attributes`, `@mod/users` |
 | `@mod/mfa-email-proof` | feature | `@mod/kernel`, `@mod/mfa-binding-proof`, `@mod/mfa-email`, `@mod/users` |
+| `@mod/mfa-email-proof-wording` | adapter | `@mod/kernel`, `@mod/mail`, `@mod/mfa-email-proof` |
 | `@mod/mfa-email-wording` | adapter | `@mod/kernel`, `@mod/mail`, `@mod/mfa-email` |
 | `@mod/mfa-enrollment` | feature | `@mod/http`, `@mod/kernel`, `@mod/labels`, `@mod/mfa`, `@mod/mfa-binding`, `@mod/mfa-binding-proof`, `@mod/mfa-extensions`, `@mod/mfa-flows`, `@mod/mfa-managing`, `@mod/session`, `@mod/subject-revocation` |
 | `@mod/mfa-entry` | feature | `@mod/kernel`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading`, `@mod/session`, `@mod/session-requirements` |

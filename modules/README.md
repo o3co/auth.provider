@@ -278,6 +278,7 @@ What each module contains is described by that module's contract card (each modu
 | The proof of the account's address before a first binding (`account-email`), by mfa-email's rules | contribution | mfa-email-proof |
 | The wording of mfa-email's mails, which a deployment replaces | contribution | mfa-email-wording |
 | Mailing a code to the account's address and checking it typed back, for the caller's purpose | contract | account-mail-code |
+| The wording of mfa-email-proof's mails, which a deployment replaces | contribution | mfa-email-proof-wording |
 | Budget numbers and invariant checks | setting | guard |
 | Kind names, their order, and which way a dependency between kinds may point | vocabulary / contract | kinds |
 | The checks each kind gets | setting | guard |
