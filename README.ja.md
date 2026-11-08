@@ -179,7 +179,7 @@ curl -s http://127.0.0.1:8080/oauth/token -d grant_type=authorization_code -d cl
 | パターン | 用途 | ストレージと外部サービス |
 |---|---|---|
 | `simple-web` | Web アプリ向けのパスワードログイン（リフレッシュトークン付きの認可コードフロー）と、サービス向けのクライアントクレデンシャル | インメモリーストア、単一インスタンス。ユーザーは設定で管理し、監査ログはログに出力 |
-| `mfa-web` | `simple-web` に TOTP、メールコード、リカバリーコードを追加 | Redis と SMTP |
+| `mfa-web` | `simple-web` に TOTP、リカバリーコード、初回の登録前にメールで行うアドレスの確認を追加。メールコードは `--add @mod/mfa-email` | Redis と SMTP |
 | `device` | `simple-web` に Device Authorization Grant を追加。ユーザーが別の画面でコードを承認 | インメモリーストア、単一インスタンス |
 | `native-app` | パブリッククライアントとして動作するネイティブアプリとシングルページアプリ。PKCE、リフレッシュトークン、DPoP を使用 | インメモリーストア、単一インスタンス |
 | `a2a` | ユーザーを介さないサービス間のトークン発行。クライアントクレデンシャルまたは JWT ベアラー、`private_key_jwt`、mTLS、DPoP を使用 | インメモリーストア、単一インスタンス。mTLS 用にクライアント証明書を転送するプロキシ |

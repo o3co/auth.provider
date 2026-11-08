@@ -24,11 +24,13 @@ Give it no relay configuration: Mailpit relays mail elsewhere only when told to.
 
 ## 2. Point `mail-smtp` at it
 
-The `mfa-web` pattern composes `mail-smtp` with a second factor by email (`mfa-email`):
+The `mfa-web` pattern composes `mail-smtp`, which mails the proof of the account's address before a first binding (`mfa-email-proof`). Add a second factor by email (`mfa-email`) to it:
 
 ```sh
-npx @o3co/create-auth-provider my-provider --pattern mfa-web
+npx @o3co/create-auth-provider my-provider --pattern mfa-web --add @mod/mfa-email
 ```
+
+Under `mfa.mode = required`, the default, a code by email is taken as a factor only where `mfa-email.adds-second-factor = true`. Without that, it is not offered, and every start warns `mfa.kind_not_taken`, naming the kind. To try it, set `adds-second-factor = true` or `mfa.mode = optional`; every start warns of either.
 
 Set its section to Mailpit's SMTP address:
 

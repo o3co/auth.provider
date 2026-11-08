@@ -189,6 +189,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Setting `mfa.mode = optional` only where a session may be used with no second factor: every start warns `mfa.not_required`.
   - Setting `mfa-binding-proof.mode = never` only where a first counting factor may bind with nothing proved: every start warns `mfa-binding-proof.never_asked`. Under the default `when-available` with no binding proof composed, none is asked either, and every start warns `mfa-binding-proof.none_available`.
   - Setting `mfa-email.adds-second-factor` only where the mailbox may stand for a second factor: a code by mail then meets a required one, and every start warns `mfa-email.counts_as_second_factor`.
+  - Composing `mfa-email` under `mfa.mode = required` without `adds-second-factor`: the code by mail is not taken, and every start warns `mfa.kind_not_taken`, naming the kind, rather than refusing boot.
   - Setting `user-verification = discouraged` (`passkeys`, `mfa-webauthn`) only where holding the authenticator is enough: whoever holds it passes, and every start warns `passkeys.user_unverified` or `mfa-webauthn.user_unverified`.
   - Naming `webauthn.top-origins` only for pages you trust to frame a ceremony: every start warns `webauthn.framed_by_other_origins`, with their count.
   - Naming a `login-passkey.password-exempt-group` only for members who must keep password logins under `password = refused-when-held`: every start warns `login-passkey.password_exempt_group`.
