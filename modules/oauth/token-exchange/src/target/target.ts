@@ -55,6 +55,10 @@ export function targetWith(issuer: string) {
 		if (!asked || asked.some((s) => !ceiling.includes(s))) {
 			return refused("scope is not within the subject token's and the client's", "invalid_scope");
 		}
+		// Left out, a subject token's scope the client's allowance takes all of is refused, never issued empty.
+		if (asked.length === 0 && subject.scope.length > 0 && ceiling.length === 0) {
+			return refused("no scope of the subject token is within the client's", "invalid_scope");
+		}
 		const held = subject.audience.filter((a) => clientAllowance.allowsAudience(client, a, issuer));
 		const audience = param("audience") || (held.length === 1 ? held[0] : undefined);
 		if (audience === undefined || !held.includes(audience)) {
