@@ -29,6 +29,9 @@
 - An assertion's `jti` is once only, spent in its issuer's ledger or the store, as `granting`'s card says.
 - The token is issued through `tokens`' issuance policies, without a session. They are asked before the `jti` is written, so a refusal leaves the assertion usable, and again when issuing.
 
+## Deprecated
+- An issuer's `public-key` written as a certificate (`CERTIFICATE`): its key is taken, nothing of the certificate checked (its validity, issuer, chain), and every start warns `jwt-bearer.certificate_key` at its place. A later release refuses boot for it. Write the key's `PUBLIC KEY` PEM instead (`openssl x509 -pubkey -noout`).
+
 ## Data
 - Spent assertions, through the store interface (a wiring keeps them) or an issuer's ledger, by name as the invariants say. The lifetime is a relative value, as the store judges it by its own clock: until `policy`'s time. Only well-formed `jti` strings (without lone surrogates) are accepted.
 

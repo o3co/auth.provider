@@ -305,3 +305,40 @@ describe("an entry's client", () => {
 		});
 	});
 });
+
+describe("a key written as a certificate", () => {
+	/** A self-signed P-256 certificate, made with openssl for this test. */
+	const certificate = `-----BEGIN CERTIFICATE-----
+MIIBJzCBzgIJAOKAR396qLcxMAoGCCqGSM49BAMCMBsxGTAXBgNVBAMMEHBlbS1m
+b3JtLWZpeHR1cmUwIBcNMjYxMTA4MTUzOTI1WhgPMjEyNjEwMTUxNTM5MjVaMBsx
+GTAXBgNVBAMMEHBlbS1mb3JtLWZpeHR1cmUwWTATBgcqhkjOPQIBBggqhkjOPQMB
+BwNCAATS/vB1y2OAZTjtIiq1h3wF3kwoWiVobLWC+5gft5EyatdMo3K85KQBg/7d
+UgN11ZspuX7pxRH/tCxxqMyGXZtjMAoGCCqGSM49BAMCA0gAMEUCIQCteb0i+M7Y
+849mU13UrKu+nKuKZ44vQOOLCQiKmdBmkQIgXerbgVMU4hCgxzMY+DTCvAl0GPA2
+ERFQaUYoKVNYuAQ=
+-----END CERTIFICATE-----
+`;
+
+	it("takes its key, warning at its place that a later release refuses it, and never for a public key", async () => {
+		const entry = parsed({
+			...written,
+			...held,
+			keys: [
+				{ alg: "ES256", "public-key": certificate },
+				{ alg: "EdDSA", "public-key": pem },
+			],
+		});
+		const told = await trust(entry);
+		expect(told).toMatchObject({
+			kind: "trusted",
+			warnings: [
+				{ event: "jwt-bearer.certificate_key", where: "jwt-bearer.issuers.0.keys.0.public-key" },
+			],
+		});
+		expect(JSON.stringify(told.kind === "trusted" ? told.warnings : [])).not.toContain("BEGIN");
+		expect(await trust(parsed({ ...written, ...held }))).toMatchObject({
+			kind: "trusted",
+			warnings: [],
+		});
+	});
+});
