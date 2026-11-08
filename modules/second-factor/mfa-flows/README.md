@@ -23,6 +23,9 @@
 - Contract `flowParts`, for the module binding factors: the transactions, the resume of a held login, recording through this package's declaration, the common answers, the request helpers, and the lockout's name and policy (`seams`' card).
 - `./testing`: test configuration builders and the section's keys (`flowKeys`), and the store interfaces' contract tests for every implementation (see `transactions`' card).
 
+## Deprecated
+- `transactionsPerHolder` (5), which nothing reads: a store wiring sets its listing's cap, as `mfa-flows-store`'s `transactions-per-holder` does. A later release removes it.
+
 ## Invariants
 - Internal modules, and what each is given: `wiring`'s card. The package's module declares the routes.
 - Boot is refused where no revocation follower goes by `mfa`'s `fenceFollower` (`mfa-revocation`): a binding begun before a revocation would bind.

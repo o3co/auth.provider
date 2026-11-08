@@ -49,6 +49,12 @@ export interface TransactionListings {
 
 export const transactionListings = contract<TransactionListings>("mfa-flows.transaction-listings");
 
+/**
+ * @deprecated A store wiring sets its listing's cap (mfa-flows-store's `transactions-per-holder`, 5 by
+ * default); nothing reads this.
+ */
+export const transactionsPerHolder = 5;
+
 /** A transaction counts only while listed, so a listing that loses or misreads a member refuses a live one. */
 export const transactionListingsNeeds = {
 	neverEvicted: true,

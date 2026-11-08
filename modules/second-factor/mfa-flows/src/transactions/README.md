@@ -20,6 +20,7 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 - `keep` (a change of what the transaction holds for its work, from what it holds) → what it holds now, or none when it is no longer in use or the change gives nothing.
 - `askedFrom` (a transaction's purpose) → whom `mfa`'s kinds are asked for: a held login by the email its login gave, `vouched` when `subject-attributes`' `vouches` says `users` stands behind it, else the session by its handle.
 - `cleared` → the cookie that ends the transaction's binding to its browser.
+- The listings' contract test holds a place to the cap it gives; a place that gives none is held to 5, the deprecated `transactionsPerHolder`.
 
 ## Invariants
 - The store interface's contract test (`./testing`) checks every implementation: kept whole and once, changed only from what it holds, ended at exactly its lifetime; restarts, memory pressure, lost answers and failovers where the place has them.
