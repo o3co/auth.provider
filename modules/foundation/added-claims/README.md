@@ -9,10 +9,13 @@
 ## Offers
 - `AddedClaims`, `AddedValue`: JSON values by name; `AddedClaims` lists every reserved name.
 - `addedClaimsLimits`, the schema part `tokens`' section takes as `added-claims`: the limits an operator may raise, each from today's value (`name-length`, `string-length`, `members`, `values`, `depth`, `size`).
-- `addedClaimsWith` (the limits read) → `of` and `readBack`, as below, under them; `addedClaimsOf` and `addedClaimsReadBack` are those under the defaults.
-- `addedClaimsOf` (what a grant gives) → a new frozen copy within the rules, none for none or an empty set; throws TypeError, naming the rule, and a null's path, on anything outside them.
-- `addedClaimsIn` (a verified payload) → its members an access token's issuer does not write, for `addedClaimsReadBack` to check.
-- `addedClaimsReadBack` (those members) → as `addedClaimsOf` answers, but a null is taken: a token an earlier release signed may hold one.
+- `addedClaimsWith` (the limits read) → `of` and `readBack`, as below, under them.
+- `of` (what a grant gives) → a new frozen copy within the rules, none for none or an empty set; throws TypeError, naming the rule, and a null's path, on anything outside them.
+- `addedClaimsIn` (a verified payload) → its members an access token's issuer does not write, for `readBack` to check.
+- `readBack` (those members) → as `of` answers, but a null is taken: a token an earlier release signed may hold one.
+
+## Deprecated
+- `addedClaimsOf` and `addedClaimsReadBack`: `of` and `readBack` under the default limits, as 0.19 checked; use `addedClaimsWith(limits)`. A later release removes them.
 
 ## Invariants
 - An added claim is JSON alone: plain objects (the object prototype or none), arrays with no hole or other property, strings, finite numbers and booleans. A null, at any depth, is refused, as signing refuses it: leave the member out.

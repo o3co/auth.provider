@@ -299,9 +299,9 @@ export function addedClaimsWith(limits: AddedClaimsLimits) {
 
 /** The checks under the default limits. */
 const byDefault = addedClaimsWith(addedClaimsLimits.parse({}));
-/** `addedClaimsWith`'s `of` under the default limits. */
+/** @deprecated `addedClaimsWith`'s `of` under the default limits; use `addedClaimsWith(limits).of`. */
 export const addedClaimsOf = byDefault.of;
-/** `addedClaimsWith`'s `readBack` under the default limits. */
+/** @deprecated `addedClaimsWith`'s `readBack` under the default limits; use `addedClaimsWith(limits).readBack`. */
 export const addedClaimsReadBack = byDefault.readBack;
 
 function copied(
