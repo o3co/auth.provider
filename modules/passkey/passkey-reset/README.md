@@ -5,7 +5,7 @@
 - The passkeys' step alone, for `mfa-reset`'s parts, which move the boundaries themselves.
 
 ## Not here
-- Telling who asks for a reset, or whether they may (the embedder's). Emptying the list and withdrawing the witness's mark (`passkeys`, through `passkeyHolders.cleared`). Moving the boundary (`subject-revocation`). Contributing the step to `mfa-reset` (the bridge `mfa-reset-passkeys`).
+- Telling who asks for a reset, or whether they may (the embedder's). Emptying the list and withdrawing the witness's mark (`passkeys`, through `passkeyClearing.cleared`). Moving the boundary (`subject-revocation`). Contributing the step to `mfa-reset` (the bridge `mfa-reset-passkeys`).
 
 ## Offers
 - `passkeyReset.reset(subject, { requestedBy? })`, for an embedder that has verified who asks, answering how the run ended (`PasskeyResetOutcome`): `done` with `removed`, or `stopped` with `at` (`sessions` or `passkeys`) at the first step that was unavailable, which running it again finishes; a failure not unavailable, at any step, is thrown.
@@ -25,4 +25,4 @@
 - A finished run logs `passkey-reset.reset`, an unfinished one `passkey-reset.reset_incomplete` (`stoppedAt`: `sessions` or `passkeys`; `error`: the error's type).
 
 ## Depends on
-- `kernel`, `audit`, `passkeys` (`passkeyHolders`), `subject-revocation` (boundaries).
+- `kernel`, `audit`, `passkeys` (`passkeyClearing`), `subject-revocation` (boundaries).
