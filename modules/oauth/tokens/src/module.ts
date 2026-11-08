@@ -127,9 +127,17 @@ export default defineModule(
 						: {}),
 				};
 				const token = await signing.sign(claims);
-				// Its standard claims have no cap of their own: one past what tokens reads is never answered.
+				// Its standard claims have no cap of their own: one past what tokens reads is never handed
+				// out, but refused, the operator told its size and the names of the claims a grant added.
 				if (token.length > compactLimit) {
-					throw new TypeError(`tokens: the access token is over ${compactLimit} bytes`);
+					c.log.warn("tokens.token_too_large", {
+						length: token.length,
+						limit: compactLimit,
+						claims: Object.keys(grant.claims ?? {})
+							.sort()
+							.join(","),
+					});
+					return { kind: "too-large" as const };
 				}
 				// Nothing kept: a token is signed and handed back, no store or record written.
 				return {

@@ -153,7 +153,9 @@ export interface Tokens extends TokenValidity<AccessCheck> {
 	 * from there, their wait included; what it answers is left runs from signing. Refuses, as its
 	 * own rule, a token with less than a second left once signed, its cap passed, its lifetime spent
 	 * in the policies' wait or its signing slow: policy `tokens`, reason `no_lifetime_left`, the
-	 * client's word `expired`. Such a token is handed to no one, and nothing of it is kept.
+	 * client's word `expired`; and one past 16 KiB once signed, which it does not read: reason
+	 * `token_too_large`, the client's word `too large`. Such a token is handed to no one, and nothing
+	 * of it is kept.
 	 */
 	issue(request: IssuanceRequest, limits?: IssueLimits): Promise<Issued>;
 	verifyAccess(token: string): Promise<AccessCheck>;

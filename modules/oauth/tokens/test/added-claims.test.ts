@@ -2,7 +2,7 @@ import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
 import { httpConfig } from "@mod/http/testing";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { accessTokenSigning } from "@mod/keys";
 import { keysConfig } from "@mod/keys/testing";
 import { describe, expect, it } from "vitest";
@@ -229,7 +229,35 @@ describe("claims a grant adds to its access token", () => {
 			kind: "invalid",
 			reason: "shape",
 		});
-		const wide = { ...grant, scope: Array.from({ length: 2000 }, (_, i) => `scope-${i}`) };
-		await expect(t.issue({ grant: wide, grantType: "test" })).rejects.toThrow(TypeError);
+	});
+
+	it("refuses an issuance whose token would pass 16 KiB once signed, warning its size and the added claims' names, never a value", async () => {
+		const logged = recordingLog();
+		const app = await assemble({
+			modules: [...composedModules, revokedInMemory(() => runtime.clock.now()).module],
+			config: {
+				...kernelConfig(),
+				...httpConfig({}),
+				...keysConfig({ signing: { kid: "k", alg: "EdDSA", "private-key": privateKey } }),
+				...issuerConfig({ url: "https://issuer.example" }),
+				tokens: { "subject-check": "none", revocation: "unsupported" },
+			},
+			runtime: { ...runtime, log: logged.log },
+		});
+		const wide = {
+			...grant,
+			scope: Array.from({ length: 2000 }, (_, i) => `scope-${i}`),
+			claims: { x_secret_kept: "s3cr3t" },
+		};
+		expect(await app.get(tokens).issue({ grant: wide, grantType: "test" })).toEqual({
+			kind: "refused",
+			policy: "tokens",
+			reason: "token_too_large",
+			description: "too large",
+		});
+		const warned = logged.lines().filter((l) => l.event === "tokens.token_too_large");
+		expect(warned).toMatchObject([{ fields: { limit: 16_384, claims: "x_secret_kept" } }]);
+		expect(Number(warned[0]?.fields.length)).toBeGreaterThan(16_384);
+		expect(JSON.stringify(logged.lines())).not.toContain("s3cr3t");
 	});
 });
