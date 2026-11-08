@@ -14,7 +14,7 @@
 - Provides `mfa-reading`'s `factorReading`, `mfa-binding`'s `factorBinding` and `mfa-managing`'s `factorManaging`, one implementation in each app; their cards hold the members and their rules.
 - `fenceFollower`: the name what moves the fence on a revocation goes by among its followers.
 - Extension point `enforcers`: the modules holding sessions to the factors (`mfa-entry`); without one, whatever the mode, boot is refused.
-- Audit events, with the subject, once written (never for a refused or raced decision but a first binding refused (`mfa.first_binding_conflict`), nor a reset, never with a secret, proof or code): declared in `./audit-events`, listed in the audit event reference.
+- Audit events, with the subject, once written (never for a refused or raced decision but a first binding refused (`mfa.first_binding_conflict`), nor a reset, never with a secret, proof or code): declared in `./audit-events`, listed in the audit event reference. A removal or reissue whose store answer is lost is recorded once a read after it shows it landed, and still answers unavailable.
 - Contributions: `login-gates` amr (each kind taken's, and `mfa` if one adds it); `seal`'s `resealers`, a resealer sealing again what a `previous` key sealed.
 - Section: `mode` (`optional`, which every start warns of as `mfa.not_required`, or `required` by default), `max-factors` (default 10).
 - Store interface `factorStore`: factor lists and claims on unique values, by keys mfa makes, contents opaque; save once, read, change from what it holds, kept without end; a list and a claim changed as one (`updateTogether`), a binding writing its factor and the claim on its unique value at once; mfa refuses to start over a store without it. Needs: never evicted, survives a crash and a failover, reads only what is confirmed.
@@ -26,6 +26,8 @@
 - `kinds` means those composed where another module collects `factorKinds` (`mfa-entry`, `mfa-enrollment`); here, those taken.
 - The rules of each decision are its contract's (`mfa-reading`, `mfa-binding`, `mfa-managing`): what a counting factor is, duplicates, first bindings, the fence, the recovery codes, and how a witnessing judges and is settled.
 - A witness composed (`mfa-witness`) with no witnessing refuses boot, so it is never left unasked.
+- A reissue whose store answer is lost may have replaced the set unseen: the codes, shown only in the answer and kept nowhere to show again, are then gone, and the user reissues.
+- Only a gate's `true` admits a first binding; any other answer does not.
 
 ## Depends on
 - `kernel`, `login-gates`, `seal`, `audit`, `mfa-reading`, `mfa-binding`, `mfa-managing` (the contracts it provides), `mfa-extensions` (the kinds, gates and witnessing), `mfa-witness` (only to refuse a witness left unasked), `labels` (the label's shape)

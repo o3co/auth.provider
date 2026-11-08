@@ -592,6 +592,37 @@ describe("decisions on the subject's factors", () => {
 		expect([written.includes(bound.secret), /"b[12]"/.test(written)]).toEqual([false, false]);
 	});
 
+	it("records a reissue or a removal whose answer is lost once a read shows it landed, and nothing for one that did not", async () => {
+		const { decided, bindCode, events, place } = await serve();
+		const bound = await bindCode("lea");
+		const other = await bindCode("max");
+		const from = events.length;
+		const lose = () => {
+			place.hooks.afterUpdate = async () => {
+				place.hooks.afterUpdate = undefined;
+				throw new Unavailable("factor-store");
+			};
+		};
+		lose();
+		await expect(decided.reissue("lea", await decided.fenceOf("lea"))).rejects.toSatisfy(
+			isUnavailable,
+		);
+		lose();
+		await expect(
+			decided.remove("lea", bound.factor.id, await decided.fenceOf("lea")),
+		).rejects.toSatisfy(isUnavailable);
+		expect(await decided.held("lea")).toEqual([]);
+		// A change that never reached the store is no removal.
+		const fence = await decided.fenceOf("max");
+		place.down.unavailable("update");
+		await expect(decided.remove("max", other.factor.id, fence)).rejects.toSatisfy(isUnavailable);
+		place.down.restore();
+		expect(events.slice(from).map((e) => [e.kind, e.subject, e.attributes])).toEqual([
+			["mfa.recovery_codes.generated", "lea", { kind: "backup", regenerated: "true" }],
+			["mfa.factor.removed", "lea", { kind: "code", factor: bound.factor.id }],
+		]);
+	});
+
 	it("records nothing for a refused binding, removal or reissue", async () => {
 		const { decided, provedCode, bindCode, idOf, events } = await serve({
 			mode: "required",
@@ -1196,7 +1227,8 @@ describe("a gate contributed before a first counting factor", () => {
 		m.contribute(firstBindingGates).by(() => ({
 			admits: async (ask) => {
 				asked.push(ask);
-				return ask.passed === "ok";
+				// Only `true` admits: a truthy answer of another type, whatever the type says, does not.
+				return (ask.passed === "ok" ? true : ask.passed === "truthy" ? 1 : false) as boolean;
 			},
 		})),
 	]);
@@ -1212,6 +1244,9 @@ describe("a gate contributed before a first counting factor", () => {
 			{ subject: "ann", kind: "code", transaction: undefined, passed: undefined, from: undefined },
 			{ subject: "ann", kind: "code", transaction: "t", passed: "ok", from: login },
 		]);
+		expect(await decided.begin("ann", "code", "truthy")).toEqual({
+			kind: "binding-proof-required",
+		});
 		expect(await decided.countingHeld("ann", "binding")).toBe(false);
 		await bindCode("ann", undefined, "ok");
 		expect(await decided.countingHeld("ann", "binding")).toBe(true);
