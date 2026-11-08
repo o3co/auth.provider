@@ -632,6 +632,16 @@ describe("login-password attempts per account", () => {
 		expect((await login(right, elsewhere())).status).toBe(200);
 	});
 
+	it("makes an identifier's first wait as long as account-first-wait, doubling it after", async () => {
+		const { login, simulated } = await serve({ login: { ...budget, "account-first-wait": "10s" } });
+		await login(wrong("alice"), elsewhere());
+		await login(wrong("alice"), elsewhere());
+		expect((await login(wrong("alice"), elsewhere())).headers.get("retry-after")).toBe("10");
+		simulated.shiftClock(10_000);
+		expect((await login(wrong("alice"), elsewhere())).status).toBe(401);
+		expect((await login(wrong("alice"), elsewhere())).headers.get("retry-after")).toBe("20");
+	});
+
 	it("hands back the attempt of a guess users could not judge", async () => {
 		const down = unavailableSwitch<Users>("users");
 		const { login } = await serve({
@@ -663,6 +673,9 @@ describe("login-password attempts per account", () => {
 			{ "account-max-wait": "1.5s" },
 			{ "account-max-wait": 60 },
 			{ "account-window": "10m", "account-max-wait": "15m" },
+			{ "account-first-wait": "0s" },
+			{ "account-first-wait": 1 },
+			{ "account-first-wait": "2m", "account-max-wait": "1m" },
 		]) {
 			await expect(serve({ login }), JSON.stringify(login)).rejects.toBeInstanceOf(BootRefused);
 		}
