@@ -160,6 +160,7 @@ From `@mod/external-jwt`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `external-jwt.key-set-max-age` | string | `1d` |  |  |  | How long after its fetch a key set is still used while no new one can be had, from `1h` to `30d`. |
+| `external-jwt.key-set-refresh` | string | `1h` |  |  |  | How long after its fetch a key set is used before it is fetched again, from `1m` to `30d` and no longer than `key-set-max-age`; fetches stay at least a minute apart. |
 
 ## federation
 

@@ -8,18 +8,21 @@ import {
 import type { JwksSource } from "./contract.ts";
 import { type Candidate, fromJwk } from "./keys.ts";
 
-/** A set is used this long after it was fetched. */
-const holdMs = 3_600_000;
 /** Fetches, whether they worked or not, are at least this far apart. */
 const spacingMs = 60_000;
 
 /**
- * The key set at a URL: fetched when first needed, kept an hour, fetched again at most once a minute,
- * and past `maxAgeMs` after it was fetched never used.
+ * The key set at a URL: fetched when first needed, kept `holdMs`, fetched again at most once a
+ * minute, and past `maxAgeMs` after it was fetched never used.
  */
 export function jwksAt(
 	source: JwksSource,
-	deps: { readonly clock: Clock; readonly outbound: Outbound; readonly maxAgeMs: number },
+	deps: {
+		readonly clock: Clock;
+		readonly outbound: Outbound;
+		readonly maxAgeMs: number;
+		readonly holdMs: number;
+	},
 ) {
 	const { clock } = deps;
 	let kept: { readonly keys: readonly Candidate[]; readonly fetchedAt: number } | undefined;
@@ -67,7 +70,7 @@ export function jwksAt(
 	return {
 		/** The set to check with: the kept one while it holds, else a fresh one where it can be had, else the last. */
 		keys: async (): Promise<readonly Candidate[] | undefined> => {
-			if (!kept || clock.now() - kept.fetchedAt >= holdMs) await refresh();
+			if (!kept || clock.now() - kept.fetchedAt >= deps.holdMs) await refresh();
 			return usable();
 		},
 		/** A fresh set for a key the kept one lacks, where a fetch is due. */

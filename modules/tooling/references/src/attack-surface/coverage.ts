@@ -284,9 +284,19 @@ export const coverage: Coverage = {
 				"past the default day, up to 30: a key set is still used that long after its fetch while no new one can be had, a key removed upstream among it",
 		},
 		{
+			key: "external-jwt.key-set-refresh",
+			weakens:
+				"past the default hour, up to `key-set-max-age`: a key removed upstream is still taken that long after the set's fetch",
+		},
+		{
 			key: "keys.jwks-cache",
 			weakens:
 				"past the default five minutes, up to a day: a verifier may keep taking a key removed from the published set that long",
+		},
+		{
+			key: "rp-logout.logout-token-lifetime",
+			weakens:
+				"past the default five minutes, up to 15: a logout token is taken that long, and one without `sid`, replayed where the client keeps no `jti`, ends the subject's later sessions there",
 		},
 		{
 			key: "client-assertion.max-lifetime",

@@ -31,10 +31,12 @@ const invalid = (reason: Reason) => ({ kind: "invalid", reason });
 /** A refusal found once the signature held: it says so. */
 const signedInvalid = (reason: Reason) => ({ kind: "invalid", reason, signed: true });
 const verifierOf = (keys: KeySource, rules: Policy) =>
-	externalJwtOver({ clock, outbound: unreached, keySetMaxAgeMs: 86_400_000 }).verifierOf(
-		keys,
-		rules,
-	);
+	externalJwtOver({
+		clock,
+		outbound: unreached,
+		keySetMaxAgeMs: 86_400_000,
+		keySetRefreshMs: 3_600_000,
+	}).verifierOf(keys, rules);
 const policy: Policy = { algorithms: ["ES256", "RS256", "EdDSA"], skewMs: 30_000 };
 const fresh = (more: Record<string, unknown> = {}) => ({
 	iss: "https://issuer.example",
@@ -470,7 +472,12 @@ describe("a key set at a URL", () => {
 	}
 	const tick = () => new Promise((done) => setTimeout(done, 0));
 	const fromUrl = (outbound: Outbound) =>
-		externalJwtOver({ clock, outbound, keySetMaxAgeMs: 86_400_000 }).verifierOf(
+		externalJwtOver({
+			clock,
+			outbound,
+			keySetMaxAgeMs: 86_400_000,
+			keySetRefreshMs: 3_600_000,
+		}).verifierOf(
 			{ jwks: { url: "https://issuer.example/jwks", hosts: ["issuer.example"] } },
 			policy,
 		);
@@ -652,7 +659,12 @@ describe("a key set at a URL", () => {
 		]) {
 			const s = served();
 			s.serve([signer.jwk]);
-			const jwt = externalJwtOver({ clock, outbound: s.outbound, keySetMaxAgeMs: 86_400_000 });
+			const jwt = externalJwtOver({
+				clock,
+				outbound: s.outbound,
+				keySetMaxAgeMs: 86_400_000,
+				keySetRefreshMs: 3_600_000,
+			});
 			const token = await signer.sign(fresh());
 			for (const own of order) {
 				const source = { jwks: { url, hosts: ["issuer.example"], ...(own ? { internal } : {}) } };
@@ -667,7 +679,12 @@ describe("a key set at a URL", () => {
 		const rsa = await testSigner("RS256", "k1");
 		const s = served();
 		s.serve([rsa.jwk]);
-		const jwt = externalJwtOver({ clock, outbound: s.outbound, keySetMaxAgeMs: 86_400_000 });
+		const jwt = externalJwtOver({
+			clock,
+			outbound: s.outbound,
+			keySetMaxAgeMs: 86_400_000,
+			keySetRefreshMs: 3_600_000,
+		});
 		const source = { jwks: { url: "https://issuer.example/jwks", hosts: ["issuer.example"] } };
 		const token = await rsa.sign(fresh());
 		const one = jwt.verifierOf(source, { ...policy, algorithms: ["RS256"] });
@@ -692,7 +709,12 @@ describe("a key set at a URL", () => {
 		const rsa = await testSigner("RS256", "k1");
 		const s = served();
 		s.serve([{ ...rsa.jwk, alg: "RS256" }]);
-		const jwt = externalJwtOver({ clock, outbound: s.outbound, keySetMaxAgeMs: 86_400_000 });
+		const jwt = externalJwtOver({
+			clock,
+			outbound: s.outbound,
+			keySetMaxAgeMs: 86_400_000,
+			keySetRefreshMs: 3_600_000,
+		});
 		const source = { jwks: { url: "https://issuer.example/jwks", hosts: ["issuer.example"] } };
 		const both = jwt.verifierOf(source, { ...policy, algorithms: ["RS256", "PS256"] });
 		expect((await both.verify(await rsa.sign(fresh()))).kind).toBe("valid");
@@ -715,7 +737,12 @@ describe("a key set at a URL", () => {
 		const pss = { ...publicKey.export({ format: "jwk" }), kid: "k2", alg: "PS256" };
 		const s = served();
 		s.serve([{ ...rsa.jwk, alg: "RS256" }]);
-		const jwt = externalJwtOver({ clock, outbound: s.outbound, keySetMaxAgeMs: 86_400_000 });
+		const jwt = externalJwtOver({
+			clock,
+			outbound: s.outbound,
+			keySetMaxAgeMs: 86_400_000,
+			keySetRefreshMs: 3_600_000,
+		});
 		const source = { jwks: { url: "https://issuer.example/jwks", hosts: ["issuer.example"] } };
 		const both = jwt.verifierOf(source, { ...policy, algorithms: ["RS256", "PS256"] });
 		expect((await both.verify(await rsa.sign(fresh()))).kind).toBe("valid");
@@ -733,7 +760,12 @@ describe("a key set at a URL", () => {
 		const signer = await testSigner("ES256", "k1");
 		const s = served();
 		s.serve([signer.jwk]);
-		const jwt = externalJwtOver({ clock, outbound: s.outbound, keySetMaxAgeMs: 86_400_000 });
+		const jwt = externalJwtOver({
+			clock,
+			outbound: s.outbound,
+			keySetMaxAgeMs: 86_400_000,
+			keySetRefreshMs: 3_600_000,
+		});
 		const source = { jwks: { url: "https://issuer.example/jwks", hosts: ["issuer.example"] } };
 		const token = await signer.sign(fresh());
 		expect((await jwt.verifierOf(source, policy).verify(token)).kind).toBe("valid");
