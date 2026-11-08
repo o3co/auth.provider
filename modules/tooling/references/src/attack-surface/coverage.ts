@@ -284,6 +284,11 @@ export const coverage: Coverage = {
 				"past the default day, up to 30: a key set is still used that long after its fetch while no new one can be had, a key removed upstream among it",
 		},
 		{
+			key: "external-jwt.key-set-refresh",
+			weakens:
+				"past the default hour, up to `key-set-max-age`: a key removed upstream is still taken that long after the set's fetch",
+		},
+		{
 			key: "client-assertion.max-lifetime",
 			weakens: "past the default hour, up to a day: a client assertion is taken that long",
 		},
