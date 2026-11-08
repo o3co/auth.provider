@@ -223,6 +223,14 @@ describe("what an app beside packages outside the release is given", () => {
 				);
 			}
 		});
+
+		it("refuses a registry for pnpm's own scope, which the image's build fetches pnpm's binary under", () => {
+			const scopes = { "@pnpm": "https://registry.x.example" };
+			const given = { ...outside, registries: { default: "https://r.example", scopes } };
+			expect(() => besideRelease(given, app)).toThrow(
+				"@pnpm: pnpm's own scope, which no record routes",
+			);
+		});
 	});
 
 	it("says of the app's guide that only a package named comes, and says it for no other app", () => {

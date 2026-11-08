@@ -183,6 +183,8 @@ function npmrcOf({ scopes = {} }: Registries): string | undefined {
 		if (!/^@[a-z0-9][a-z0-9._~-]*$/.test(scope) || !isOrigin(origin)) {
 			throw new Error("a scoped registry's record is not a scope and an origin");
 		}
+		// The image's build fetches pnpm's own binary under it, before the install has a credential.
+		if (scope === "@pnpm") throw new Error("@pnpm: pnpm's own scope, which no record routes");
 	}
 	return entries.map(([scope, origin]) => `${scope}:registry=${origin}/\n`).join("");
 }
