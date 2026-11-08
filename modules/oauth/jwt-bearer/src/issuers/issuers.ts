@@ -327,6 +327,15 @@ export async function trustedWith(p: {
 					? fetchedSigners(p.jwt, keySetOf(i), p.policyOf(i))
 					: contributedSigners(p.jwt, keys as NonNullable<typeof keys>, p.policyOf(i), thumbprint),
 		);
+		// Deprecated: a certificate's key is taken with nothing of the certificate checked.
+		for (const [n, key] of ("keys" in i ? i.keys : []).entries()) {
+			if (publicPem(key["public-key"], { withForm: true })?.form === "certificate") {
+				warnings.push({
+					event: "jwt-bearer.certificate_key",
+					where: `${where}.keys.${n}.public-key`,
+				});
+			}
+		}
 		if ("jwks-uri" in i && i["accept-key-set-elsewhere"]) {
 			warnings.push({ event: "jwt-bearer.key_set_elsewhere", where });
 		}
