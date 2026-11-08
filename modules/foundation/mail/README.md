@@ -2,8 +2,7 @@
 
 ## Responsibilities
 - Owns the contract for sending mail: the sending side gives a purpose, one address, values, and optionally a locale and an expiry.
-- Collects the purposes sending sides declare and the templates (wording per purpose); refuses boot when a declared purpose has no template.
-- Refuses boot when a template's purpose is undeclared, naming it: its owner is not composed, or no longer sends it.
+- Collects the purposes sending sides declare and the templates (wording per purpose); refuses boot when a declared purpose has no template, or a template's purpose is undeclared (its owner not composed, or no longer sending it).
 - Prepares each message for every sender: copies and checks it, renders it, checks the rendered result.
 - Holds a plain-text template part and the logging-only sender.
 
