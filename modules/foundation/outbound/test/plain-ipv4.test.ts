@@ -7,7 +7,7 @@ import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
 import { outboundOver, section } from "../src/module.ts";
-import { type Lookup, systemLookup } from "../src/transport.ts";
+import { type Lookup, systemLookup } from "../src/transport/transport.ts";
 
 // A name ECS Service Connect answers, as its hosts file lines give it: 127.255.0.1, which its proxy
 // takes, and 2600:f0f0::1, which in the environment reported does not reach. A connection to
