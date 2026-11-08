@@ -1,8 +1,9 @@
+import { addedClaimsLimits, addedClaimsWith } from "@mod/added-claims";
 import { isUnavailable } from "@mod/kernel";
-import { expect, it } from "vitest";
-import type { IssuancePolicy } from "../../contract.ts";
+import { describe, expect, it } from "vitest";
+import type { IssuancePolicy, IssuanceRequest } from "../../contract.ts";
 import { section } from "../../section.ts";
-import { judging } from "../issuance.ts";
+import { issuing, judging } from "../issuance.ts";
 
 const request = {
 	grant: { subject: "s", issuedTo: "c", audience: ["api"], scope: [] },
@@ -72,4 +73,49 @@ it("takes the policies' deadline written with its unit, from 1s to 1m, 10s unles
 		false,
 		false,
 	]);
+});
+
+describe("the claims a grant adds, as issuing reads them", () => {
+	const seen: IssuanceRequest[] = [];
+	const judge = async (asked: IssuanceRequest) => {
+		seen.push(asked);
+		return { kind: "allowed" } as const;
+	};
+	const issueAccess = async () => {
+		throw new Error("not issued here");
+	};
+	const { admits, issue } = issuing(
+		judge,
+		issueAccess,
+		() => 0,
+		addedClaimsWith(addedClaimsLimits.parse({})).of,
+	);
+	const grant = request.grant;
+
+	it("refuses a null as a TypeError naming its path, before any policy runs, at admits as at issue", async () => {
+		seen.length = 0;
+		const nulled = { grant: { ...grant, claims: { c: { a: null } } }, grantType: "test" };
+		for (const asked of [() => issue(nulled), () => admits(nulled)]) {
+			await expect(asked()).rejects.toThrow("null at c.a");
+		}
+		expect(seen).toEqual([]);
+	});
+
+	it("shows the policies the claims as copied, frozen, at admits as at issue, an empty set as none", async () => {
+		seen.length = 0;
+		const claims = { a: [1] };
+		expect(await admits({ grant: { ...grant, claims }, grantType: "test" })).toEqual({
+			kind: "allowed",
+		});
+		expect(seen[0]?.grant.claims).toEqual(claims);
+		expect(seen[0]?.grant.claims).not.toBe(claims);
+		expect(Object.isFrozen(seen[0]?.grant.claims?.a)).toBe(true);
+		await admits({ grant: { ...grant, claims: {} }, grantType: "test" });
+		expect("claims" in (seen[1]?.grant ?? {})).toBe(false);
+		// issue shows them the same copy before it issues.
+		await expect(issue({ grant: { ...grant, claims }, grantType: "test" })).rejects.toThrow();
+		expect(seen[2]?.grant.claims).toEqual(claims);
+		expect(seen[2]?.grant.claims).not.toBe(claims);
+		expect(Object.isFrozen(seen[2]?.grant.claims?.a)).toBe(true);
+	});
 });
