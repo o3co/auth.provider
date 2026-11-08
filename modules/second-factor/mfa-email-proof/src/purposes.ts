@@ -1,4 +1,4 @@
-/** The purposes this module names; a wording module contributes a template for each. */
+/** The purposes this module sends, each declared to `mail`; a wording module contributes a template for each. */
 export const purposes = {
 	accountEmail: "mfa-email-proof.account-email",
 } as const;

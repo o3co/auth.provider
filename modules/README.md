@@ -275,7 +275,7 @@ What each module contains is described by that module's contract card (each modu
 | Having an operator's reset of second factors remove the subject's passkeys too | contribution | mfa-reset-passkeys |
 | WebAuthn as a second factor (the subject's user handle for it, its amr, the name an authenticator shows) | contribution / setting | mfa-webauthn |
 | A code by mail as a second factor, how a code is mailed to the account's address, and the mail purposes of both below | contribution / setting / contract | mfa-email |
-| The proof of the account's address before a first binding (`account-email`), by mfa-email's rules | contribution | mfa-email-proof |
+| The proof of the account's address before a first binding (`account-email`), by account-mail-code's rules | contribution | mfa-email-proof |
 | The wording of mfa-email's mails, which a deployment replaces | contribution | mfa-email-wording |
 | Mailing a code to the account's address and checking it typed back, for the caller's purpose | contract | account-mail-code |
 | The wording of mfa-email-proof's mails, which a deployment replaces | contribution | mfa-email-proof-wording |
