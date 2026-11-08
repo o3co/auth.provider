@@ -9,6 +9,7 @@
 ## Offers
 - A bridge of `mfa-email`: it comes wherever `mfa-email` is composed, through `combinations`; it opts in, so the full template takes it only with `mfa-email`.
 - Contribution to `mfa-binding-proof`'s binding proofs (boot is refused without `mfa-binding-proof` composed): `account-email`, available while the account has an address `mfa-email` takes; a 16-character code good for ten minutes at most, mailed under `mfa-email`'s purpose `mfa-email.proof`.
+- `purposes` (`mfa-email-proof.account-email`) and their type `Purpose`, for the module that words them.
 - A proof that passes tells `users` the address is the subject's (`verifiedContact`); past the contacts `users` keeps, it still passes, logging `mfa-email.contact_not_kept` without the address.
 
 ## Invariants
