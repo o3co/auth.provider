@@ -20,6 +20,7 @@ Internal module of `federation-grants`: what a grant and a browser step are, and
 - `clientSection`, `permits`, `returnsTo`, `scopeTokens`, `within`, `withoutCredentials`, `secretFrom`.
 
 ## Invariants
+- A refresh answering the access token kept counts its life from now: a back-off, as the next refresh waits half of what is left, so an upstream that keeps answering the same token is asked about five times before its end. Counted from its first obtaining, it would be asked on every request within `refresh-before` until the rotation budget ran out.
 - A record of another shape is none; credentials open only under the grant they were sealed for.
 - Each part of an upstream's tokens is read once; one that throws is none.
 - A grant ends at the earlier of its own end and its activation plus the longest life allowed now, on `kernel`'s clock.
