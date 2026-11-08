@@ -452,6 +452,17 @@ From `@mod/mfa-management`.
 | `mfa-management.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over every POST the routes take. |
 | `mfa-management.window` | string | `5m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, such as `5m`. |
 
+## mfa-totp
+
+From `@mod/mfa-totp`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `mfa-totp.algorithm` | SHA1 \| SHA256 \| SHA512 | `SHA1` |  |  |  | The HMAC new enrolments' codes are made with: SHA1, SHA256 or SHA512. A factor keeps what it was enrolled with; moving it means enrolling again. Some authenticator apps make SHA1 codes whatever the enrolment asks, and the enrolment's first code then fails, so nothing is bound. |
+| `mfa-totp.digits` | integer (6–8) | `6` |  |  |  | How many digits new enrolments' codes have, from 6 to 8. A factor keeps what it was enrolled with; some apps make 6 whatever the enrolment asks. |
+| `mfa-totp.period` | string | `30s` |  |  |  | How long a step of new enrolments' codes lasts: 30s or 60s. A factor keeps what it was enrolled with; some apps step every 30s whatever the enrolment asks. |
+| `mfa-totp.drift-steps` | integer (0–1) | `1` |  |  |  | How many of a factor's own steps either side of the current one a code is taken for, 0 or 1 (RFC 6238 §5.2 advises no more than one); every factor's check reads it. |
+
 ## mfa-webauthn
 
 From `@mod/mfa-webauthn`.

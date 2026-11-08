@@ -225,6 +225,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `mfa-flows.lockout.max-backoff` | `@mod/mfa-flows` | `"1d"` | shortened: holds after failed second-factor guesses end sooner, so more guesses go through |
 | `mfa-flows.lockout.memory` | `@mod/mfa-flows` | `"1d"` | shortened: holds after failed second-factor guesses end sooner, so more guesses go through |
 | `mfa-flows.lockout.threshold` | `@mod/mfa-flows` | `5` | raised, with no upper bound: more second-factor guesses before a hold, so past enough no lockout at all |
+| `mfa-totp.period` | `@mod/mfa-totp` | `"30s"` | `60s`: a code is taken for up to three steps of a minute (with `drift-steps` 1), twice the default's window, so a code phished or read over a shoulder works for an attacker that much longer; it applies to factors enrolled under it |
 | `mfa-webauthn.user-verification` | `@mod/mfa-webauthn` | `"preferred"` | `discouraged`: the authenticator is not asked to verify its user, so whoever holds it passes |
 | `mfa.mode` | `@mod/mfa` | `"required"` | below `required`, using a session needs no second factor |
 | `mtls.mode` | `@mod/mtls` |  | `self-signed`: any certificate that parses binds, with no revocation |
