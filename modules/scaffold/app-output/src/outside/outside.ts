@@ -87,9 +87,18 @@ export function besideRelease(
 			throw new Error(`${m.name}: its record is not a package name, version and integrity`);
 		}
 	}
+	const letThrough = [
+		...outside.modules.filter((m) => outside.fresh?.includes(m.name)),
+		...freshDependencies,
+	];
 	for (const name of outside.fresh ?? []) {
 		if (!outside.modules.some((m) => m.name === name))
 			throw new Error(`${name}: let through as fresh, but not recorded`);
+	}
+	for (const m of letThrough) {
+		// pnpm's exemption names a version as semver writes it, with no build metadata.
+		if (!outsideLock.exemptable(m))
+			throw new Error(`${m.name}: let through as fresh at ${m.version}, which no exemption names`);
 	}
 	const npmrc = npmrcOf(outside.registries);
 	const release = new Map(

@@ -74,8 +74,8 @@ describe("what an app beside packages outside the release is given", () => {
 		for (const field of [
 			{ name: "@x/gr`ant" },
 			{ version: "1.2.0|x" },
-			// A version the script would read as another, and an integrity cut short.
-			{ version: "1.2.0+build" },
+			// A version spelled otherwise than semver spells it, and an integrity cut short.
+			{ version: "v1.2.0" },
 			{ integrity: "sha512-AAAA" },
 			{ integrity: "sha512-AA\n| injected |" },
 		]) {
@@ -343,6 +343,18 @@ describe("what an app beside packages outside the release is given", () => {
 	it("refuses a package let through as fresh that it does not record", () => {
 		expect(() => besideRelease({ ...outside, fresh: ["@x/other"] }, app)).toThrow(
 			"@x/other: let through as fresh, but not recorded",
+		);
+	});
+
+	it("writes a record at a version with build metadata, but lets none through as fresh", () => {
+		const built = { ...grant, version: "1.2.0+build.1" };
+		expect(() => besideRelease({ ...outside, modules: [built] }, app)).not.toThrow();
+		expect(() => besideRelease({ ...outside, modules: [built], fresh: [grant.name] }, app)).toThrow(
+			`${grant.name}: let through as fresh at 1.2.0+build.1, which no exemption names`,
+		);
+		const jose = { name: "jose-lite", version: "1.4.0+build.1", integrity: grant.integrity };
+		expect(() => besideRelease({ ...outside, freshDependencies: [jose] }, app)).toThrow(
+			"jose-lite: let through as fresh at 1.4.0+build.1, which no exemption names",
 		);
 	});
 });

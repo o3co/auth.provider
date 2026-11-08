@@ -19,8 +19,11 @@ export interface Registries {
 	readonly scopes?: Readonly<Record<string, string>>;
 }
 
-/** Whether a record is a package name, a version as `semver` writes it, and an sha256, sha384 or sha512 integrity at its full length. */
+/** Whether a record is a package name, a version as `semver` spells it (build metadata kept), and an sha256, sha384 or sha512 integrity at its full length. */
 export function wellRecorded(recorded: unknown): boolean;
+
+/** Whether a record is well recorded at a version an exemption names: no build metadata. */
+export function exemptable(recorded: unknown): boolean;
 
 export function recordOf(text: string, name: string, registries: Registries): Recorded;
 

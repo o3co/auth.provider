@@ -812,6 +812,7 @@ describe("a dependency of a recorded package, let through though published withi
 		for (const recorded of [
 			{ name: "jose-lite", version: "1.4.0" },
 			{ name: "jose-lite", version: "1.4.0 ", integrity: jose },
+			{ name: "jose-lite", version: "1.4.0+build", integrity: jose },
 			{ name: "jose lite", version: "1.4.0", integrity: jose },
 			{ name: "jose-lite", version: "1.4.0", integrity: "md5-X" },
 			{ name: "jose-lite", version: "1.4.0", integrity: "sha512-A" },
