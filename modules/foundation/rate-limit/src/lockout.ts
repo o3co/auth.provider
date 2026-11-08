@@ -83,6 +83,8 @@ const kept = (state: State): Partial<State> => ({
 	...(state.used?.length ? { used: state.used } : {}),
 });
 
+const keepRefused = "rate-limit: a release's keepMs is a positive integer a time can hold";
+
 const fixedOf = (state: State) =>
 	state.fixed && state.fixedAt !== undefined ? { fixedAt: state.fixedAt } : {};
 
@@ -111,6 +113,9 @@ function released(
 		terms.forgive !== undefined && terms.forgive.firstFailureAt === stands.firstFailureAt;
 	const lifted = terms.lift !== undefined && terms.lift.fixedAt === stands.fixedAt;
 	if (!forgiven && !lifted) return { answer: { kind: "unchanged", ...fixedOf(was) } };
+	const until = now + terms.once.keepMs;
+	// Past the safe range, the time would store a state none can read.
+	if (!Number.isSafeInteger(until)) throw new Error(keepRefused);
 	const staysFixed = was.fixed && !lifted;
 	const endsRun = lifted || (forgiven && !staysFixed);
 	const next: State = {
@@ -122,7 +127,7 @@ function released(
 		fixed: staysFixed,
 		...(staysFixed ? fixedOf(was) : {}),
 		generation: nextGeneration,
-		used: [...(was.used ?? []), { id: terms.once.id, until: now + terms.once.keepMs }],
+		used: [...(was.used ?? []), { id: terms.once.id, until }],
 	};
 	const cleared = { budget: forgiven, run: endsRun, hard: lifted };
 	const answer: Released = {
@@ -288,7 +293,7 @@ export function lockoutCounter(states: LockoutStates): Lockouts {
 			// An id kept for no time is never kept; a keep of no whole number stores a state none can read.
 			const keep = terms.kind === "checked" ? terms.once.keepMs : undefined;
 			if (keep !== undefined && (!Number.isSafeInteger(keep) || keep < 1)) {
-				throw new Error("rate-limit: a release's keepMs is a positive integer");
+				throw new Error(keepRefused);
 			}
 			return changing(name, key, (current, now) => {
 				const done = released(aged(stateOf(current), policy, now), terms, now);

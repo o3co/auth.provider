@@ -500,7 +500,7 @@ describe("releasing a lockout under terms", () => {
 		const { lockouts: l } = await boot();
 		await fail(l, "k1", policy, 2);
 		const standing = await l.standing("l1", "k1", policy);
-		for (const keepMs of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53]) {
+		for (const keepMs of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53, 2 ** 53 - 1]) {
 			const terms = { kind: "checked", once: { id: "z", keepMs }, forgive: standing } as const;
 			await expect(l.releaseUnder("l1", "k1", policy, terms), String(keepMs)).rejects.toThrow(
 				"keepMs",
