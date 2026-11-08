@@ -1,6 +1,6 @@
 import { DestinationRefused } from "@mod/outbound-policy";
 import type { OutboundRequest } from "../contract.ts";
-import { decided } from "../transport.ts";
+import { decided } from "../transport/transport.ts";
 
 /** One header value: printable ASCII on one line, no space at either end. */
 const headerValue = /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/;

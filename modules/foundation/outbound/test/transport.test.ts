@@ -18,7 +18,7 @@ import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
 import { outboundOver, section } from "../src/module.ts";
-import { type Lookup, type Resolver, send } from "../src/transport.ts";
+import { type Lookup, type Resolver, send } from "../src/transport/transport.ts";
 import { authority, destination } from "./fixtures/certificates.ts";
 
 // A connection to `rerouted.from` reaches a local server instead, and is recorded: a private address
