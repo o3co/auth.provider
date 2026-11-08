@@ -127,7 +127,7 @@ flowchart LR
 | `@mod/client-documents` | feature | `@mod/clients`, `@mod/kernel` |
 | `@mod/clients` | feature | `@mod/audit`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/secret-hash` |
 | `@mod/csrf` | feature | `@mod/cookies`, `@mod/http`, `@mod/kernel` |
-| `@mod/login-attributes` | feature | `@mod/users` |
+| `@mod/login-attributes` | feature | `@mod/kernel`, `@mod/users` |
 | `@mod/login-gates` | feature | `@mod/http`, `@mod/kernel`, `@mod/session`, `@mod/url-setting` |
 | `@mod/login-password` | feature | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/login-gates`, `@mod/rate-limit`, `@mod/request-source`, `@mod/users` |
 | `@mod/session` | feature | `@mod/cookies`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/subject-revocation` |

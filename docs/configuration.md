@@ -660,6 +660,9 @@ From `@mod/session-lifecycle`.
 | `session-lifecycle.lifetime` | string | `1h` |  |  |  | How long a session lasts, counted from its opening, from 1m to 30d, such as 8h; its cookie lives as long. The lifetime in force decides on each read, so a shorter one ends sessions opened under a longer one. |
 | `session-lifecycle.sweep-interval` | string | `30s` |  |  |  | How often each host goes on with pending closes, from 1s to 1h, such as 1m; a close whose participants keep failing is retried after half its age, at least this, at most an hour. |
 | `session-lifecycle.recent-authentication` | string | `5m` |  |  |  | How long an authentication stays recent, from 30s to 1h, such as 10m. Where no entry requirement judges changing credentials (no mfa), a sign-in at a known time must be this recent to do so. |
+| `session-lifecycle.attributes.groups-limit` | integer (1–200) | `64` |  |  |  | How many groups a login may name, from 1 to 200; more, and the groups are dropped whole. |
+| `session-lifecycle.attributes.group-limit` | string | `256B` |  |  |  | The longest group name, in UTF-8 bytes, from 1B to 1KiB; one longer, and the groups are dropped whole. |
+| `session-lifecycle.attributes.picture-limit` | string | `2KiB` |  |  |  | The longest picture URL, in UTF-8 bytes, from 1B to 8KiB; one longer is dropped whole. |
 
 ## session-store
 
