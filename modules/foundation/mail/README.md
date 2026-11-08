@@ -37,7 +37,7 @@
 - None stored; the logging-only sender's hash key lives for the process.
 
 ## Depends on
-- `kernel`
+- `kernel`, `mail-address` (the address rule)
 
 ## Vocabulary
 - purpose: a name the sending side gives a kind of message; templates are chosen by it.

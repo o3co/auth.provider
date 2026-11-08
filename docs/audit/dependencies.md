@@ -106,7 +106,7 @@ flowchart LR
 | `@mod/kernel` | common | none |
 | `@mod/keys` | foundation | `@mod/http`, `@mod/kernel` |
 | `@mod/labels` | foundation | none |
-| `@mod/mail` | foundation | `@mod/kernel` |
+| `@mod/mail` | foundation | `@mod/kernel`, `@mod/mail-address` |
 | `@mod/mail-address` | foundation | none |
 | `@mod/metrics` | foundation | `@mod/kernel` |
 | `@mod/outbound` | foundation | `@mod/address-reach`, `@mod/host-entries`, `@mod/kernel`, `@mod/outbound-policy`, `@mod/tls-options`, `@mod/url-setting` |
@@ -136,7 +136,7 @@ flowchart LR
 | `@mod/session-requirements` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/subject-attributes` | feature | `@mod/kernel`, `@mod/login-attributes`, `@mod/session`, `@mod/users` |
 | `@mod/subject-revocation` | feature | `@mod/kernel` |
-| `@mod/users` | feature | `@mod/kernel`, `@mod/mail`, `@mod/secret-hash` |
+| `@mod/users` | feature | `@mod/kernel`, `@mod/mail-address`, `@mod/secret-hash` |
 
 ### log-sinks
 
@@ -225,7 +225,7 @@ flowchart LR
 | `@mod/mfa` | feature | `@mod/audit`, `@mod/kernel`, `@mod/labels`, `@mod/login-gates`, `@mod/mfa-binding`, `@mod/mfa-extensions`, `@mod/mfa-managing`, `@mod/mfa-reading`, `@mod/mfa-witness`, `@mod/seal` |
 | `@mod/mfa-binding` | feature | `@mod/kernel`, `@mod/mfa-extensions`, `@mod/mfa-reading` |
 | `@mod/mfa-binding-proof` | feature | `@mod/kernel`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading`, `@mod/seal` |
-| `@mod/mfa-email` | feature | `@mod/kernel`, `@mod/mail`, `@mod/mfa`, `@mod/mfa-binding-proof`, `@mod/mfa-extensions`, `@mod/subject-attributes`, `@mod/users` |
+| `@mod/mfa-email` | feature | `@mod/kernel`, `@mod/mail`, `@mod/mail-address`, `@mod/mfa`, `@mod/mfa-binding-proof`, `@mod/mfa-extensions`, `@mod/subject-attributes`, `@mod/users` |
 | `@mod/mfa-email-proof` | feature | `@mod/kernel`, `@mod/mfa-binding-proof`, `@mod/mfa-email`, `@mod/users` |
 | `@mod/mfa-email-wording` | adapter | `@mod/kernel`, `@mod/mail`, `@mod/mfa-email` |
 | `@mod/mfa-enrollment` | feature | `@mod/http`, `@mod/kernel`, `@mod/labels`, `@mod/mfa`, `@mod/mfa-binding`, `@mod/mfa-binding-proof`, `@mod/mfa-extensions`, `@mod/mfa-flows`, `@mod/mfa-managing`, `@mod/session`, `@mod/subject-revocation` |
@@ -246,7 +246,7 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/mail-smtp` | adapter | `@mod/address-reach`, `@mod/kernel`, `@mod/mail`, `@mod/tls-options`, `@mod/url-setting` |
+| `@mod/mail-smtp` | adapter | `@mod/address-reach`, `@mod/kernel`, `@mod/mail`, `@mod/mail-address`, `@mod/tls-options`, `@mod/url-setting` |
 
 ### store-redis
 

@@ -392,6 +392,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@mod/mail-address':
+        specifier: workspace:*
+        version: link:../mail-address
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -834,9 +837,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/mail':
+      '@mod/mail-address':
         specifier: workspace:*
-        version: link:../../foundation/mail
+        version: link:../../foundation/mail-address
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -3001,6 +3004,9 @@ importers:
       '@mod/mail':
         specifier: workspace:*
         version: link:../../foundation/mail
+      '@mod/mail-address':
+        specifier: workspace:*
+        version: link:../../foundation/mail-address
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
@@ -3561,6 +3567,9 @@ importers:
       '@mod/mail':
         specifier: workspace:*
         version: link:../../foundation/mail
+      '@mod/mail-address':
+        specifier: workspace:*
+        version: link:../../foundation/mail-address
       '@mod/tls-options':
         specifier: workspace:*
         version: link:../../foundation/tls-options

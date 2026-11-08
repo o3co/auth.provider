@@ -14,6 +14,7 @@
 	},
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
+		"@mod/mail-address": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"peerDependencies": {
