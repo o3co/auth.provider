@@ -76,6 +76,11 @@ describe("choosing a path", () => {
 		expect(chosen(leaf.der, [], trust, 0)).toEqual({ kind: "too many intermediates" });
 	});
 
+	it("finds no path for a leaf that is itself an anchor, as the engine alone found none before", async () => {
+		const pinned = await issue({ cn: "client" });
+		expect(pickOf(pinned, [], [pinned])).toBe("path");
+	});
+
 	it("refuses, asked for self-signed anchors alone, one that is not", async () => {
 		const root = await issue({ cn: "R", ca: true });
 		const held = await issue({ cn: "I", by: root, ca: true });
