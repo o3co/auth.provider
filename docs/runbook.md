@@ -106,12 +106,12 @@ Give every instance the same configuration, and keep their clocks in step: what 
 
 ## Rotating the signing key
 
-Tokens name the key that signed them (`kid`). An instance verifies a token by the key it names and publishes the public keys as its key set (the `jwks_uri` its metadata names), which verifiers may cache for 300 seconds.
+Tokens name the key that signed them (`kid`). An instance verifies a token by the key it names and publishes the public keys as its key set (the `jwks_uri` its metadata names), which verifiers may cache for `keys.jwks-cache` (300 seconds by default).
 
 `keys.signing` signs, `keys.next` is published but never signs, and each `keys.previous` entry is published until its `expires-at`. The ring is read at boot, so every step ends with restarting every instance.
 
 1. **Publish the new key.** Write the new key in `keys.next`, then restart every instance. Tokens are still signed with the current key.
-2. **Wait for caches.** Wait at least 300 seconds after the last instance restarted, so every verifier that cached the key set has the new key.
+2. **Wait for caches.** Wait at least `keys.jwks-cache` (300 seconds by default) after the last instance restarted, so every verifier that cached the key set has the new key.
 3. **Sign with the new key.**
    - Move the new key from `keys.next` to `keys.signing`.
    - Where the new key's `alg` is another, set `oidc.id-token-alg` to it in the same change, and any registered client's `sections.oidc.id-token-alg` that names the old one: an instance whose signing key does not sign with `oidc.id-token-alg` refuses to boot. Until then each start warns `oidc.next_key_alg_differs`. A client read from a metadata document that names the old one in `id_token_signed_response_alg` is refused from the promotion on, at each request, until its relying party changes the document: neither the boot nor the warning shows it, so tell those relying parties first.
