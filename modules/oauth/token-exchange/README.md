@@ -4,6 +4,7 @@
 - Contributes the Token Exchange grant (RFC 8693), `urn:ietf:params:oauth:grant-type:token-exchange`. It issues access tokens only.
 - Owns the extension point for the verifiers of the tokens a client may exchange.
 - Builds the actor chain (`act`), and checks its depth and `may_act`.
+- Chooses the scope and audience issued, through its internal module `target`.
 
 ## Not here
 - Verifying other token types (the contributing side). What a token is tied to, kept by its owners (`grants`' token ties: `refresh`'s family, `session-tokens`' session). Revocation (`tokens`). Whether a binding carries over (`sender-binding`). Client authentication (`token-endpoint`). The client's allowance (`client-allowance`).
@@ -23,8 +24,7 @@
 - A refused token or request is `invalid_request`.
 - The subject token and the actor token must name the calling client, by issued-to or audience, unless its `others-tokens` is true, warned at every start naming the client (`token-exchange.others_tokens`). A foreign token must list the caller in `clients` instead, whatever `others-tokens` says.
 - A once-only token (its verifier has `consume`), or a foreign one, is refused as the actor.
-- The scope lies within the subject token's scope and the client's allowance; left out, it is the subject token's, cut to the client's. Wider is `invalid_scope`. For a foreign token, there is no scope or audience of its own: the client's allowance decides them, by the same rules for `audience` and `resource`.
-- The audience is one the subject token holds and the client is allowed; left out, the only such one. A `resource` must be an absolute URI without a fragment (by `resource-indicators`), and that audience. Otherwise `invalid_target`. It declares it takes its audience from the request, so no rule refuses its `resource` first.
+- The scope and the audience it issues for are its internal module `target`'s: within the subject token's and the client's, or `invalid_scope` and `invalid_target`.
 - A token bound to a key is never exchanged for one without it, for the subject and the actor alike.
 - `act` is the actor's subject over the subject token's chain. Without an actor there is no `act`. A chain past `max-actor-depth` is refused. A `may_act` must name the actor, or the client when there is none; a client never matches an entry with an issuer.
 - A revoked or expired token, or one a tie answers ended (its family, or its session closed or short of a requirement, each told apart in the description), is refused, as subject or actor: the subject's ties first, each token's in their names' order.
