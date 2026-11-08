@@ -27,7 +27,7 @@ export const section = z.strictObject({
 		.max(2048)
 		.prefault(256)
 		.describe(
-			"The longest `nonce` taken, in characters, from 64 to 2048; a longer one is `invalid_request`.",
+			"The longest `nonce` taken, in characters (UTF-16 code units), from 64 to 2048; a longer one is `invalid_request`.",
 		),
 	"state-limit": z
 		.number()
@@ -36,7 +36,7 @@ export const section = z.strictObject({
 		.max(2048)
 		.prefault(512)
 		.describe(
-			"The longest `state` taken, in characters, from 64 to 2048; it goes back in the redirect's Location, so a longer one is `invalid_request`, sent back without it.",
+			"The longest `state` taken, in characters (UTF-16 code units), from 64 to 2048; it goes back in the redirect's Location, so a longer one is `invalid_request`, sent back without it.",
 		),
 	/** Whether every request names `openid` in its own scope (`dual` also serves plain OAuth clients). */
 	"oidc-mode": z
