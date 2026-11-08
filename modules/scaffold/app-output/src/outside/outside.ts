@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { stringify } from "yaml";
-import { type OutsideRecord, outsideLock, type Registries } from "../lockfile/contract.ts";
+import {
+	type OutsideRecord,
+	outsideLock,
+	type Recorded,
+	type Registries,
+} from "../lockfile/contract.ts";
 
 /** The packages outside the release an app composes, as recorded when it is generated. */
 export interface OutsideModules {
@@ -9,6 +14,8 @@ export interface OutsideModules {
 	readonly registries: Registries;
 	/** The names let through though published within the last day, each at its recorded version alone. */
 	readonly fresh?: readonly string[];
+	/** Dependencies of those packages let through though published within the last day, each at its version and integrity alone. */
+	readonly freshDependencies?: readonly Recorded[];
 }
 
 /** What the app is given beside its own files, where it composes packages outside the release. */
@@ -73,7 +80,8 @@ export function besideRelease(
 	},
 ): Beside {
 	if (outside === undefined || outside.modules.length === 0) return nothing;
-	for (const m of outside.modules) {
+	const freshDependencies = outside.freshDependencies ?? [];
+	for (const m of [...outside.modules, ...freshDependencies]) {
 		// Each goes into a table of the guide: only the text a package name, a version and an integrity are made of.
 		if (
 			!/^[@a-z0-9._~/-]+$/.test(m.name) ||
@@ -109,12 +117,16 @@ export function besideRelease(
 			zod: app.zod,
 		},
 		minimumReleaseAge: releaseAge,
-		minimumReleaseAgeExclude: [...held, ...fresh.sort()],
+		minimumReleaseAgeExclude: [
+			...held,
+			...[...fresh, ...freshDependencies.map((d) => `${d.name}@${d.version}`)].sort(),
+		],
 	};
 	const record = {
 		modules: outside.modules,
 		registries: outside.registries,
 		held: heldIntegrities([...held, "zod"], app.integrity ?? {}),
+		...(freshDependencies.length === 0 ? {} : { freshDependencies }),
 	};
 	return {
 		files: {
@@ -130,14 +142,18 @@ export function besideRelease(
 			// Never in a layer: the install stage reads them from where pnpm looks, for that one command.
 			...(npmrc ? { mount: "--mount=type=secret,id=npmrc,target=/root/.npmrc" } : {}),
 		},
-		guide: guideOf(outside.modules, npmrc !== undefined),
+		guide: guideOf(outside.modules, freshDependencies, npmrc !== undefined),
 		// Only the packages named are read: one outside the release brings no other outside it.
 		comesWith:
 			"What they need to run comes with them, and so do the wirings and bridges of the release's modules. A package outside the release brings no other: each wiring and adapter outside it must be listed by name, or boot refuses, naming the contract no module provides.",
 		scripts: false,
 		install:
 			"Install as `## Packages outside this release` below says: its three commands, in their order",
-		index: `\nPackages outside the release, not part of it: \`${recordFile}\` records each one as the app was generated.\n`,
+		index: `\nPackages outside the release, not part of it: \`${recordFile}\` records each one as the app was generated.${
+			freshDependencies.length === 0
+				? ""
+				: ` Installed though published within the last day, as their dependencies: ${freshDependencies.map((d) => `\`${d.name}@${d.version}\``).join(", ")}.`
+		}\n`,
 	};
 }
 
@@ -191,7 +207,11 @@ function heldIntegrities(names: readonly string[], recorded: Readonly<Record<str
 	return Object.fromEntries([...names].sort().map((name) => [name, recorded[name] as string]));
 }
 
-function guideOf(modules: readonly OutsideRecord[], scoped: boolean): string {
+function guideOf(
+	modules: readonly OutsideRecord[],
+	freshDependencies: readonly Recorded[],
+	scoped: boolean,
+): string {
 	return [
 		"",
 		"## Packages outside this release",
@@ -202,6 +222,18 @@ function guideOf(modules: readonly OutsideRecord[], scoped: boolean): string {
 		"|---|---|---|",
 		...modules.map((m) => `| \`${m.name}\` | \`${m.version}\` | \`${m.integrity}\` |`),
 		"",
+		...(freshDependencies.length === 0
+			? []
+			: [
+					`These dependencies of them are installed though published within the last day, as a dependency of a package above, each at this version and integrity alone, which \`${recordFile}\` records and the check holds the lockfile to:`,
+					"",
+					"| Dependency | Version | Integrity |",
+					"|---|---|---|",
+					...freshDependencies.map(
+						(d) => `| \`${d.name}\` | \`${d.version}\` | \`${d.integrity}\` |`,
+					),
+					"",
+				]),
 		"Install it in this order, and commit `pnpm-lock.yaml`:",
 		"",
 		"```sh",

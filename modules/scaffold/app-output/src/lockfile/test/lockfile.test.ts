@@ -375,11 +375,14 @@ describe("the integrity the release recorded of each package the overrides hold"
 });
 
 describe("reading a lockfile as data", () => {
-	it("refuses an unknown tag, an anchor's alias, a duplicate key, another version and one over its bound", () => {
+	it("refuses an unknown tag, an anchor's alias, a merge key, a duplicate key, another version and one over its bound", () => {
 		const read = (text: string) => () => outsideLock.refusals(text, [], {}, registries);
 		expect(read(`${appLock}\nextra: !evil 1\n`)).toThrow(/lockfile not read/);
 		expect(read("lockfileVersion: '9.0'\na: &x {k: 1}\nb: *x\n")).toThrow(
 			/Alias resolution is disabled/,
+		);
+		expect(read("lockfileVersion: '9.0'\npackages:\n  <<: { a@1.0.0: {} }\n")).toThrow(
+			"lockfile not read: it holds a merge key (<<)",
 		);
 		expect(read("lockfileVersion: '9.0'\nlockfileVersion: '9.0'\n")).toThrow(/lockfile not read/);
 		expect(read("lockfileVersion: '6.0'\n")).toThrow("lockfile version 6.0, where 9.0 is read");
@@ -452,7 +455,11 @@ describe("a recorded package declaring a command", () => {
 
 describe("the script an app runs, the file as it ships", () => {
 	/** An app's directory holding the script beside the lockfile, the record and the overrides. */
-	const appWith = (lock: string, held: Record<string, string> | null = recorded) => {
+	const appWith = (
+		lock: string,
+		held: Record<string, string> | null = recorded,
+		more: Record<string, unknown> = {},
+	) => {
 		const app = mkdtempSync(join(tmpdir(), "check-outside-"));
 		copyFileSync(outsideLock.script, join(app, "check-outside.mjs"));
 		// What the app installed is beside the script; the script reads none of it.
@@ -460,9 +467,19 @@ describe("the script an app runs, the file as it ships", () => {
 		writeFileSync(join(app, "pnpm-lock.yaml"), lock);
 		writeFileSync(
 			join(app, "outside-modules.json"),
-			JSON.stringify({ modules: [record], registries, ...(held ? { held } : {}) }),
+			JSON.stringify({
+				modules: [record],
+				registries,
+				...(held ? { held } : {}),
+				...Object.fromEntries(Object.entries(more).filter(([key]) => key !== "workspace")),
+			}),
 		);
-		writeFileSync(join(app, "pnpm-workspace.yaml"), stringify({ overrides }));
+		writeFileSync(
+			join(app, "pnpm-workspace.yaml"),
+			typeof more.workspace === "string"
+				? more.workspace
+				: stringify({ overrides, ...(more.workspace as object) }),
+		);
 		return app;
 	};
 	const run = (app: string) => {
@@ -602,6 +619,57 @@ describe("the script an app runs, the file as it ships", () => {
 		});
 	});
 
+	it("holds each dependency let through to the integrity recorded, as the module does", () => {
+		const jose = parse(appLock).packages["jose-lite@1.4.0"].resolution.integrity as string;
+		const freshDependencies = [{ name: "jose-lite", version: "1.4.0", integrity: jose }];
+		expect(run(appWith(appLock, recorded, { freshDependencies }))).toEqual({
+			code: 0,
+			out: "ok\n",
+		});
+		const swapped = changed((l) => {
+			l.packages["jose-lite@1.4.0"].resolution = { integrity: "sha512-OTHER==" };
+		});
+		expect(run(appWith(swapped, recorded, { freshDependencies }))).toEqual({
+			code: 1,
+			out: `jose-lite: integrity sha512-OTHER==, not ${jose} as recorded to install it fresh\n1 refusal(s)\n`,
+		});
+	});
+
+	it("holds what the settings let through to the record: no exclusion beside a record of nothing, null or another version", () => {
+		const jose = parse(appLock).packages["jose-lite@1.4.0"].resolution.integrity as string;
+		const workspace = {
+			minimumReleaseAgeExclude: ["@o3co/auth-provider-oauth", "jose-lite@1.4.0"],
+		};
+		const lets = "minimumReleaseAgeExclude lets jose-lite@1.4.0 through, which the record does not";
+		const good = [{ name: "jose-lite", version: "1.4.0", integrity: jose }];
+		expect(run(appWith(appLock, recorded, { workspace, freshDependencies: good }))).toEqual({
+			code: 0,
+			out: "ok\n",
+		});
+		// A version as semver writes it alone: pnpm reads `1.2.0+build` as 1.2.0.
+		const built = "@x/grant@1.2.0+build";
+		expect(
+			outsideLock.refusals(
+				appLock,
+				[{ ...record, version: "1.2.0+build" }],
+				overrides,
+				registries,
+				recorded,
+				[],
+				[built],
+			),
+		).toContain(`minimumReleaseAgeExclude lets ${built} through, which the record does not`);
+		const merged = `${stringify({ overrides })}<<: { minimumReleaseAgeExclude: [jose-lite] }\n`;
+		expect(run(appWith(appLock, recorded, { workspace: merged }))).toEqual({
+			code: 1,
+			out: "pnpm-workspace.yaml not read: it holds a merge key (<<)\n",
+		});
+		for (const freshDependencies of [undefined, null, [{ ...good[0], version: "1.4.0 " }]]) {
+			const out = run(appWith(appLock, recorded, { workspace, freshDependencies })).out;
+			expect(out, JSON.stringify(freshDependencies)).toContain(`${lets}\n`);
+		}
+	});
+
 	it("refuses with the module's words, and exits 1", () => {
 		const lock = changed(
 			(l) =>
@@ -615,5 +683,125 @@ describe("the script an app runs, the file as it ships", () => {
 			code: 1,
 			out: `${found.join("\n")}\n${found.length} refusal(s)\n`,
 		});
+	});
+});
+
+describe("a dependency of a recorded package, let through though published within the last day", () => {
+	const jose = parse(appLock).packages["jose-lite@1.4.0"].resolution.integrity as string;
+	const fresh = [{ name: "jose-lite", version: "1.4.0", integrity: jose }];
+	const freshly = (lock: string, list: unknown = fresh) =>
+		outsideLock.refusals(lock, [record], overrides, registries, recorded, list as never);
+
+	it("reads its one version and integrity from the project pnpm installed it into", () => {
+		expect(outsideLock.dependencyRecordOf(stagingLock, "jose-lite", registries)).toEqual({
+			name: "jose-lite",
+			version: "1.4.0",
+			integrity: parse(stagingLock).packages["jose-lite@1.4.0"].resolution.integrity,
+		});
+	});
+
+	it("refuses one the project's lockfile does not hold, holds at two versions, or resolves from no registry", () => {
+		expect(() => outsideLock.dependencyRecordOf(stagingLock, "none-lite", registries)).toThrow(
+			"none-lite: the project's lockfile does not hold it",
+		);
+		const second = changed(
+			(l) => (l.packages["jose-lite@1.5.0"] = { resolution: { integrity: "sha512-SECOND==" } }),
+			stagingLock,
+		);
+		expect(() => outsideLock.dependencyRecordOf(second, "jose-lite", registries)).toThrow(
+			"jose-lite: 1.4.0, 1.5.0 in the project's lockfile, where one is let through",
+		);
+		const directory = changed(
+			(l) => (l.packages["jose-lite@1.4.0"].resolution = { type: "directory", directory: "../j" }),
+			stagingLock,
+		);
+		expect(() => outsideLock.dependencyRecordOf(directory, "jose-lite", registries)).toThrow(
+			"jose-lite: resolved from no registry",
+		);
+	});
+
+	it("passes the app's lockfile installing it as recorded, or holding no such version of it", () => {
+		expect(freshly(appLock)).toEqual([]);
+		expect(freshly(appLock, [{ ...fresh[0], version: "1.9.0" }])).toEqual([]);
+		expect(freshly(appLock, [])).toEqual([]);
+	});
+
+	it("refuses it at another integrity, or from other than its registry", () => {
+		const swapped = changed((l) => {
+			l.packages["jose-lite@1.4.0"].resolution = { integrity: "sha512-SWAPPED==" };
+		});
+		expect(freshly(swapped)).toEqual([
+			`jose-lite: integrity sha512-SWAPPED==, not ${jose} as recorded to install it fresh`,
+		]);
+		const elsewhere = changed((l) => {
+			l.packages["jose-lite@1.4.0"].resolution.tarball =
+				"https://elsewhere.example/jose-lite/-/jose-lite-1.4.0.tgz";
+		});
+		expect(freshly(elsewhere)).toEqual([
+			"jose-lite: its tarball lies at https://elsewhere.example, not at its registry http://127.0.0.1:4873",
+		]);
+	});
+
+	it("refuses its version resolved with no entry of it, or by a resolution naming its own source", () => {
+		const unentered = changed((l) => {
+			delete l.packages["jose-lite@1.4.0"];
+		});
+		expect(freshly(unentered)).toEqual([
+			"jose-lite: the lockfile resolves jose-lite@1.4.0 and holds no entry of it",
+		]);
+		const sourced = changed((l) => {
+			l.snapshots["jose-lite@1.4.0"] = { resolution: { tarball: "https://evil.example/j.tgz" } };
+		});
+		expect(freshly(sourced)).toEqual([
+			"jose-lite: a resolution of jose-lite@1.4.0 names its own source",
+		]);
+	});
+
+	it("refuses an entry of a name the settings let through, or hold, naming another version than its key", () => {
+		const other = parse(appLock).packages["real-lib@1.1.0"].resolution.integrity as string;
+		const renamed = changed((l) => {
+			l.packages["jose-lite@1.5.0"] = { version: "1.4.0", resolution: { integrity: other } };
+		});
+		expect(freshly(renamed)).toEqual([
+			"jose-lite@1.5.0: its entry names version 1.4.0, not its key's",
+		]);
+		const held = Object.keys(parse(appLock).packages).find((key) => key.startsWith("zod@"));
+		const recordedAs = changed((l) => {
+			l.packages[held as string].version = "1.0.0";
+			l.packages["@x/grant@1.2.0"].version = "1.2.0";
+		});
+		expect(freshly(recordedAs)).toEqual([`${held}: its entry names version 1.0.0, not its key's`]);
+		// Nor does a snapshot of one name a version or a source of its own.
+		const grant = Object.keys(parse(appLock).snapshots).find((key) => key.startsWith("@x/grant@"));
+		const snapshotted = changed((l) => {
+			l.packages["jose-lite@1.5.0"] = { resolution: { integrity: other } };
+			l.snapshots["jose-lite@1.5.0"] = { version: "1.4.0" };
+			l.snapshots[grant as string].resolution = { integrity: other };
+		});
+		expect(freshly(snapshotted)).toEqual([
+			`@x/grant: a resolution of ${grant} names its own source`,
+			"jose-lite: a resolution of jose-lite@1.5.0 names its own version",
+		]);
+	});
+
+	it("refuses a record of it that is no list of a name, a version and an integrity", () => {
+		expect(freshly(appLock, { "jose-lite": "1.4.0" })).toEqual([
+			"the record of dependencies let through is not a list",
+		]);
+		for (const recorded of [
+			{ name: "jose-lite", version: "1.4.0" },
+			{ name: "jose-lite", version: "1.4.0 ", integrity: jose },
+			{ name: "jose lite", version: "1.4.0", integrity: jose },
+			{ name: "jose-lite", version: "1.4.0", integrity: "md5-X" },
+			{ name: "jose-lite", version: "1.4.0", integrity: "sha512-A" },
+			{ name: "jose-lite", version: "1.4.0", integrity: `${jose}==` },
+		]) {
+			expect(freshly(appLock, [recorded]), JSON.stringify(recorded)).toEqual([
+				"a dependency let through is not recorded by a name, a version and an integrity",
+			]);
+		}
+		expect(freshly(appLock, null)).toEqual([
+			"the record of dependencies let through is not a list",
+		]);
 	});
 });

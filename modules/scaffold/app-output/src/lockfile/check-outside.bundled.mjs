@@ -8312,19 +8312,28 @@ function specOf(spec) {
 	}
 	return import_semver.default.validRange(text) ? { range: text } : void 0;
 }
-/** The lockfile as data: pnpm's version 9, no anchor resolved, no unknown tag, within its bound. */
-function lockOf(text) {
-	if (Buffer.byteLength(text) > 16777216) throw new Error(`lockfile over ${lockBytes} bytes`);
+const merges = (value) => value !== null && typeof value === "object" && (Object.hasOwn(value, "<<") || Object.values(value).some(merges));
+/** YAML as data: no anchor resolved, no merge key, no unknown tag, no duplicate key. */
+function dataOf(text, what) {
 	const doc = (0, import_dist.parseDocument)(text, {
 		merge: false,
 		uniqueKeys: true
 	});
 	const [problem] = [...doc.errors, ...doc.warnings];
-	if (problem) throw new Error(`lockfile not read: ${problem.message.split("\n")[0]}`);
-	const lock = doc.toJS({ maxAliasCount: 0 });
+	if (problem) throw new Error(`${what} not read: ${problem.message.split("\n")[0]}`);
+	const data = doc.toJS({ maxAliasCount: 0 });
+	if (merges(data)) throw new Error(`${what} not read: it holds a merge key (<<)`);
+	return data;
+}
+/** The lockfile as data, pnpm's version 9, within its bound. */
+function lockOf(text) {
+	if (Buffer.byteLength(text) > 16777216) throw new Error(`lockfile over ${lockBytes} bytes`);
+	const lock = dataOf(text, "lockfile");
 	if (own(lock).get("lockfileVersion") !== "9.0") throw new Error(`lockfile version ${own(lock).get("lockfileVersion")}, where 9.0 is read`);
 	return lock;
 }
+/** pnpm's workspace settings as data, read as a lockfile is. */
+const workspaceOf = (text) => dataOf(text, "pnpm-workspace.yaml");
 /** Every reference the lockfile holds: each importer's three kinds of dependency, and each snapshot's two. */
 function referencesIn(lock) {
 	const found = [];
@@ -8469,22 +8478,61 @@ function recordRefusals(lock, record, overrides, references, registries) {
 * Why the lockfile does not resolve each recorded package as recorded, with the app's `overrides`
 * (name to version) applied, why it holds an overridden package in other than one copy at its
 * version, why either comes from other than its registry in `registries` (the default origin and
-* each scope's), why it was resolved with other overrides, and why an overridden package is not the
-* tarball whose integrity the release recorded (`integrities`, one for each package the overrides
-* hold; one without refused); none where it is as recorded.
+* each scope's), why it was resolved with other overrides, and why an overridden package, or a
+* dependency let through though fresh (`fresh`), is not the tarball whose integrity was recorded
+* (`integrities`, one for each package the overrides hold; one without refused); none where it is.
 */
-function refusals(text, records, overrides, registries, integrities) {
+function refusals(text, records, overrides, registries, integrities, fresh = [], excluded = []) {
 	const lock = lockOf(text);
 	const versions = (map) => new Map([...own(map)].map(([name, version]) => [name, String(version)]));
 	const held = versions(overrides);
 	const references = referencesIn(lock);
 	const resolvedWith = versions(lock.overrides);
+	const named = [...records, ...Array.isArray(fresh) ? fresh : []].map(own);
 	return [
 		...sameMap(resolvedWith, held) ? [] : ["the lockfile was resolved with other overrides than the app's"],
 		...records.flatMap((record) => recordRefusals(lock, record, held, references, registries)),
 		...[...held].sort(([a], [b]) => a < b ? -1 : 1).flatMap(([name, version]) => oneCopyRefusals(lock, name, String(version), references, registries)),
-		...heldIntegrityRefusals(lock, held, own(integrities))
+		...heldIntegrityRefusals(lock, held, own(integrities)),
+		...freshRefusals(lock, fresh, registries, references),
+		...exclusionRefusals(excluded, named, held),
+		...ownedRefusals(lock, /* @__PURE__ */ new Set([...held.keys(), ...named.map((fields) => fields.get("name"))]))
 	];
+}
+const packageName = /^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/;
+const recordedRight = (name, version, integrity) => typeof name === "string" && packageName.test(name) && typeof version === "string" && import_semver.default.valid(version) === version && typeof integrity === "string" && /^(sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)$/.test(integrity);
+function exclusionRefusals(excluded, named, held) {
+	if (!Array.isArray(excluded)) return ["minimumReleaseAgeExclude is not a list"];
+	const recorded = new Set(named.filter((fields) => import_semver.default.valid(fields.get("version")) === fields.get("version")).map((fields) => `${fields.get("name")}@${fields.get("version")}`));
+	return excluded.filter((entry) => typeof entry !== "string" || !(held.has(entry) || recorded.has(entry))).map((entry) => `minimumReleaseAgeExclude lets ${String(entry)} through, which the record does not`);
+}
+/** An entry of a name held, recorded or let through naming a version but its key's, or a snapshot of one naming its own source or version. */
+function ownedRefusals(lock, names) {
+	const keyed = (key) => bare(key).slice(nameOf(key).length + 1);
+	return [...[...own(lock.packages)].flatMap(([key, entry]) => {
+		const version = own(entry).get("version");
+		return names.has(nameOf(key)) && version !== void 0 && String(version) !== keyed(key) ? [`${key}: its entry names version ${String(version)}, not its key's`] : [];
+	}), ...[...own(lock.snapshots)].flatMap(([key, snapshot]) => names.has(nameOf(key)) ? [...own(snapshot).has("resolution") ? ["source"] : [], ...own(snapshot).has("version") ? ["version"] : []].map((what) => `${nameOf(key)}: a resolution of ${key} names its own ${what}`) : [])];
+}
+function freshRefusals(lock, fresh, registries, references) {
+	if (!Array.isArray(fresh)) return ["the record of dependencies let through is not a list"];
+	return fresh.flatMap((recorded) => {
+		const fields = own(recorded);
+		const [name, version, integrity] = [
+			"name",
+			"version",
+			"integrity"
+		].map((key) => fields.get(key));
+		if (!recordedRight(name, version, integrity)) return ["a dependency let through is not recorded by a name, a version and an integrity"];
+		const at = `${name}@${version}`;
+		const snapshots = [...own(lock.snapshots)].filter(([key]) => bare(key) === at);
+		const entry = own(lock.packages).get(at);
+		if (entry === void 0) return snapshots.length > 0 || references.some(({ as, reference }) => as === name && bare(reference) === version) ? [`${name}: the lockfile resolves ${at} and holds no entry of it`] : [];
+		const unregistered = registryRefusal(entry, name, registries);
+		if (unregistered !== void 0) return [unregistered];
+		const found = own(own(entry).get("resolution")).get("integrity");
+		return found === integrity ? [] : [`${name}: integrity ${found}, not ${integrity} as recorded to install it fresh`];
+	});
 }
 /**
 * Why a package the overrides hold is not the tarball the release recorded: its entry at the held
@@ -8520,6 +8568,23 @@ function recordOf(text, name, registries) {
 		integrity: own(own(entry).get("resolution")).get("integrity")
 	};
 }
+function dependencyRecordOf(text, name, registries) {
+	const lock = lockOf(text);
+	const keys = [...own(lock.packages).keys()].filter((key) => nameOf(key) === name);
+	if (keys.length === 0) throw new Error(`${name}: the project's lockfile does not hold it`);
+	const versions = keys.map((key) => bare(key).slice(name.length + 1)).sort();
+	if (versions.length > 1) throw new Error(`${name}: ${versions.join(", ")} in the project's lockfile, where one is let through`);
+	const [version] = versions;
+	if (!import_semver.default.valid(version)) throw new Error(`${name}: the project resolves ${version}, not a version`);
+	const entry = own(lock.packages).get(`${name}@${version}`);
+	const unregistered = registryRefusal(entry, name, registries);
+	if (unregistered !== void 0) throw new Error(unregistered);
+	return {
+		name,
+		version,
+		integrity: own(own(entry).get("resolution")).get("integrity")
+	};
+}
 function entered() {
 	try {
 		return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
@@ -8531,9 +8596,9 @@ function entered() {
 if (entered()) {
 	const read = (file) => readFileSync(file, "utf8");
 	try {
-		const workspace = (0, import_dist.parseDocument)(read("pnpm-workspace.yaml"), { merge: false }).toJS({ maxAliasCount: 0 });
+		const workspace = workspaceOf(read("pnpm-workspace.yaml"));
 		const outside = JSON.parse(read("outside-modules.json"));
-		const found = refusals(read("pnpm-lock.yaml"), outside.modules, Object.fromEntries(own(own(workspace).get("overrides"))), outside.registries, outside.held);
+		const found = refusals(read("pnpm-lock.yaml"), outside.modules, Object.fromEntries(own(own(workspace).get("overrides"))), outside.registries, outside.held, Object.hasOwn(outside, "freshDependencies") ? outside.freshDependencies : [], own(workspace).get("minimumReleaseAgeExclude") ?? []);
 		for (const line of found) process.stdout.write(`${line}\n`);
 		process.stdout.write(found.length === 0 ? "ok\n" : `${found.length} refusal(s)\n`);
 		process.exitCode = found.length === 0 ? 0 : 1;
@@ -8544,4 +8609,4 @@ if (entered()) {
 }
 
 //#endregion
-export { recordOf, refusals };
+export { dependencyRecordOf, recordOf, refusals };
