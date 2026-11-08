@@ -242,6 +242,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `outbound.resolution` | `@mod/outbound` | `"helper"` | `in-process`: names resolve in the app's own process, not in helpers that take none of its environment |
 | `passkeys.user-verification` | `@mod/passkeys` | `"preferred"` | `discouraged`: the authenticator is not asked to verify its user, so whoever holds it passes |
 | `rate-limit.fail-mode` | `@mod/rate-limit` | `"closed"` | `open`: while the store cannot count, a route's request limit lets every request through |
+| `redis.accept-plaintext` | `@mod/redis` | `false` | `true`: `redis://` off this host is taken in production too, the store's traffic and the URL's password readable and changeable on the way; warned at every boot |
 | `redis.durability` | `@mod/redis` |  | `none`: a crash loses the latest writes, spent assertion and proof ids and lockout records among them |
 | `redis.replication` | `@mod/redis` |  | `none`: a failover loses writes, confirmed ones too |
 | `refresh.lifetime` | `@mod/refresh` | `"1d"` | past the default day, up to 365 days: a leaked refresh token family is used that long |

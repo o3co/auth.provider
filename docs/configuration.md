@@ -602,6 +602,7 @@ From `@mod/redis`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `redis.url` | string |  | yes | `REDIS_URL` | `rediss://redis.example.invalid:6379` | The Redis server to connect to, with no query: each option is its own setting. |
+| `redis.accept-plaintext` | boolean | `false` |  |  |  | Accepts `redis://` at a host not loopback by its name, the store's traffic and the URL's password readable and changeable on the way, in production too; every start warns `redis.plaintext`. Without it, production warns at every start too: deprecated, a later release refuses boot for it. |
 | `redis.address-family` | ipv4 \| ipv6 |  |  |  |  | The address family the host's name resolves to: ipv4 or ipv6; either when unset. |
 | `redis.prefix` | string | `store` |  |  |  | What every key the store writes begins with. |
 | `redis.connect-timeout` | string | `2s` |  |  |  | How long connecting to Redis may take, at least 100ms. |
