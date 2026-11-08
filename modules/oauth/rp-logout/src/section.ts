@@ -43,10 +43,10 @@ export const section = z.strictObject({
 		),
 	"frame-wait": setting
 		.duration("ms")
-		.pipe(z.number().int().min(1000).max(10_000))
+		.pipe(z.number().int().min(2000).max(10_000))
 		.prefault("2s")
 		.describe(
-			"How long the front-channel logout page lets the clients' frames load before it moves the browser on, from 1s to 10s: a longer one waits for slow pages, and keeps the person waiting as long.",
+			"How long the front-channel logout page lets the clients' frames load before it moves the browser on, from 2s to 10s: a longer one waits for slow pages, and keeps the person waiting as long; a shorter one would cut a slow client's logout off.",
 		),
 	"error-page": urlSetting({ schemes: ["https"], loopbackHttp: true })
 		.optional()

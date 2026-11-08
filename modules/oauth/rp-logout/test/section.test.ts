@@ -10,7 +10,7 @@ it.each([
 	["confirm-within", "59s", "1m", "15m", "901s"],
 	["logout-token-lifetime", "59s", "1m", "15m", "901s"],
 	["hint-max-age", "59s", "1m", "1d", "86401s"],
-	["frame-wait", "999ms", "1s", "10s", "10001ms"],
+	["frame-wait", "1999ms", "2s", "10s", "10001ms"],
 ])("takes %s from its least to its most, written with its unit", (key, under, low, high, over) => {
 	const takes = (value: unknown) => section.safeParse({ [key]: value }).success;
 	expect([under, low, high, over, 60, "60"].map(takes)).toEqual([
