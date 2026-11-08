@@ -150,7 +150,11 @@ export const certificateOf = (der: Uint8Array) =>
 
 const parsed = (c: pkijs.Certificate | undefined): c is pkijs.Certificate => c !== undefined;
 
-/** The path from the leaf to an anchor, through the candidates given (a chain a peer sent), as of `now`. */
+/**
+ * The path from the leaf to an anchor, through the candidates given (a chain a peer sent), as of
+ * `now`. The engine builds over every candidate and anchor given, unbounded: a caller bounds them, or
+ * hands it one chain.
+ */
 export async function pathOf(
 	leaf: Uint8Array,
 	candidates: readonly Uint8Array[],

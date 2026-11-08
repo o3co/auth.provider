@@ -8,7 +8,7 @@ Internal module of `x509-path`, shared by its path rules and by `revocation`: wh
 
 ## Not here
 - Which certificates and what material are held to the algorithms: `x509-path` and `revocation`.
-- Which algorithms an operator takes: `mtls`'s section.
+- Which algorithms are taken: the caller's rules.
 
 ## Offers
 - `signatureAlgorithms`: `rsa-pkcs1-sha256|384|512`, `rsa-pss-sha256|384|512`, `ecdsa-sha256|384|512`.

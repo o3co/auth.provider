@@ -323,6 +323,50 @@ describe("a verified CRL, apart from the certificate it is asked of", () => {
 		expect(bare.kind === "verified" && "number" in bare.crl).toBe(false);
 	});
 
+	it("asks the issuer again at every judgment: another of the same name and key, unable to sign CRLs or out of date, is unusable", async () => {
+		const { root, intermediate, client } = await hierarchy();
+		const verified = await verifyCrl(
+			await crlOf({ by: intermediate }),
+			intermediate.certificate,
+			Date.now(),
+			skewMs,
+			signatureAlgorithms,
+		);
+		if (verified.kind !== "verified") throw new Error(verified.reason);
+		// The same name and key, as a cross-sign would be: one without cRLSign, one expired.
+		const same = { cn: "intermediate", by: root, ca: true, keys: intermediate.keys };
+		const noCrlSign = await issue({ ...same, keyUsage: 0x04 });
+		expect(crlSays(verified.crl, client.certificate, noCrlSign.certificate, Date.now())).toEqual({
+			kind: "unusable",
+			reason: "issuer cannot sign crls",
+		});
+		const expired = await issue({ ...same, notAfter: Date.now() - 1000 });
+		expect(crlSays(verified.crl, client.certificate, expired.certificate, Date.now())).toEqual({
+			kind: "unusable",
+			reason: "issuer out of date",
+		});
+	});
+
+	it("takes a CRL whose number is not a non-negative INTEGER as malformed", async () => {
+		const { intermediate } = await hierarchy();
+		const numbered = (value: asn1js.BaseBlock) =>
+			new pkijs.Extension({ extnID: "2.5.29.20", extnValue: value.toBER(false) });
+		for (const value of [
+			new asn1js.Utf8String({ value: "7" }),
+			new asn1js.Integer({ value: -1 }),
+		]) {
+			const der = await crlOf({ by: intermediate, extensions: [numbered(value)] });
+			const verified = await verifyCrl(
+				der,
+				intermediate.certificate,
+				Date.now(),
+				skewMs,
+				signatureAlgorithms,
+			);
+			expect(verified).toEqual({ kind: "unusable", reason: "malformed" });
+		}
+	});
+
 	it("tells, asked later, a CRL past its next update stale, and one of another issuer's certificate unusable", async () => {
 		const { root, intermediate, client } = await hierarchy();
 		const next = Date.now() + 60_000;

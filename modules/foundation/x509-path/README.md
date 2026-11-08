@@ -5,12 +5,12 @@
 - Reads the revocation material of a certificate on the path, CRLs and OCSP answers, through `revocation`, and judges what it says.
 
 ## Not here
-- Which certificate to check, which rules hold, where material comes from, keeping it, and what a result leads to: the caller's (`mtls`, `outbound`).
+- Which certificate to check, which rules hold, where material comes from, keeping it, and what a result leads to: the caller's.
 - Fetching: the caller's.
 
 ## Offers
 - `certificateOf` (DER) → the certificate, or none for anything that is not one.
-- `pathOf` (the leaf, the candidates given, `PathRules`, a time) → the path, or a `PathRefusal`.
+- `pathOf` (the leaf, the candidates given, `PathRules`, a time) → the path, or a `PathRefusal`. The engine builds over every candidate and anchor given, unbounded: a caller bounds them, or hands it one chain.
   - `PathRules`: the anchors, the most intermediates, the signature algorithms, the fewest RSA bits, the EC curves taken (any where none are given), the purposes and whether the leaf's or every certificate's extended key usage is held to them, and the key usage bits the leaf's must allow one of.
 - `signatureAlgorithms` and `SignatureAlgorithm`, as `signatures` names them.
 - CRL, OCSP: `revocation`'s, as its card says.

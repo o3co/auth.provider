@@ -118,21 +118,26 @@ export async function verifyCrl(
 	}
 	const number = crl.crlExtensions?.extensions.find((e) => e.extnID === oid.crlNumber);
 	const read = number && decoded(number.extnValue.valueBlock.valueHexView, (schema) => schema);
+	// A CRLNumber is a non-negative INTEGER (RFC 5280 §5.2.3); any other is a CRL unread.
+	const bytes = read instanceof asn1js.Integer ? read.valueBlock.valueHexView : undefined;
+	if (number && (bytes === undefined || ((bytes[0] ?? 0) & 0x80) !== 0))
+		return unusable("malformed");
 	return {
 		kind: "verified",
 		crl: Object.freeze({
 			issuer: crl.issuer,
 			thisUpdate,
 			nextUpdate: next,
-			...(read instanceof asn1js.Integer
-				? { number: BigInt(`0x${hex(read.valueBlock.valueHexView) || "0"}`) }
-				: {}),
+			...(bytes ? { number: BigInt(`0x${hex(bytes) || "0"}`) } : {}),
 			listed,
 		}),
 	};
 }
 
-/** What a verified CRL says of `cert`, `issuer`'s, as of `now`: until its next update or the issuer's end. */
+/**
+ * What a verified CRL says of `cert`, `issuer`'s, as of `now`: until its next update or the issuer's
+ * end. The issuer's name, its right to sign CRLs and its dates are asked again here, every time.
+ */
 export function crlSays(
 	verified: VerifiedCrl,
 	cert: pkijs.Certificate,
@@ -141,6 +146,13 @@ export function crlSays(
 ): Judged {
 	if (verified.nextUpdate < now) return { kind: "unusable", reason: "stale" };
 	if (!verified.issuer.isEqual(cert.issuer)) return { kind: "unusable", reason: "issuer" };
+	// Asked of every judgment: another issuer of the same name and key may be the path's now.
+	if (!keyUsageAllows(issuer, usage.cRLSign)) {
+		return { kind: "unusable", reason: "issuer cannot sign crls" };
+	}
+	if (now < issuer.notBefore.value.getTime() || issuer.notAfter.value.getTime() < now) {
+		return { kind: "unusable", reason: "issuer out of date" };
+	}
 	const until = Math.min(verified.nextUpdate, issuer.notAfter.value.getTime());
 	const entry = verified.listed.get(hex(cert.serialNumber.valueBlock.valueHexView));
 	if (!entry) return { kind: "good", until };
