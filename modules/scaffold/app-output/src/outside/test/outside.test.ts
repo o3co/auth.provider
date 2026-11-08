@@ -7,7 +7,7 @@ import { besideRelease, type OutsideModules } from "../contract.ts";
 const grant = {
 	name: "@x/grant",
 	version: "1.2.0",
-	integrity: "sha512-AAAA",
+	integrity: `sha512-${"A".repeat(86)}==`,
 	dependencies: { "jose-lite": "^1.0.0" },
 	optionalDependencies: {},
 	peerDependencies: {
@@ -74,6 +74,9 @@ describe("what an app beside packages outside the release is given", () => {
 		for (const field of [
 			{ name: "@x/gr`ant" },
 			{ version: "1.2.0|x" },
+			// A version the script would read as another, and an integrity cut short.
+			{ version: "1.2.0+build" },
+			{ integrity: "sha512-AAAA" },
 			{ integrity: "sha512-AA\n| injected |" },
 		]) {
 			expect(() => besideRelease({ ...outside, modules: [{ ...grant, ...field }] }, app)).toThrow(
@@ -130,7 +133,7 @@ describe("what an app beside packages outside the release is given", () => {
 	it("tells the guide and the agents' index which packages lie outside the release, and what to run", () => {
 		const { guide, index } = besideRelease(outside, app);
 		expect(guide).toContain("## Packages outside this release");
-		expect(guide).toContain("| `@x/grant` | `1.2.0` | `sha512-AAAA` |");
+		expect(guide).toContain(`| \`@x/grant\` | \`1.2.0\` | \`sha512-${"A".repeat(86)}==\` |`);
 		const said = [
 			"pnpm install --lockfile-only",
 			"node scripts/check-outside.mjs",
@@ -304,7 +307,7 @@ describe("what an app beside packages outside the release is given", () => {
 	});
 
 	it("records each dependency let through though published within the last day, lets that version alone through, and names it in the guide and the index", () => {
-		const jose = { name: "jose-lite", version: "1.4.0", integrity: "sha512-JOSE" };
+		const jose = { name: "jose-lite", version: "1.4.0", integrity: `sha512-${"J".repeat(86)}==` };
 		const beside = besideRelease({ ...outside, freshDependencies: [jose] }, app);
 		expect(JSON.parse(beside.files["outside-modules.json"] as string).freshDependencies).toEqual([
 			jose,
@@ -314,7 +317,9 @@ describe("what an app beside packages outside the release is given", () => {
 			"@o3co/auth-provider-oauth",
 			"jose-lite@1.4.0",
 		]);
-		expect(beside.guide).toContain("| `jose-lite` | `1.4.0` | `sha512-JOSE` |");
+		expect(beside.guide).toContain(
+			`| \`jose-lite\` | \`1.4.0\` | \`sha512-${"J".repeat(86)}==\` |`,
+		);
 		expect(beside.index).toContain("`jose-lite@1.4.0`");
 		const none = besideRelease(outside, app);
 		expect(JSON.parse(none.files["outside-modules.json"] as string)).not.toHaveProperty(
@@ -325,8 +330,8 @@ describe("what an app beside packages outside the release is given", () => {
 
 	it("refuses a dependency let through whose record is not a package name, version and integrity", () => {
 		for (const jose of [
-			{ name: "jose lite", version: "1.4.0", integrity: "sha512-JOSE" },
-			{ name: "jose-lite", version: "1.4.0|x", integrity: "sha512-JOSE" },
+			{ name: "jose lite", version: "1.4.0", integrity: `sha512-${"J".repeat(86)}==` },
+			{ name: "jose-lite", version: "1.4.0|x", integrity: `sha512-${"J".repeat(86)}==` },
 			{ name: "jose-lite", version: "1.4.0", integrity: "md5-JOSE" },
 		]) {
 			expect(() => besideRelease({ ...outside, freshDependencies: [jose] }, app)).toThrow(

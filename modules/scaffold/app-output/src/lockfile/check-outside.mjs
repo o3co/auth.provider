@@ -258,15 +258,21 @@ export function refusals(
 }
 
 const packageName = /^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/;
-const recordedRight = (name, version, integrity) =>
-	typeof name === "string" &&
-	packageName.test(name) &&
-	typeof version === "string" &&
-	semver.valid(version) === version &&
-	typeof integrity === "string" &&
-	/^(sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)$/.test(
-		integrity,
+export const wellRecorded = (recorded) => {
+	const [name, version, integrity] = ["name", "version", "integrity"].map((key) =>
+		own(recorded).get(key),
 	);
+	return (
+		typeof name === "string" &&
+		packageName.test(name) &&
+		typeof version === "string" &&
+		semver.valid(version) === version &&
+		typeof integrity === "string" &&
+		/^(sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)$/.test(
+			integrity,
+		)
+	);
+};
 
 function exclusionRefusals(excluded, named, held) {
 	if (!Array.isArray(excluded)) return ["minimumReleaseAgeExclude is not a list"];
@@ -311,7 +317,7 @@ function freshRefusals(lock, fresh, registries, references) {
 		const [name, version, integrity] = ["name", "version", "integrity"].map((key) =>
 			fields.get(key),
 		);
-		if (!recordedRight(name, version, integrity)) {
+		if (!wellRecorded(recorded)) {
 			return ["a dependency let through is not recorded by a name, a version and an integrity"];
 		}
 		const at = `${name}@${version}`;

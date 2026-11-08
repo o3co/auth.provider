@@ -390,7 +390,7 @@ it("records the packages outside the release and checks the lockfile against the
 	const grant = {
 		name: "@x/grant",
 		version: "1.2.0",
-		integrity: "sha512-AAAA",
+		integrity: `sha512-${"A".repeat(86)}==`,
 		dependencies: {},
 		optionalDependencies: {},
 		peerDependencies: { zod: "^4.6.0" },
@@ -451,7 +451,7 @@ describe.each([
 			{
 				name: "@x/grant",
 				version: "1.2.0",
-				integrity: "sha512-AAAA",
+				integrity: `sha512-${"A".repeat(86)}==`,
 				dependencies: {},
 				optionalDependencies: {},
 				peerDependencies: {},
@@ -493,7 +493,7 @@ it("tells of what comes with the modules as it holds for the app: the release's,
 	const grant = {
 		name: "@x/grant",
 		version: "1.2.0",
-		integrity: "sha512-AAAA",
+		integrity: `sha512-${"A".repeat(86)}==`,
 		dependencies: {},
 		optionalDependencies: {},
 		peerDependencies: { zod: "^4.6.0" },
@@ -518,7 +518,7 @@ it("takes a registry's credentials as a build secret, only where a scope records
 	const grant = {
 		name: "@x/grant",
 		version: "1.2.0",
-		integrity: "sha512-AAAA",
+		integrity: `sha512-${"A".repeat(86)}==`,
 		dependencies: {},
 		optionalDependencies: {},
 		peerDependencies: { zod: "^4.6.0" },

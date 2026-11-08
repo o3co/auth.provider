@@ -8500,7 +8500,14 @@ function refusals(text, records, overrides, registries, integrities, fresh = [],
 	];
 }
 const packageName = /^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/;
-const recordedRight = (name, version, integrity) => typeof name === "string" && packageName.test(name) && typeof version === "string" && import_semver.default.valid(version) === version && typeof integrity === "string" && /^(sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)$/.test(integrity);
+const wellRecorded = (recorded) => {
+	const [name, version, integrity] = [
+		"name",
+		"version",
+		"integrity"
+	].map((key) => own(recorded).get(key));
+	return typeof name === "string" && packageName.test(name) && typeof version === "string" && import_semver.default.valid(version) === version && typeof integrity === "string" && /^(sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)$/.test(integrity);
+};
 function exclusionRefusals(excluded, named, held) {
 	if (!Array.isArray(excluded)) return ["minimumReleaseAgeExclude is not a list"];
 	const recorded = new Set(named.filter((fields) => import_semver.default.valid(fields.get("version")) === fields.get("version")).map((fields) => `${fields.get("name")}@${fields.get("version")}`));
@@ -8523,7 +8530,7 @@ function freshRefusals(lock, fresh, registries, references) {
 			"version",
 			"integrity"
 		].map((key) => fields.get(key));
-		if (!recordedRight(name, version, integrity)) return ["a dependency let through is not recorded by a name, a version and an integrity"];
+		if (!wellRecorded(recorded)) return ["a dependency let through is not recorded by a name, a version and an integrity"];
 		const at = `${name}@${version}`;
 		const snapshots = [...own(lock.snapshots)].filter(([key]) => bare(key) === at);
 		const entry = own(lock.packages).get(at);
@@ -8609,4 +8616,4 @@ if (entered()) {
 }
 
 //#endregion
-export { dependencyRecordOf, recordOf, refusals };
+export { dependencyRecordOf, recordOf, refusals, wellRecorded };

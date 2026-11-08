@@ -10,6 +10,7 @@
 - Reading a manifest into a record, and writing the record, the script and the overrides into an app: their callers.
 
 ## Offers
+- `outsideLock.wellRecorded` (a record): whether it is a package name, a version as `semver` writes it, and an sha256, sha384 or sha512 integrity at its full length; what the script holds a record of a dependency let through to, and the writer every record.
 - `outsideLock.recordOf` (lockfile text, name, registries): the version and integrity the root importer resolves the name to.
   - It refuses a name the importer lacks, a resolution to no version (a link, a file, an alias), and one from no registry.
 - `outsideLock.dependencyRecordOf` (lockfile text, name, registries): the one version and integrity the lockfile holds of a package it resolves anywhere, as a dependency is.
