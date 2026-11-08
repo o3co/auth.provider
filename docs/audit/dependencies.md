@@ -119,6 +119,7 @@ flowchart LR
 | `@mod/store` | foundation | `@mod/kernel` |
 | `@mod/tls-options` | foundation | `@mod/kernel` |
 | `@mod/url-setting` | foundation | none |
+| `@mod/x509-path` | foundation | none |
 
 ### identity
 
