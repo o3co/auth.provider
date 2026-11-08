@@ -34,6 +34,7 @@
 - An outside JWK with a private member, a `kid` that is no string, or a key member not in its one form, is refused; so is a private PEM.
 - An outside key may verify only for signatures (`use`, `key_ops`) and only under an algorithm its kind and curve fit.
 - Internal modules `material` (outside key material), `secret` (secret settings), `signing` (the provider's key ring) and `jwks` (the public key set).
+- `accessTokenSigning`'s `takenBy` is a composition rule, held by the kernel at assembly and by the guard on shipped imports (imported only by the packages named), not a runtime defence: an access token is made only through `tokens`, so none skips its issuance policies, revocation and subject check.
 
 ## Depends on
 - `kernel`, `http`

@@ -1,13 +1,13 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import { isUnavailable, type Log, Unavailable } from "@mod/kernel";
-import type { PasskeyHolders } from "@mod/passkeys";
+import type { PasskeyClearing } from "@mod/passkeys";
 import type { Revocations } from "@mod/subject-revocation";
 import events from "./audit-events.ts";
 import type { PasskeyReset, PasskeyResetOutcome, PasskeyResetPart } from "./contract.ts";
 
 export interface ResetParts {
 	readonly revocations: Pick<Revocations, "record">;
-	readonly holders: Pick<PasskeyHolders, "cleared">;
+	readonly holders: Pick<PasskeyClearing, "cleared">;
 	readonly audit: Pick<Audit, "record">;
 	readonly log: Log;
 }
