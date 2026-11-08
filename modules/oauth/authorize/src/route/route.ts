@@ -16,8 +16,6 @@ import { urlFrom } from "../url.ts";
 
 export const path = "/oauth/authorize";
 
-/** The longest value taken of any parameter, in characters. */
-const maxValue = 2048;
 const found = (status: number, location: string): HttpResponse => ({
 	status,
 	headers: { ...noStore, location },
@@ -62,10 +60,9 @@ export function routeWith({
 		}
 		const source = request.query;
 		const repeated = source.repeated();
-		const tooLong = [...source]
-			.filter(([, values]) => values.some((v) => v.length > maxValue))
-			.map(([name]) => name);
-		const one = (name: string) => (tooLong.includes(name) ? undefined : source.single(name));
+		// Each value is held to its reader's bound (the client's id, the registered redirect URI, the
+		// nonce, the claims request, the hint), and the request to `http`'s; only `state` is this route's.
+		const one = (name: string) => source.single(name);
 
 		const clientId = one("client_id");
 		if (!clientId) return oauthError(400, "invalid_request", "client_id is required once");
@@ -105,7 +102,7 @@ export function routeWith({
 				? ruled
 					? refusal(ruled.error, ruled.description)
 					: refusal("invalid_request", "repeated parameter")
-				: tooLong.length > 0 || (stateText !== undefined && state === undefined)
+				: stateText !== undefined && state === undefined
 					? refusal("invalid_request", "parameter too long")
 					: undefined;
 		const params = new Map([...source].map(([name, values]) => [name, values[0] ?? ""]));

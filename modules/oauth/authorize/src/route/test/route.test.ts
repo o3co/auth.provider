@@ -199,9 +199,25 @@ describe("route: an OpenID Connect request", () => {
 		const repeated = oidc();
 		repeated.set("nonce", ["n1", "n2"]);
 		expect(await sentBack(issued.answer, repeated)).toEqual(refused("invalid_request"));
-		expect(await sentBack(issued.answer, oidc({ nonce: "n".repeat(2049) }))).toEqual(
-			refused("invalid_request"),
-		);
+	});
+
+	it("hands a value of any length but state's on to the flow, each held to its reader's bound there", async () => {
+		const read: (string | undefined)[] = [];
+		const reading = route(async ({ one }) => {
+			read.push(
+				...["id_token_hint", "claims", "nonce", "x-other"].map(one).map((v) => v?.slice(0, 1)),
+			);
+			return { kind: "code", code: "c1", subject: "a" };
+		}, find);
+		const long = (c: string) => c.repeat(4096);
+		const sent = oidc({
+			id_token_hint: long("h"),
+			claims: long("c"),
+			nonce: long("n"),
+			"x-other": long("x"),
+		});
+		expect((await sentBack(reading.answer, sent))[2]).toBe("c1");
+		expect(read).toEqual(["h", "c", "n", "x"]);
 	});
 
 	it("sends back a state up to the package's state-limit, and refuses a longer one without it", async () => {
@@ -239,7 +255,7 @@ describe("route: an OpenID Connect request", () => {
 		const repeated = oidc();
 		repeated.set("nonce", ["n1", "n2"]);
 		await kept.answer(testRequest({ query: repeated }));
-		const answered = await kept.answer(testRequest({ query: oidc({ nonce: "n".repeat(2049) }) }));
+		const answered = await kept.answer(testRequest({ query: oidc({ state: "s".repeat(513) }) }));
 		expect(handed).toEqual([
 			{ kind: "refuse", error: "invalid_request", description: "repeated parameter" },
 			{ kind: "refuse", error: "invalid_request", description: "parameter too long" },

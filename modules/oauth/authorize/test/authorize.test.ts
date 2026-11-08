@@ -1725,6 +1725,13 @@ describe("authorize: an id_token_hint", () => {
 		expect(both.at?.searchParams.has("code")).toBe(true);
 	});
 
+	it("hands a hint longer than 2048 characters, as an ID token with added claims may be, to its reader", async () => {
+		const { authorize, login } = await serve();
+		const long = "a".repeat(4000);
+		const res = await authorize(hinted(`id:${long}`), await login(long));
+		expect(res.at?.searchParams.has("code")).toBe(true);
+	});
+
 	it("reads no hint in a request without openid", async () => {
 		const { authorize, login } = await serve();
 		const oauth = request({ scope: "read", id_token_hint: "id:bob" });
