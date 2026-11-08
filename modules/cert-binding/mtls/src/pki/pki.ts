@@ -1,4 +1,4 @@
-import { certificateOf, type PathRefusal, type PathRules, pathOf } from "@mod/x509-path";
+import { certificateOf, type PathRefusal, type PathRules, pathOf, trustOf } from "@mod/x509-path";
 import type { Checked, PathPolicy, Pki, RevocationPolicy, Sources } from "./contract.ts";
 import { revocationOver } from "./revocation/revocation.ts";
 
@@ -27,6 +27,8 @@ export function pkiOver(
 	path: PathPolicy,
 	revocation?: { readonly policy: RevocationPolicy; readonly sources: Sources },
 ): Pki {
+	// The operator's anchors, as written: one need not be self-signed, and nothing above it is asked.
+	const trust = trustOf({ anchors: path.anchors, selfSignedAnchorsOnly: false });
 	const revocations =
 		revocation &&
 		revocationOver(
@@ -39,7 +41,7 @@ export function pkiOver(
 		);
 	return {
 		check: async (leaf, chain, now): Promise<Checked> => {
-			const built = await pathOf(leaf, chain, rulesOf(path), now);
+			const built = await pathOf(leaf, chain, trust, rulesOf(path), now);
 			if (built.kind === "invalid") return { kind: "invalid", reason: reasonOf(built.reason) };
 			if (!revocations) return { kind: "valid" };
 			const status = await revocations.check(built.path);
