@@ -2,6 +2,7 @@ import { userAttribute } from "@mod/users";
 import { describe, expect, it } from "vitest";
 import {
 	attributeCaps,
+	keptAttributes as deprecatedKept,
 	keepingWith,
 	loginSource,
 	sourcedAttributesShape,
@@ -22,6 +23,15 @@ describe("login sources", () => {
 		}
 		expect(Object.isFrozen(loginSource)).toBe(true);
 	});
+});
+
+it("still offers keptAttributes, deprecated, keeping as keepingWith does under the default caps", () => {
+	const given = {
+		source: "users",
+		values: { name: "Al", groups: Array.from({ length: 65 }, (_, n) => `g${n}`) },
+	};
+	expect(deprecatedKept(given)).toEqual(keptAttributes(given));
+	expect(deprecatedKept(given).kept?.values).toEqual({ name: "Al" });
 });
 
 describe("keeping a login's attributes", () => {
