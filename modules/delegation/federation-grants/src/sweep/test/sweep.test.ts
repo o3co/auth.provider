@@ -4,6 +4,7 @@ import type { Seal } from "@mod/seal";
 import { expect, it } from "vitest";
 import { memoryStores } from "../../../test/stores.ts";
 import { type Grant, type Judge, recordsWith } from "../../grant/grant.ts";
+import { revocationWith, unlistingWith } from "../../retention/retention.ts";
 import { sweepWith } from "../sweep.ts";
 
 const day = 86_400_000;
@@ -38,6 +39,8 @@ async function swept() {
 		grants: stores.grants,
 		records,
 		judge,
+		revocation: revocationWith(judge, 30 * day),
+		unlisted: unlistingWith(stores.subjects, logged.log),
 		audit: { record: (event) => void events.push(event), lost: () => ({}) },
 		...runtime,
 	});

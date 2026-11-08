@@ -1,5 +1,5 @@
 import type { GrantIntents, HeldTokens } from "../browser.ts";
-import { credentialsFrom, type Grant, retentionMs } from "../grant/grant.ts";
+import { credentialsFrom, type Grant } from "../grant/grant.ts";
 import type { Common } from "./common.ts";
 import { foundOf, type Judged, refOf } from "./found.ts";
 import { carried } from "./intents.ts";
@@ -15,6 +15,7 @@ export function callbackWith({
 	back,
 	failed,
 }: Common): Pick<GrantIntents, "resumed" | "stillValid" | "judged" | "activated"> {
+	const retentionMs = p.settings.retention * 1000;
 	return {
 		resumed: async (taken) => {
 			const kept = carried.safeParse(taken);

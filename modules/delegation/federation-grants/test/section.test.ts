@@ -5,6 +5,7 @@ import { section } from "../src/section.ts";
 const times = [
 	["default-lifetime", 60, 31_536_000, "30d"],
 	["max-lifetime", 60, 31_536_000, "30d"],
+	["retention", 86_400, 31_536_000, "30d"],
 	["connect-lifetime", 60, 3600, "10m"],
 	["refresh-before", 0, 3600, "30s"],
 	["rotation-window", 1, 86_400, "1h"],
@@ -58,6 +59,7 @@ describe("federation-grants' section: its times", () => {
 			connections: {},
 			"default-lifetime": 2_592_000,
 			"max-lifetime": 2_592_000,
+			retention: 2_592_000,
 			"connect-lifetime": 600,
 			"refresh-before": 30,
 			rotations: 24,

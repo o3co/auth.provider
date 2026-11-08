@@ -89,9 +89,6 @@ const stepShape = z
 	})
 	.readonly();
 
-/** How long a grant's record stays after it can no longer be used, so status still answers. */
-export const retentionMs = 30 * 86_400_000;
-
 /** A secret from `random`: 32 bytes, base64url. */
 export const secretFrom = (random: Random) => () =>
 	Buffer.from(random.bytes(32)).toString("base64url");

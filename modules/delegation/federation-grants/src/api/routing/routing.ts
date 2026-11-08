@@ -49,19 +49,17 @@ export function routingWith(
 		if (grant.status === "revoked" || !(await p.judge.revoked(grant))) {
 			return { grant, ended: false };
 		}
-		const revoked = (g: Grant): Grant => ({
-			...withoutCredentials(g),
-			status: "revoked",
-			reason: "backstop",
-		});
+		const at = p.clock.now();
 		const changed = await p.grants.change(grant.id, (stored) => {
 			const now = records.grantOf(stored);
 			if (!now || now.status === "revoked") return undefined;
-			return { value: records.stored(revoked(now)) };
+			const revoked = p.revocation(now, "backstop", at);
+			return { value: records.stored(revoked.grant), lifetimeMs: revoked.lifetimeMs };
 		});
 		const after = records.grantOf(changed?.after);
 		const ended = records.grantOf(changed?.before)?.status !== "revoked" && after !== undefined;
-		return { grant: after ?? revoked(grant), ended };
+		if (ended) await p.unlisted(grant);
+		return { grant: after ?? p.revocation(grant, "backstop", at).grant, ended };
 	};
 	/** Erases the credentials of a grant past its end (its own, or the longest life allowed now); its status stays to be answered. */
 	const lapse = async (grant: Grant): Promise<Grant> => {

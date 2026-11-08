@@ -360,7 +360,7 @@ Compose `federation-grants` and its store, `federation-grants-store`; there is n
 | `redis-federation-grant-store.encryptionKeys` | `seal.current`, `seal.previous` | One ring for every sealed record |
 | `redis-federation-grant-store.encryptionMode` | removed | Always sealed |
 | `redis-federation-grant-store.keyPrefix`, `redis-federation-grant-intent-store.keyPrefix` | `redis.prefix` | One prefix for every store |
-| `redis-federation-grant-store.listingAllowanceMs`, `tombstoneRetention`; `core-federation-grant-store-memory.tombstoneRetention` | removed | A revoked or ended grant answers its status for 30 days past the grant's end; fixed |
+| `redis-federation-grant-store.listingAllowanceMs`, `tombstoneRetention`; `core-federation-grant-store-memory.tombstoneRetention` | removed | A revoked or ended grant answers its status for 30 days past the grant's end; fixed (from 0.20, `federation-grants.retention` sets it, and a revoked grant is kept that long past its revocation) |
 | `mfa.page.url` (the step-up page connect followed) | `federation-grants.step-up-page` | Absolute https URL; without it, a session short of a requirement gets `403`. `federation-grants-connect.step-up-page` from 0.19 |
 | (none) | `federation-grants-store.pending-per-client-and-subject`, `grants-per-subject` | Defaults 16 and 100; past the cap the one ending first is pushed out |
 

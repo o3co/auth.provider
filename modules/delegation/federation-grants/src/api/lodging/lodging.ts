@@ -4,7 +4,6 @@ import {
 	type Grant,
 	type Intent,
 	permits,
-	retentionMs,
 	returnsTo,
 	scopeTokens,
 	within,
@@ -145,7 +144,7 @@ export function lodgingWith({
 			rotations: { from: now, count: 0 },
 		};
 		const connectMs = settings["connect-lifetime"] * 1000;
-		await p.grants.create(grant.id, records.stored(grant), connectMs + retentionMs);
+		await p.grants.create(grant.id, records.stored(grant), connectMs + settings.retention * 1000);
 		await p.listed(grant, connectMs);
 		// Past the pair's cap, the intents that end first are pushed out, and end.
 		const { pushedOut } = await p.pending.add(`${client.id}\n${subject}`, grant.id, connectMs);

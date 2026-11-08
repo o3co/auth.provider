@@ -97,6 +97,17 @@ export function grantStoreContract(name: string, open: () => Promise<GrantPlace>
 			expect(await place.grants.read(id)).toBeUndefined();
 		});
 
+		it("ends a grant sooner where a change gives a lifetime shorter than what was left", async () => {
+			const place = await open();
+			const id = fresh();
+			await place.grants.create(id, grant({ n: 1 }), 60_000);
+			await place.grants.change(id, () => ({ value: grant({ n: 2 }), lifetimeMs: 1000 }));
+			place.advance(999);
+			expect(await place.grants.read(id)).toBeDefined();
+			place.advance(1);
+			expect(await place.grants.read(id)).toBeUndefined();
+		});
+
 		it("keeps a step by its secret, which the place never holds in clear", async () => {
 			const place = await open();
 			const secret = `s3cr3t-${fresh()}`;
