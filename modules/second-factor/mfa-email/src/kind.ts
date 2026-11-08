@@ -1,11 +1,16 @@
+import {
+	longCode,
+	mailedCodes,
+	readLongCode,
+	readShortCode,
+	shortCode,
+} from "@mod/account-mail-code";
 import { Unavailable } from "@mod/kernel";
 import type { Mail } from "@mod/mail";
 import type { FactorKind, Opened, Sending } from "@mod/mfa-extensions";
 import type { SubjectAttributes } from "@mod/subject-attributes";
 import type { Users } from "@mod/users";
 import { z } from "zod";
-import { longCode, readLongCode, readShortCode, shortCode } from "./codes.ts";
-import { mailedCodes } from "./mailed.ts";
 import { purposes } from "./purposes.ts";
 
 /** A code kept for its proof: the code, and when it stops being good (epoch ms on `kernel`'s clock). */

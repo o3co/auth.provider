@@ -10,9 +10,9 @@
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
+		"@mod/account-mail-code": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/mail": "workspace:*",
-		"@mod/mail-address": "workspace:*",
 		"@mod/mfa": "workspace:*",
 		"@mod/mfa-binding-proof": "workspace:*",
 		"@mod/mfa-email-proof": "workspace:*",

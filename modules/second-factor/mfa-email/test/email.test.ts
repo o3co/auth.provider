@@ -15,11 +15,11 @@ import {
 	bindingProof,
 	bindingProofs,
 } from "@mod/mfa-binding-proof";
+import { proofName } from "@mod/mfa-email-proof";
 import { type FactorKind, factorKinds } from "@mod/mfa-extensions";
 import { subjectAttributes } from "@mod/subject-attributes";
 import { type Users, users } from "@mod/users";
 import { beforeEach, expect, it } from "vitest";
-import { readLongCode, shortCode } from "../src/codes.ts";
 import emailModule from "../src/module.ts";
 
 let now = 1_800_000_000_000;
@@ -108,7 +108,7 @@ const proofPlace = defineModule(
 
 /** What mfa-email-proof contributes, as far as this kind's boot asks: the proof's name. */
 const accountEmail: BindingProof = {
-	name: "account-email",
+	name: proofName,
 	available: async () => false,
 	send: async () => ({ kind: "refused" }),
 	check: async () => false,
@@ -235,11 +235,6 @@ it("takes one mailbox in one form, its domain in ASCII and lower case", async ()
 	expect(await kind.enroll("ann", [factor])).toEqual({ kind: "duplicate" });
 	contacts.set("ann", "ann@XN--BCHER-KVA.example");
 	expect((await kind.challenge?.("ann", factor, now + 60_000))?.kind).toBe("sent");
-});
-
-it("masks an address by its first character, however many code units it takes", async () => {
-	const { enrolled } = await annEnrolled("\u{20bb7}\u7530@example.jp");
-	expect(enrolled.show).toMatchObject({ sent_to: "\u{20bb7}***@example.jp" });
 });
 
 it("refuses before sending an address the subject already holds, and an account without one", async () => {
@@ -379,21 +374,6 @@ it("fails as unavailable, sending nothing and judging no code, on a stored value
 	await expect(kind.enroll("ann", [broken])).rejects.toSatisfy(isUnavailable);
 });
 
-it("sends to an address in NFC, however the account states it", async () => {
-	const { kind } = await boot();
-	contacts.set("amy", "Ame\u0301lie@example.com");
-	expect("secret" in (await kind.enroll("amy", []))).toBe(true);
-	expect(last().to).toBe("Am\u00e9lie@example.com");
-});
-
-it("draws six digits evenly: a draw past the last whole million is drawn again", () => {
-	const draws = [
-		[255, 255, 255, 255],
-		[0, 0, 0, 1],
-	];
-	expect(shortCode(() => Uint8Array.from(draws.shift() ?? []))).toBe("000001");
-});
-
 it("declares each purpose it sends, and words none: its wording module does", async () => {
 	const { purposes, templates } = await boot();
 	expect([...purposes].sort()).toEqual([
@@ -402,25 +382,6 @@ it("declares each purpose it sends, and words none: its wording module does", as
 		"mfa-email.proof",
 	]);
 	expect(templates).toEqual([]);
-});
-
-it("reads a long code in any case, with hyphens or spaces, O as 0 and I or L as 1", () => {
-	expect(readLongCode(" abcd-efgh ijkl mnop ")).toBe("ABCDEFGH1JK1MN0P");
-	expect(readLongCode("ABCDEFGH1JK1MN0")).toBeUndefined();
-	expect(readLongCode("ABCDEFGH1JK1MN0U")).toBeUndefined();
-	expect(readLongCode("x".repeat(65))).toBeUndefined();
-});
-
-it("reads only ASCII letters, digits, hyphens and spaces, never a character that changes case into one", () => {
-	for (const typed of [
-		"\u0131BCDEFGH1JK1MN0P",
-		"ABCDEFGH1JK1MN0\u017f",
-		"\ufb00BCDEFGH1JK1MN0",
-		"ABCDEFGH\u30001JK1MN0P",
-		"ABCDEFGH\t1JK1MN0P",
-	]) {
-		expect(readLongCode(typed), JSON.stringify(typed)).toBeUndefined();
-	}
 });
 
 it("takes all it names", async () => {
