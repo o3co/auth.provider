@@ -25,6 +25,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `grant` (`src/grant`): what a grant and a browser step are, and the judgments the other internal modules share.
   - `intents` (`src/intents`): a grant's intent through the browser, as the package owns it.
   - `refresh` (`src/refresh`): handing a grant's upstream token, and renewing it.
+  - `retention` (`src/retention`): how long a grant's record and its subject listing are kept once it can no longer be used.
   - `sweep` (`src/sweep`): erasing the credentials of grants no request reads.
 - `@mod/federation-grants-connect` (feature, `modules/delegation/federation-grants-connect`): Joins `federation-grants`: runs its browser half, the link a client sends the user to, the question, the user's decision and the upstream's callback, over the intents federation-grants owns (`grantIntents`).
   - `connect` (`src/connect`): the browser half of a connection.
