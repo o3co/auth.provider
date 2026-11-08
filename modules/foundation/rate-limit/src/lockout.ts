@@ -38,8 +38,35 @@ type State = {
 type Hold = Extract<Lockout, { kind: "held" }>["hold"];
 
 const empty: State = { run: 0, lastAt: 0, spent: [], holdUntil: 0, fixed: false };
-const stateOf = (value: Json | null | undefined): State =>
-	value && typeof value === "object" && !Array.isArray(value) ? (value as State) : empty;
+const time = (v: unknown) => Number.isSafeInteger(v);
+const timeOrNone = (v: unknown) => v === undefined || time(v);
+const wellShaped = (v: { readonly [k: string]: unknown }) =>
+	time(v.run) &&
+	time(v.lastAt) &&
+	time(v.holdUntil) &&
+	Array.isArray(v.spent) &&
+	v.spent.every(time) &&
+	typeof v.fixed === "boolean" &&
+	timeOrNone(v.fixedAt) &&
+	timeOrNone(v.named) &&
+	timeOrNone(v.generation) &&
+	(v.used === undefined ||
+		(Array.isArray(v.used) &&
+			v.used.every(
+				(u) => u !== null && typeof u === "object" && typeof u.id === "string" && time(u.until),
+			)));
+/** No state is no hold; one of another shape is unavailable, never read as no hold. */
+const stateOf = (value: Json | null | undefined): State => {
+	if (value === null || value === undefined) return empty;
+	if (
+		typeof value !== "object" ||
+		Array.isArray(value) ||
+		!wellShaped(value as { readonly [k: string]: unknown })
+	) {
+		throw new Unavailable("rate-limit");
+	}
+	return value as unknown as State;
+};
 
 /** The state as of `now`: a quiet run is forgotten; failures older than the budget window and ids past keeping drop out. */
 function aged(state: State, policy: LockoutPolicy, now: number): State {
