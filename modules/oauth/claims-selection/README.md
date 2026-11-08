@@ -32,7 +32,7 @@
 - Writes and reads that fail throw to the caller.
 
 ## Data
-- Records: a code's selection for the code's lifetime and a minute, for clock drift between hosts; a pin for five minutes, a fixed margin over the one exchange it covers; a family's target until the family's end; a token's target until the token's end and two minutes, for clock drift between hosts.
+- Records: a code's selection for the code's lifetime and a minute, so a code still alive finds it; a pin for five minutes, a fixed margin over the one exchange it covers; a family's target until the family's end; a token's target until the token's end and two minutes, for clock drift between hosts.
 - Needs: no eviction, a crash survived, no rollback on failover; a lost record would let a constrained claim go out unconstrained.
 
 ## Depends on
