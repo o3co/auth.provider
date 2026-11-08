@@ -29,6 +29,7 @@ const expectedOf = (noSkip: boolean): Expected => ({
 	suffixed: [{ entry: faultRun, pkg, files: ".faults.case.ts" }],
 	noSkip: new Set(noSkip ? [faultRun] : []),
 	gate: new Set(),
+	shards: new Map(),
 });
 const items = (faults = "Lr, F", mark = "") =>
 	parseItems(

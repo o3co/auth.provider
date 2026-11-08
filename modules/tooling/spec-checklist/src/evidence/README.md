@@ -4,7 +4,7 @@ Internal module of `spec-checklist`: what a CI run's tests proved of the checkli
 
 ## Responsibilities
 - Writes each vitest run's results as a report named by what ran them (`reporter`).
-- Reads a CI run's reports against the runs it was expected to make, and tells each item's status (`runs`, `compliance`).
+- Reads a CI run's reports against the runs it was expected to make, and tells each item's status (`runs`, `compliance`); which reports count, by leg and attempt, is `legs`'.
 
 ## Not here
 - Which tests name which items, and an item's mark: the package's.
@@ -12,19 +12,21 @@ Internal module of `spec-checklist`: what a CI run's tests proved of the checkli
 
 ## Offers
 - `evidenceReporter` (through the package's `./testing`), a vitest reporter: with `SPEC_EVIDENCE_DIR` set, each run writes one JSON report there: its identity (the commit tested, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_JOB`, the entry, the target, `legacy` where `CONFORMANCE_TARGET` says so), each test's file, names (suites first) and state with a skipped test's note, and the count of errors no test owns. Without the variable it writes nothing.
+- A report names the shard it ran, `i/n`, where vitest ran one of more than one; which runs every shard reported is `legs`' to tell.
 - An entry names the run: `unit` and `integration` for the root's two configs; else the package beside the config, then `@<pattern>` with `CONFORMANCE_PATTERN` and `#<run>` with `SPEC_EVIDENCE_RUN`.
 - `run expected [--release]`: the runs a CI run must report, a release's own too with `--release`, as JSON.
-- `run plan <kind>`: the values a kind of job's matrix takes, as JSON, from the same runs.
+- `run plan <kind>`: the values a kind of job's matrix takes, as JSON, from the same runs; with `--legs`, each leg its jobs run, `{ matrix, shard }`, as many as the value's runs have shards (`1/1` for one).
 - `run compliance <dir> [--release]`: reads every report under `dir` against the expected runs (a release's with `--release`), writes `compliance.json` and `compliance.md` beside them; with `--release`, fails where an expected run did not report or an item is `failed`, `incomplete` or `unverified`, or a guarantee is a `hole` or `noncompliant` (`blocksRelease`).
 - `compliance.json` holds each item's status and role with the identity of each report its tests ran in, and of each that gave a failure no test owns with its reason, the runs that did not report, the failures that stop a release (`gateFailures`, named as below), the counts by class and status, and by role.
 
 ## Invariants
 - Every vitest config the workspace tracks registers the reporter, its fixtures' aside.
 - The commit a report names and compliance takes is `SPEC_EVIDENCE_COMMIT` where set, else the checkout's HEAD; never the event's `GITHUB_SHA`.
-- A job writes, before it can fail, the mark `{ attempted: { run, attempt, job, kind, matrix? } }` beside its reports; a report older than the last attempt its entry's job was marked in does not count, so a job attempted again that did not report leaves its entry missing.
-- Only this run's reports count: the commit tested and the run of `GITHUB_RUN_ID`, the new system's target, and every report of each entry and job's last attempt.
+- A job writes, before it can fail, the mark `{ attempted: { run, attempt, job, kind, matrix?, shard? } }` beside its reports; a report older than the last attempt its entry's leg (its shard, or the whole) was marked in does not count, so a leg attempted again that did not report leaves it missing, and another leg's reports stand.
+- Only this run's reports count: the commit tested and the run of `GITHUB_RUN_ID`, the new system's target, and every report of each entry's leg and job's last attempt.
+- A run with `shards` reports when each shard has a report, or one report ran it whole (as locally, or before runs had shards); one without a shard is named missing with it (`<entry> (shard i/n)`). A report of a shard of another count is not counted. Its shards' reports are judged together, as two processes of one entry are: a file in the report that ran it, a failure in any.
 - A test counts once for each item its names give, however many of its names give it.
-- The runs are `unit`, `integration`, each package with a `conformance` script (kind `area`), and each run a package's `evidence-runs` script prints as a JSON list of `{ entry, kind, matrix?, releaseOnly?, files?, noSkip?, gate? }` (entries `<package>@<pattern>`, `<package>#<run>`).
+- The runs are `unit`, `integration`, each package with a `conformance` script (kind `area`), and each run a package's `evidence-runs` script prints as a JSON list of `{ entry, kind, matrix?, releaseOnly?, files?, noSkip?, gate?, shards? }` (entries `<package>@<pattern>`, `<package>#<run>`).
 - A CI run expects every run, but a `releaseOnly` one only where it is a release's; its jobs' matrices are the runs' `matrix` values by kind.
 - A test file runs in: `integration` for `.integration.test.ts`; the runs of its package whose `files` suffix it bears, whether or not they are expected now; a harness package's other printed runs; an area's own run and its pattern runs for its `.case.ts`, but those a suffix owns; `unit` for any other `.test.ts`; its package's run otherwise.
 - A guarantee with faults is judged by column: its status, the first that holds, its mark; `failed` where any test naming it failed (or as below); `hole` where a fault has no test marked for it; `incomplete` where an expected run did not report, a test did not run, or a marked test had no result, was skipped or pending in a run of its file; else `passed`.
