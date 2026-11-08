@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import { expect, it, vi } from "vitest";
 import {
 	clientSectionsOf,
+	describedOf,
 	idpTypesOf,
 	itemRowsOf,
 	type JsonSchema,
+	referenceConfOf,
 	referenceFile,
 	referenceOf,
 	rowsOf,
@@ -82,6 +84,49 @@ it("requires a key inside an optional object only once the object is set, and ho
 	expect(table).toContain("| `k.current.id` | string |  | yes |");
 	expect(table).toContain("| `k.next.id` | string |  | when `k.next` is set |");
 	expect(table).toContain("| `k.next.alg` | string | `a` when `k.next` is set |  |");
+});
+
+it("shows a nested object's own description before its first key, in the table and the HOCON, nested ones too", () => {
+	const schema = {
+		type: "object",
+		properties: {
+			caps: {
+				type: "object",
+				description: "What every cap holds to.",
+				default: {},
+				properties: {
+					size: { type: "integer", default: 1 },
+					inner: {
+						type: "object",
+						description: "Deeper.",
+						default: {},
+						properties: { depth: { type: "integer", default: 2 } },
+					},
+				},
+			},
+			plain: { type: "object", properties: { n: { type: "integer", default: 3 } } },
+		},
+	};
+	const objects = describedOf(schema, ["k"]);
+	expect(objects).toEqual([
+		{ key: "k.caps", description: "What every cap holds to." },
+		{ key: "k.caps.inner", description: "Deeper." },
+	]);
+	const rows = rowsOf(schema, ["k"], () => ({}));
+	const section = { section: "k", owner: "@mod/k", rows, objects };
+	const table = referenceOf([section]).split("\n");
+	const at = (start: string) => table.findIndex((line) => line.startsWith(start));
+	expect(table[at("| `k.caps` |")]).toBe(
+		"| `k.caps` | object |  |  |  |  | What every cap holds to. |",
+	);
+	expect(at("| `k.caps` |")).toBe(at("| `k.caps.size` |") - 1);
+	expect(at("| `k.caps.inner` |")).toBe(at("| `k.caps.inner.depth` |") - 1);
+	expect(at("| `k.plain` |")).toBe(-1);
+	const conf = referenceConfOf(section).split("\n");
+	expect(conf.indexOf("\t# caps: What every cap holds to.")).toBe(
+		conf.indexOf("\tcaps.size = 1") - 1,
+	);
+	expect(conf.indexOf("\t# caps.inner: Deeper.")).toBe(conf.indexOf("\tcaps.inner.depth = 2") - 1);
 });
 
 it("holds a key nested in an optional object to the nearest optional object, a list of objects kept as one row", () => {

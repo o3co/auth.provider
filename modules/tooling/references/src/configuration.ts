@@ -199,6 +199,38 @@ function keyRows(
 	];
 }
 
+/** A nested object that says what it is: its key and its own description, shown before its keys. */
+export interface Described {
+	readonly key: string;
+	readonly description: string;
+}
+
+/** Each nested object of a schema with a description of its own, outermost first, as `rowsOf` walks into it. */
+export function describedOf(schema: JsonSchema, path: readonly string[]): Described[] {
+	const object = objectOf(schema);
+	return Object.entries(object?.properties ?? {}).flatMap(([name, s]) => {
+		if (objectOf(s) === undefined) return [];
+		const key = [...path, name].join(".");
+		const own = s.description ? [{ key, description: s.description }] : [];
+		return [...own, ...describedOf(s, [...path, name])];
+	});
+}
+
+/** Each row, after the described objects it lies in that no earlier row did: an object before its first key. */
+function withObjects<T>(
+	rows: readonly Row[],
+	objects: readonly Described[],
+	row: (r: Row) => T[],
+	object: (o: Described) => T[],
+): T[] {
+	const shown = new Set<string>();
+	return rows.flatMap((r) => {
+		const before = objects.filter((o) => !shown.has(o.key) && r.key.startsWith(`${o.key}.`));
+		for (const o of before) shown.add(o.key);
+		return [...before.flatMap(object), ...row(r)];
+	});
+}
+
 /** The keys inside lists of objects, under `<list>.<i>`, which the rows keep as one list row each. */
 export function itemRowsOf(schema: JsonSchema, path: readonly string[]): Row[] {
 	const object = objectOf(schema);
@@ -238,6 +270,8 @@ export interface Section {
 	readonly rows: Row[];
 	/** The keys inside its lists of objects, which `rows` keeps as one list row each. */
 	readonly items?: Row[];
+	/** Its nested objects that say what they are, each shown before its keys. */
+	readonly objects?: readonly Described[];
 	/** The fragment's keys read from env that no row holds: under a map whose names are the operator's. */
 	readonly unfixed: readonly string[];
 }
@@ -276,6 +310,7 @@ export async function sectionsIn(packages: readonly Pkg[]): Promise<Section[]> {
 				schema: module.section,
 				rows,
 				items: itemRowsOf(schema as JsonSchema, [module.name]),
+				objects: describedOf(schema as JsonSchema, [module.name]),
 				unfixed: unfixedKeys(rows, [...env.keys()]),
 			});
 		} else if (fragment && name === kernel) {
@@ -368,11 +403,18 @@ export function referenceOf(
 	clients: readonly Omit<ClientSection, "schema">[] = [],
 	types: readonly Omit<ClientSection, "schema">[] = [],
 ): string {
-	const blocks = sections.map(({ section, owner, rows }) => {
-		const lines = rows.map((r) => {
-			const { fallback, required } = held(r);
-			return `| \`${r.key}\` | ${text(r.type)} | ${fallback} | ${required} | ${r.env ? `\`${r.env}\`` : ""} | ${cell(r.example)} | ${text(r.description)} |`;
-		});
+	const blocks = sections.map(({ section, owner, rows, objects = [] }) => {
+		const lines = withObjects(
+			rows,
+			objects,
+			(r) => {
+				const { fallback, required } = held(r);
+				return [
+					`| \`${r.key}\` | ${text(r.type)} | ${fallback} | ${required} | ${r.env ? `\`${r.env}\`` : ""} | ${cell(r.example)} | ${text(r.description)} |`,
+				];
+			},
+			(o) => [`| \`${o.key}\` | object |  |  |  |  | ${text(o.description)} |`],
+		);
 		return [
 			`## ${section}`,
 			"",
@@ -467,27 +509,38 @@ export function referenceConfOf({
 	section,
 	owner,
 	rows,
+	objects = [],
 }: Omit<Section, "dir" | "schema" | "unfixed">): string {
-	const keys = rows.flatMap((r) => {
-		const inSection = (path: string) => path.split(".").slice(1).map(hoconKey).join(".");
-		const key = inSection(r.key);
-		const about = (r.description ?? "")
+	const inSection = (path: string) => path.split(".").slice(1).map(hoconKey).join(".");
+	const described = (o: Described) =>
+		o.description
 			.split("\n")
 			.filter(Boolean)
-			.map((line) => `\t# ${line}`);
-		const needs = r.required ? "required" : "optional";
-		const once = conditionsOf(r, (text, kind) => (kind === "key" ? inSection(text) : text));
-		if (once !== "") {
+			.map((line, i) => (i === 0 ? `\t# ${inSection(o.key)}: ${line}` : `\t# ${line}`));
+	const keys = withObjects(
+		rows,
+		objects,
+		(r) => {
+			const key = inSection(r.key);
+			const about = (r.description ?? "")
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => `\t# ${line}`);
+			const needs = r.required ? "required" : "optional";
+			const once = conditionsOf(r, (text, kind) => (kind === "key" ? inSection(text) : text));
+			if (once !== "") {
+				const value =
+					r.default !== undefined
+						? `\t# ${key} = ${hoconValue(r.default)} (${once})`
+						: `\t# ${key}: ${needs} ${once}`;
+				return [...about, value];
+			}
 			const value =
-				r.default !== undefined
-					? `\t# ${key} = ${hoconValue(r.default)} (${once})`
-					: `\t# ${key}: ${needs} ${once}`;
+				r.default !== undefined ? `\t${key} = ${hoconValue(r.default)}` : `\t# ${key}: ${needs}`;
 			return [...about, value];
-		}
-		const value =
-			r.default !== undefined ? `\t${key} = ${hoconValue(r.default)}` : `\t# ${key}: ${needs}`;
-		return [...about, value];
-	});
+		},
+		described,
+	);
 	return [
 		`# The defaults of \`${owner}\`'s section, generated by \`references\` from its schema: do not edit; run \`pnpm --filter @mod/references run configuration\`.`,
 		"# For reading only: the module applies these itself, and the app does not load this file.",
