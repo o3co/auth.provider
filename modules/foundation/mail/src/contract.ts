@@ -1,6 +1,5 @@
 import { contract, extensionPoint } from "@mod/kernel";
 
-export { canonicalAddress, isAddress } from "@mod/mail-address";
 export { plainText } from "./plain-text.ts";
 export { type Prepared, preparer } from "./prepare.ts";
 
