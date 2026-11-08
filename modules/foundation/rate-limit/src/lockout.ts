@@ -284,14 +284,20 @@ export function lockoutCounter(states: LockoutStates): Lockouts {
 			const { value, now } = await states.read(name, key);
 			return standingOf(aged(stateOf(value), policy, now));
 		},
-		releaseUnder: (name, key, policy, terms) =>
-			changing(name, key, (current, now) => {
+		releaseUnder: async (name, key, policy, terms) => {
+			// An id kept for no time is never kept; a keep of no whole number stores a state none can read.
+			const keep = terms.kind === "checked" ? terms.once.keepMs : undefined;
+			if (keep !== undefined && (!Number.isSafeInteger(keep) || keep < 1)) {
+				throw new Error("rate-limit: a release's keepMs is a positive integer");
+			}
+			return changing(name, key, (current, now) => {
 				const done = released(aged(stateOf(current), policy, now), terms, now);
 				const decision: Decision =
 					"next" in done
 						? { kind: "write", value: done.next, expiry: expiryOf(done.next, policy) }
 						: { kind: "keep" };
 				return { decision, answer: done.answer };
-			}),
+			});
+		},
 	};
 }

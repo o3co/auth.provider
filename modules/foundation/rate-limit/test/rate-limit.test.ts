@@ -496,6 +496,19 @@ describe("releasing a lockout under terms", () => {
 		});
 	});
 
+	it("refuses terms keeping their id for no positive whole number of ms, writing nothing", async () => {
+		const { lockouts: l } = await boot();
+		await fail(l, "k1", policy, 2);
+		const standing = await l.standing("l1", "k1", policy);
+		for (const keepMs of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53]) {
+			const terms = { kind: "checked", once: { id: "z", keepMs }, forgive: standing } as const;
+			await expect(l.releaseUnder("l1", "k1", policy, terms), String(keepMs)).rejects.toThrow(
+				"keepMs",
+			);
+		}
+		expect(await l.standing("l1", "k1", policy)).toEqual(standing);
+	});
+
 	it("answers what it judged on the state it wrote, when a failure lands between its read and its write", async () => {
 		const { simulated, lockouts: l } = await boot();
 		await fail(l, "w1", fixing, 10);
