@@ -25,7 +25,7 @@
 - Reads are confirmed only in a space that declares confirmed reads; a feature that decides on them states it among its needs.
 - Records and deferred work leave expiry to the store; keyed sets read only `kernel`'s clock; no two clocks are compared.
 - Records hold JSON values. A change without a lifetime keeps the record's; a change's lifetime under 1 ms is 1 ms.
-- A conditional removal is a change: where the record holds what the caller expects, it changes it to a 1 ms lifetime, and it is read no more from then on.
+- A conditional removal is a change: where the record holds what the caller expects, it changes it to a 1 ms lifetime, and from a millisecond later it is read no more.
 - A keyed set is one record per key, rewritten whole, so its cap stays small; anything in it that is not a member is no member.
 - A member ends at its add's time plus its lifetime on `kernel`'s clock, however late the write lands; the set is kept ten minutes past its last end. What an add pushes out awaits in that same write, until its caller settles it or its end passes, so a caller stopped between the add and its own work finds it again. A set kept as a bare list, as before, reads as members alone.
 - Over the cap, the other members ending first are pushed out (ties by code point order), never the one being added, and that is logged with the space. A cap is a whole number from 1.
