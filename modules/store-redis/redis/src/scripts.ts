@@ -1,3 +1,5 @@
+import { idempotencyWindows } from "@mod/store";
+
 /**
  * Shared prelude: store time, versions, expiry and idempotency. Every input has been checked at
  * the store contract boundary, so nothing below fails after the first write.
@@ -63,9 +65,9 @@ local function guard(ikey, digest, deadline)
   if deadline ~= '' and now > tonumber(deadline) then return cjson.encode({kind = 'late'}) end
   return nil
 end
--- A mark is kept a second past its deadline, or five minutes and a second without one, as store says.
-local mark_without_deadline_ms = 300000
-local mark_past_deadline_ms = 1000
+-- A mark is kept as store's idempotencyWindows say: past its deadline, or from now without one.
+local mark_without_deadline_ms = ${idempotencyWindows.withoutDeadlineMs}
+local mark_past_deadline_ms = ${idempotencyWindows.pastDeadlineMs}
 local function remember(ikey, digest, answer, deadline)
   if ikey ~= '' then
     local base = deadline ~= '' and tonumber(deadline) or now + mark_without_deadline_ms
