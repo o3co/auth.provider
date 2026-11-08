@@ -1,5 +1,5 @@
 import { auditStandIn } from "@mod/audit/testing";
-import { clients } from "@mod/clients";
+import { type Clients, clients } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientSecret, clientsConfig, confidentialClient } from "@mod/clients/testing";
 import cookiesModule from "@mod/cookies/module";
@@ -15,7 +15,14 @@ import { federationGrantsConfig } from "@mod/federation-grants/testing";
 import { type HttpRequest, type HttpResponse, type Route, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
+import {
+	assemble,
+	contract,
+	defineModule,
+	kernelConfig,
+	type Module,
+	Unavailable,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { memoryRecords } from "@mod/records/testing";
@@ -187,10 +194,35 @@ export async function connector(
 			.provide(roundTripStore)
 			.by(() => ({ save: kept.records.create, update: kept.records.change })),
 	]);
+	/** What `relist` last set, which the clients then answer as every client's section found. */
+	let listed: { connections: string[]; "return-uris": string[] } | undefined;
+	/** The clients as built, finding a client with `listed` once set: a new object, as the one built is shared. */
+	const relisting: Module = {
+		...clientsModule,
+		provides: (clientsModule.provides ?? []).map((part) =>
+			part.contract !== clients
+				? part
+				: {
+						contract: part.contract,
+						create: async (context: Parameters<typeof part.create>[0]) => {
+							const real = (await part.create(context)) as Clients;
+							return {
+								...real,
+								find: async (id: string) => {
+									const found = await real.find(id);
+									return found && listed !== undefined
+										? { ...found, section: (() => listed) as never }
+										: found;
+								},
+							};
+						},
+					},
+		),
+	};
 	const app = await assemble({
 		modules: [
 			http,
-			clientsModule,
+			relisting,
 			secretHashModule,
 			cookiesModule,
 			tripStore,
@@ -251,13 +283,7 @@ export async function connector(
 	};
 	/** From now on the clients answer the worker with these connections and returns. */
 	const relist = (connections: string[], returns: string[]) => {
-		const found = app.get(clients);
-		const { find } = found;
-		const section = () => ({ connections, "return-uris": returns }) as never;
-		found.find = async (id) => {
-			const client = await find(id);
-			return client && { ...client, section };
-		};
+		listed = { connections, "return-uris": returns };
 	};
 
 	let n = 0;

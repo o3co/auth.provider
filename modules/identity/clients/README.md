@@ -1,7 +1,7 @@
 # clients
 
 ## Responsibilities
-- Looks up and authenticates clients, checking and freezing their records at the boundary, with built-in methods `client_secret_basic`, `client_secret_post` and `none`.
+- Looks up and authenticates clients, checking and freezing their records at the boundary, with built-in methods `client_secret_basic`, `client_secret_post` and `none`, and freezing the registry every taker shares, so none reassigns a member for the others.
 
 ## Not here
 - What each metadata field means: the module that reads one contributes it as a section, and its default applies to a client without it.

@@ -87,7 +87,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 ## identity
 
 - `@mod/client-documents` (feature, `modules/identity/client-documents`): Owns how a `clients` section is filled from a client's metadata document: what a source that reads documents asks of each section's owner, and what the owner answers.
-- `@mod/clients` (feature, `modules/identity/clients`): Looks up and authenticates clients, checking and freezing their records at the boundary, with built-in methods `client_secret_basic`, `client_secret_post` and `none`.
+- `@mod/clients` (feature, `modules/identity/clients`): Looks up and authenticates clients, checking and freezing their records at the boundary, with built-in methods `client_secret_basic`, `client_secret_post` and `none`, and freezing the registry every taker shares, so none reassigns a member for the others.
 - `@mod/csrf` (feature, `modules/identity/csrf`): Checks that a state-changing request came from this deployment's origin (the CSRF check).
 - `@mod/login-attributes` (feature, `modules/identity/login-attributes`): Decides which of a login's attributes are kept: `users`' named set, within caps.
   - `keeping` (`src/keeping`): keeping a login's attributes within caps.
