@@ -17,7 +17,7 @@ Internal module of `http`: the answers to cross-origin requests, for the routes 
 - An answer names the request's origin only when it is listed; `access-control-*` headers the route wrote itself pass as written.
 - An answer never names `*`.
 - An answer never allows credentials.
-- A preflight from a listed origin, for a method a declared route takes, names the methods of the path's declared routes, the request headers the route takes, and a max age of 600 seconds.
+- A preflight from a listed origin, for a method a declared route takes, names the methods of the path's declared routes, the request headers the route takes, and a max age of 600 seconds, fixed: browsers cap it themselves, and a shorter one would only shorten how long a removed origin's preflight stays cached.
 - Any other preflight on such a path gets `204` with nothing to read by.
 
 ## Depends on

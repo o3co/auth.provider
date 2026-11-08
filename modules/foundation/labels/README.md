@@ -10,7 +10,7 @@
 - `isLabel` (text) → whether it is such a name.
 
 ## Invariants
-- A label is 1 to 64 code points, well formed (no lone surrogate).
+- A label is 1 to 64 code points, well formed (no lone surrogate): a fixed display bound that holds a name in any language.
 - It holds no control character (`\p{Cc}`), line or paragraph separator, directional mark (U+061C, U+200E, U+200F) or bidi control (U+202A to U+202E, U+2066 to U+2069): each breaks a line or reorders the text around it.
 - Any other character is taken, spaces and joiners included.
 

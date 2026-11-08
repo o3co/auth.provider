@@ -30,7 +30,7 @@
 - With a longest lifetime, `exp` may be no further ahead than it with the caller's allowance, and `exp` − `iat` no longer than it without one, so `iat` may lie no further behind.
 - An expected audience is met by any one of the token's audiences; a list of audiences holds only strings.
 - A key set is fetched when first needed and used `key-set-refresh` from when its fetch began; before then, only for a key it lacks, never for one it holds twice.
-- One fetch runs at a time, shared by every check waiting for it; fetches are at least a minute apart, whether they worked or not.
+- One fetch runs at a time, shared by every check waiting for it; fetches are at least a minute apart, whether they worked or not: a fixed floor, not a setting, so no burst of tokens makes this host ask a peer more often.
 - Only a `200` answer holding a `keys` list is a set; entries that are no public key are skipped.
 - While no set can be had, the last one is used until `key-set-max-age` after its fetch; past that, or with none, the answer is unavailable.
 - A refused destination, an unreachable host, or an answer that is no JSON is an outage; any other error is thrown.
