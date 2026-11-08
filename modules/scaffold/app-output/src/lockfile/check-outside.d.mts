@@ -32,4 +32,5 @@ export function refusals(
 	/** The integrity the release recorded of each package the overrides hold: one without is refused. */
 	integrities?: Readonly<Record<string, string>>,
 	fresh?: readonly Recorded[],
+	excluded?: readonly string[],
 ): string[];

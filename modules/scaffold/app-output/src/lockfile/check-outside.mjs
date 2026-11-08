@@ -3,8 +3,16 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import semver from "semver";
-import { parseDocument } from "yaml";
-import { bare, lockOf, nameOf, own, referencesIn, specOf, targetOf } from "./reading/contract.mjs";
+import {
+	bare,
+	lockOf,
+	nameOf,
+	own,
+	referencesIn,
+	specOf,
+	targetOf,
+	workspaceOf,
+} from "./reading/contract.mjs";
 
 const sameMap = (a, b) =>
 	a.size === b.size &&
@@ -216,13 +224,22 @@ function recordRefusals(lock, record, overrides, references, registries) {
  * dependency let through though fresh (`fresh`), is not the tarball whose integrity was recorded
  * (`integrities`, one for each package the overrides hold; one without refused); none where it is.
  */
-export function refusals(text, records, overrides, registries, integrities, fresh = []) {
+export function refusals(
+	text,
+	records,
+	overrides,
+	registries,
+	integrities,
+	fresh = [],
+	excluded = [],
+) {
 	const lock = lockOf(text);
 	const versions = (map) =>
 		new Map([...own(map)].map(([name, version]) => [name, String(version)]));
 	const held = versions(overrides);
 	const references = referencesIn(lock);
 	const resolvedWith = versions(lock.overrides);
+	const named = [...records, ...(Array.isArray(fresh) ? fresh : [])].map(own);
 	return [
 		...(sameMap(resolvedWith, held)
 			? []
@@ -234,22 +251,78 @@ export function refusals(text, records, overrides, registries, integrities, fres
 				oneCopyRefusals(lock, name, String(version), references, registries),
 			),
 		...heldIntegrityRefusals(lock, held, own(integrities)),
-		...freshRefusals(lock, fresh, registries),
+		...freshRefusals(lock, fresh, registries, references),
+		...exclusionRefusals(excluded, named, held),
+		...ownedRefusals(lock, new Set([...held.keys(), ...named.map((fields) => fields.get("name"))])),
 	];
 }
 
-function freshRefusals(lock, fresh, registries) {
+const packageName = /^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/;
+const recordedRight = (name, version, integrity) =>
+	typeof name === "string" &&
+	packageName.test(name) &&
+	typeof version === "string" &&
+	semver.valid(version) === version &&
+	typeof integrity === "string" &&
+	/^(sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)$/.test(
+		integrity,
+	);
+
+function exclusionRefusals(excluded, named, held) {
+	if (!Array.isArray(excluded)) return ["minimumReleaseAgeExclude is not a list"];
+	const recorded = new Set(
+		named
+			.filter((fields) => semver.valid(fields.get("version")) === fields.get("version"))
+			.map((fields) => `${fields.get("name")}@${fields.get("version")}`),
+	);
+	return excluded
+		.filter((entry) => typeof entry !== "string" || !(held.has(entry) || recorded.has(entry)))
+		.map(
+			(entry) =>
+				`minimumReleaseAgeExclude lets ${String(entry)} through, which the record does not`,
+		);
+}
+
+/** An entry of a name held, recorded or let through naming a version but its key's, or a snapshot of one naming its own source or version. */
+function ownedRefusals(lock, names) {
+	const keyed = (key) => bare(key).slice(nameOf(key).length + 1);
+	return [
+		...[...own(lock.packages)].flatMap(([key, entry]) => {
+			const version = own(entry).get("version");
+			return names.has(nameOf(key)) && version !== undefined && String(version) !== keyed(key)
+				? [`${key}: its entry names version ${String(version)}, not its key's`]
+				: [];
+		}),
+		...[...own(lock.snapshots)].flatMap(([key, snapshot]) =>
+			names.has(nameOf(key))
+				? [
+						...(own(snapshot).has("resolution") ? ["source"] : []),
+						...(own(snapshot).has("version") ? ["version"] : []),
+					].map((what) => `${nameOf(key)}: a resolution of ${key} names its own ${what}`)
+				: [],
+		),
+	];
+}
+
+function freshRefusals(lock, fresh, registries, references) {
 	if (!Array.isArray(fresh)) return ["the record of dependencies let through is not a list"];
 	return fresh.flatMap((recorded) => {
 		const fields = own(recorded);
 		const [name, version, integrity] = ["name", "version", "integrity"].map((key) =>
 			fields.get(key),
 		);
-		if (![name, version, integrity].every((field) => typeof field === "string")) {
+		if (!recordedRight(name, version, integrity)) {
 			return ["a dependency let through is not recorded by a name, a version and an integrity"];
 		}
-		const entry = own(lock.packages).get(`${name}@${version}`);
-		if (entry === undefined) return [];
+		const at = `${name}@${version}`;
+		const snapshots = [...own(lock.snapshots)].filter(([key]) => bare(key) === at);
+		const entry = own(lock.packages).get(at);
+		if (entry === undefined) {
+			const resolved =
+				snapshots.length > 0 ||
+				references.some(({ as, reference }) => as === name && bare(reference) === version);
+			return resolved ? [`${name}: the lockfile resolves ${at} and holds no entry of it`] : [];
+		}
 		const unregistered = registryRefusal(entry, name, registries);
 		if (unregistered !== undefined) return [unregistered];
 		const found = own(own(entry).get("resolution")).get("integrity");
@@ -334,9 +407,7 @@ function entered() {
 if (entered()) {
 	const read = (file) => readFileSync(file, "utf8");
 	try {
-		const workspace = parseDocument(read("pnpm-workspace.yaml"), { merge: false }).toJS({
-			maxAliasCount: 0,
-		});
+		const workspace = workspaceOf(read("pnpm-workspace.yaml"));
 		const outside = JSON.parse(read("outside-modules.json"));
 		const found = refusals(
 			read("pnpm-lock.yaml"),
@@ -344,7 +415,8 @@ if (entered()) {
 			Object.fromEntries(own(own(workspace).get("overrides"))),
 			outside.registries,
 			outside.held,
-			outside.freshDependencies ?? [],
+			Object.hasOwn(outside, "freshDependencies") ? outside.freshDependencies : [],
+			own(workspace).get("minimumReleaseAgeExclude") ?? [],
 		);
 		for (const line of found) process.stdout.write(`${line}\n`);
 		process.stdout.write(found.length === 0 ? "ok\n" : `${found.length} refusal(s)\n`);

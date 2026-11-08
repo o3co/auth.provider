@@ -6,4 +6,5 @@ export {
 	referencesIn,
 	specOf,
 	targetOf,
+	workspaceOf,
 } from "./reading.mjs";
