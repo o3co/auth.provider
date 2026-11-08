@@ -16,7 +16,7 @@ Internal module of `x509-path`: reading a certificate's revocation material, CRL
 ## Invariants
 - Nothing in revocation material is used before its signature is checked by an algorithm the path would take.
 - CRL: read from http and https full-name points covering every reason and naming no other issuer.
-- CRL: the issuer's key usage, where given, signs CRLs; no next update is stale, as of each time it is judged.
+- CRL: the issuer's key usage, where given, signs CRLs, and the issuer is in date; no next update is stale, as of each time it is judged.
 - CRL: a delta or scoped CRL, an indirect entry, or any other critical extension is unsupported.
 - CRL: its CRLNumber is read whole, however large; one that is not a non-negative INTEGER makes the CRL malformed.
 - CRL: judged of a certificate, its issuer's name, its right to sign CRLs and its dates are asked again, every time.

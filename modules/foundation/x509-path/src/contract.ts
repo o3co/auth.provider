@@ -1,3 +1,4 @@
+export { type Trust, trustOf } from "./choice/choice.ts";
 export { certificateOf, type EcCurve, type PathRefusal, type PathRules, pathOf } from "./path.ts";
 export {
 	crlSays,

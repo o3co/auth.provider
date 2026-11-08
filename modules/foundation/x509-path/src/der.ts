@@ -2,7 +2,9 @@ import * as asn1js from "asn1js";
 import type * as pkijs from "pkijs";
 
 export const oid = {
+	subjectKeyIdentifier: "2.5.29.14",
 	keyUsage: "2.5.29.15",
+	authorityKeyIdentifier: "2.5.29.35",
 	reasonCode: "2.5.29.21",
 	subjectAltName: "2.5.29.17",
 	basicConstraints: "2.5.29.19",
