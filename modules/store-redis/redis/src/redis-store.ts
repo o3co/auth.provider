@@ -12,6 +12,7 @@ import {
 	type Store,
 } from "@mod/store";
 import { type Redis, ReplyError } from "ioredis";
+import { list, numbers } from "./answer/answer.ts";
 import { keysUnder } from "./keys.ts";
 import { confirmationPipeline, confirmationRounds } from "./round/round.ts";
 import * as scripts from "./scripts.ts";
@@ -23,20 +24,6 @@ type Raw = { value: string; version: string; expiresAt: string | null };
 
 /** A text matched literally by SCAN's pattern. */
 const literal = (text: string) => text.replace(/[*?[\]\\]/g, (c) => `\\${c}`);
-
-/** cjson turns empty or sparse Lua arrays into objects; rebuild them by count. */
-function list<T>(value: unknown, n: number): T[] {
-	return Array.from({ length: n }, (_, i) => (value as Record<number, T>)[i] as T);
-}
-
-/** Script answers carry numbers as strings; turn the known ones back into numbers (the fields scripts.ts answers). */
-function numbers<A extends Record<string, unknown>>(answer: A): A {
-	const out: Record<string, unknown> = { ...answer };
-	for (const field of ["now", "remainingMs", "resetAt", "count"]) {
-		if (typeof out[field] === "string") out[field] = Number(out[field]);
-	}
-	return out as A;
-}
 
 const digest = (request: string) => createHash("sha256").update(request).digest("hex");
 /** Where a script answer records the server it ran on, out of sight of the callers. */
