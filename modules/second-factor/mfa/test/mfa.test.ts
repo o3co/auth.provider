@@ -1628,4 +1628,20 @@ describe("a way back that does not count", () => {
 		]).toEqual(["unknown-kind", "unknown-kind", 2, false]);
 		expect(await decided.remove("wen", id, await decided.fenceOf("wen"))).toBe("removed");
 	});
+
+	it("is warned of at every start under required, naming its kind, and not under optional", async () => {
+		const warned = async (mode: "required" | "optional") => {
+			const from = logged.lines().length;
+			await serve({ mode }, { kinds: [code, backup, mailBack] });
+			await stop();
+			return logged
+				.lines()
+				.slice(from)
+				.filter((line) => line.event === "mfa.kind_not_taken");
+		};
+		expect(await warned("required")).toEqual([
+			{ level: "warn", event: "mfa.kind_not_taken", fields: { kind: "mail-back" } },
+		]);
+		expect(await warned("optional")).toEqual([]);
+	});
 });

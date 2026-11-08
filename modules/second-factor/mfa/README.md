@@ -23,6 +23,8 @@
 ## Invariants
 - "required" refuses to boot unless a composed kind counts.
 - The kinds it takes are those composed; under "required", a composed kind whose proof adds no `mfa` is left out of its table at boot, a standing rule: a login proving it would open a session nothing may use. Every decision looking up a kind (`begin`, `provePending`, `bind`, `held`, `asks`, `challenge`, `guessable`, `guessableBoundAfter`) answers for it as for a kind not composed, and its amr is not contributed; `remove` and `rename`, by a factor's id, still reach its record.
+- A kind left out under "required" is warned of at every start (`mfa.kind_not_taken`, with its kind), from the judgment that leaves it out, and boot goes on.
+- That warning is the one exception to refusing at boot a setting that does nothing, narrowed by the owner to this condition alone (#2666): a refusal would stop the deployments composing a code by mail as 0.19's `mfa-web` did, and push their operators to `mfa-email.adds-second-factor = true`, which loosens what a second factor assures.
 - `kinds` means those composed where another module collects `factorKinds` (`mfa-entry`, `mfa-enrollment`); here, those taken.
 - The rules of each decision are its contract's (`mfa-reading`, `mfa-binding`, `mfa-managing`): what a counting factor is, duplicates, first bindings, the fence, the recovery codes, and how a witnessing judges and is settled.
 - A witness composed (`mfa-witness`) with no witnessing refuses boot, so it is never left unasked.
