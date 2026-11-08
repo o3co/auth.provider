@@ -41,9 +41,11 @@ async function composed(section: Record<string, unknown> | undefined) {
 	const signer = await testSigner("EdDSA", "k1");
 	let now = 1_800_000_000_000;
 	let up = true;
+	let fetches = 0;
 	const fake = defineModule({ name: "fake-outbound", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(outbound).by(() => ({
 			fetch: async () => {
+				fetches++;
 				if (!up) throw new Unavailable("outbound");
 				return {
 					status: 200,
@@ -75,6 +77,11 @@ async function composed(section: Record<string, unknown> | undefined) {
 			up = false;
 			now += ms;
 		},
+		/** The clock moves on, the source still up. */
+		advance: (ms: number) => {
+			now += ms;
+		},
+		fetches: () => fetches,
 	};
 }
 
@@ -96,8 +103,27 @@ it("uses a set it cannot renew as long as the operator's section says", async ()
 	expect(await set.checked()).toBe("unavailable");
 });
 
+it("fetches a set again once key-set-refresh has passed since its fetch, an hour by default", async () => {
+	for (const [section, refreshMs] of [
+		[undefined, 3_600_000],
+		[{ "key-set-refresh": "10m" }, 600_000],
+	] as const) {
+		const set = await composed(section);
+		expect(await set.checked()).toBe("valid");
+		set.advance(refreshMs - 1);
+		expect(await set.checked()).toBe("valid");
+		expect(set.fetches(), JSON.stringify(section)).toBe(1);
+		set.advance(1);
+		expect(await set.checked()).toBe("valid");
+		expect(set.fetches(), JSON.stringify(section)).toBe(2);
+	}
+});
+
 it("refuses a section outside its bounds", async () => {
 	for (const refused of [
+		{ "key-set-refresh": "59999ms" },
+		{ "key-set-refresh": "2592000001ms" },
+		{ "key-set-refresh": "2h", "key-set-max-age": "1h" },
 		{ "key-set-max-age": "3599999ms" },
 		{ "key-set-max-age": "2592000001ms" },
 		{ "key-set-max-age": 7_200_000 },
