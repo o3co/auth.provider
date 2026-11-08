@@ -154,13 +154,13 @@ it("keeps a family a reuse revoked revoked through a failover", async () => {
 	expect(await refresh(next)).toBe("invalid_grant");
 });
 
-it("revokes a session's family and its access tokens when the session closes, through refresh's participant", async () => {
+it("refuses a session's family at its next round once the session closes, through the stores it wires", async () => {
 	const { app, start, close } = await boot();
 	const params = { grant_type: "refresh_token", refresh_token: await start() };
 	const outcome = await app.get(grantCalls).call("refresh_token", "app", params);
 	if (outcome.kind !== "issued") throw new Error(outcome.error);
-	const access = String(outcome.body.access_token);
-	expect((await app.get(tokens).verifyAccess(access)).kind).toBe("valid");
 	expect((await close()).kind).toBe("closed");
-	expect((await app.get(tokens).verifyAccess(access)).kind).toBe("invalid");
+	const next = { grant_type: "refresh_token", refresh_token: String(outcome.body.refresh_token) };
+	const after = await app.get(grantCalls).call("refresh_token", "app", next);
+	expect(after).toMatchObject({ kind: "error", error: "invalid_grant" });
 });
