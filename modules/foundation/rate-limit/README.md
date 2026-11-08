@@ -28,7 +28,7 @@
 - Handing back the attempt that fixed a hold lifts it; handing back any other keeps it.
 - Attempt times are unique within a key and never go back, so a reservation names one attempt.
 - A success ends the run but keeps failures in the budget; the budget's window is the caller's.
-- A lockout that keeps losing races is unavailable; a reservation it cannot hand back stays a failure, the safe side.
+- A lockout that keeps losing races is unavailable; a reservation it cannot hand back stays a failure, the safe side. A stored lockout state of another shape is unavailable, never read as no hold.
 
 ## Data
 - Limit windows: no eviction, so a flood cannot reset a count; not replicated, as no credential depends on them.

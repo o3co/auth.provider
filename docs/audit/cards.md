@@ -300,6 +300,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 ## store-redis
 
 - `@mod/redis` (adapter, `modules/store-redis/redis`): Implements the `store` contract with Redis, with one script per shape of basic operation and none per feature.
+  - `answer` (`src/answer`): a store script's answer read as data.
   - `client` (`src/client`): the client's options, and what the URL and the environment say of its connection.
   - `round` (`src/round`): the confirmation round.
 

@@ -205,6 +205,35 @@ it("is unavailable when other writers keep changing a key's lockout before each 
 	await expect(l.failed("l1", "busy", policy)).rejects.toSatisfy(isUnavailable);
 });
 
+it("reads a lockout state of another shape as unavailable, never as no hold", async () => {
+	const { lockouts: l, store } = await boot();
+	const held = { space: lockoutSpace, partition: partitionOf("l1", "odd"), name: "lockout" };
+	const whole = { run: 3, lastAt: start, spent: [start], holdUntil: start + 60_000, fixed: false };
+	const expiry = { expiry: { kind: "after", ms: 60_000 } } as const;
+	for (const odd of [
+		{},
+		7,
+		[whole],
+		{ ...whole, holdUntil: String(start + 60_000) },
+		{ ...whole, holdUntil: null },
+		{ ...whole, spent: [String(start)] },
+		{ ...whole, fixed: "no" },
+		{ ...whole, named: 1.5 },
+		{ ...whole, used: [{ id: 1, until: start }] },
+	]) {
+		const { entry } = await store.get(held);
+		await (entry
+			? store.replaceIf(held, entry.version, odd, expiry)
+			: store.putIfAbsent(held, odd, expiry));
+		const said = JSON.stringify(odd);
+		await expect(l.check("l1", "odd", policy), said).rejects.toSatisfy(isUnavailable);
+		await expect(l.failed("l1", "odd", policy), said).rejects.toSatisfy(isUnavailable);
+	}
+	const { entry } = await store.get(held);
+	await store.replaceIf(held, entry?.version ?? "", whole, expiry);
+	expect((await l.check("l1", "odd", policy)).kind).toBe("held");
+});
+
 it("judges a lockout policy's shape", () => {
 	expect(lockoutProblem(policy)).toBeUndefined();
 	expect(lockoutProblem({ ...policy, threshold: 0 })).toBeDefined();
