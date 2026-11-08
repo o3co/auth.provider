@@ -1,0 +1,20 @@
+{
+	"name": "@mod/account-mail-code",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		".": "./src/contract.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/mail": "workspace:*",
+		"@mod/mfa-extensions": "workspace:*",
+		"@mod/subject-attributes": "workspace:*",
+		"@mod/users": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5"
+	}
+}
