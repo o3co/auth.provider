@@ -38,7 +38,7 @@ export default defineModule({ name: "keys", replicaSafe: true, section, takes: [
 			path: keySetPath,
 			// Public keys a page may read from any listed origin.
 			cors: {},
-			handle: (request) => jwksResponse(current, c.clock.now(), request),
+			handle: (request) => jwksResponse(current, c.clock.now(), request, c.section["jwks-cache"]),
 		};
 	}),
 ]);

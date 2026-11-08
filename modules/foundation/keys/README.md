@@ -18,7 +18,7 @@
 - `publicMembers`: a JWK rebuilt from its type's public members alone, without reading it.
 - `isCanonicalJws`: whether a compact JWS is written in its one form; `verify` answers any other as `malformed`. `secretBytes` (exactly or at least n): the setting of a secret's bytes every module takes, strict base64 of at least 8 byte values, never a `REPLACE-` sample; a refusal never names the value.
 - `bearerToken` (at least n): the setting of a bearer token sent to an outside party, an RFC 6750 b64token of at least n bytes and 8 byte values of key material however read (as written, hex or base64), never a `REPLACE-` sample; a refusal never names the value.
-- Operator section: `signing` (`kid`, `alg`, and a PKCS8 PEM `private-key`, or for HS256 a `secret`, its bytes the HMAC key as `secret-encoding` reads them: `hex`, `base64` or `utf8`, the text's own; unset, hex where the value is whole bytes of hex, else base64), `next` (`kid`, `alg`, `public-key`), `previous` (`kid`, `alg`, `public-key`, `expires-at`).
+- Operator section: `signing` (`kid`, `alg`, and a PKCS8 PEM `private-key`, or for HS256 a `secret`, its bytes the HMAC key as `secret-encoding` reads them: `hex`, `base64` or `utf8`, the text's own; unset, hex where the value is whole bytes of hex, else base64), `next` (`kid`, `alg`, `public-key`), `previous` (`kid`, `alg`, `public-key`, `expires-at`), `jwks-cache` (1m–1d, default `5m`: how long verifiers may cache the set).
 - Test configuration builders (`./testing`), with an RS256 signing key, one RSA key a process makes once, unless a test sets one.
 
 ## Invariants
@@ -30,7 +30,7 @@
 - A token is verified by the key its `kid` names, after its `typ`, and refused once that key's `expires-at` is reached.
 - A payload the key signed that is no JSON is answered as a bad signature.
 - The published set holds public members alone, of unexpired keys; with nothing to publish, it answers 404 `no-store`.
-- The set carries a strong ETag, answers 304 to it, and is cached five minutes.
+- The set carries a strong ETag, answers 304 to it, and is cached `jwks-cache`; the operator publishes `next` at least that long before it signs.
 - An outside JWK with a private member, a `kid` that is no string, or a key member not in its one form, is refused; so is a private PEM.
 - An outside key may verify only for signatures (`use`, `key_ops`) and only under an algorithm its kind and curve fit.
 - Internal modules `material` (outside key material), `secret` (secret settings), `signing` (the provider's key ring) and `jwks` (the public key set).

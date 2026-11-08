@@ -1,3 +1,4 @@
+import { setting } from "@mod/kernel";
 import { z } from "zod";
 import { secretProblem } from "../secret/secret.ts";
 
@@ -80,6 +81,13 @@ export const section = z
 			.array(previous)
 			.prefault([])
 			.describe("Past signing keys that still verify tokens until each one's `expires-at`."),
+		"jwks-cache": setting
+			.duration("s")
+			.pipe(z.number().int().min(60).max(86_400))
+			.prefault("5m")
+			.describe(
+				"How long verifiers may cache the published key set (its `Cache-Control` max-age), from 1m to 1d: publish a `next` key at least this long before it signs.",
+			),
 	})
 	.refine(
 		(s) => new Set([s.signing.kid, ...s.previous.map((p) => p.kid)]).size === 1 + s.previous.length,
