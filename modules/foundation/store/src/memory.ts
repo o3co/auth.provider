@@ -7,6 +7,7 @@ import {
 	type Entry,
 	type Expiry,
 	idempotencyRequest,
+	idempotencyWindows,
 	type Json,
 	type Key,
 	type Late,
@@ -19,9 +20,8 @@ type Answer = { readonly kind: string };
 type Held = { readonly value: Json; readonly version: string; readonly expiresAt: number | null };
 type Limits = { readonly deadline?: number; readonly idempotency?: string } | undefined;
 
-/** How long past a deadline a resend still gets the first answer. */
-export const idempotencySkewMs = 1000;
-export const idempotencyDefaultMs = 5 * 60_000;
+const { withoutDeadlineMs: idempotencyDefaultMs, pastDeadlineMs: idempotencySkewMs } =
+	idempotencyWindows;
 const sweepEvery = 256;
 const scanPage = 100;
 
