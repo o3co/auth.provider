@@ -41,9 +41,9 @@ function checkedCopy(message: Message): Message {
 
 /**
  * For a sender, at build: refuses boot when a declared purpose has no template, or a template's
- * purpose is undeclared. The function it
- * gives copies and checks a message, and renders it; it throws a TypeError for a bad message and
- * Unavailable once expired, synchronously, so call it inside the async send.
+ * purpose is undeclared. The function it gives copies and checks a message, and renders it; it
+ * throws a TypeError for a bad message and Unavailable once expired, synchronously, so call it
+ * inside the async send.
  * Every sender sends only what it returns.
  */
 export async function preparer<S>(c: BuildContext<S>): Promise<(message: Message) => Prepared> {
