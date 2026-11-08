@@ -87,6 +87,9 @@ export async function verifyCrl(
 	if (!sameAlgorithm(crl.signature, crl.signatureAlgorithm)) return unusable("signature algorithm");
 	if (!crl.issuer.isEqual(issuer.subject)) return unusable("issuer");
 	if (!keyUsageAllows(issuer, usage.cRLSign)) return unusable("issuer cannot sign crls");
+	if (now < issuer.notBefore.value.getTime() || issuer.notAfter.value.getTime() < now) {
+		return unusable("issuer out of date");
+	}
 	// The signature alone: what the CRL's extensions mean is judged here, not by the engine.
 	if (!(await signedBy(issuer, crl.tbsView, crl.signatureValue, crl.signatureAlgorithm))) {
 		return unusable("signature");

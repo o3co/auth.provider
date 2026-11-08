@@ -1,6 +1,7 @@
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
-import { decoded, keyUsageAllows, oid, parsedExtension, same } from "./der.ts";
+import { chosen, type Trust } from "./choice/choice.ts";
+import { decoded, keyUsageAllows, oid, parsedExtension } from "./der.ts";
 import { isSelfIssued, nameConstraintsRefusal } from "./names.ts";
 import { isSignedAsTaken, type SignatureAlgorithm } from "./signatures/signatures.ts";
 
@@ -15,8 +16,6 @@ const ecPublicKey = "1.2.840.10045.2.1";
 
 /** What a path is held to, as its caller chooses it. */
 export interface PathRules {
-	/** Trust anchors (DER); a peer never sends one that counts. */
-	readonly anchors: readonly Uint8Array[];
 	/** At most this many certificates between the leaf and an anchor. */
 	readonly maxIntermediates: number;
 	/** The signature algorithms taken on the path, anchors' own aside. */
@@ -148,39 +147,34 @@ function refusalOf(path: readonly pkijs.Certificate[], rules: PathRules): PathRe
 export const certificateOf = (der: Uint8Array) =>
 	decoded(der, (schema) => new pkijs.Certificate({ schema }));
 
-const parsed = (c: pkijs.Certificate | undefined): c is pkijs.Certificate => c !== undefined;
-
 /**
- * The path from the leaf to an anchor, through the candidates given (a chain a peer sent), as of
- * `now`. The engine builds over every candidate and anchor given, unbounded: a caller bounds them, or
- * hands it one chain.
+ * The path from the leaf to an anchor of `trust`, as of `now`: the one chain `choice` picks from what
+ * the peer sent and the trust holds, then validated by the engine and held to the rules.
  */
 export async function pathOf(
 	leaf: Uint8Array,
-	candidates: readonly Uint8Array[],
+	sent: readonly Uint8Array[],
+	trust: Trust,
 	rules: PathRules,
 	now: number,
 ): Promise<
 	| { readonly kind: "path"; readonly path: readonly pkijs.Certificate[] }
 	| { readonly kind: "invalid"; readonly reason: PathRefusal }
 > {
-	// The engine takes the end entity last, and drops a certificate sent twice.
-	const sent = [...candidates.filter((der) => !same(der, leaf)), leaf];
-	const certificates = sent.map(certificateOf);
-	const anchors = rules.anchors.map(certificateOf);
-	if (!certificates.every(parsed) || !anchors.every(parsed)) {
-		return { kind: "invalid", reason: "malformed" };
-	}
+	const picked = chosen(leaf, sent, trust, rules.maxIntermediates);
+	if (picked.kind !== "chain") return { kind: "invalid", reason: picked.kind };
+	const chain = picked.chain.map(certificateOf) as pkijs.Certificate[];
+	const anchor = chain.at(-1) as pkijs.Certificate;
+	// One chain, so the engine builds no other: the end entity last, as it takes it.
 	const engine = new pkijs.CertificateChainValidationEngine({
-		trustedCerts: anchors,
-		certs: certificates,
+		trustedCerts: [anchor],
+		certs: chain.slice(0, -1).reverse(),
 		checkDate: new Date(now),
 	});
 	const built = await engine.verify().catch(() => undefined);
 	const path = built?.certificatePath ?? [];
-	if (!built?.result || path.length === 0) return { kind: "invalid", reason: "path" };
-	// The path must start with the leaf given itself.
-	if (path[0] !== certificates.at(-1)) return { kind: "invalid", reason: "path" };
+	const same = path.length === chain.length && path.every((cert, at) => cert === chain[at]);
+	if (!built?.result || !same) return { kind: "invalid", reason: "path" };
 	const refused = refusalOf(path, rules);
 	return refused ? { kind: "invalid", reason: refused } : { kind: "path", path };
 }

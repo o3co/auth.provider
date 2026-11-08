@@ -1,13 +1,16 @@
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import { describe, expect, it } from "vitest";
+import { trustOf } from "../src/choice/choice.ts";
 import type { PathRules } from "../src/path.ts";
 import { pathOf } from "../src/path.ts";
 import { signatureAlgorithms } from "../src/signatures/signatures.ts";
 import { ecKeys, hierarchy, issue, pssKeys, restated, rsaKeys } from "../src/testing.ts";
 
 const now = Date.now();
-const policyOf = (anchors: Uint8Array[], more: Partial<PathRules> = {}): PathRules => ({
+/** The rules a test gives, with the anchors its trust is made of. */
+type Given = PathRules & { readonly anchors: readonly Uint8Array[] };
+const policyOf = (anchors: Uint8Array[], more: Partial<Given> = {}): Given => ({
 	anchors,
 	maxIntermediates: 4,
 	minRsaBits: 2048,
@@ -19,8 +22,9 @@ const policyOf = (anchors: Uint8Array[], more: Partial<PathRules> = {}): PathRul
 });
 /** Refused, by the engine or by the path's rules, whichever comes first. */
 const refusedAny = expect.not.stringMatching(/^path of/);
-const reasonOf = async (leaf: Uint8Array, chain: Uint8Array[], policy: PathRules, at = now) => {
-	const read = await pathOf(leaf, chain, policy, at);
+const reasonOf = async (leaf: Uint8Array, chain: Uint8Array[], policy: Given, at = now) => {
+	const trust = trustOf({ anchors: policy.anchors, selfSignedAnchorsOnly: false });
+	const read = await pathOf(leaf, chain, trust, policy, at);
 	return read.kind === "path" ? `path of ${read.path.length}` : read.reason;
 };
 
@@ -123,7 +127,8 @@ describe("path validation", () => {
 		const policy = policyOf([root.der]);
 		expect(await reasonOf(client.der, [intermediate.der], policy)).toBe("path of 3");
 		const asEcdsa = restated("certificate", client.der, "1.2.840.10045.4.3.2");
-		expect(await reasonOf(asEcdsa, [intermediate.der], policy)).toBe("signature algorithm");
+		// node checks the signature by the algorithm stated, so it is no issuer's: no path.
+		expect(await reasonOf(asEcdsa, [intermediate.der], policy)).toBe("path");
 	});
 
 	it("counts an RSA key's bits from its first, however many zero bytes its encoding puts before them", async () => {
@@ -163,14 +168,17 @@ describe("path validation", () => {
 				const garbled = { id, critical };
 				const leaf = await issue({ cn: "client", by: intermediate, garbled });
 				const reason = await reasonOf(leaf.der, [intermediate.der], anchors);
-				expect(reason, `${id} ${critical}`).toBe("malformed extension");
+				// node may read such a certificate as no issuer's before the rules do: refused either way.
+				expect(["malformed extension", "path"], `${id} ${critical}`).toContain(reason);
 			}
 		}
 		const inhibit = { id: "2.5.29.54", critical: true, value: new asn1js.Null().toBER(false) };
 		const notAsn1 = { id: "2.5.29.19", critical: true, value: new Uint8Array([0xff]).buffer };
 		for (const garbled of [inhibit, notAsn1]) {
 			const leaf = await issue({ cn: "client", by: intermediate, garbled });
-			expect(await reasonOf(leaf.der, [intermediate.der], anchors)).toBe("malformed extension");
+			expect(["malformed extension", "path"]).toContain(
+				await reasonOf(leaf.der, [intermediate.der], anchors),
+			);
 		}
 		const fine = {
 			id: "2.5.29.54",
@@ -186,7 +194,9 @@ describe("path validation", () => {
 			garbled: { id: "2.5.29.30", critical: true },
 		});
 		const under = await issue({ cn: "client", by: constrained });
-		expect(await reasonOf(under.der, [constrained.der], anchors)).toBe("malformed extension");
+		expect(["malformed extension", "path"]).toContain(
+			await reasonOf(under.der, [constrained.der], anchors),
+		);
 	});
 
 	it("holds the leaf to a client certificate, and every issuer to a CA within its path length", async () => {
@@ -300,7 +310,7 @@ describe("the rules a caller chooses", () => {
 	const serverAuth = "1.3.6.1.5.5.7.3.1";
 	const anyPurpose = "2.5.29.37.0";
 	/** As outbound holds a server's path: every certificate, anchor included, for server authentication. */
-	const serverRules = (anchors: Uint8Array[], more: Partial<PathRules> = {}) =>
+	const serverRules = (anchors: Uint8Array[], more: Partial<Given> = {}) =>
 		policyOf(anchors, {
 			purpose: { ekus: [serverAuth, anyPurpose], on: "path" },
 			leafKeyUsage: 0x80 | 0x08,

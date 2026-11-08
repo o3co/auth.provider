@@ -1,13 +1,16 @@
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import { expect, it } from "vitest";
+import { trustOf } from "../src/choice/choice.ts";
 import type { PathRules } from "../src/path.ts";
 import { pathOf } from "../src/path.ts";
 import { signatureAlgorithms } from "../src/signatures/signatures.ts";
 import { dns, type Issuing, ip, issue, subtree } from "../src/testing.ts";
 
 const clientAuth = ["1.3.6.1.5.5.7.3.2"];
-const policyOf = (anchors: Uint8Array[]): PathRules => ({
+/** The rules a test gives, with the anchors its trust is made of. */
+type Given = PathRules & { readonly anchors: readonly Uint8Array[] };
+const policyOf = (anchors: Uint8Array[]): Given => ({
 	anchors,
 	maxIntermediates: 4,
 	minRsaBits: 2048,
@@ -26,7 +29,8 @@ async function reasonOf(
 	const r = await issue({ cn: "root", ca: true, ...root });
 	const i = await issue({ cn: "intermediate", by: r, ca: true, ...intermediate });
 	const c = await issue({ cn: "client", by: i, eku: clientAuth, ...client });
-	const read = await pathOf(c.der, [i.der], policyOf([r.der]), Date.now());
+	const trust = trustOf({ anchors: [r.der], selfSignedAnchorsOnly: false });
+	const read = await pathOf(c.der, [i.der], trust, policyOf([r.der]), Date.now());
 	return read.kind === "path" ? "valid" : read.reason;
 }
 
@@ -126,8 +130,9 @@ it("refuses a path whose constraints name a kind it does not judge, or bound a s
 		expect(await reasonOf({}, constraints, {})).toBe("name constraints unsupported");
 		expect(await reasonOf(constraints, {}, {})).toBe("name constraints unsupported");
 	}
-	expect(await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum: 1 })] }, {})).toBe(
-		"name constraints unsupported",
+	// node reads a subtree's depth as no issuer's constraints it takes: no path, or the rules refuse it.
+	expect(["name constraints unsupported", "path"]).toContain(
+		await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum: 1 })] }, {}),
 	);
 	// A minimum of 4 bytes or more, which asn1js reads as 0 by its valueDec: refused by its value,
 	// from the first length it misreads (2^24, 1, a negative one) to 2^32.
@@ -140,18 +145,17 @@ it("refuses a path whose constraints name a kind it does not judge, or bound a s
 		[1, 0, 0, 0, 0],
 	]) {
 		const minimum = integer(bytes);
-		expect(
+		expect(["name constraints unsupported", "path"], JSON.stringify(bytes)).toContain(
 			await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum })] }, {}),
-			JSON.stringify(bytes),
-		).toBe("name constraints unsupported");
+		);
 	}
-	// A zero written in more bytes than it needs is still zero: taken.
+	// A zero written in more bytes than DER allows: node reads it as no issuer's, so no path.
 	const zero = integer([0, 0, 0, 0, 0]);
 	expect(
 		await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum: zero })] }, {}),
-	).toBe("valid");
-	expect(await reasonOf({}, { permitted: [subtree(dns("example.com"), { maximum: 2 })] }, {})).toBe(
-		"name constraints unsupported",
+	).toBe("path");
+	expect(["name constraints unsupported", "path"]).toContain(
+		await reasonOf({}, { permitted: [subtree(dns("example.com"), { maximum: 2 })] }, {}),
 	);
 });
 

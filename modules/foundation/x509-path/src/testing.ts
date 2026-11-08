@@ -93,6 +93,8 @@ export interface Issuing {
 	readonly points?: readonly pkijs.DistributionPoint[];
 	/** No basic constraints at all. */
 	readonly bare?: boolean;
+	/** Subject and authority key identifiers: each a SHA-1 of its key's SPKI. */
+	readonly keyIds?: boolean;
 }
 
 let serials = 100;
@@ -161,6 +163,17 @@ export async function issue(spec: Issuing): Promise<Issued> {
 		extensions.push(raw(id, value ?? new asn1js.Integer({ value: 5 }), critical));
 	}
 	if (spec.criticalUnknown) extensions.push(unknownCritical("1.3.6.1.4.1.99999.1"));
+	if (spec.keyIds) {
+		const idOf = async (k: Keys) =>
+			new asn1js.OctetString({
+				valueHex: await subtle.digest("SHA-1", await subtle.exportKey("spki", k.publicKey)),
+			});
+		extensions.push(raw("2.5.29.14", await idOf(keys)));
+		const authority = new pkijs.AuthorityKeyIdentifier({
+			keyIdentifier: await idOf(spec.by?.keys ?? keys),
+		});
+		extensions.push(extension("2.5.29.35", authority));
+	}
 	c.extensions = extensions;
 	await c.subjectPublicKeyInfo.importKey(keys.publicKey);
 	await c.sign((spec.by?.keys ?? keys).privateKey, spec.hash ?? "SHA-256");
