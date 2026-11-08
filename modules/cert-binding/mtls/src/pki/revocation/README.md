@@ -20,7 +20,7 @@
 - OCSP: the request names the certificate by SHA-1 hashes of its issuer's name and key, with a nonce the answer must carry back where asked.
 - OCSP: the signer is the issuer, or a responder it signed: in date, for OCSP signing, held to the path's key and signature rules, with no unknown or unparsable extension.
 - OCSP: a delegated responder's own revocation is checked before its good is taken, unless it says it needs none.
-- Under both, OCSP comes first, and the CRL may only add a revocation to an unknown.
+- Under both, OCSP comes first, and the CRL may only add a revocation to an unknown; where OCSP gives no answer it can use, the CRL alone decides.
 - Any certificate revoked revokes the path.
 - Only a fetch that failed (unreachable, out of time or size, a server failing, busy or timed out, a responder's internal error or try later) is an outage.
 - Anything else not confirmed good refuses, and a refusal outweighs an outage.
