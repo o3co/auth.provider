@@ -94,9 +94,12 @@ export function publicPem(
 export function publicPem(pem: string, asked?: { readonly withForm: true }) {
 	const key = keyOfPem(pem);
 	if (key === undefined || !asked?.withForm) return key;
-	// The platform takes a key block before a certificate's; one found only in a certificate came from it.
-	const certificates = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
-	const form: PemForm = keyOfPem(pem.replace(certificates, "")) ? "public-key" : "certificate";
+	// A public key only where the platform still reads one from its public key blocks alone; a key it
+	// read from any other block (a certificate, under any header it takes) came from a certificate.
+	const keyBlocks = pem.match(
+		/-----BEGIN (RSA )?PUBLIC KEY-----[\s\S]*?-----END \1PUBLIC KEY-----/g,
+	);
+	const form: PemForm = keyOfPem((keyBlocks ?? []).join("\n")) ? "public-key" : "certificate";
 	return { key, form };
 }
 

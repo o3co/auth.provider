@@ -74,6 +74,12 @@ describe("reading public keys", () => {
 		expect(publicPem(certificate)?.asymmetricKeyType).toBe("ec");
 		const form = (pem: string) => publicPem(pem, { withForm: true })?.form;
 		expect(form(certificate)).toBe("certificate");
+		// The header OpenSSL also takes for a certificate.
+		const legacy = certificate.replaceAll("CERTIFICATE-----", "X509 CERTIFICATE-----");
+		expect(publicPem(legacy)?.asymmetricKeyType).toBe("ec");
+		expect(form(legacy)).toBe("certificate");
+		const rsaPkcs1 = rsa.publicKey.export({ format: "pem", type: "pkcs1" }).toString();
+		expect(form(rsaPkcs1)).toBe("public-key");
 		expect(form(spki)).toBe("public-key");
 		const pkcs8 = ec.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
 		expect(form(pkcs8)).toBeUndefined();
