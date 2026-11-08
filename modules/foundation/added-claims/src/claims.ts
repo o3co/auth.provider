@@ -1,4 +1,6 @@
 import { types } from "node:util";
+import { setting } from "@mod/kernel";
+import { z } from "zod";
 
 /** A value of an added claim: JSON, as the rules below take it. A null is read back alone, from a token 0.18 signed. */
 export type AddedValue =
@@ -72,14 +74,67 @@ const reserved: ReadonlySet<string> = new Set([...written, ...unwritten]);
 /** Names an object's own key never takes, at any depth: the language's, and the one JSON calls. */
 const objectNames = new Set(["__proto__", "constructor", "prototype", "toJSON"]);
 
-const limits = {
-	nameCodePoints: 255,
-	stringCodePoints: 2048,
-	members: 256,
-	nodes: 1024,
-	depth: 8,
-	bytes: 4096,
-} as const;
+/**
+ * The limits an operator may raise, each from today's value, never below it: a token issued under
+ * them is read back under them. `size` is JSON bytes in UTF-8; the lengths are code points.
+ */
+export const addedClaimsLimits = z
+	.strictObject({
+		"name-length": z
+			.number()
+			.int()
+			.min(255)
+			.max(1024)
+			.prefault(255)
+			.describe(
+				"The longest name of an added claim, in code points, from 255 to 1024; raised only.",
+			),
+		"string-length": z
+			.number()
+			.int()
+			.min(2048)
+			.max(8192)
+			.prefault(2048)
+			.describe(
+				"The longest string of an added claim, in code points, from 2048 to 8192; raised only.",
+			),
+		members: z
+			.number()
+			.int()
+			.min(256)
+			.max(1024)
+			.prefault(256)
+			.describe(
+				"The most members of an object, or values of an array, in added claims, from 256 to 1024; raised only.",
+			),
+		values: z
+			.number()
+			.int()
+			.min(1024)
+			.max(4096)
+			.prefault(1024)
+			.describe("The most values in one set of added claims, from 1024 to 4096; raised only."),
+		depth: z
+			.number()
+			.int()
+			.min(8)
+			.max(16)
+			.prefault(8)
+			.describe(
+				"The deepest an added claim nests, its value at depth 1, from 8 to 16; raised only.",
+			),
+		size: setting
+			.size("B")
+			.pipe(z.number().int().min(4096).max(8192))
+			.prefault("4KiB")
+			.describe(
+				"The largest set of added claims, as JSON in UTF-8, a size with a unit from 4KiB to 8KiB; raised only.",
+			),
+	})
+	.prefault({});
+
+/** The limits as read. */
+export type AddedClaimsLimits = z.output<typeof addedClaimsLimits>;
 
 const refused = (why: string) => new TypeError(`added-claims: an added claim ${why}`);
 const controlOrSpace = /[\p{Cc}\p{White_Space}]/u;
@@ -95,6 +150,7 @@ const bytesOf = (text: string) => Buffer.byteLength(JSON.stringify(text));
 
 /** The walk's running counts: the values met and the bytes the JSON would take; and whether it takes a null. */
 interface Walk {
+	readonly limits: AddedClaimsLimits;
 	nodes: number;
 	bytes: number;
 	readonly seen: Set<object>;
@@ -103,17 +159,20 @@ interface Walk {
 
 /** Each count is checked as it grows, before the walk goes on. */
 function node(walk: Walk) {
-	if (++walk.nodes > limits.nodes) throw refused(`set holds more than ${limits.nodes} values`);
+	const most = walk.limits.values;
+	if (++walk.nodes > most) throw refused(`set holds more than ${most} values`);
 }
 function bytes(walk: Walk, n: number) {
 	walk.bytes += n;
-	if (walk.bytes > limits.bytes) throw refused(`set is over ${limits.bytes} bytes as JSON`);
+	const most = walk.limits.size;
+	if (walk.bytes > most) throw refused(`set is over ${most} bytes as JSON`);
 }
 
-function nameOf(key: string | symbol, top: boolean): string {
+function nameOf(key: string | symbol, top: boolean, walk: Walk): string {
 	if (typeof key === "symbol") throw refused("name is a symbol");
-	if (key.length === 0 || !withinCodePoints(key, limits.nameCodePoints)) {
-		throw refused(`name is not 1 to ${limits.nameCodePoints} code points`);
+	const most = walk.limits["name-length"];
+	if (key.length === 0 || !withinCodePoints(key, most)) {
+		throw refused(`name is not 1 to ${most} code points`);
 	}
 	if (!key.isWellFormed() || controlOrSpace.test(key)) {
 		throw refused("name holds a lone surrogate, a control character or a space");
@@ -143,7 +202,7 @@ function ownData(value: object, most: number, over: string): [string | symbol, u
 
 /** `at` is the value's path, as `keys` names a null: a member by `.name`, an array's value by `[i]`. */
 function copy(value: unknown, depth: number, walk: Walk, at: string): AddedValue {
-	if (depth > limits.depth) throw refused(`is nested deeper than ${limits.depth}`);
+	if (depth > walk.limits.depth) throw refused(`is nested deeper than ${walk.limits.depth}`);
 	node(walk);
 	if (value === null && walk.nulls === "refused") {
 		throw refused(`holds a null at ${at}: leave it out`);
@@ -158,9 +217,8 @@ function copy(value: unknown, depth: number, walk: Walk, at: string): AddedValue
 		return value;
 	}
 	if (typeof value === "string") {
-		if (!withinCodePoints(value, limits.stringCodePoints)) {
-			throw refused(`string is over ${limits.stringCodePoints} code points`);
-		}
+		const most = walk.limits["string-length"];
+		if (!withinCodePoints(value, most)) throw refused(`string is over ${most} code points`);
 		if (!value.isWellFormed()) throw refused("string holds a lone surrogate");
 		bytes(walk, bytesOf(value));
 		return value;
@@ -187,7 +245,8 @@ function copyArray(
 	if (Object.getPrototypeOf(value) !== Array.prototype) throw refused("array is not a plain one");
 	// A plain array's length is its own data property, read before anything else.
 	const length = value.length;
-	if (length > limits.members) throw refused(`array holds more than ${limits.members} values`);
+	const most = walk.limits.members;
+	if (length > most) throw refused(`array holds more than ${most} values`);
 	// Its indexes, in order, and its length alone: a hole or a property beside them is no JSON array.
 	const entries = ownData(value, length + 1, "array holds a property beside its values");
 	if (entries.length !== length + 1) throw refused("array holds a hole");
@@ -201,55 +260,71 @@ function copyArray(
 	return Object.freeze(copied);
 }
 
-function plainMembers(value: object, over: string): [string | symbol, unknown][] {
+function plainMembers(value: object, most: number, over: string): [string | symbol, unknown][] {
 	const prototype = Object.getPrototypeOf(value);
 	if (prototype !== Object.prototype && prototype !== null)
 		throw refused("object is not a plain one");
-	return ownData(value, limits.members, over);
+	return ownData(value, most, over);
 }
 
 function copyObject(value: object, depth: number, walk: Walk, path: string): AddedClaims {
-	const entries = plainMembers(value, `object holds more than ${limits.members} members`);
+	const most = walk.limits.members;
+	const entries = plainMembers(value, most, `object holds more than ${most} members`);
 	bytes(walk, 2 + Math.max(0, entries.length - 1));
 	const copied: Record<string, AddedValue> = {};
 	for (const [key, member] of entries) {
-		const name = nameOf(key, false);
+		const name = nameOf(key, false, walk);
 		bytes(walk, bytesOf(name) + 1);
 		copied[name] = copy(member, depth + 1, walk, `${path}.${name}`);
 	}
 	return Object.freeze(copied);
 }
 
-/**
- * The claims a grant adds, checked and copied: a new frozen record of JSON values within the
- * limits, every name not reserved; none for none or an empty set. Throws TypeError, the grant's
- * maker's mistake, on anything else: nothing given is called, nor used past the copy.
- */
-export function addedClaimsOf(given: unknown): AddedClaims | undefined {
-	return copied(given, "refused");
+/** The checks and copies of added claims under `limits`, as the operator set them. */
+export function addedClaimsWith(limits: AddedClaimsLimits) {
+	return {
+		/**
+		 * The claims a grant adds, checked and copied: a new frozen record of JSON values within the
+		 * limits, every name not reserved; none for none or an empty set. Throws TypeError, the grant's
+		 * maker's mistake, on anything else: nothing given is called, nor used past the copy.
+		 */
+		of: (given: unknown) => copied(given, "refused", limits),
+		/**
+		 * The added claims of a token read back, checked and copied as a grant's are but for a null.
+		 * Signing took one under 0.18, so a token it signed may hold one, and is read as it was signed.
+		 */
+		readBack: (given: unknown) => copied(given, "read", limits),
+	};
 }
 
-/**
- * The added claims of a token read back, checked and copied as a grant's are but for a null. Signing
- * took one under 0.18, so a token it signed may hold one, and is read as it was signed.
- */
-export function addedClaimsReadBack(given: unknown): AddedClaims | undefined {
-	return copied(given, "read");
-}
+/** The checks under the default limits. */
+const byDefault = addedClaimsWith(addedClaimsLimits.parse({}));
+/** `addedClaimsWith`'s `of` under the default limits. */
+export const addedClaimsOf = byDefault.of;
+/** `addedClaimsWith`'s `readBack` under the default limits. */
+export const addedClaimsReadBack = byDefault.readBack;
 
-function copied(given: unknown, nulls: Walk["nulls"]): AddedClaims | undefined {
+function copied(
+	given: unknown,
+	nulls: Walk["nulls"],
+	limits: AddedClaimsLimits,
+): AddedClaims | undefined {
 	if (given === undefined) return undefined;
 	if (given === null || typeof given !== "object" || Array.isArray(given)) {
 		throw refused("set is not an object");
 	}
 	if (types.isProxy(given)) throw refused("set is a proxy");
-	const entries = plainMembers(given, `set holds more than ${limits.members} claims`);
+	const entries = plainMembers(
+		given,
+		limits.members,
+		`set holds more than ${limits.members} claims`,
+	);
 	if (entries.length === 0) return undefined;
-	const walk: Walk = { nodes: 0, bytes: 0, seen: new Set([given]), nulls };
+	const walk: Walk = { limits, nodes: 0, bytes: 0, seen: new Set([given]), nulls };
 	bytes(walk, 2 + entries.length - 1);
 	const taken: Record<string, AddedValue> = {};
 	for (const [key, value] of entries) {
-		const name = nameOf(key, true);
+		const name = nameOf(key, true, walk);
 		bytes(walk, bytesOf(name) + 1);
 		taken[name] = copy(value, 1, walk, name);
 	}
