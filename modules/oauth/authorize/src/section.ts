@@ -20,6 +20,24 @@ export const section = z.strictObject({
 		.describe(
 			"The longest login URL a browser is sent to, `redirect_to` and all: a size with a unit, from 2KiB to 64KiB. A request whose login URL would be longer is answered here, `400`, nothing sent back.",
 		),
+	"nonce-limit": z
+		.number()
+		.int()
+		.min(64)
+		.max(2048)
+		.prefault(256)
+		.describe(
+			"The longest `nonce` taken, in characters (UTF-16 code units), from 64 to 2048; a longer one is `invalid_request`.",
+		),
+	"state-limit": z
+		.number()
+		.int()
+		.min(64)
+		.max(2048)
+		.prefault(512)
+		.describe(
+			"The longest `state` taken, in characters (UTF-16 code units), from 64 to 2048; it goes back in the redirect's Location, so a longer one is `invalid_request`, sent back without it.",
+		),
 	/** Whether every request names `openid` in its own scope (`dual` also serves plain OAuth clients). */
 	"oidc-mode": z
 		.enum(["oidc-required", "dual"])

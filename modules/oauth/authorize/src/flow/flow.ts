@@ -6,8 +6,9 @@ import { type Reauths, reauths as reauthsContract } from "@mod/reauth";
 import { type Sessions, sessions } from "@mod/session";
 import { type IssuanceRefused, type Tokens, tokens } from "@mod/tokens";
 import {
-	checkRequest,
 	checkScope,
+	type RequestCheck,
+	requestCheckOver,
 	type TargetCheck,
 	targetCheckOver,
 	targetCheckTakes,
@@ -69,6 +70,7 @@ export interface FlowParts extends Place {
 	readonly loginUrlLimit: number;
 	/** Whether each request must name `openid` itself (the package's `oidc-mode`). */
 	readonly openidRequired: boolean;
+	readonly check: RequestCheck;
 	readonly reauths: Reauths;
 	readonly stepUp: StepUp;
 	readonly consent: ConsentDecision;
@@ -87,7 +89,7 @@ export type Flow = (trusted: Trusted) => Promise<Decision>;
 export function flowWith(parts: FlowParts): Flow {
 	const { issuer, self, sessions: entered, codes: issued, clock, loginPage, loginUrlLimit } = parts;
 	const { reauths, stepUp, consent, openidRequired, tokens: issuance, target: targetOf } = parts;
-	const { selections, claimsParameter, hint: hintOf } = parts;
+	const { selections, claimsParameter, hint: hintOf, check } = parts;
 	const urlWith = urlFrom(self);
 
 	/**
@@ -129,7 +131,7 @@ export function flowWith(parts: FlowParts): Flow {
 	const readOf = async ({ client, one, params }: Trusted) => {
 		const denied = consent.denied(one);
 		if (denied) return denied;
-		const checked = checkRequest(client, one, params);
+		const checked = check(client, one, params);
 		if (checked.kind !== "checked") return checked;
 		const allowed = checkScope(client, one("scope"), issuer, openidRequired);
 		if (allowed.kind !== "allowed") return allowed;
@@ -304,6 +306,7 @@ export async function flowOver(c: BuildContext<Settings>, place: Place): Promise
 		reauths,
 		stepUp: await stepUpOver(c, reauths),
 		consent: await consentDecisionOver(c),
+		check: requestCheckOver(c),
 		target: await targetCheckOver(c),
 		hint: await hintCheckOver(c),
 	});
