@@ -50,6 +50,13 @@ export default defineModule(
 			if (c.section.mode !== "required") {
 				c.log.warn("mfa.not_required", { reason: "using a session needs no second factor" });
 			}
+			// The kinds taken: under required, one whose proof adds no mfa would let a login prove
+			// nothing a session may use, so it is left out, and every lookup by kind answers as for a
+			// kind not composed. Said at every start, from the same judgment, rather than refused.
+			const taken = composed.filter((k) => !leftOut(k, required));
+			for (const k of composed.filter((k) => leftOut(k, required))) {
+				c.log.warn("mfa.kind_not_taken", { kind: k.kind });
+			}
 			// Sessions are held to the factors elsewhere: without that module, using them would ask for none.
 			if ((await c.collect(enforcers)).length === 0) {
 				return c.refuse(
@@ -74,10 +81,7 @@ export default defineModule(
 			}
 			return factorDecisions({
 				stored,
-				// The kinds taken: under required, one whose proof adds no mfa would let a login prove
-				// nothing a session may use, so it is left out, and every lookup by kind answers as for
-				// a kind not composed.
-				kinds: byKind(composed.filter((k) => !leftOut(k, required))),
+				kinds: byKind(taken),
 				seal: await c.get(seal),
 				required,
 				maxFactors: c.section["max-factors"],
