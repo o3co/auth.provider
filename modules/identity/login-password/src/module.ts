@@ -10,52 +10,62 @@ import { z } from "zod";
 import events from "./audit-events.ts";
 import { answer, loginWith, proves } from "./login.ts";
 
-const section = z.strictObject({
-	attempts: z
-		.number()
-		.int()
-		.min(1)
-		.max(100)
-		.prefault(20)
-		.describe(
-			"Login attempts allowed per source in each window, within bounds that keep guessing slow.",
-		),
-	window: setting
-		.duration("s")
-		.pipe(z.number().int().min(60).max(86_400))
-		.prefault("15m")
-		.describe("The window `attempts` is counted over, from 1m to 1d."),
-	"account-attempts": z
-		.number()
-		.int()
-		.min(1)
-		.max(100)
-		.prefault(10)
-		.describe(
-			"Failed attempts allowed at one identifier, from any source, before each next one waits.",
-		),
-	"account-window": setting
-		.duration("s")
-		.pipe(z.number().int().min(60).max(86_400))
-		.prefault("1h")
-		.describe(
-			"How long an identifier's run of failed attempts is remembered, from 1m to 1d, and no shorter than `account-max-wait`.",
-		),
-	"account-first-wait": setting
-		.duration("s")
-		.pipe(z.number().int().min(1).max(3600))
-		.prefault("1s")
-		.describe(
-			"An identifier's first wait past its `account-attempts`, from 1s to 1h and no longer than `account-max-wait`: each next one doubles it.",
-		),
-	"account-max-wait": setting
-		.duration("s")
-		.pipe(z.number().int().min(1).max(3600))
-		.prefault("5m")
-		.describe(
-			"The longest an identifier waits between attempts, from 1s to 1h and no longer than `account-window`: the wait doubles to it, never locking out.",
-		),
-});
+const section = z
+	.strictObject({
+		attempts: z
+			.number()
+			.int()
+			.min(1)
+			.max(100)
+			.prefault(20)
+			.describe(
+				"Login attempts allowed per source in each window, within bounds that keep guessing slow.",
+			),
+		window: setting
+			.duration("s")
+			.pipe(z.number().int().min(60).max(86_400))
+			.prefault("15m")
+			.describe("The window `attempts` is counted over, from 1m to 1d."),
+		"account-attempts": z
+			.number()
+			.int()
+			.min(1)
+			.max(100)
+			.prefault(10)
+			.describe(
+				"Failed attempts allowed at one identifier, from any source, before each next one waits.",
+			),
+		"account-window": setting
+			.duration("s")
+			.pipe(z.number().int().min(60).max(86_400))
+			.prefault("1h")
+			.describe(
+				"How long an identifier's run of failed attempts is remembered, from 1m to 1d, and no shorter than `account-max-wait`.",
+			),
+		"account-first-wait": setting
+			.duration("s")
+			.pipe(z.number().int().min(1).max(3600))
+			.prefault("1s")
+			.describe(
+				"An identifier's first wait past its `account-attempts`, from 1s to 1h and no longer than `account-max-wait`: each next one doubles it.",
+			),
+		"account-max-wait": setting
+			.duration("s")
+			.pipe(z.number().int().min(1).max(3600))
+			.prefault("5m")
+			.describe(
+				"The longest an identifier waits between attempts, from 1s to 1h and no longer than `account-window`: the wait doubles to it, never locking out.",
+			),
+	})
+	// Each relation names its keys here; rate-limit's lockoutProblem stays behind them.
+	.refine((s) => s["account-first-wait"] <= s["account-max-wait"], {
+		message: "longer than login-password.account-max-wait",
+		path: ["account-first-wait"],
+	})
+	.refine((s) => s["account-max-wait"] <= s["account-window"], {
+		message: "longer than login-password.account-window",
+		path: ["account-max-wait"],
+	});
 
 export default defineModule(
 	{ name: "login-password", replicaSafe: true, section, takes: [audit, logins, lockouts, users] },

@@ -664,6 +664,26 @@ describe("login-password attempts per account", () => {
 		expect((await login(wrong("alice"), elsewhere())).status).toBe(429);
 	});
 
+	it("refuses to boot on a wait longer than the one after it, naming both keys", async () => {
+		for (const [login, where, reason] of [
+			[
+				{ "account-first-wait": "2m", "account-max-wait": "1m" },
+				"account-first-wait",
+				"account-max-wait",
+			],
+			[
+				{ "account-window": "10m", "account-max-wait": "15m" },
+				"account-max-wait",
+				"account-window",
+			],
+		] as const) {
+			const refused = await serve({ login }).catch((error) => error);
+			expect(refused.refusals, JSON.stringify(login)).toMatchObject([
+				{ where: `login-password.${where}`, reason: `longer than login-password.${reason}` },
+			]);
+		}
+	});
+
 	it("refuses to boot on attempts, a window or a longest wait out of bounds, or a wait that names no unit", async () => {
 		for (const login of [
 			{ "account-attempts": 0 },
