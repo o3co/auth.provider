@@ -256,6 +256,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 
 ## second-factor
 
+- `@mod/account-mail-code` (feature, `modules/second-factor/account-mail-code`): Mails a code to the account's address, as `users` states or vouches for it, and checks a typed code against it, for the second-factor kinds and proofs that name the purpose.
 - `@mod/mfa` (feature, `modules/second-factor/mfa`): Owns each subject's second factors: a kind's secret, sealed, and its state.
   - `binding` (`src/binding`): a factor begun, its pending proof, and its binding.
   - `clearing` (`src/clearing`): a reset's clearing of a subject's factors and its mark, and a first binding refused.
