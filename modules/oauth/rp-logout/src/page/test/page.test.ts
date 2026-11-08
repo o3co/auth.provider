@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { frontChannelPage, loggedOutPage } from "../page.ts";
 
-const at = { issuer: "https://as.example", session: "s1" };
+const at = { issuer: "https://as.example", session: "s1", waitMs: 2000 };
 const frames = [{ uri: "https://app.example/fc", withSession: true }];
 
 describe("the pages a logout ends on", () => {
@@ -10,6 +10,11 @@ describe("the pages a logout ends on", () => {
 		expect(page?.html).toContain("<title>Logged out</title>");
 		expect(page?.html).toContain("You are logged out.");
 		expect(page?.html).toContain("<iframe");
+	});
+
+	it("lets the frames load as long as it is told before it moves the browser on", () => {
+		const page = frontChannelPage(frames, { ...at, next: "https://app.example/", waitMs: 5000 });
+		expect(page?.html).toContain('data-delay="5000"');
 	});
 
 	it("writes a client's front-channel URI into its frame escaped, so it cannot break out of the attribute [rfc6749-10.14-b]", () => {

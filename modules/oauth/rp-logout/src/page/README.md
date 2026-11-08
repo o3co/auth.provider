@@ -9,7 +9,7 @@ Internal module of `rp-logout`: the front-channel page.
 - Which clients are framed and when the page is sent (`ending`).
 
 ## Offers
-- `frontChannelPage` (frames, issuer, session, where to go next → the page and what it loads, for `http`'s `loads`, and how many frames were left out / none when no frame can load).
+- `frontChannelPage` (frames, issuer, session, where to go next, how long the frames get to load → the page and what it loads, for `http`'s `loads`, and how many frames were left out / none when no frame can load).
 - `loggedOutPage` (where to go next, and whether to say the person was not signed in → the page with no frame and what it loads): moves on at once by the same one script, or stays with none.
 - `returnUrl` (a client's return and `state` → the URL the browser goes to, `state` added to its query / none without a return).
 

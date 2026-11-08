@@ -35,6 +35,8 @@ export interface ConfirmParts {
 	readonly logoutUrl: string;
 	/** How long, in seconds, a confirmation and a carried request may be answered (the package's `confirm-within`). */
 	readonly withinSeconds: number;
+	/** How long the front-channel page's frames get to load (the package's `frame-wait`). */
+	readonly frameWaitMs: number;
 	readonly now: () => number;
 	readonly log: Log;
 }
@@ -130,7 +132,12 @@ export function confirmWith(p: ConfirmParts) {
 		// Always a page: the form's policy would hold a redirect after the post to this origin.
 		const frames = await closed.frames();
 		const next = closed.upstream ?? returnUrl(back);
-		const framed = frontChannelPage(frames, { issuer: p.issuer, session: handle, next });
+		const framed = frontChannelPage(frames, {
+			issuer: p.issuer,
+			session: handle,
+			next,
+			waitMs: p.frameWaitMs,
+		});
 		if (framed && framed.skipped > 0)
 			p.log.warn("rp-logout.frames_skipped", { count: framed.skipped });
 		const done = framed ?? loggedOutPage({ next });
@@ -165,6 +172,7 @@ export async function confirmFrom(
 		confirmUrl: `${origin}${confirmPath}`,
 		logoutUrl: `${origin}${logoutPath}`,
 		withinSeconds: c.section["confirm-within"],
+		frameWaitMs: c.section["frame-wait"],
 		now: c.clock.now,
 		log: c.log,
 	});

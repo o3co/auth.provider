@@ -10,6 +10,7 @@ it.each([
 	["confirm-within", "59s", "1m", "15m", "901s"],
 	["logout-token-lifetime", "59s", "1m", "15m", "901s"],
 	["hint-max-age", "59s", "1m", "1d", "86401s"],
+	["frame-wait", "999ms", "1s", "10s", "10001ms"],
 ])("takes %s from its least to its most, written with its unit", (key, under, low, high, over) => {
 	const takes = (value: unknown) => section.safeParse({ [key]: value }).success;
 	expect([under, low, high, over, 60, "60"].map(takes)).toEqual([
@@ -22,7 +23,7 @@ it.each([
 	]);
 });
 
-it("remembers and notifies for a day, sweeps every minute, waits five minutes for a person to confirm, gives a logout token five minutes, takes a hint up to a day old and takes 60 requests a minute per source, where nothing is set", () => {
+it("remembers and notifies for a day, sweeps every minute, waits five minutes for a person to confirm, gives a logout token five minutes, takes a hint up to a day old, lets frames load two seconds and takes 60 requests a minute per source, where nothing is set", () => {
 	expect(section.parse({})).toEqual({
 		"remember-for": 86_400,
 		"notify-within": 86_400,
@@ -30,6 +31,7 @@ it("remembers and notifies for a day, sweeps every minute, waits five minutes fo
 		"confirm-within": 300,
 		"logout-token-lifetime": 300,
 		"hint-max-age": 86_400,
+		"frame-wait": 2000,
 		requests: 60,
 		window: 60,
 	});

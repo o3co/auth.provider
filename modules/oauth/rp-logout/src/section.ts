@@ -41,6 +41,13 @@ export const section = z.strictObject({
 		.describe(
 			"How long ago an `id_token_hint` may have been issued and still be taken, from 1m to 1d; an older one is refused, by GET or POST, as a logout another site may have started, so it never grows past a day.",
 		),
+	"frame-wait": setting
+		.duration("ms")
+		.pipe(z.number().int().min(1000).max(10_000))
+		.prefault("2s")
+		.describe(
+			"How long the front-channel logout page lets the clients' frames load before it moves the browser on, from 1s to 10s: a longer one waits for slow pages, and keeps the person waiting as long.",
+		),
 	"error-page": urlSetting({ schemes: ["https"], loopbackHttp: true })
 		.optional()
 		.describe(
