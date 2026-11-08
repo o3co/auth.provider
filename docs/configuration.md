@@ -146,9 +146,11 @@ From `@mod/exchange-id-tokens`.
 |---|---|---|---|---|---|---|
 | `exchange-id-tokens.max-age` | string | `10m` |  |  |  | The oldest an id_token may be, from its `iat`, from 1m to 1h. |
 | `exchange-id-tokens.clock-skew` | string | `30s` |  |  |  | How far an id_token's times may be off this host's clock, from 0s to 5m. Set it no lower than your issuers' real clock drift: narrowing it can admit an id_token a wider skew refused at a revocation. |
+| `exchange-id-tokens.apple` | object |  |  |  |  | Takes Apple's id_tokens when written. |
 | `exchange-id-tokens.apple.upstream` | string | `apple` when `exchange-id-tokens.apple` is set |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
 | `exchange-id-tokens.apple.clients` | map |  | when `exchange-id-tokens.apple` is set |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
 | `exchange-id-tokens.apple.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256"]` when `exchange-id-tokens.apple` is set |  |  |  | The algorithms Apple's id_tokens may be signed with: asymmetric ones only, RS256 by default. |
+| `exchange-id-tokens.google` | object |  |  |  |  | Takes Google's id_tokens when written. |
 | `exchange-id-tokens.google.upstream` | string | `google` when `exchange-id-tokens.google` is set |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
 | `exchange-id-tokens.google.clients` | map |  | when `exchange-id-tokens.google` is set |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
 | `exchange-id-tokens.google.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256"]` when `exchange-id-tokens.google` is set |  |  |  | The algorithms Google's id_tokens may be signed with: asymmetric ones only, RS256 by default. |
@@ -316,11 +318,13 @@ From `@mod/keys`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
+| `keys.signing` | object |  |  |  |  | The key the provider signs with now. |
 | `keys.signing.kid` | string |  | yes | `KEYS_SIGNING_KID` | `signing-1` | The key id tokens signed with this key carry, unique in the ring. |
 | `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `RS256` | The algorithm the provider signs with. |
 | `keys.signing.private-key` | string |  | when `keys.signing.alg` is `EdDSA`, `ES256` or `RS256` | `KEYS_SIGNING_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----"` | The signing key, as a PKCS8 PEM. |
 | `keys.signing.secret` | string |  | when `keys.signing.alg` is `HS256` |  |  | The HMAC secret for HS256, its bytes the HMAC key, read as `secret-encoding` names; unset, as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first). At least 32 bytes, of at least 8 byte values, however read. |
 | `keys.signing.secret-encoding` | hex \| base64 \| utf8 |  |  |  |  | How `secret` is read: `hex`, `base64` (strict) or `utf8`, the text's own bytes, as 0.17 and policy-verifier read it; a value not of the reading named is refused. Unset, hex or else base64. |
+| `keys.next` | object |  |  |  |  | The key that signs next: published and verifying now, never signing, so verifiers know it before it signs. |
 | `keys.next.kid` | string |  | when `keys.next` is set |  |  | The key id of the key that signs next, unique in the ring. |
 | `keys.next.alg` | EdDSA \| ES256 \| RS256 |  | when `keys.next` is set |  |  | The algorithm the next key will sign with. |
 | `keys.next.public-key` | string |  | when `keys.next` is set |  |  | The next key's public half, as PEM; a private PEM is taken too. |
@@ -496,6 +500,7 @@ From `@mod/mtls`.
 | `mtls.anchors` | list of string |  | when `mtls.mode` is `pki` |  |  | The trust anchors, as PEM text holding one certificate each. |
 | `mtls.max-intermediates` | integer (0–14) | `4` when `mtls.mode` is `pki` |  |  |  | At most this many certificates between the leaf and an anchor. |
 | `mtls.min-rsa-bits` | integer (2048–16384) | `2048` when `mtls.mode` is `pki` |  |  |  | The fewest bits an RSA key in the path may have; 2048 at least. |
+| `mtls.revocation` | object |  |  |  |  | How a certificate's revocation is confirmed. |
 | `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  | when `mtls.mode` is `pki` |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
 | `mtls.revocation.on-unavailable` | reject \| allow |  | when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
 | `mtls.revocation.hosts` | list of string |  | when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
@@ -603,6 +608,7 @@ From `@mod/redis`.
 | `redis.command-timeout` | string | `1s` |  |  |  | How long one Redis command may take, from 10ms to 1m. |
 | `redis.replication` | none \| replicas |  |  | `REDIS_REPLICATION` | `replicas` | Required when a space asks for replication or confirmed reads. "replicas": every write must reach the replicas, and Redis itself must refuse writes without them. "none": the operator states there is no failover at all, accepting that a failover would lose writes. |
 | `redis.durability` | none |  |  |  |  | "none": the operator states the server does not fsync every write, accepting that a crash loses the latest writes, among them spent assertion and proof ids and lockout records. Without it, a durable space needs appendonly yes, appendfsync always and no-appendfsync-on-rewrite no. |
+| `redis.server-settings` | object |  |  |  |  | The server's settings as the operator declares them, read only where the server refuses CONFIG GET or does not show the setting; declare only what the server really has. Where CONFIG GET answers, a declared value that differs refuses boot. |
 | `redis.server-settings.maxmemory-policy` | string |  |  |  |  | The server's maxmemory-policy, as it is set there. |
 | `redis.server-settings.appendonly` | yes \| no |  |  |  |  | Whether the server keeps an append-only file. |
 | `redis.server-settings.appendfsync` | always \| everysec \| no |  |  |  |  | How often the server fsyncs its append-only file. |
@@ -664,9 +670,11 @@ From `@mod/seal`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
+| `seal.current` | object |  |  |  |  | The key that seals; any key of the ring opens. |
 | `seal.current.id` | string |  | yes | `SEAL_CURRENT_ID` | `seal-1` | The key's id, which heads every value it seals. |
 | `seal.current.algorithm` | aes-256-gcm | `aes-256-gcm` |  |  |  | What the key seals and opens with: aes-256-gcm, the default and only one. |
 | `seal.current.key` | string |  | yes | `SEAL_CURRENT_KEY` | `REPLACE-32-RANDOM-BYTES-BASE64` | The key's bytes, base64, as many as its algorithm takes, of at least 8 byte values. |
+| `seal.next` | object |  |  |  |  | Opens but never seals, so every host opens with it before it seals. |
 | `seal.next.id` | string |  | when `seal.next` is set |  |  | The key's id: it opens values but seals none until it is made current. |
 | `seal.next.algorithm` | aes-256-gcm | `aes-256-gcm` when `seal.next` is set |  |  |  | What the key seals and opens with: aes-256-gcm, the default and only one. |
 | `seal.next.key` | string |  | when `seal.next` is set |  |  | The key's bytes, base64, as many as its algorithm takes, of at least 8 byte values. |
@@ -697,6 +705,7 @@ From `@mod/session-lifecycle`.
 | `session-lifecycle.lifetime` | string | `1h` |  |  |  | How long a session lasts, counted from its opening, from 1m to 30d, such as 8h; its cookie lives as long. The lifetime in force decides on each read, so a shorter one ends sessions opened under a longer one. |
 | `session-lifecycle.sweep-interval` | string | `30s` |  |  |  | How often each host goes on with pending closes, from 1s to 1h, such as 1m; a close whose participants keep failing is retried after half its age, at least this, at most an hour. |
 | `session-lifecycle.recent-authentication` | string | `5m` |  |  |  | How long an authentication stays recent, from 30s to 1h, such as 10m. Where no entry requirement judges changing credentials (no mfa), a sign-in at a known time must be this recent to do so. |
+| `session-lifecycle.attributes` | object |  |  |  |  | The caps a login's attributes are kept within, as login-attributes reads them; lowering one drops, when an open session's attributes are read back, a value past it. |
 | `session-lifecycle.attributes.groups-limit` | integer (1–200) | `64` |  |  |  | How many groups a login may name, from 1 to 200; more, and the groups are dropped whole. |
 | `session-lifecycle.attributes.group-limit` | string | `256B` |  |  |  | The longest group name, in UTF-8 bytes, from 1B to 1KiB; one longer, and the groups are dropped whole. |
 | `session-lifecycle.attributes.picture-limit` | string | `2KiB` |  |  |  | The longest picture URL, in UTF-8 bytes, from 1B to 8KiB; one longer is dropped whole. |
