@@ -4,7 +4,7 @@ import { isFloor, tlsOptions } from "@mod/tls-options";
 import { Redis } from "ioredis";
 import { z } from "zod";
 import { clientDebugs, clientOptions, inTheClear, queryRefusal } from "./client/client.ts";
-import { redisProbe } from "./probe.ts";
+import { redisProbe } from "./probe/probe.ts";
 import {
 	clusterRefused,
 	redisStore,

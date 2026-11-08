@@ -12,9 +12,9 @@ import { spaces } from "@mod/store";
 import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import type { Redis } from "ioredis";
 import { afterEach, describe, expect, it } from "vitest";
-import redisModule from "../src/module.ts";
-import { redisProbe } from "../src/probe.ts";
-import { fakeRedis } from "./fake-redis.ts";
+import { fakeRedis } from "../../../test/fake-redis.ts";
+import redisModule from "../../module.ts";
+import { redisProbe } from "../probe.ts";
 
 /** Waits until `holds`, checking every 10 ms, for 2 s at most: on the event, not on a guess of its time. */
 async function until(holds: () => boolean | Promise<boolean>) {
