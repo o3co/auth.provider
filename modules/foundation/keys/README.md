@@ -12,7 +12,7 @@
 - `accessTokenSigning`: sign claims as an access token (`at+jwt`, adding the `kid`) and verify one, under the ring and answers of `keys`: the one way to either, taken by the module `tokens` alone (any other taking it refuses boot; it binds the modules of a trusted composition, not code that imports `keys` itself), and imported by `tokens` alone, as the manifest's `takenBy` declares.
 - Whether signing is asymmetric, the `alg` it signs with, and the path of the public key set, a route contributed to `http` that answers its listed origins.
 - `publicJwk`: a JWK the platform reads as a public key, kept as given.
-- `publicPem`: a public key written as PEM.
+- `publicPem`: a public key written as PEM; asked `withForm`, also whether it was written as a public key or as a certificate its key is taken out of, for a caller to tell the operator.
 - `thumbprint`: a key's JWK thumbprint (RFC 7638, SHA-256): of a key read, the same whatever form it was written in; of a JWK given, from its required members as written.
 - `verifiesUnder`: whether a JWK may verify, under an algorithm or any of `verifyAlgorithms`, typed as `VerifyAlgorithm`; `isVerifyAlgorithm` tells one from any other name.
 - `publicMembers`: a JWK rebuilt from its type's public members alone, without reading it.

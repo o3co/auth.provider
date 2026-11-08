@@ -17,6 +17,17 @@ const jwkOf = (key: KeyObject, extra: Record<string, unknown> = {}): Jwk => ({
 	...extra,
 });
 const ec = generateKeyPairSync("ec", { namedCurve: "P-256" });
+/** A self-signed P-256 certificate, made with openssl for these tests. */
+const certificate = `-----BEGIN CERTIFICATE-----
+MIIBJzCBzgIJAOKAR396qLcxMAoGCCqGSM49BAMCMBsxGTAXBgNVBAMMEHBlbS1m
+b3JtLWZpeHR1cmUwIBcNMjYxMTA4MTUzOTI1WhgPMjEyNjEwMTUxNTM5MjVaMBsx
+GTAXBgNVBAMMEHBlbS1mb3JtLWZpeHR1cmUwWTATBgcqhkjOPQIBBggqhkjOPQMB
+BwNCAATS/vB1y2OAZTjtIiq1h3wF3kwoWiVobLWC+5gft5EyatdMo3K85KQBg/7d
+UgN11ZspuX7pxRH/tCxxqMyGXZtjMAoGCCqGSM49BAMCA0gAMEUCIQCteb0i+M7Y
+849mU13UrKu+nKuKZ44vQOOLCQiKmdBmkQIgXerbgVMU4hCgxzMY+DTCvAl0GPA2
+ERFQaUYoKVNYuAQ=
+-----END CERTIFICATE-----
+`;
 const ed = generateKeyPairSync("ed25519");
 const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
 
@@ -56,6 +67,17 @@ describe("reading public keys", () => {
 			).toBeUndefined();
 		}
 		expect(publicPem("no pem")).toBeUndefined();
+	});
+
+	it("tells the form a public PEM was written in: a public key, or a certificate it takes the key out of", () => {
+		const spki = ec.publicKey.export({ format: "pem", type: "spki" }).toString();
+		expect(publicPem(certificate)?.asymmetricKeyType).toBe("ec");
+		const form = (pem: string) => publicPem(pem, { withForm: true })?.form;
+		expect(form(certificate)).toBe("certificate");
+		expect(form(spki)).toBe("public-key");
+		const pkcs8 = ec.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+		expect(form(pkcs8)).toBeUndefined();
+		expect(form("no pem")).toBeUndefined();
 	});
 });
 

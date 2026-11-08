@@ -37,6 +37,7 @@ export { isCanonicalJws } from "./material/jws.ts";
 export {
 	isVerifyAlgorithm,
 	type Jwk,
+	type PemForm,
 	publicJwk,
 	publicMembers,
 	publicPem,
