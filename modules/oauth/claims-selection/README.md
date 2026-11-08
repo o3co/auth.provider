@@ -22,7 +22,7 @@
 - Store interface, wired by the assembly: records by name, each kept once for its lifetime. `./testing` holds its contract test for every implementation (`selectionRecordsContract`, through faults), and claims-selection composed over records in memory (`claimsSelectionInMemory`), which a test may wrap.
 
 ## Invariants
-- A selection holds only scalar values: strings up to 256 characters, booleans and finite numbers; exactly one of `value` and a non-empty `values` of up to 16; 4 KiB whole. Another is a `TypeError`.
+- A selection holds only scalar values: strings up to 256 characters, booleans and finite numbers; exactly one of `value` and a non-empty `values` of up to 16; 4 KiB whole. These are fixed, as a selection is stored and read back under the same bounds. Another is a `TypeError`.
 - Without a judge of consent, no name is agreed to.
 - An empty pin means the code had no selection kept, never that claims requests are not taken; every redemption is pinned.
 - A pin copies the code's selection, or marks it none, and holds it five minutes; the redemption's other reads use only the pin. A pin gone fails the read, never answering none.
@@ -32,7 +32,7 @@
 - Writes and reads that fail throw to the caller.
 
 ## Data
-- Records: a code's selection for the code's lifetime and a minute; a pin for five minutes; a family's target until the family's end; a token's target until the token's end and two minutes, for clock drift between hosts.
+- Records: a code's selection for the code's lifetime and a minute, for clock drift between hosts; a pin for five minutes, a fixed margin over the one exchange it covers; a family's target until the family's end; a token's target until the token's end and two minutes, for clock drift between hosts.
 - Needs: no eviction, a crash survived, no rollback on failover; a lost record would let a constrained claim go out unconstrained.
 
 ## Depends on
