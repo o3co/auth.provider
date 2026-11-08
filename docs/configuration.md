@@ -435,6 +435,14 @@ From `@mod/mfa-flows`.
 | `mfa-flows.lockout.hard-limit` | integer (1–100) | `100` |  |  |  | Failures in one run after which the hold is fixed until released; a positive integer up to 100, no less than `budget`. |
 | `mfa-flows.lockout.memory` | string | `1d` |  |  |  | How long a run of failures is remembered without one, at least 1h and no shorter than `max-backoff`, in whole seconds, such as `1d`. |
 
+## mfa-flows-store
+
+From `@mod/mfa-flows-store`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `mfa-flows-store.transactions-per-holder` | integer (1–10000) | `5` |  |  |  | How many live MFA transactions a holder's listing keeps, from 1 to 10000; past it, the one ending first is pushed out. |
+
 ## mfa-management
 
 From `@mod/mfa-management`.

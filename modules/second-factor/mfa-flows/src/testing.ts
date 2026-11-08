@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { section } from "./section.ts";
-import {
-	type StoredTransaction,
-	type TransactionListings,
-	type TransactionStore,
-	transactionsPerHolder,
-} from "./store.ts";
+import type { StoredTransaction, TransactionListings, TransactionStore } from "./store.ts";
 
 export type FlowSettings = z.input<typeof section>;
 
@@ -127,6 +122,8 @@ export function transactionStoreContract(
 /** A place that keeps each holder's live transactions, as one implementation of that store interface offers it. */
 export interface ListingPlace {
 	readonly listings: TransactionListings;
+	/** How many live transactions a holder's listing keeps, as the place was given; unset, 5. */
+	readonly cap?: number;
 	/** Moves the place's clock on, so lifetimes run out. */
 	advance(ms: number): void;
 	/** Where answers can be lost: the next write takes effect, but its answer is lost. */
@@ -162,10 +159,11 @@ export function transactionListingsContract(name: string, open: () => Promise<Li
 			expect(await membersOf(listings, other)).toEqual([ending]);
 		});
 
-		it(`holds ${transactionsPerHolder} a holder: one more pushes out the one ending first, never the one added`, async () => {
-			const { listings } = await open();
+		it("holds as many a holder as its cap: one more pushes out the one ending first, never the one added", async () => {
+			// A place that gives no cap is held to 5, the cap every place kept before one could give it.
+			const { listings, cap = 5 } = await open();
 			const key = fresh();
-			const kept = Array.from({ length: transactionsPerHolder }, () => fresh());
+			const kept = Array.from({ length: cap }, () => fresh());
 			for (const [i, member] of kept.entries()) {
 				expect((await listings.add(key, member, 60_000 + i)).pushedOut).toEqual([]);
 			}

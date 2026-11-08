@@ -6,6 +6,7 @@ import { type Space, spaces } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import wiring from "../src/module.ts";
+import { section } from "../src/section.ts";
 
 const runtime = quietRuntime({ clock: { now: () => 1_800_000_000_000 } });
 
@@ -40,16 +41,17 @@ let listingsNow = 1_800_000_000_000;
 const listingsRuntime = quietRuntime({ clock: { now: () => listingsNow } });
 
 transactionListingsContract(
-	"mfa-flows-store on records' keyed sets, on a simulated replicated store",
+	"mfa-flows-store on records' keyed sets, on a simulated replicated store, keeping the section's 7 a holder",
 	async () => {
 		const simulated = simulatedStore();
 		const app = await assemble({
 			modules: [simulated.module, wiring],
-			config: kernelConfig(),
+			config: { ...kernelConfig(), "mfa-flows-store": { "transactions-per-holder": 7 } },
 			runtime: listingsRuntime,
 		});
 		return {
 			listings: app.get(transactionListings),
+			cap: 7,
 			advance: (ms) => {
 				listingsNow += ms;
 			},
@@ -60,6 +62,12 @@ transactionListingsContract(
 		};
 	},
 );
+
+it("keeps 5 transactions a holder unless the section says, from 1 to 10000", () => {
+	expect(section.parse({})).toEqual({ "transactions-per-holder": 5 });
+	const takes = (n: unknown) => section.safeParse({ "transactions-per-holder": n }).success;
+	expect([0, 1, 10_000, 10_001, 2.5].map(takes)).toEqual([false, true, true, false, false]);
+});
 
 it("declares, for the listings, each guarantee mfa-flows needs, confirmed reads among them", async () => {
 	const declared = contract<readonly Space[]>("declared");

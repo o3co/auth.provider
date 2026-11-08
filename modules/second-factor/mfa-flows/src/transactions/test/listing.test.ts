@@ -4,8 +4,7 @@ import { testRequest } from "@mod/http/testing";
 import { isUnavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { memoryTransactions } from "../../../test/stores.ts";
-import { transactionsPerHolder } from "../../store.ts";
+import { memoryTransactions, perHolder } from "../../../test/stores.ts";
 import type { Started } from "../records.ts";
 import { transactionsOver } from "../transactions.ts";
 
@@ -51,11 +50,11 @@ function opened() {
 
 const login = { subject: "sue", purpose: "enroll-login" } as const;
 
-it(`keeps ${transactionsPerHolder} live transactions a holder: one more ends the one ending first`, async () => {
+it(`keeps ${perHolder} live transactions a holder: one more ends the one ending first`, async () => {
 	const { start } = opened();
 	const first = await start(login);
 	const rest = [];
-	for (let n = 1; n < transactionsPerHolder; n++) rest.push(await start(login));
+	for (let n = 1; n < perHolder; n++) rest.push(await start(login));
 	expect(await first.found()).toBe(true);
 	const last = await start(login);
 	expect(await first.found()).toBe(false);
@@ -65,7 +64,7 @@ it(`keeps ${transactionsPerHolder} live transactions a holder: one more ends the
 it("counts a session's transactions apart from a held login's, and one subject's apart from another's", async () => {
 	const { start } = opened();
 	const held = await start(login);
-	for (let n = 0; n < transactionsPerHolder; n++) {
+	for (let n = 0; n < perHolder; n++) {
 		await start({ subject: "sue", purpose: "step-up", handle: "h1" });
 		await start({ subject: "tom", purpose: "enroll-login" });
 	}
@@ -80,7 +79,7 @@ it("counts no transaction once taken or out of attempts, so it pushes out none",
 	expect(await transactions.take(taken.id)).toBe(true);
 	await transactions.spend(spent.id);
 	await transactions.spend(spent.id);
-	for (let n = 3; n < transactionsPerHolder + 2; n++) await start(login);
+	for (let n = 3; n < perHolder + 2; n++) await start(login);
 	expect(await first.found()).toBe(true);
 });
 

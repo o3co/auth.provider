@@ -7,8 +7,10 @@ import {
 	type TransactionStore,
 	transactionListings,
 	transactionStore,
-	transactionsPerHolder,
 } from "../src/store.ts";
+
+/** The live transactions a holder keeps here, as mfa-flows-store keeps them by default. */
+export const perHolder = 5;
 
 /** mfa-flows' transaction store on the records stand-in, its lifetimes on the given clock, behind a switch. */
 export function memoryTransactions(now: () => number) {
@@ -30,7 +32,7 @@ export function memoryTransactions(now: () => number) {
 		},
 	});
 	const listingsDown = unavailableSwitch<TransactionListings>("transaction listings");
-	const listings = listingsDown.wrap(stand.keyedSets(transactionsPerHolder));
+	const listings = listingsDown.wrap(stand.keyedSets(perHolder));
 	const module = defineModule({ name: "transaction-store", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(transactionStore).by(() => transactions),
 		m.provide(transactionListings).by(() => listings),
