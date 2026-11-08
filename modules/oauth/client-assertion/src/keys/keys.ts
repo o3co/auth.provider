@@ -31,7 +31,7 @@ export const clientKeys: Section<ClientKeys> = {
 				)
 				.prefault([])
 				.describe(
-					"The client's public keys for its assertions, as JWKs: RSA, EC or OKP, with no private member; never beside `jwks-uri`. A registered client's key that none of `client-assertion.algorithms` reads refuses boot.",
+					"The client's public keys for its assertions, as JWKs: RSA, EC or OKP, with no private member; never beside `jwks-uri`. A registered client's key that none of `client-assertion.algorithms` reads is warned of at every start, by its place; deprecated, a later release refuses boot for it.",
 				),
 			"jwks-uri": urlSetting({ schemes: ["https", "http"] })
 				.optional()
@@ -59,25 +59,18 @@ export function keysOf(section: ClientKeys): KeySource {
 		: { jwks: { url: uri, hosts: [new URL(uri).hostname] } };
 }
 
-/**
- * The section with checks at boot: each key written in is read under one of the algorithms taken,
- * and `outbound`'s policy lets a registered client's jwks-uri through.
- */
-export function clientKeysUnder(
-	refusals: OutboundRefusals,
-	algorithms: readonly Algorithm[],
-): Section<ClientKeys> {
+/** The places (`keys.<n>`) of the written keys that none of the algorithms taken reads. */
+export function unreadKeys(section: ClientKeys, algorithms: readonly Algorithm[]): string[] {
+	return section.keys.flatMap((jwk, i) =>
+		boundAlgorithm(jwk, algorithms) === undefined ? [`keys.${i}`] : [],
+	);
+}
+
+/** The section with its check at boot: `outbound`'s policy lets a registered client's jwks-uri through. */
+export function clientKeysUnder(refusals: OutboundRefusals): Section<ClientKeys> {
 	return {
 		...clientKeys,
 		checkAtBoot: (section) => {
-			// Every such key at once, so one boot names all there is to change.
-			const unread = section.keys.flatMap((jwk, i) =>
-				boundAlgorithm(jwk, algorithms) === undefined ? [`keys.${i}`] : [],
-			);
-			if (unread.length > 0) {
-				const [is, it] = unread.length === 1 ? ["is", "it"] : ["are", "each"];
-				return `${unread.join(", ")} ${is} read under none of client-assertion.algorithms: give ${it} an alg among them, or take only one for its kind`;
-			}
 			const source = keysOf(section);
 			if (!("jwks" in source)) return undefined;
 			return destinationRefusal(
@@ -93,10 +86,9 @@ export function clientKeysUnder(
 /** What `clientKeysIn` takes from the build context. */
 export const keysTakes = [outboundRefusals] as const;
 
-/** The section as the composition gives it, with `outbound`'s refusals read from it, under the algorithms taken. */
+/** The section as the composition gives it, with `outbound`'s refusals read from it. */
 export async function clientKeysIn(
 	c: Pick<BuildContext<unknown>, "get">,
-	algorithms: readonly Algorithm[],
 ): Promise<Section<ClientKeys>> {
-	return clientKeysUnder(await c.get(outboundRefusals), algorithms);
+	return clientKeysUnder(await c.get(outboundRefusals));
 }
