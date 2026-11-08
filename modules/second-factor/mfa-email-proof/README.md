@@ -8,7 +8,7 @@
 
 ## Offers
 - Composed on its own: it opts in, so the full template takes it only where it is added or a composed module needs it.
-- Contribution to `mfa-binding-proof`'s binding proofs (boot is refused without `mfa-binding-proof` composed): `account-email`, available while the account has an address `account-mail-code` takes; a 16-character code good for ten minutes at most, mailed under its purpose `mfa-email-proof.account-email`, declared to `mail`.
+- Contribution to `mfa-binding-proof`'s binding proofs (boot is refused without `mfa-binding-proof` composed): `account-email`, available while the account has an address `account-mail-code` takes; a 16-character code good until the transaction it is asked in ends, mailed under its purpose `mfa-email-proof.account-email`, declared to `mail`.
 - `purposes` (`mfa-email-proof.account-email`) and their type `Purpose`, for the module that words them; `proofName` (`account-email`), for the modules that ask for the proof.
 - A proof that passes tells `users` the address is the subject's (`verifiedContact`); past the contacts `users` keeps, it still passes, logging `mfa-email.contact_not_kept` without the address.
 

@@ -113,7 +113,7 @@ it("refuses to boot without mfa-binding-proof composed, naming its contract, so 
 	);
 });
 
-it("proves the account's address before a first binding, by a long code good for ten minutes at most", async () => {
+it("proves the account's address before a first binding, by a long code good until its transaction ends", async () => {
 	const proof = await boot();
 	expect(proof.name).toBe("account-email");
 	contacts.set("ann", "ann@example.com");
@@ -122,18 +122,19 @@ it("proves the account's address before a first binding, by a long code good for
 	if (asked.kind !== "sent") throw new Error("not sent");
 	expect(last()).toMatchObject({
 		purpose: "mfa-email-proof.account-email",
-		values: { minutes: "10" },
+		values: { minutes: "60" },
 	});
 	const code = String(last().values.code);
 	expect(await proof.check("ann", asked.kept, "0".repeat(16))).toBe(false);
 	expect(verified).toEqual([]);
+	now += 3_600_000;
 	expect(await proof.check("ann", asked.kept, code)).toBe(true);
 	// The address the code went to is the subject's now: users keeps it as verified.
 	expect(verified).toEqual([["ann", { kind: "email", value: "ann@example.com" }]]);
-	now += 600_001;
+	now += 1;
 	expect(await proof.check("ann", asked.kept, code)).toBe(false);
 	expect(await proof.send("bob", now + 60_000)).toEqual({ kind: "refused" });
-	// The caller's end, when it comes first; a limited sender keeps nothing.
+	// A shorter transaction, a shorter code; a limited sender keeps nothing.
 	expect(await proof.send("ann", now + 30_000)).toMatchObject({ show: { expires_in: 30 } });
 	expect(last().values.minutes).toBe("1");
 	answer = "limited";
