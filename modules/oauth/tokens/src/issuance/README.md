@@ -19,6 +19,7 @@ Internal module of `tokens`: the judgment `admits` and `issue` share, and the is
 - `admits` makes the same judgment without issuing, but for the lifetime, which only `issue`'s limits and signing fix; a policy that cannot tell is unavailable.
 - `issue` takes one frozen copy of the request and its limits, and the time, before anything waits: every policy reads it and the issuing signs it, so neither a policy nor a caller changing its own objects meanwhile changes what is signed; that time is handed to the issuing (`IssueAccess`' `askedAt`) as the token's `iat`, so the policies' wait moves it past no boundary.
 - A token with less than a second left once signed, its end come, its cap passed, its lifetime spent in the policies' wait or its signing slow, is refused as tokens' own rule: policy `tokens`, reason `no_lifetime_left`, the client's word `expired`, which `token-endpoint` answers `invalid_grant` whatever the grant. Any other answers its expires-in: what is left once signed, rounded up to whole seconds, at least 1.
+- A token over 16 KiB once signed is refused alike, policy `tokens`, reason `token_too_large`, the client's word `too large`; the package warns of it.
 - What an issuing keeps of a token (`IssueAccess`' `keep`) is kept only once the token is handed out, so one refused leaves no trace. tokens keeps nothing: a token is signed and handed back, no store, ledger or record written. The stand-in keeps what it issued.
 
 ## Depends on

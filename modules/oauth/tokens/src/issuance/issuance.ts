@@ -73,7 +73,17 @@ export type IssueAccess = (
 	grant: IssuanceRequest["grant"],
 	askedAt: number,
 	limits?: IssueLimits,
-) => Promise<{ readonly access: IssuedAccess; readonly keep?: () => void }>;
+) => Promise<
+	{ readonly access: IssuedAccess; readonly keep?: () => void } | { readonly kind: "too-large" }
+>;
+
+/** tokens' own refusal of a token past what it reads once signed: handed to no one. */
+const tooLarge = {
+	kind: "refused",
+	policy: "tokens",
+	reason: "token_too_large",
+	description: "too large",
+} as const;
 
 /** The least a token may have left once signed: a second. */
 const leastLeftMs = 1000;
@@ -124,7 +134,9 @@ export function issuing(
 			const askedAt = now();
 			const judged = await judge(taken.request);
 			if (judged.kind === "refused") return judged;
-			const { access, keep } = await issueAccess(taken.request.grant, askedAt, taken.limits);
+			const made = await issueAccess(taken.request.grant, askedAt, taken.limits);
+			if ("kind" in made) return tooLarge;
+			const { access, keep } = made;
 			// Less than a second left once signed, its end come, its cap passed or its signing slow: handed
 			// to no one, and nothing of it kept.
 			const leftMs = access.expiresAt - now();
