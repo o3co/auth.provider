@@ -625,7 +625,7 @@ From `@mod/refresh`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `refresh.lifetime` | string | `1d` |  |  |  | How long a refresh token family lives, from `1s` to `365d` in whole seconds. Shorter is only safer, so the floor is a second, which lets tests watch a family run out. |
-| `refresh.sweep-interval` | string | `30s` |  |  |  | How often the sweep finishes revocations that stopped halfway, from `1s` to `1h` in whole seconds. |
+| `refresh.sweep-interval` | string | `30s` |  |  |  | Deprecated: taken, not read, as no sweep runs; a later release refuses it. From `1s` to `1h` in whole seconds. |
 | `refresh.bind-confidential-clients` | boolean | `false` |  |  |  | Whether a confidential client's family is bound to its sender too. As 0.17's default: a confidential client already proves itself, so only a public one's is bound. |
 
 ## refresh-store
@@ -634,10 +634,10 @@ From `@mod/refresh-store`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `refresh-store.families-per-session` | integer (1–10000) | `1000` |  |  |  | How many refresh token families a session's set keeps; past it, one is pushed out and revoked. |
-| `refresh-store.tokens-per-family` | integer (1–10000) | `1000` |  |  |  | How many access tokens a family's set keeps; past it, one is pushed out and revoked. |
-| `refresh-store.settle-shards` | integer (1–65536) | `1024` |  |  |  | How many shards the list of families to settle is spread over. |
-| `refresh-store.settles-per-shard` | integer (1–10000) | `1000` |  |  |  | How many families to settle one shard holds at most. |
+| `refresh-store.families-per-session` | integer (1–10000) | `1000` |  |  |  | Deprecated: `refresh` no longer reads or writes this set, so it has no effect; a later release refuses it. How many refresh token families a session's set keeps. |
+| `refresh-store.tokens-per-family` | integer (1–10000) | `1000` |  |  |  | Deprecated: `refresh` no longer reads or writes this set, so it has no effect; a later release refuses it. How many access tokens a family's set keeps. |
+| `refresh-store.settle-shards` | integer (1–65536) | `1024` |  |  |  | Deprecated: `refresh` no longer reads or writes this list, so it has no effect; a later release refuses it. How many shards the list of families to settle is spread over. |
+| `refresh-store.settles-per-shard` | integer (1–10000) | `1000` |  |  |  | Deprecated: `refresh` no longer reads or writes this list, so it has no effect; a later release refuses it. How many families to settle one shard holds at most. |
 
 ## rp-logout
 

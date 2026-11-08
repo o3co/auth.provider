@@ -47,6 +47,7 @@ export interface TokenFamilies {
 /**
  * Members by key, each for its own lifetime, which only lengthens; past a cap, the first to end is
  * pushed out, and awaits under its key until it is said settled.
+ * @deprecated Neither read nor written by refresh; a later release removes it.
  */
 export interface MemberLists {
 	add(
@@ -62,7 +63,10 @@ export interface MemberLists {
 	settled(key: string, member: string): Promise<void>;
 }
 
-/** The families whose revocation must still be finished, kept until done. */
+/**
+ * The families whose revocation must still be finished, kept until done.
+ * @deprecated Neither read nor written by refresh; a later release removes it.
+ */
 export interface SettleList {
 	add(id: string): Promise<void>;
 	done(id: string): Promise<void>;
@@ -72,11 +76,18 @@ export interface SettleList {
 
 export const familyStore = contract<FamilyStore>("refresh.family-store");
 export const redemptionStore = contract<RedemptionStore>("refresh.redemption-store");
-/** The families each session started, so closing it revokes them. */
+/**
+ * The families each session started.
+ * @deprecated Neither read nor written by refresh; a later release removes it.
+ */
 export const sessionFamilies = contract<MemberLists>("refresh.session-families");
-/** The access tokens each family issued, by `tokens`' references, so revoking it revokes them. */
+/**
+ * The access tokens each family issued, by `tokens`' references.
+ * @deprecated Neither read nor written by refresh; a later release removes it.
+ */
 export const issuedAccess = contract<MemberLists>("refresh.issued-access");
 export const tokenFamilies = contract<TokenFamilies>("refresh.token-families");
+/** @deprecated Neither read nor written by refresh; a later release removes it. */
 export const settleList = contract<SettleList>("refresh.settle-list");
 
 /** A family or mark that was lost would let a spent token or code be used again, or leave tokens alive. */

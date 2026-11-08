@@ -14,7 +14,7 @@ export const section = z.strictObject({
 		.pipe(z.number().int().min(1).max(3600))
 		.prefault("30s")
 		.describe(
-			"How often the sweep finishes revocations that stopped halfway, from `1s` to `1h` in whole seconds.",
+			"Deprecated: taken, not read, as no sweep runs; a later release refuses it. From `1s` to `1h` in whole seconds.",
 		),
 	"bind-confidential-clients": z
 		.boolean()
