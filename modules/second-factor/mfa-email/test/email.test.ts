@@ -148,6 +148,17 @@ it("refuses to boot where no account-email proof is composed, naming mfa-email-p
 	);
 });
 
+it("depends on mfa-email-proof, so adding a code by email composes the proof of the account's address", async () => {
+	const { readFile } = await import("node:fs/promises");
+	const manifest = JSON.parse(
+		await readFile(new URL("../package.json", import.meta.url), "utf8"),
+	) as { dependencies?: Record<string, string>; helpers?: string[]; optional?: string[] };
+	expect(Object.keys(manifest.dependencies ?? {})).toContain("@mod/mfa-email-proof");
+	for (const marked of [manifest.helpers, manifest.optional]) {
+		expect(marked ?? []).not.toContain("@mod/mfa-email-proof");
+	}
+});
+
 it("refuses to boot where an account-email proof is composed without mfa-binding-proof, which hears it", async () => {
 	await expect(
 		assemble({ modules: [outside, proofStand, emailModule], config: kernelConfig(), runtime }),

@@ -3038,6 +3038,9 @@ importers:
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
+      '@mod/mfa-email-proof':
+        specifier: workspace:*
+        version: link:../mfa-email-proof
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions

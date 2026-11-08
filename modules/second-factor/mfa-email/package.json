@@ -15,6 +15,7 @@
 		"@mod/mail-address": "workspace:*",
 		"@mod/mfa": "workspace:*",
 		"@mod/mfa-binding-proof": "workspace:*",
+		"@mod/mfa-email-proof": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",
 		"@mod/subject-attributes": "workspace:*",
 		"@mod/users": "workspace:*",
