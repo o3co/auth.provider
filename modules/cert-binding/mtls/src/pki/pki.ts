@@ -2,6 +2,8 @@ import type { Checked, PathPolicy, Pki, RevocationPolicy, Sources } from "./cont
 import { certificateOf, pathOf } from "./path.ts";
 import { revocationOver } from "./revocation/revocation.ts";
 
+export { signatureAlgorithms } from "./signatures/signatures.ts";
+
 /** Whether the bytes are one certificate (DER) and nothing else. */
 export const isCertificate = (der: Uint8Array) => certificateOf(der) !== undefined;
 
@@ -12,7 +14,14 @@ export function pkiOver(
 ): Pki {
 	const revocations =
 		revocation &&
-		revocationOver({ ...revocation.policy, minRsaBits: path.minRsaBits }, revocation.sources);
+		revocationOver(
+			{
+				...revocation.policy,
+				minRsaBits: path.minRsaBits,
+				signatureAlgorithms: path.signatureAlgorithms,
+			},
+			revocation.sources,
+		);
 	return {
 		check: async (leaf, chain, now): Promise<Checked> => {
 			const built = await pathOf(leaf, chain, path, now);

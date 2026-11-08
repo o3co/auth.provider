@@ -17,11 +17,12 @@ import {
 export type { Status } from "./outcome.ts";
 
 /**
- * Checks the certificates of a path, the anchor aside, against the sources the policy names; a
- * delegated OCSP responder is held to the path's RSA bits.
+ * Checks the certificates of a path, the anchor aside, against the sources the policy names; CRLs
+ * and OCSP answers are held to the path's signature algorithms, a delegated responder to its RSA
+ * bits too.
  */
 export function revocationOver(
-	policy: RevocationPolicy & Pick<PathPolicy, "minRsaBits">,
+	policy: RevocationPolicy & Pick<PathPolicy, "minRsaBits" | "signatureAlgorithms">,
 	sources: Sources,
 ) {
 	const crls = expiring<Uint8Array | Failed>(policy.crlEntries, sources.now);

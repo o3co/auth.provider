@@ -2,6 +2,7 @@ import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import { describe, expect, it } from "vitest";
 import type { Fetched, PathPolicy, RevocationPolicy } from "../../contract.ts";
+import { signatureAlgorithms } from "../../signatures/signatures.ts";
 import {
 	type Answering,
 	crlOf,
@@ -15,7 +16,7 @@ import {
 import { revocationOver } from "../revocation.ts";
 
 const ocspSigning = "1.3.6.1.5.5.7.3.9";
-type Policy = RevocationPolicy & Pick<PathPolicy, "minRsaBits">;
+type Policy = RevocationPolicy & Pick<PathPolicy, "minRsaBits" | "signatureAlgorithms">;
 const policyOf = (more: Partial<Policy> = {}): Policy => ({
 	mode: "crl",
 	nonce: true,
@@ -27,6 +28,7 @@ const policyOf = (more: Partial<Policy> = {}): Policy => ({
 	ocspEntries: 1024,
 	maxFetches: 4,
 	minRsaBits: 2048,
+	signatureAlgorithms,
 	...more,
 });
 

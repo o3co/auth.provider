@@ -1,5 +1,5 @@
 import type * as pkijs from "pkijs";
-import type { RevocationPolicy, Sources } from "../contract.ts";
+import type { PathPolicy, RevocationPolicy, Sources } from "../contract.ts";
 import { crlUrlsOf, type Judged, judgeCrl } from "./crl.ts";
 import type { Alone, Expiring } from "./kept.ts";
 import {
@@ -19,7 +19,7 @@ const saidOf = (judged: Exclude<Judged, { kind: "unusable" }>): Said =>
 
 /** What a certificate's CRLs say, each CRL kept by its location. */
 export function crlSource(
-	policy: RevocationPolicy,
+	policy: RevocationPolicy & Pick<PathPolicy, "signatureAlgorithms">,
 	sources: Sources,
 	crls: Expiring<Uint8Array | Failed>,
 	alone: Alone,
@@ -36,7 +36,14 @@ export function crlSource(
 		const entry = crls.get(url);
 		if (entry) {
 			if (!(entry.value instanceof Uint8Array)) return entry.value;
-			const judged = await judgeCrl(entry.value, cert, issuer, now, policy.skewMs);
+			const judged = await judgeCrl(
+				entry.value,
+				cert,
+				issuer,
+				now,
+				policy.skewMs,
+				policy.signatureAlgorithms,
+			);
 			return judged.kind === "unusable" ? refused(judged.reason) : saidOf(judged);
 		}
 		const fetched = await fetch(url);
@@ -46,7 +53,14 @@ export function crlSource(
 			crls.set(url, failed, now + policy.failureMs);
 			return failed;
 		}
-		const judged = await judgeCrl(fetched.body, cert, issuer, now, policy.skewMs);
+		const judged = await judgeCrl(
+			fetched.body,
+			cert,
+			issuer,
+			now,
+			policy.skewMs,
+			policy.signatureAlgorithms,
+		);
 		if (judged.kind === "unusable") {
 			crls.set(url, refused(judged.reason), now + policy.failureMs);
 			return refused(judged.reason);

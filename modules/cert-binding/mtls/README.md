@@ -14,7 +14,7 @@
 - Composition definition only. The binding kind: `cnf` member `x5t#S256`, named `mtls` for operators, token type `Bearer`.
 - Contribution to `issuer`'s metadata: `tls_client_certificate_bound_access_tokens`.
 - Operator section, each value explained in its schema:
-  - `mode`: `self-signed`, or `pki` with `anchors`, `max-intermediates` (4), `min-rsa-bits` (2048) and `revocation`.
+  - `mode`: `self-signed`, or `pki` with `anchors`, `max-intermediates` (4), `min-rsa-bits` (2048), `signature-algorithms` (all nine) and `revocation`.
   - `revocation.mode`: `disabled`, `crl`, `ocsp` or `both`, with `on-unavailable` and `hosts`.
   - `revocation` limits: `nonce` (true), `skew` (`5m`), `ocsp-fresh` (`10m`), `crl-ttl` (`1h`), `failure-lifetime` (`30s`), `crl-entries` (256), `ocsp-entries` (1024), `timeout` (`3s`), `max-fetches` (4); times written with their unit, a bare number refused.
 
@@ -30,6 +30,7 @@
 - A source failing (5xx), busy (429), timed out (408), or not answering in time and size is an outage.
 - A destination not allowed, or any other answer, is a refusal.
 - An answer's content is used only after `pki` checks its signature.
+- A CRL or OCSP answer signed with an algorithm `signature-algorithms` leaves out is not used: a refusal, not an outage, so `on-unavailable` does not bind it; under `both` the other source alone can confirm the certificate.
 
 ## Data
 - Revocation caches in the process, held by `pki`'s internal module `revocation`; nothing is stored.

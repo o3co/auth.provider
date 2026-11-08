@@ -3,7 +3,7 @@ import * as pkijs from "pkijs";
 import type { PathPolicy } from "./contract.ts";
 import { decoded, keyUsageAllows, oid, parsedExtension, same, usage } from "./der.ts";
 import { isSelfIssued, nameConstraintsRefusal } from "./names.ts";
-import { isStrong } from "./signatures.ts";
+import { isSignedAsTaken } from "./signatures/signatures.ts";
 
 const clientAuth = "1.3.6.1.5.5.7.3.2";
 /** Extensions a path is judged by; any other marked critical refuses the certificate. */
@@ -56,8 +56,10 @@ function refusalOf(path: readonly pkijs.Certificate[], policy: PathPolicy): stri
 	const intermediates = path.length - 2;
 	if (intermediates > policy.maxIntermediates) return "too many intermediates";
 	for (const [at, cert] of path.entries()) {
-		const anchor = at === path.length - 1;
-		if (!anchor && !isStrong(cert.signatureAlgorithm)) return "signature algorithm";
+		// The anchor's own signature is not checked: it is trusted as it is.
+		const signer = path[at + 1];
+		if (signer && !isSignedAsTaken(cert, signer, policy.signatureAlgorithms))
+			return "signature algorithm";
 		const bits = rsaBits(cert);
 		if (bits !== undefined && bits < policy.minRsaBits) return "rsa key too small";
 		if (hasMalformedExtension(cert)) return "malformed extension";

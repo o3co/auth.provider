@@ -1,6 +1,7 @@
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import { describe, expect, it } from "vitest";
+import { signatureAlgorithms } from "../../signatures/signatures.ts";
 import {
 	ecKeys,
 	hierarchy,
@@ -8,6 +9,7 @@ import {
 	type Issuing,
 	issue,
 	ocspOf,
+	restated,
 	rsaKeys,
 } from "../../test/authority.ts";
 import { type Asked, judgeOcsp, ocspRequestOf, ocspUrlsOf } from "../ocsp.ts";
@@ -18,6 +20,7 @@ const asked = (more: Partial<Asked> = {}) => ({
 	skewMs: 300_000,
 	freshMs: 600_000,
 	minRsaBits: 2048,
+	signatureAlgorithms,
 	...more,
 });
 const nonce = new Uint8Array(16).fill(7);
@@ -126,6 +129,42 @@ describe("judging an OCSP response", () => {
 		}
 		const critical = await responder({ criticalUnknown: true });
 		expect(await reasonOf(await answer(critical))).toBe("signer");
+	});
+
+	it("uses no answer, nor delegated responder, signed by an algorithm its policy leaves out", async () => {
+		const { intermediate, client, reasonOf, responder } = await setUp();
+		const base = { cert: client, issuer: intermediate };
+		const narrowed = { signatureAlgorithms: ["ecdsa-sha256"] } as const;
+		const answer = await ocspOf({ ...base, hash: "SHA-384" });
+		expect(await reasonOf(answer, narrowed)).toBe("signature algorithm");
+		expect(await reasonOf(answer, { signatureAlgorithms: ["ecdsa-sha384"] })).toBe("good");
+		const delegated = await responder({ hash: "SHA-384" });
+		const by = await ocspOf({ ...base, by: delegated, certs: [delegated] });
+		expect(await reasonOf(by, narrowed)).toBe("signer");
+		expect(await reasonOf(by)).toBe("good");
+	});
+
+	it("uses no answer, nor delegated responder, stated as an algorithm of another family than its signer's key", async () => {
+		const root = await issue({ cn: "root", ca: true });
+		const intermediate = await issue({ cn: "int", by: root, ca: true, keys: await rsaKeys(2048) });
+		const client = await issue({ cn: "client", by: intermediate });
+		const reasonOf = async (der: Uint8Array) => {
+			const judged = await judgeOcsp(der, client.certificate, intermediate.certificate, asked());
+			return judged.kind === "unusable" ? judged.reason : judged.kind;
+		};
+		const ecdsa = "1.2.840.10045.4.3.2";
+		const answer = await ocspOf({ cert: client, issuer: intermediate });
+		expect(await reasonOf(answer)).toBe("good");
+		expect(await reasonOf(restated("ocsp", answer, ecdsa))).toBe("signature");
+		const delegated = await issue({ cn: "responder", by: intermediate, eku: [ocspSigning] });
+		const posing = {
+			...delegated,
+			der: restated("certificate", delegated.der, ecdsa),
+		};
+		posing.certificate = new pkijs.Certificate({ schema: asn1js.fromBER(posing.der).result });
+		const by = { cert: client, issuer: intermediate, by: delegated };
+		expect(await reasonOf(await ocspOf({ ...by, certs: [delegated] }))).toBe("good");
+		expect(await reasonOf(await ocspOf({ ...by, certs: [posing] }))).toBe("signer");
 	});
 
 	it("takes no delegated responder whose key usage is not one, rather than failing", async () => {
