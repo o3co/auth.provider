@@ -294,6 +294,11 @@ export const coverage: Coverage = {
 				"past the default five minutes, up to a day: a verifier may keep taking a key removed from the published set that long",
 		},
 		{
+			key: "rp-logout.logout-token-lifetime",
+			weakens:
+				"past the default five minutes, up to 15: a logout token is taken that long, and one without `sid`, replayed where the client keeps no `jti`, ends the subject's later sessions there",
+		},
+		{
 			key: "client-assertion.max-lifetime",
 			weakens: "past the default hour, up to a day: a client assertion is taken that long",
 		},
