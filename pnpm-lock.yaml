@@ -3564,6 +3564,9 @@ importers:
       '@mod/mail':
         specifier: workspace:*
         version: link:../../foundation/mail
+      '@mod/mail-address':
+        specifier: workspace:*
+        version: link:../../foundation/mail-address
       '@mod/tls-options':
         specifier: workspace:*
         version: link:../../foundation/tls-options

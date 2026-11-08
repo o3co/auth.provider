@@ -246,7 +246,7 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/mail-smtp` | adapter | `@mod/address-reach`, `@mod/kernel`, `@mod/mail`, `@mod/tls-options`, `@mod/url-setting` |
+| `@mod/mail-smtp` | adapter | `@mod/address-reach`, `@mod/kernel`, `@mod/mail`, `@mod/mail-address`, `@mod/tls-options`, `@mod/url-setting` |
 
 ### store-redis
 

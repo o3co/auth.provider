@@ -1,5 +1,6 @@
 import { defineModule, Unavailable } from "@mod/kernel";
-import { canonicalAddress, type Message, mail, preparer, preparerTakes } from "@mod/mail";
+import { type Message, mail, preparer, preparerTakes } from "@mod/mail";
+import { canonicalAddress } from "@mod/mail-address";
 import { isFloor, tlsOptions } from "@mod/tls-options";
 import { RelayFailure, relayOver, type Stage } from "./relay/relay.ts";
 import { section } from "./section.ts";
