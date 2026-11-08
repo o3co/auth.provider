@@ -244,6 +244,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `redis.durability` | `@mod/redis` |  | `none`: a crash loses the latest writes, spent assertion and proof ids and lockout records among them |
 | `redis.replication` | `@mod/redis` |  | `none`: a failover loses writes, confirmed ones too |
 | `refresh.lifetime` | `@mod/refresh` | `"1d"` | past the default day, up to 365 days: a leaked refresh token family is used that long |
+| `rp-logout.logout-token-lifetime` | `@mod/rp-logout` | `"5m"` | past the default five minutes, up to 15: a logout token is taken that long, and one without `sid`, replayed where the client keeps no `jti`, ends the subject's later sessions there |
 | `sections.client-assertion.accept-loose-audience` | `@mod/client-assertion` | `false` | named so (`accept-*` and the like) |
 | `sections.consent.first-party` | `@mod/consent` | `false` | `true`: that client's users are never asked for consent; taken only for a client the operator registered |
 | `sections.federation-tokens.receives` | `@mod/federation-tokens` | `false` | `true`: the client is handed its sessions' upstream tokens |
