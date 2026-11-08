@@ -16,9 +16,8 @@ import { urlFrom } from "../url.ts";
 
 export const path = "/oauth/authorize";
 
-/** Length limits: state is echoed back, so it is kept short enough for any Location header. */
+/** The longest value taken of any parameter, in characters. */
 const maxValue = 2048;
-const maxState = 512;
 const found = (status: number, location: string): HttpResponse => ({
 	status,
 	headers: { ...noStore, location },
@@ -31,6 +30,8 @@ export interface RouteParts extends Place {
 	readonly log: Log;
 	/** The composed rule for the audience a request asks for, which may answer a repeated parameter it reads. */
 	readonly rule: Pick<TargetRule, "repeated">;
+	/** The longest `state` taken, in characters (the package's `state-limit`): it goes back in the redirect's Location. */
+	readonly stateLimit: number;
 }
 
 /** The routes' declared answer to Unavailable, and the one before a session is found. */
@@ -45,6 +46,7 @@ export function routeWith({
 	flow,
 	log,
 	rule,
+	stateLimit,
 }: RouteParts): Pick<Route, "handle" | "unavailable"> {
 	const audited = declaredAudit(recorder, events);
 	const urlWith = urlFrom(self);
@@ -77,7 +79,7 @@ export function routeWith({
 
 		// From here on the redirect URI is trusted, and every answer goes back to it.
 		const stateText = one("state");
-		const state = stateText !== undefined && stateText.length <= maxState ? stateText : undefined;
+		const state = stateText !== undefined && stateText.length <= stateLimit ? stateText : undefined;
 		const back = (params: Record<string, string>) =>
 			answerTo(redirectUri, { ...params, state, iss: issuer });
 		/** The answer a decision makes: here, on to another page, or back to the client. */
@@ -158,5 +160,6 @@ export async function routeOver(c: BuildContext<Settings>) {
 		flow: await flowOver(c, place),
 		log: c.log,
 		rule: await c.get(targets),
+		stateLimit: c.section["state-limit"],
 	});
 }

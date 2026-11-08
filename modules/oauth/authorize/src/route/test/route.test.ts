@@ -26,6 +26,7 @@ const nocode: Client = {
 function route(
 	flow: Flow = async () => refused("unauthorized_client", "grant_type_not_allowed"),
 	find = async (id: string) => (id === nocode.id ? nocode : undefined),
+	stateLimit = 512,
 ) {
 	const recorded: AuditRecord[] = [];
 	const logged = recordingLog();
@@ -38,6 +39,7 @@ function route(
 		log: logged.log,
 		// No rule composed: a repeated parameter is a malformed request.
 		rule: {},
+		stateLimit,
 	});
 	return { answer: declared.handle, declared, recorded, lines: logged.lines };
 }
@@ -199,6 +201,16 @@ describe("route: an OpenID Connect request", () => {
 		expect(await sentBack(issued.answer, oidc({ nonce: "n".repeat(2049) }))).toEqual(
 			refused("invalid_request"),
 		);
+	});
+
+	it("sends back a state up to the package's state-limit, and refuses a longer one without it", async () => {
+		const flow: Flow = async ({ refused }) => refused ?? { kind: "code", code: "c1", subject: "a" };
+		const longer = route(flow, find, 600);
+		const state = "s".repeat(600);
+		const taken = await sentBack(longer.answer, oidc({ state }));
+		expect([taken[2], taken[4]]).toEqual(["c1", state]);
+		const refused = await sentBack(longer.answer, oidc({ state: `${state}s` }));
+		expect([refused[3], refused[4]]).toEqual(["invalid_request", null]);
 	});
 
 	it("hands a repeated or too long parameter's refusal to the flow, and answers one the flow keeps at the endpoint by 400 [rfc9700-4.11.2-b]", async () => {

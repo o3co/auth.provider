@@ -4,10 +4,9 @@ import { challengeShape, codeGrantType } from "@mod/code-grant";
 import { targets } from "@mod/grants";
 import type { BuildContext } from "@mod/kernel";
 import { type Decision, recorded, refusal } from "../decision.ts";
+import type { Settings } from "../section.ts";
 
 const prompts = new Set(["none", "login", "consent", "select_account"]);
-/** The longest `nonce` taken, in characters. */
-const longestNonce = 256;
 
 /** What a request asks, once its form is checked. */
 export interface Checked {
@@ -24,6 +23,8 @@ export function checkRequest(
 	client: Client,
 	one: (name: string) => string | undefined,
 	params: ReadonlyMap<string, string>,
+	/** The longest `nonce` taken, in characters (the package's `nonce-limit`). */
+	nonceLimit: number,
 ): Checked | Decision {
 	const responseType = one("response_type");
 	if (!responseType) return refusal("invalid_request", "response_type is required");
@@ -47,7 +48,7 @@ export function checkRequest(
 	if (!challengeShape.test(challenge))
 		return refusal("invalid_request", "code_challenge is malformed");
 	const nonce = one("nonce");
-	if (nonce !== undefined && nonce.length > longestNonce)
+	if (nonce !== undefined && nonce.length > nonceLimit)
 		return refusal("invalid_request", "nonce too long");
 	const prompt = new Set((one("prompt") ?? "").split(" ").filter((p) => p !== ""));
 	if ([...prompt].some((p) => !prompts.has(p)) || (prompt.has("none") && prompt.size > 1)) {
@@ -101,6 +102,19 @@ export function checkScope(
 		? recorded(allowed.error, "scope_omitted_without_default", allowed.description)
 		: refusal(allowed.error, allowed.description);
 }
+
+/** A request's form, as `checkRequest` checks it, under the package's section. */
+export type RequestCheck = (
+	client: Client,
+	one: (name: string) => string | undefined,
+	params: ReadonlyMap<string, string>,
+) => Checked | Decision;
+
+/** The request check, its nonce held to the package's `nonce-limit`. */
+export const requestCheckOver =
+	(c: Pick<BuildContext<Settings>, "section">): RequestCheck =>
+	(client, one, params) =>
+		checkRequest(client, one, params, c.section["nonce-limit"]);
 
 /** The audience a request asks for, within what the client may be issued, or the refusal to give. */
 export type TargetCheck = (

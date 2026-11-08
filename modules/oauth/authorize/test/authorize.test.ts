@@ -287,12 +287,28 @@ describe("authorize: the section", () => {
 		]);
 	});
 
+	it("reads the nonce and state limits as whole numbers of characters, from 64 to 2048", () => {
+		for (const key of ["nonce-limit", "state-limit"]) {
+			const takes = (written: unknown) => section.safeParse({ ...login, [key]: written }).success;
+			expect([63, 64, 2048, 2049, 100.5, "300"].map(takes), key).toEqual([
+				false,
+				true,
+				true,
+				false,
+				false,
+				false,
+			]);
+		}
+	});
+
 	it("reads a section that holds only the login page with the defaults it had, claims-parameter true", () => {
 		expect(section.parse(login)).toEqual({
 			...login,
 			"oidc-mode": "oidc-required",
 			"claims-parameter": true,
 			"login-url-limit": 8192,
+			"nonce-limit": 256,
+			"state-limit": 512,
 			requests: 60,
 			window: 60,
 		});

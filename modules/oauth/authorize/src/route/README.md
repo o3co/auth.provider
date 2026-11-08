@@ -13,7 +13,7 @@ Internal module of `authorize`: the endpoint's requests and answers.
 - `routeOver` (the build context; refuses to start without a public origin) → `routeWith` (the issuer's URL and the endpoint's, `clients`' lookup, `audit`'s recording, `flow`, the log) → the handler of both methods and its answer to Unavailable, `503` `temporarily_unavailable`.
 
 ## Invariants
-- Parameter lengths are capped (state 512, others 2048). Before the redirect URI is trusted, errors go out as `token-endpoint`'s OAuth error responses.
+- Parameter lengths are capped: `state` at the package's `state-limit`, others at 2048. Before the redirect URI is trusted, errors go out as `token-endpoint`'s OAuth error responses.
 - Once it is trusted, a repeated or too long parameter is `invalid_request` (a repeated one the composed rule reads, as its `repeated` answers), handed to the flow to answer. An outage the flow found before the session (`unavailable`) is the declared `503` with no redirect; Unavailable it throws, once the session is found, becomes the refusal `temporarily_unavailable`.
 - A decision kept at the endpoint (`answer`) is `token-endpoint`'s OAuth error response, `400`, never a redirect.
 - Unavailable before trust is left to `http`, which answers it as declared and warns once, `http.unavailable`; after trust, either way, it leaves one warning `authorize.unavailable`; either names only what was unavailable and the route.

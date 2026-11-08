@@ -1,6 +1,7 @@
 import { allowancesFor } from "@mod/client-allowance/testing";
 import type { Client, Section } from "@mod/clients";
 import { describe, expect, it } from "vitest";
+import { refusal } from "../../decision.ts";
 import { checkRequest, checkScope } from "../checks.ts";
 
 const sections: Record<string, unknown> = allowancesFor({
@@ -32,7 +33,7 @@ const oidc = (extra: Record<string, string> = {}, ...left: string[]) => {
 	return params;
 };
 const checked = (params: Map<string, string>) =>
-	checkRequest(app, (name) => params.get(name), params);
+	checkRequest(app, (name) => params.get(name), params, 256);
 /** The error and description of a refusal, or the kind of what it decided otherwise. */
 const outcome = (params: Map<string, string>) => {
 	const decided = checked(params);
@@ -95,6 +96,12 @@ describe("checks: an OpenID Connect request's form", () => {
 			prompt: new Set(["login", "consent"]),
 			maxAgeMs: 60_000,
 		});
+	});
+
+	it("takes a nonce up to the limit it is given, and refuses a longer one", () => {
+		const under = (nonce: string) => checkRequest(app, (n) => oidc({ nonce }).get(n), oidc(), 300);
+		expect(under("n".repeat(300))).toMatchObject({ kind: "checked", nonce: "n".repeat(300) });
+		expect(under("n".repeat(301))).toEqual(refusal("invalid_request", "nonce too long"));
 	});
 
 	it("refuses prompt=select_account as account_selection_required, with no page to choose an account by [oidc-core-3.1.2.1-q]", () => {
