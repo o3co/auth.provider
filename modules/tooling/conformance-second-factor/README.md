@@ -3,11 +3,11 @@
 ## Responsibilities
 - Owns the conformance scenes of the second-factor area: second factor at login (by a form or a JSON body), enrollment, naming factors, step-up, lockout, a recovery code that lets in one login only when two use it at once, store failure, the audit events they record.
 - Owns the scenes of a code by mail as a second factor (binding by the long code, a login let in by six digits, a wrong code refused).
-- Owns the scenes of a code by mail kept as a way back, its proof adding no mfa (`mfa-email`'s default): a login it lets in is asked a step-up to change credentials, and bound as a subject's first factor it then holds its logins.
+- Owns the scenes of a code by mail kept as a way back, its proof adding no mfa (`mfa-email`'s default): a login it lets in is asked a step-up to change credentials, and bound as a subject's first factor it then holds its logins; under a required second factor, it is not bound (`400`).
 - Owns the scenes of a user's own release of the lockout (released after a recovery code, refused without one, refused while the account was not revoked after the first counted failure, a fixed hold naming when its factors may be bound again).
 - Owns the scene of a login a second factor holds when the ledger revokes its subject (its transaction answers `login_required`, and the right code opens no session).
-- Owns the fault scenes of the second-factor area, on a Redis topology and a deployment of their own, each after a control with no fault: a recovery code used once (internal module `recovery-code-once`), a subject's fence refusing a change to her second factors her revocation overtook (`fence`), with what they share (`faults`).
-- Sets up the second-factor area's parts (optional or required, a code by mail and whether its proof adds mfa, `mail.addsSecondFactor`, true unless the scene states otherwise, and the lockout's numbers) on each of the legacy and new targets.
+- Owns the fault scenes of the second-factor area, on a Redis topology and a deployment of their own, each after a control with no fault: a recovery code used once (internal module `recovery-code-once`), a subject's fence refusing a change to her second factors her revocation overtook (`fence`), a code by mail bound as a way back then not taken under required (`way-back`), with what they share (`faults`).
+- Sets up the second-factor area's parts (optional or required, a code by mail and whether its proof adds mfa, `mail.addsSecondFactor`, true unless the scene states otherwise, the lockout's numbers and a sealing key kept across starts) on each of the legacy and new targets.
 - Runs the conformance base's fake SMTP relay for its mail scenes, each run.
 - Tells both targets where the fake SMTP relay listens.
 
