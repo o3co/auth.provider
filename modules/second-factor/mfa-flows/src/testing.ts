@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { section } from "./section.ts";
-import {
-	type StoredTransaction,
-	type TransactionListings,
-	type TransactionStore,
-	transactionsPerHolder,
-} from "./store.ts";
+import type { StoredTransaction, TransactionListings, TransactionStore } from "./store.ts";
 
 export type FlowSettings = z.input<typeof section>;
 
@@ -165,7 +160,8 @@ export function transactionListingsContract(name: string, open: () => Promise<Li
 		});
 
 		it("holds as many a holder as its cap: one more pushes out the one ending first, never the one added", async () => {
-			const { listings, cap = transactionsPerHolder } = await open();
+			// A place that gives no cap is held to 5, the cap every place kept before one could give it.
+			const { listings, cap = 5 } = await open();
 			const key = fresh();
 			const kept = Array.from({ length: cap }, () => fresh());
 			for (const [i, member] of kept.entries()) {
