@@ -10,6 +10,7 @@ How to run auth-provider 0.19: Redis, rotating keys, upgrading, and what to watc
 - [Rotating the sealing key](#rotating-the-sealing-key)
 - [Upgrading](#upgrading)
 - [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)
+- [Ending tokens exchanged from another](#ending-tokens-exchanged-from-another)
 - [Staff who sign in through an upstream IdP only](#staff-who-sign-in-through-an-upstream-idp-only)
 - [Keeping the second-factor witness at the ledger](#keeping-the-second-factor-witness-at-the-ledger)
 - [Second factors left without their claim](#second-factors-left-without-their-claim)
@@ -180,6 +181,21 @@ When the outside user ledger suspends a user, its answers stop new logins and gr
 - Every subject revoked keeps its record with no end, so the records grow with the subjects you revoke. With `mfa-revocation`, each revocation also writes the subject's factor list in `mfa`'s store, empty for a subject who never enrolled, so that store grows with them too.
 - With second factors composed, `mfa-revocation` makes a revocation complete only once no enrollment begun before it can bind; an app composed by hand must compose it, as `combinations` does.
 - Likewise `mfa-entry` holds sessions to second factors; `mfa` refuses to boot without it, whatever the mode, so an app composed by hand must compose it.
+
+## Ending tokens exchanged from another
+
+A token issued by token exchange answers to its subject: it ends when its subject's refresh family is revoked, its session closes or falls short, or its subject is revoked. It does not end when:
+
+- the subject token it came from is revoked by id (`POST /oauth/revoke`, by the client it was issued to);
+- the actor's session closes, or the actor token expires.
+
+Until then, it lives to its own end: never past the subject token's expiry, at most `token-exchange.max-lifetime` where set (optional, `2s` to `1d`), else `tokens.access-token-lifetime` (default `1h`). Introspection answers it active meanwhile.
+
+**Finding them.** The audit cannot list the tokens exchanged from one: `token.issued` names no parent or child token, subject, session or family.
+
+**Ending them now.** Revoke their subject ([Revoking a user from the ledger](#revoking-a-user-from-the-ledger)): its boundary ends every token for it, exchanged ones included, and closes its sessions. Ending a session or a refresh family reaches the tokens exchanged under it too, where you know which one from elsewhere.
+
+**Keeping the window short.** Set `token-exchange.max-lifetime` below `tokens.access-token-lifetime` where an exchanged token reaches an API of high value.
 
 ## Staff who sign in through an upstream IdP only
 
