@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { stringify } from "yaml";
 import {
 	type OutsideRecord,
 	outsideLock,
@@ -18,9 +17,18 @@ export interface OutsideModules {
 	readonly freshDependencies?: readonly Recorded[];
 }
 
+/** pnpm's settings for the app's install, beside packages outside the release. */
+export interface Settings {
+	readonly overrides?: Readonly<Record<string, string>>;
+	readonly minimumReleaseAge?: number;
+	readonly minimumReleaseAgeExclude?: readonly string[];
+}
+
 /** What the app is given beside its own files, where it composes packages outside the release. */
 export interface Beside {
 	readonly files: Readonly<Record<string, string>>;
+	/** What its `pnpm-workspace.yaml` sets. */
+	readonly settings: Settings;
 	/** What the image's install stage copies, and runs before anything is installed. */
 	readonly image:
 		| {
@@ -51,6 +59,7 @@ const releasePackage = (name: string) => name.startsWith("@o3co/auth-provider-")
 
 const nothing: Beside = {
 	files: {},
+	settings: {},
 	image: undefined,
 	guide: "",
 	index: "",
@@ -116,7 +125,7 @@ export function besideRelease(
 	const fresh = (outside.fresh ?? []).map(
 		(name) => `${name}@${outside.modules.find((m) => m.name === name)?.version}`,
 	);
-	const settings = {
+	const settings: Settings = {
 		overrides: {
 			...Object.fromEntries(held.map((name) => [name, release.get(name)])),
 			zod: app.zod,
@@ -134,11 +143,11 @@ export function besideRelease(
 		...(freshDependencies.length === 0 ? {} : { freshDependencies }),
 	};
 	return {
+		settings,
 		files: {
 			[recordFile]: `${JSON.stringify(record, null, "\t")}\n`,
 			// The script holds what it uses: it loads nothing of the install it checks.
 			[scriptFile]: readFileSync(outsideLock.script, "utf8"),
-			"pnpm-workspace.yaml": stringify(settings),
 			...(npmrc ? { [npmrcFile]: npmrc } : {}),
 		},
 		image: {
@@ -174,6 +183,8 @@ function npmrcOf({ scopes = {} }: Registries): string | undefined {
 		if (!/^@[a-z0-9][a-z0-9._~-]*$/.test(scope) || !isOrigin(origin)) {
 			throw new Error("a scoped registry's record is not a scope and an origin");
 		}
+		// The image's build fetches pnpm's own binary under it, before the install has a credential.
+		if (scope === "@pnpm") throw new Error("@pnpm: pnpm's own scope, which no record routes");
 	}
 	return entries.map(([scope, origin]) => `${scope}:registry=${origin}/\n`).join("");
 }

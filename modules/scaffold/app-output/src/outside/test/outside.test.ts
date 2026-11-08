@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
 import { outsideLock } from "../../lockfile/contract.ts";
 import { besideRelease, type OutsideModules } from "../contract.ts";
 
@@ -43,6 +42,7 @@ describe("what an app beside packages outside the release is given", () => {
 		]) {
 			expect(besideRelease(none, app)).toEqual({
 				files: {},
+				settings: {},
 				image: undefined,
 				guide: "",
 				index: "",
@@ -86,7 +86,7 @@ describe("what an app beside packages outside the release is given", () => {
 	});
 
 	it("holds every bundle of the release it depends on, or a package outside names as a peer, and zod to one version", () => {
-		const settings = parse(besideRelease(outside, app).files["pnpm-workspace.yaml"] as string);
+		const { settings } = besideRelease(outside, app);
 		expect(settings.overrides).toEqual({
 			"@o3co/auth-provider-identity": "0.19.0",
 			"@o3co/auth-provider-oauth": "0.19.0",
@@ -107,19 +107,16 @@ describe("what an app beside packages outside the release is given", () => {
 	});
 
 	it("installs no version published within the last day, but the release's and those let through by name and version", () => {
-		const fresh = besideRelease({ ...outside, fresh: ["@x/grant"] }, app).files[
-			"pnpm-workspace.yaml"
-		] as string;
-		expect(parse(fresh).minimumReleaseAge).toBe(1440);
-		expect(parse(fresh).minimumReleaseAgeExclude).toEqual([
+		const fresh = besideRelease({ ...outside, fresh: ["@x/grant"] }, app).settings;
+		expect(fresh.minimumReleaseAge).toBe(1440);
+		expect(fresh.minimumReleaseAgeExclude).toEqual([
 			"@o3co/auth-provider-identity",
 			"@o3co/auth-provider-oauth",
 			"@x/grant@1.2.0",
 		]);
-		expect(
-			parse(besideRelease(outside, app).files["pnpm-workspace.yaml"] as string)
-				.minimumReleaseAgeExclude,
-		).not.toContain("@x/grant@1.2.0");
+		expect(besideRelease(outside, app).settings.minimumReleaseAgeExclude).not.toContain(
+			"@x/grant@1.2.0",
+		);
 	});
 
 	it("checks the lockfile in the image's install stage, with what it checks against", () => {
@@ -226,6 +223,14 @@ describe("what an app beside packages outside the release is given", () => {
 				);
 			}
 		});
+
+		it("refuses a registry for pnpm's own scope, which the image's build fetches pnpm's binary under", () => {
+			const scopes = { "@pnpm": "https://registry.x.example" };
+			const given = { ...outside, registries: { default: "https://r.example", scopes } };
+			expect(() => besideRelease(given, app)).toThrow(
+				"@pnpm: pnpm's own scope, which no record routes",
+			);
+		});
 	});
 
 	it("says of the app's guide that only a package named comes, and says it for no other app", () => {
@@ -271,10 +276,9 @@ describe("what an app beside packages outside the release is given", () => {
 			"@o3co/auth-provider-oauth",
 			"@o3co/auth-provider-second-factor",
 		];
-		const { files } = besideRelease(outside, closing);
-		const settings = parse(files["pnpm-workspace.yaml"] as string);
-		expect(Object.keys(settings.overrides).sort()).toEqual([...closed, "zod"]);
-		expect(settings.overrides["@o3co/auth-provider-second-factor"]).toBe("0.19.0");
+		const { files, settings } = besideRelease(outside, closing);
+		expect(Object.keys(settings.overrides ?? {}).sort()).toEqual([...closed, "zod"]);
+		expect(settings.overrides?.["@o3co/auth-provider-second-factor"]).toBe("0.19.0");
 		expect(settings.minimumReleaseAgeExclude).toEqual(closed);
 		const { held } = JSON.parse(files["outside-modules.json"] as string);
 		expect(Object.keys(held)).toEqual([...closed, "zod"]);
@@ -312,7 +316,7 @@ describe("what an app beside packages outside the release is given", () => {
 		expect(JSON.parse(beside.files["outside-modules.json"] as string).freshDependencies).toEqual([
 			jose,
 		]);
-		expect(parse(beside.files["pnpm-workspace.yaml"] as string).minimumReleaseAgeExclude).toEqual([
+		expect(beside.settings.minimumReleaseAgeExclude).toEqual([
 			"@o3co/auth-provider-identity",
 			"@o3co/auth-provider-oauth",
 			"jose-lite@1.4.0",

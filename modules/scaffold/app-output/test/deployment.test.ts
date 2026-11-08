@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { writeDeployment } from "../src/contract.ts";
 import { fakePackages } from "./fake.ts";
 
@@ -29,10 +30,13 @@ it("writes the deployment of the modules from the packages given", async () => {
 			"config/application.conf",
 			"config/local.conf.example",
 			"package.json",
+			"pnpm-workspace.yaml",
 			"src",
 			"src/main.ts",
 		].sort(),
 	);
+	// The lockfile stays one document, whatever the app composes.
+	expect(parse(await read(target, "pnpm-workspace.yaml"))).toEqual({ pmOnFail: "ignore" });
 	const manifest = JSON.parse(await read(target, "package.json"));
 	// The kernel and its configuration files come first, whether or not listed, and no reseal without seal.
 	expect(Object.keys(manifest.dependencies)).toEqual([
@@ -408,6 +412,9 @@ it("records the packages outside the release and checks the lockfile against the
 			"scripts/check-outside.mjs",
 		]),
 	);
+	const workspace = parse(await read(target, "pnpm-workspace.yaml"));
+	expect(workspace.pmOnFail).toBe("ignore");
+	expect(workspace.overrides).toEqual({ zod: "4.6.7" });
 	// What the release recorded of the packages held to one copy reaches the record.
 	expect(JSON.parse(await read(target, "outside-modules.json")).held).toEqual({
 		zod: "sha512-ZOD",
