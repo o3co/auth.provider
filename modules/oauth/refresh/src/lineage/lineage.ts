@@ -81,9 +81,9 @@ export function lineageOver(
 				throw new Error("refresh: an adopted token must end by its family's end");
 			}
 			await revoker.recordAccess(id, issued);
-			// A revocation that listed the family's tokens before this one did not see it: run it again.
+			// A mark written meanwhile refuses the token through its link; it is withdrawn all the same.
 			if (!(await unended(id))) {
-				await revoker.revokeFamily(id);
+				await revoker.revokeIssued(issued);
 				return "ended";
 			}
 			return "adopted";

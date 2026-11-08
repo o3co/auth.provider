@@ -13,7 +13,7 @@ Internal module of `refresh`: the families (`of`, `adopt`, `start`) behind the `
 
 ## Invariants
 - `of` answers only for a token the caller verified, reads the record every time, and names the token asked for, never the family.
-- An end racing an adoption is run again.
+- A family that ends as a token is adopted has that token withdrawn, and answers ended.
 
 ## Depends on
 - `client-allowance`, `kernel`; `grant`'s founding, the package's records and store interfaces

@@ -193,10 +193,9 @@ export function refreshGrant({
 /** What `grantOver` takes beside `settlingIn`'s. */
 export const grantTakes = [sessions, subjectRevocation, issuer, audit, claimsSelections];
 
-/** The refresh_token grant over the contracts the assembly gives; it sweeps the families to settle. */
+/** The refresh_token grant over the contracts the assembly gives. */
 export async function grantOver(c: BuildContext<Settings>) {
 	const { stores, revoker } = await settlingIn(c);
-	c.every(c.section["sweep-interval"] * 1000, () => revoker.sweep());
 	const checks = { sessions: await c.get(sessions), revocation: await c.get(subjectRevocation) };
 	return refreshGrant({
 		stores,
