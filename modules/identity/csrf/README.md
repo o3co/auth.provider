@@ -21,7 +21,7 @@
 
 ## Invariants
 - The policy needs same-origin evidence (Origin and Referer) or the double-submit token.
-- The token is 43 base64url characters. It comes in the cookie and the header, or else in the request's `csrf_token` field (as `http` reads fields), sent once.
+- The token is 43 base64url characters, and it and its cookie last two hours, fixed: past them the page is shown again, and no deployment needs a longer life for a form. It comes in the cookie and the header, or else in the request's `csrf_token` field (as `http` reads fields), sent once.
 - In the policy, an `Origin` or a `Referer` naming another origin means refusal, even with the token; the policy reads no `Sec-Fetch-Site`.
 - Origin evidence also counts any `Sec-Fetch-Site` other than `same-origin` as cross-origin.
 - `Origin: null` and an unreadable Referer count as no evidence, so the policy falls through to the token.

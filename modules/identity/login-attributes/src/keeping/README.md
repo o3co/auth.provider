@@ -16,7 +16,7 @@ Internal module of `login-attributes`: keeping a login's attributes within caps.
 ## Invariants
 - A value `users` does not take (`acceptedAttributes`) is dropped whole.
 - A value over its cap is dropped whole, never cut.
-- The caps, in UTF-8 bytes: name 512 and a source 128, fixed; picture and each group as the caps given.
+- The caps, in UTF-8 bytes: name 512 and a source 128, fixed, as no real name passes 512 bytes and a source is the operator's own configured name; picture and each group as the caps given.
 - More groups than the caps allow are dropped whole.
 - An empty or ill-formed value is dropped whole.
 - A verification without its email is dropped.

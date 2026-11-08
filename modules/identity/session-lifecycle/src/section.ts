@@ -30,7 +30,7 @@ export const section = z.strictObject({
 		)
 		.prefault("5m")
 		.describe(
-			"How long an authentication stays recent, from 30s to 1h, such as 10m. Where no entry requirement judges changing credentials (no mfa), a sign-in at a known time must be this recent to do so.",
+			'How long an authentication stays recent, from 30s to 1h, such as 10m; the hour is fixed, as a longer "recent" would weaken what it means. Where no entry requirement judges changing credentials (no mfa), a sign-in at a known time must be this recent to do so.',
 		),
 	attributes: attributeCaps.describe(
 		"The caps a login's attributes are kept within, as login-attributes reads them; lowering one drops, when an open session's attributes are read back, a value past it.",
