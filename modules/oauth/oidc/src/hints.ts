@@ -12,9 +12,17 @@ const clientOf = (aud: unknown, azp: unknown): string | undefined => {
 	return audience.length === 1 && nonEmpty(only) ? only : undefined;
 };
 
+/**
+ * The longest hint read, in characters, checked before it is parsed or verified: the routes that take
+ * one let none longer through (a GET's 16 KiB of request line and headers, rp-logout's 64 KiB form),
+ * so the reader holds its own bound rather than its callers'.
+ */
+const longestHint = 65_536;
+
 export function hintsOver(p: { keys: Keys; issuer: string }): IdTokenHints {
 	return {
 		check: async (token): Promise<Hint> => {
+			if (token.length > longestHint) return { kind: "invalid" };
 			const verified = await p.keys.verify(token, "JWT");
 			if (verified.kind !== "valid") return { kind: "invalid" };
 			const { iss, sub, iat, exp, sid, aud, azp } = verified.claims;
