@@ -1,7 +1,7 @@
 import { cookiesFor } from "@mod/cookies";
 import { type HttpRequest, site } from "@mod/http";
 import { defineModule, isUnavailable, type Log, Unavailable } from "@mod/kernel";
-import { keptAttributes, type SourcedAttributes } from "@mod/login-attributes";
+import { attributeCaps, keepingWith, type SourcedAttributes } from "@mod/login-attributes";
 import { revocationFollowers, subjectRevocation } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
 import {
@@ -22,6 +22,9 @@ import {
 	checkAuthenticatedAt,
 	checkProvenSince,
 } from "./rules/authenticated.ts";
+
+/** Keeping under login-attributes' default caps, as an app that sets none keeps a login's attributes. */
+const keptByDefault = keepingWith(attributeCaps.parse({}));
 
 /** The session and cookies an `open` answered, for a test that opens one: a refused one throws. */
 export function openedOf(answer: Opened): {
@@ -527,7 +530,7 @@ export function sessionsContract(
 				{ source: "users", values: null },
 			];
 			for (const given of givens) {
-				expect(await keptOf(given), JSON.stringify(given)).toEqual(keptAttributes(given).kept);
+				expect(await keptOf(given), JSON.stringify(given)).toEqual(keptByDefault(given).kept);
 			}
 		});
 
@@ -689,7 +692,7 @@ export const standInLifetimeSeconds = 3600;
 
 /** What the stand-in keeps of a login's attributes, as login-attributes keeps them, logging dropped names. */
 function keptAtLogin(given: unknown, log: Log): SourcedAttributes | undefined {
-	const { kept, dropped, others } = keptAttributes(given);
+	const { kept, dropped, others } = keptByDefault(given);
 	if (dropped.length > 0 || others > 0) {
 		log.warn("session.attributes_dropped", { dropped: dropped.join(","), others });
 	}
