@@ -1,4 +1,4 @@
-import { Unavailable } from "@mod/kernel";
+import { isUnavailable, Unavailable } from "@mod/kernel";
 import { isLabel } from "@mod/labels";
 import type { FactorBinding } from "@mod/mfa-binding";
 import { issuedWayBack, type Opened } from "@mod/mfa-extensions";
@@ -34,6 +34,25 @@ export function factorDecisions(p: FactorParts): Decisions {
 	const binding = bindingWith(shared, standings, clearing);
 	const challengeContext = (subject: string, factor: string) =>
 		sealContext(subject, `challenge ${factor}`);
+	/**
+	 * A write whose answer is lost may yet have landed: `audit` is recorded once a read shows that it
+	 * did (`landed`), and the answer stays unavailable either way.
+	 */
+	const lost = async (
+		error: unknown,
+		subject: string,
+		landed: (factors: readonly Factor[]) => boolean,
+		audit: () => void,
+	): Promise<never> => {
+		if (isUnavailable(error)) {
+			const shown = await records.list(subject).then(landed, (read: unknown) => {
+				if (isUnavailable(read)) return false;
+				throw read;
+			});
+			if (shown) audit();
+		}
+		throw error;
+	};
 	const recovery = async (subject: string) => {
 		const kind = [...p.kinds.values()].find(issuedWayBack);
 		if (!kind) return undefined;
@@ -148,9 +167,10 @@ export function factorDecisions(p: FactorParts): Decisions {
 		remove: async (subject, target, fence) => {
 			// Read before the write: a factor written since, not read here, does not stand for the subject.
 			const stood = p.required || p.witnessing ? await standingIds(subject) : new Set<string>();
-			const removed = await records.decide<"unknown" | "last" | "fenced" | { kind: string }>(
-				subject,
-				(all, fences) => {
+			let decided: { kind: string } | undefined;
+			const removed = await records
+				.decide<"unknown" | "last" | "fenced" | { kind: string }>(subject, (all, fences) => {
+					decided = undefined;
 					if (fences !== fence) return { verdict: "fenced" };
 					const kind = all.find((f) => f.id === target)?.kind;
 					if (kind === undefined) return { verdict: "unknown" };
@@ -160,10 +180,19 @@ export function factorDecisions(p: FactorParts): Decisions {
 					// One whose claim is missing may yet be another's, so it does not stand for the subject.
 					const stays = rest.some((f) => stood.has(f.id));
 					if ((p.required || p.witnessing) && !stays) return { verdict: "last" };
+					decided = { kind };
 					// A way back left alone would hold every login once its codes run out: it goes with the last counting factor.
-					return { next: counted ? rest : rest.filter((f) => !wayBack(f)), verdict: { kind } };
-				},
-			);
+					return { next: counted ? rest : rest.filter((f) => !wayBack(f)), verdict: decided };
+				})
+				.catch((error: unknown) =>
+					lost(
+						error,
+						subject,
+						(all) => decided !== undefined && !all.some((f) => f.id === target),
+						() =>
+							recorded("factor.removed", subject, { kind: decided?.kind ?? "", factor: target }),
+					),
+				);
 			if (typeof removed === "string") return removed;
 			recorded("factor.removed", subject, { kind: removed.kind, factor: target });
 			return "removed";
@@ -172,24 +201,41 @@ export function factorDecisions(p: FactorParts): Decisions {
 		reissue: async (subject, fence) => {
 			const codes = await recovery(subject);
 			// Decided on the factors as written: no codes land beside no counting factor, and the old set goes in the same write.
-			const written = await records.decide<
-				"fenced" | "no-qualifying-factor" | "full" | { replaced: boolean }
-			>(subject, (all, fences) => {
-				if (fences !== fence) return { verdict: "fenced" };
-				if (counting(all, p.kinds).length === 0) return { verdict: "no-qualifying-factor" };
-				if (!codes) return { verdict: { replaced: false } };
-				const replaced = all.some((f) => f.kind === codes.factor.kind);
-				// A first set takes the place its binding kept, unless another factor took it meanwhile.
-				if (!replaced && all.length + 1 > p.maxFactors) return { verdict: "full" };
-				const next = [...all.filter((f) => f.kind !== codes.factor.kind), codes.factor];
-				return { next, verdict: { replaced } };
-			});
+			let replacing: boolean | undefined;
+			const generated = (replaced: boolean) =>
+				codes &&
+				recorded("recovery_codes.generated", subject, {
+					kind: codes.factor.kind,
+					regenerated: String(replaced),
+				});
+			const written = await records
+				.decide<"fenced" | "no-qualifying-factor" | "full" | { replaced: boolean }>(
+					subject,
+					(all, fences) => {
+						replacing = undefined;
+						if (fences !== fence) return { verdict: "fenced" };
+						if (counting(all, p.kinds).length === 0) return { verdict: "no-qualifying-factor" };
+						if (!codes) return { verdict: { replaced: false } };
+						const replaced = all.some((f) => f.kind === codes.factor.kind);
+						// A first set takes the place its binding kept, unless another factor took it meanwhile.
+						if (!replaced && all.length + 1 > p.maxFactors) return { verdict: "full" };
+						const next = [...all.filter((f) => f.kind !== codes.factor.kind), codes.factor];
+						replacing = replaced;
+						return { next, verdict: { replaced } };
+					},
+				)
+				.catch((error: unknown) =>
+					// The codes are shown only in the answer, so a set landed unseen is gone for good: the user reissues.
+					lost(
+						error,
+						subject,
+						(all) => replacing !== undefined && all.some((f) => f.id === codes?.factor.id),
+						() => generated(replacing ?? false),
+					),
+				);
 			if (typeof written === "string") return { kind: written };
 			if (!codes) return { kind: "unknown-kind" };
-			recorded("recovery_codes.generated", subject, {
-				kind: codes.factor.kind,
-				regenerated: String(written.replaced),
-			});
+			generated(written.replaced);
 			return { kind: "reissued", codes: codes.show };
 		},
 	};
