@@ -1,1 +1,1 @@
-export { type Beside, besideRelease, type OutsideModules } from "./outside.ts";
+export { type Beside, besideRelease, type OutsideModules, type Settings } from "./outside.ts";

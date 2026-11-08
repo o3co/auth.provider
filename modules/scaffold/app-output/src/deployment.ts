@@ -15,7 +15,15 @@ import {
 } from "./fragments/contract.ts";
 import { type Beside, besideRelease } from "./outside/contract.ts";
 import type { Card, Packages, Release } from "./packages.ts";
-import { filled, manifestOf, vacant, withKernel, writeProject, zod } from "./project.ts";
+import {
+	filled,
+	manifestOf,
+	vacant,
+	withKernel,
+	workspaceFile,
+	writeProject,
+	zod,
+} from "./project.ts";
 
 /** The files the generated project names in its guide, each written where the guide says. */
 const paths = {
@@ -104,6 +112,7 @@ export async function writeDeployment(
 			dependencies,
 			beside.scripts ? { start: run(paths.main), ...entries.scripts } : undefined,
 		),
+		"pnpm-workspace.yaml": workspaceFile(beside.settings),
 		...beside.files,
 		[paths.main]: await mainSource(modules, packages.importOf, keys),
 		...entries.files,
@@ -155,7 +164,7 @@ const installed = (beside: Beside["image"]) =>
 		: `# The lockfile is held to what was recorded of the packages outside the release, before any is installed.
 ${beside.copy.map((file) => `COPY ${file} ./${file}`).join("\n")}
 RUN ${beside.check}
-# corepack fetches pnpm here, so its download sees no credential below.
+# corepack fetches pnpm here, and pnpm its native binary, so neither download sees a credential below.
 RUN pnpm --version
 ${beside.mount ? "# A registry's credentials come as a build secret, and stay in no layer.\n" : ""}RUN ${beside.mount ? `${beside.mount} ` : ""}pnpm install --frozen-lockfile --prod --ignore-scripts`;
 
