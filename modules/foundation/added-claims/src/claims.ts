@@ -78,6 +78,10 @@ const objectNames = new Set(["__proto__", "constructor", "prototype", "toJSON"])
  * The limits an operator may raise, each from today's value, never below it: a token issued under
  * them is read back under them. `size` is JSON bytes in UTF-8; the lengths are code points.
  */
+/** What each limit's description ends with: how it is raised, and what lowering it does. */
+const raisedOnly =
+	"raised only. Raise it on every instance before any issues under it: an instance on a lower value, 0.19 included, refuses those tokens until they expire; lowering it leaves the tokens issued under it unreadable until they expire.";
+
 export const addedClaimsLimits = z
 	.strictObject({
 		"name-length": z
@@ -87,7 +91,7 @@ export const addedClaimsLimits = z
 			.max(1024)
 			.prefault(255)
 			.describe(
-				"The longest name of an added claim, in code points, from 255 to 1024; raised only.",
+				`The longest name of an added claim, in code points, from 255 to 1024; ${raisedOnly}`,
 			),
 		"string-length": z
 			.number()
@@ -96,7 +100,7 @@ export const addedClaimsLimits = z
 			.max(8192)
 			.prefault(2048)
 			.describe(
-				"The longest string of an added claim, in code points, from 2048 to 8192; raised only.",
+				`The longest string of an added claim, in code points, from 2048 to 8192; ${raisedOnly}`,
 			),
 		members: z
 			.number()
@@ -105,7 +109,8 @@ export const addedClaimsLimits = z
 			.max(1024)
 			.prefault(256)
 			.describe(
-				"The most members of an object, or values of an array, in added claims, from 256 to 1024; raised only.",
+				"The most members of an object, or values of an array, in added claims, from 256 to 1024; " +
+					raisedOnly,
 			),
 		values: z
 			.number()
@@ -113,7 +118,7 @@ export const addedClaimsLimits = z
 			.min(1024)
 			.max(4096)
 			.prefault(1024)
-			.describe("The most values in one set of added claims, from 1024 to 4096; raised only."),
+			.describe(`The most values in one set of added claims, from 1024 to 4096; ${raisedOnly}`),
 		depth: z
 			.number()
 			.int()
@@ -121,14 +126,15 @@ export const addedClaimsLimits = z
 			.max(16)
 			.prefault(8)
 			.describe(
-				"The deepest an added claim nests, its value at depth 1, from 8 to 16; raised only.",
+				`The deepest an added claim nests, its value at depth 1, from 8 to 16; ${raisedOnly}`,
 			),
 		size: setting
 			.size("B")
 			.pipe(z.number().int().min(4096).max(8192))
 			.prefault("4KiB")
 			.describe(
-				"The largest set of added claims, as JSON in UTF-8, a size with a unit from 4KiB to 8KiB; raised only.",
+				"The largest set of added claims, as JSON in UTF-8, a size with a unit from 4KiB to 8KiB; " +
+					raisedOnly,
 			),
 	})
 	.prefault({});

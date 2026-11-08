@@ -24,7 +24,7 @@
 - Never a key at any depth: `__proto__`, `constructor`, `prototype` and `toJSON`.
 - A name is 1 to `name-length` code points (255 unless raised), well formed (no lone surrogate), with no control character or space; a string is at most `string-length` code points (2048), well formed.
 - At most `members` members to an object or values to an array (256), `values` values in all (1024), `depth` deep (8; a claim's value is depth 1), and `size` as JSON in UTF-8 (4 KiB).
-- One set of limits holds a grant's claims and a token's read back: lowering a raised one leaves the tokens issued while it was raised unreadable until their `exp`.
+- One set of limits holds a grant's claims and a token's read back: lowering a raised one leaves the tokens issued while it was raised unreadable until their `exp`, and a value is raised on every instance before any issues under it: an instance on a lower one, 0.19 included, refuses those tokens until they expire.
 - A set stops at the first limit it passes: a count is taken before what it counts is read, and a string or a name past twice its limit is refused unread.
 - The copy is frozen at every depth; what was given is never used past it.
 
