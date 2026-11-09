@@ -16,9 +16,9 @@ Internal module of `x509-path`: choosing the one chain a path is validated along
 - An issuer is a certificate node reads as the certificate's issuer (`checkIssued`: names as OpenSSL compares them, key identifiers too) whose key verifies its signature; nothing else is an edge, a self-issued certificate included.
 - Breadth first from the leaf; a certificate (by DER) is entered once, so a cycle ends.
 - Bounds, the same for every caller but by its `maxIntermediates`, as each hands it a chain an outside party chose: at most 10 certificates sent, or `maxIntermediates` and one more where that is more (every intermediate a caller allows can be sent), 4 issuers to a certificate and 32 certificates entered, and `maxIntermediates` deep; past any, no chain (`path`).
-- Issuers come from what was sent, all of it, and from the trust, found by the certificate's authority key identifier and by its issuer name's DER as written. One the trust holds under another encoding of the name, with no key identifiers, is not found: no chain.
+- Issuers come from what was sent, all of it, and from the trust, found by the certificate's authority key identifier and by its issuer name's DER as written. Where those find no issuer in the trust, every trusted certificate is asked, in DER order, so one whose name is written in another string type is found as node compares names: at most the trust's size in `checkIssued` for each certificate entered.
 - Among the shallowest chains: those sent first, in the order sent, then the trust's, in DER order.
-- Cost (20 runs each, against the platform's store of 118 roots and one root more): an ordinary chain of two intermediates 0.9 ms; the most a peer may send, ten certificates and four issuers at a step, 3.3 ms; a cycle of two 0.8 ms.
+- Cost (20 runs each, against the platform's store of 118 roots and one root more): an ordinary chain of two intermediates 1.1–1.4 ms; ten sent with four issuers at a step 3.1–3.2 ms; the most a peer may send, fifteen under 14 intermediates allowed and reaching no anchor, so every step asks the whole store, 5.0–5.2 ms (the asking about 0.5 ms of it); a cycle of two 0.9–1.0 ms.
 
 ## Depends on
 - node's `X509Certificate`; `pkijs`, `asn1js`; `x509-path`'s reading of DER
