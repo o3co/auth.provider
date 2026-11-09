@@ -765,12 +765,12 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				expect(stale).toEqual({ kind: "conflict", index: 0 });
 				expect((await s.get(written)).entry).toBeNull();
 				const { now } = await s.get(watched);
-				expect(
-					await batchAcross([], [], { deadline: now + 60_000, idempotency: "empty" }),
-				).toMatchObject({
-					kind: "committed",
-					versions: [],
-				});
+				const { at, ...empty } = (await batchAcross([], [], {
+					deadline: now + 60_000,
+					idempotency: "empty",
+				})) as { at?: number };
+				expect(empty).toEqual({ kind: "committed", versions: [] });
+				if (at !== undefined) expect(at).toEqual(expect.any(Number));
 				expect((await batchAcross([], [], { deadline: now - 1 })).kind).toBe("late");
 			});
 

@@ -59,11 +59,14 @@ export interface StoreUpkeep {
 	leaveMaintenance(): Promise<{ readonly kind: "left" }>;
 	/** Every space ever declared to the store's data, until retired. */
 	kept(): Promise<readonly KeptSpace[]>;
-	/** Takes a space off the ledger; never one this process declares. */
+	/** Takes a space off the ledger, under the maintenance key alone; never one this process declares. */
 	retire(
 		name: string,
 	): Promise<
-		{ readonly kind: "retired" } | { readonly kind: "declared" } | { readonly kind: "missing" }
+		| { readonly kind: "retired" }
+		| { readonly kind: "declared" }
+		| { readonly kind: "missing" }
+		| { readonly kind: "not-in-maintenance" }
 	>;
 	/** Checks again, on every call, whether the store gives these guarantees now. */
 	honours(guarantees: readonly Guarantee[]): Promise<Honours>;

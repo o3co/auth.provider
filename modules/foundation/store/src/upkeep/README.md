@@ -19,7 +19,7 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
 - Entering maintenance sets the key and a new epoch, never one the data had, in one write, and the process entering takes the epoch; leaving lifts the key and keeps the epoch.
 - A mark is kept with the epoch it was written in, through later epochs; its reader judges what that epoch means for it.
 - `require` replaces the set of spaces, under the maintenance key alone, and never with none.
-- Before its first change, a starting process adds each space it declares to the ledger, or its start is refused. A space's `subjectDataEver` turns true once a declaration names a category other than `none`, or none at all, and never turns back. Only `retire` takes a space off, never one the process declares.
+- Before its first change, a starting process adds each space it declares to the ledger, or its start is refused. A space's `subjectDataEver` turns true once a declaration names a category other than `none`, or none at all, and never turns back. Only `retire` takes a space off, under the maintenance key alone, never one the process declares.
 - `honours` checks anew on each call, and answers verified, declared (naming the settings the operator declared) or unmet (with why).
 - `sweep` removes for good each expired key it meets, its answer confirmed as a write, and names the server each page ran on.
 

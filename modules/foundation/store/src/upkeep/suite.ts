@@ -166,6 +166,8 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 			it("retires a space no longer declared, never one the process declares", async () => {
 				const p = await harness.start(upkeepSpaces);
 				const fewer = await harness.another(p, [none]);
+				expect(await fewer.upkeep.retire(held.name)).toEqual({ kind: "not-in-maintenance" });
+				await fewer.upkeep.enterMaintenance();
 				expect(await fewer.upkeep.retire(held.name)).toEqual({ kind: "retired" });
 				expect(await fewer.upkeep.retire(none.name)).toEqual({ kind: "declared" });
 				expect(await fewer.upkeep.retire("never-declared")).toEqual({ kind: "missing" });

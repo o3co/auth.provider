@@ -309,6 +309,7 @@ export function memoryProcess(
 			deepFreeze([...ledger].map(([name, subjectDataEver]) => ({ name, subjectDataEver }))),
 		retire: async (name) => {
 			refuseStale();
+			if (!record.maintenance) return { kind: "not-in-maintenance" };
 			if (known.has(name)) return { kind: "declared" };
 			return ledger.delete(name) ? { kind: "retired" } : { kind: "missing" };
 		},
