@@ -27,7 +27,6 @@
 - Device authorization is limited per source by `rate-limit`'s policy, before the client is authenticated.
 - The client must be explicitly allowed this grant. `token-endpoint`'s allowance decides the scope there, and nothing widens it later.
 - The device code is 32 random bytes. It is never kept; only its name is.
-- The user code is 8 of 20 consonants (about 35 bits), drawn without bias, drawn again a few times when it meets one in use, and keys its index as is: its short lifetime and the attempt limit guard it.
 - Input forgives case, spaces and hyphens only. Any other character is refused without asking the store.
 - The verification interface declares `csrf`'s policy. Looking up and denying enter the session at level `none`; approving enters at `use`.
 - Every action counts against the subject in `rate-limit`'s attempt limit. A count it cannot make is answered as unavailable.

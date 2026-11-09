@@ -18,4 +18,4 @@ Internal module of `login-passkey`: what follows an assertion, up to the session
 - A refusal is `401` `passkey_login_failed`, its reason recorded.
 
 ## Depends on
-- `http`, `passkeys` (`passkeyHolders`), `subject-revocation`, `login-gates`, `session`; the internal modules `facts` and `audited`
+- `http`, `passkeys` (`passkeyHolding`), `subject-revocation`, `login-gates`, `session`; the internal modules `facts` and `audited`

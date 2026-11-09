@@ -25,7 +25,7 @@
 - A mark follows a written factor: between a binding's write and its mark the factor stands unwitnessed, and a write that fails leaves no mark.
 - This package never decides to remove a mark it did not set, as it may be a store that lost its factors; a reset does, the token it read alone and only where `after` is `none`. It keeps its mark's token only while its enroll answered the mark is that token's, and removes nothing without it.
 - Where the witness offers `withdraw`, its removal takes its own mark alone. Where it does not, it clears, which takes whatever mark stands, so its clear of its own may still take another's (below).
-- A binding that took this call's mark for its own, by its enroll or its read, is left with no mark by this call's removal; this call then reads again and marks anew. A withdraw unavailable is sent again with the same token.
+- A binding that took this call's mark for its own, by its enroll or its read, is left with no mark by this call's removal; this call then reads again and marks anew. An enroll or a withdraw unavailable is sent again three times, a fixed margin for a witness briefly out; a withdraw is sent again with the same token.
 - At either limit, or where the read again, the mark anew or the withdraw stays unavailable, or the process stops, a removal of its own mark is not followed by a mark anew: the factor stands unmarked until a later binding or backfill marks it.
 - Without `withdraw`, a clear of its own mark can also take a binding's mark set just before it; where the store also loses that binding's factor before the next read, the subject reads as never enrolled.
 - Boot is refused without exactly one witness composed.

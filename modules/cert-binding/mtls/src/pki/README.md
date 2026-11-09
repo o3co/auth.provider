@@ -16,7 +16,7 @@
 - The sources a caller implements: GET or POST of a body (material, outage or refused), the time, randomness.
 
 ## Invariants
-- The path is chosen by `x509-path` from the client's chain as sent, within its fixed bounds, every edge checked, toward a trust read once at boot from the operator's anchors as written (none required to be self-signed).
+- The path is chosen by `x509-path` from the client's chain as sent, within its bounds, every edge checked, toward a trust read once at boot from the operator's anchors as written (none required to be self-signed).
 - It is validated by `x509-path` under the policy's rules (its anchors, intermediates, RSA bits and signature algorithms, no EC curve asked), as its card states each, with the leaf's extended key usage alone held to client authentication and its key usage, where given, to signing or key agreement; a refusal for another purpose is told as not for client authentication.
 - Revocation is checked by the internal module `revocation`, with the path's RSA bits and signature algorithms.
 

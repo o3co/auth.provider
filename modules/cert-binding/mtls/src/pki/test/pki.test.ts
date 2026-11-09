@@ -85,13 +85,12 @@ it("tells one certificate from anything else", async () => {
 
 it("refuses, in bounded time, a client's chain that cycles between two issuers, and an edge only its key identifier and signature join", async () => {
 	const root = await issue({ cn: "root", ca: true, keyIds: true });
-	const policy = {
+	const pki = pkiOver({
 		anchors: [root.der],
 		maxIntermediates: 4,
 		minRsaBits: 2048,
 		signatureAlgorithms,
-	};
-	const pki = pkiOver(policy);
+	});
 	// Two issuers that name and sign each other, as a client may send them; no anchor above.
 	const y = await issue({ cn: "Y", ca: true });
 	const x = await issue({ cn: "X", by: { ...y, cn: "Y" }, ca: true });

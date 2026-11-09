@@ -6,6 +6,7 @@
 ## Not here
 - What is decided with the witness, and when it is marked or withdrawn: `passkeys` and the module that matches the witness's mark with the passkeys.
 - Where the mark is kept: the implementation, such as an outside user ledger's adapter (`passkey-witness-http`).
+- A witness form shared with `mfa-witness`. The marks mean different things (a passkey held; a counting factor held, cleared by a reset or the last such factor), and `withdraw` and `markedWith` are required here, optional there, which an outside ledger may rely on. A third witness would bring a common form.
 
 ## Offers
 - `passkeyWitnesses` (`passkeys.witnesses`): at most one; the module that asks it refuses to start with two.

@@ -16,8 +16,8 @@ import {
 	type OutboundRequest,
 	type OutboundResponse,
 	OutboundUnavailable,
-} from "./contract.ts";
-import { noteHandshake, type Tls, tlsOf } from "./tls/tls.ts";
+} from "../contract.ts";
+import { noteHandshake, type Tls, tlsOf } from "../tls/tls.ts";
 
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 

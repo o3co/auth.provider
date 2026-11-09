@@ -3,7 +3,13 @@ import { auditStandIn } from "@mod/audit/testing";
 import { assemble, defineModule, isUnavailable, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { passkeyWitnessStandIn } from "@mod/passkey-witness/testing";
-import { challengeStore, passkeyHolders, passkeyStore, registrations } from "@mod/passkeys";
+import {
+	challengeStore,
+	passkeyClearing,
+	passkeyHolding,
+	passkeyStore,
+	registrations,
+} from "@mod/passkeys";
 import passkeysModule from "@mod/passkeys/module";
 import { passkeysConfig } from "@mod/passkeys/testing";
 import { simulatedStore } from "@mod/store/testing";
@@ -69,7 +75,8 @@ async function composed() {
 	await app.start();
 	stop = () => app.stop(1000);
 	const regs = app.get(registrations);
-	const holders = app.get(passkeyHolders);
+	// Both sides of holding, as the modules taking them see it.
+	const holders = { ...app.get(passkeyHolding), ...app.get(passkeyClearing) };
 	/** A registration of `subject`'s, its two asks answered by `admitted`: the answer. */
 	const registering = async (subject: string, admitted?: (ask: number) => Promise<boolean>) => {
 		const options = (await regs.creation(subject)).options as CreationOptions;

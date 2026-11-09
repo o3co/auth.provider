@@ -84,6 +84,22 @@ describe("path validation", () => {
 		expect(await reasonOf(spoiled, [intermediate.der, client.der], anchors)).toBe("path");
 	});
 
+	it("has the engine walk the chain chosen alone, though a certificate on it would sign as another's issuer too", async () => {
+		const root = await issue({ cn: "root", ca: true, keyIds: true });
+		const intermediate = await issue({ cn: "intermediate", by: root, ca: true, keyIds: true });
+		// The leaf holds the root's key: by key identifier and signature, it reads as the intermediate's issuer too.
+		const leaf = await issue({
+			cn: "client",
+			by: intermediate,
+			keys: root.keys,
+			keyIds: true,
+			eku: ["1.3.6.1.5.5.7.3.2"],
+		});
+		const started = performance.now();
+		expect(await reasonOf(leaf.der, [intermediate.der], policyOf([root.der]))).toBe("path of 3");
+		expect(performance.now() - started).toBeLessThan(1000);
+	});
+
 	it("refuses a weak signature, a small RSA key, or an unknown critical extension anywhere on the path", async () => {
 		const { root, intermediate } = await hierarchy();
 		const anchors = policyOf([root.der]);
@@ -317,6 +333,20 @@ describe("the rules a caller chooses", () => {
 			ecCurves: ["P-256", "P-384", "P-521"],
 			...more,
 		});
+
+	it("takes as many certificates sent as the intermediates allowed and one more, and refuses allowing more than 14", async () => {
+		const { root, intermediate, client } = await hierarchy();
+		const twelve = policyOf([root.der], { maxIntermediates: 12 });
+		const padding = await Promise.all(Array.from({ length: 13 }, (_, n) => issue({ cn: `p${n}` })));
+		const sent = (n: number) => [intermediate.der, ...padding.slice(0, n - 1).map((p) => p.der)];
+		expect(await reasonOf(client.der, sent(13), twelve)).toBe("path of 3");
+		expect(await reasonOf(client.der, sent(14), twelve)).toBe("path");
+		const trust = trustOf({ anchors: [root.der], selfSignedAnchorsOnly: false });
+		const fifteen = policyOf([root.der], { maxIntermediates: 15 });
+		await expect(pathOf(client.der, [intermediate.der], trust, fifteen, now)).rejects.toThrow(
+			TypeError,
+		);
+	});
 
 	it("takes an EC key only on a curve taken, anchor included, and any curve where none is given", async () => {
 		const root = await issue({ cn: "root", ca: true, keys: await ecKeys("P-384") });

@@ -1,14 +1,14 @@
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import type { BuildContext } from "@mod/kernel";
 import { type Logins, logins } from "@mod/login-gates";
-import { type PasskeyHolders, passkeyHolders } from "@mod/passkeys";
+import { type PasskeyHolding, passkeyHolding } from "@mod/passkeys";
 import { type SubjectRevocation, subjectRevocation } from "@mod/subject-revocation";
 import { type Recorded, recordedIn, recordedTakes } from "../audited/audited.ts";
 import { type Asserted, factsIn, type factsOver, factsTakes } from "../facts/facts.ts";
 import type { Settings } from "../section.ts";
 
 export interface OpeningParts {
-	readonly holders: Pick<PasskeyHolders, "held">;
+	readonly holders: Pick<PasskeyHolding, "held">;
 	readonly revocation: Pick<SubjectRevocation, "check">;
 	readonly logins: Pick<Logins, "login">;
 	readonly facts: ReturnType<typeof factsOver>;
@@ -63,7 +63,7 @@ export type Opening = ReturnType<typeof openingOver>;
 
 /** What `openingIn` takes from the build context, its own and the facts' and records' it asks. */
 export const openingTakes = [
-	passkeyHolders,
+	passkeyHolding,
 	subjectRevocation,
 	logins,
 	...factsTakes,
@@ -72,7 +72,7 @@ export const openingTakes = [
 
 export const openingIn = async (c: BuildContext<Settings>) =>
 	openingOver({
-		holders: await c.get(passkeyHolders),
+		holders: await c.get(passkeyHolding),
 		revocation: await c.get(subjectRevocation),
 		logins: await c.get(logins),
 		facts: await factsIn(c),

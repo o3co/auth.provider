@@ -164,12 +164,17 @@ export async function pathOf(
 	const picked = chosen(leaf, sent, trust, rules.maxIntermediates);
 	if (picked.kind !== "chain") return { kind: "invalid", reason: picked.kind };
 	const chain = picked.chain.map(certificateOf) as pkijs.Certificate[];
-	const anchor = chain.at(-1) as pkijs.Certificate;
-	// One chain, so the engine builds no other: the end entity last, as it takes it.
+	// The engine walks this chain alone: each certificate's issuer is the next, where it signed it.
+	const next = new Map(chain.slice(0, -1).map((cert, at) => [cert, chain[at + 1]]));
 	const engine = new pkijs.CertificateChainValidationEngine({
-		trustedCerts: [anchor],
+		trustedCerts: chain.slice(-1),
+		// The end entity last, as the engine takes it.
 		certs: chain.slice(0, -1).reverse(),
 		checkDate: new Date(now),
+		findIssuer: async (cert, _engine, crypto) => {
+			const issuer = next.get(cert);
+			return issuer && (await cert.verify(issuer, crypto).catch(() => false)) ? [issuer] : [];
+		},
 	});
 	const built = await engine.verify().catch(() => undefined);
 	const path = built?.certificatePath ?? [];

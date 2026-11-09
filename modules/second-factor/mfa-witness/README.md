@@ -6,6 +6,7 @@
 ## Not here
 - What is decided with the witness, and when it is marked or cleared: `mfa` and `mfa-witnessing`.
 - Where the mark is kept: the implementation, such as an outside user ledger's adapter.
+- A witness form shared with `passkey-witness`. The marks mean different things (a counting factor held, cleared by a reset or the last such factor; a passkey held), and `withdraw` and `markedWith` are optional here, required there, which an outside ledger may rely on. A third witness would bring a common form.
 
 ## Offers
 - `enrollmentWitnesses`: at most one; the module that asks it refuses to start with two.

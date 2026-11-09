@@ -502,6 +502,10 @@ export const coverage: Coverage = {
 			key: "http.trusted-proxies",
 			why: "the peers whose forwarding is believed: a trust assumption the security model states",
 		},
+		{
+			key: "login-passkey.counts-as-mfa",
+			why: "on by default, as holding the key and the user verified in one operation make a multi-factor authenticator; `false` takes `mfa` from a passkey login, which only narrows. Trusting the authenticator's word that it verified its user is the deployment's, as the security model leaves it",
+		},
 	],
 	manualTasks: [
 		{ anchor: "rotating-the-signing-key", what: "rotating the signing key" },
