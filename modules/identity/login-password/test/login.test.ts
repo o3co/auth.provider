@@ -632,6 +632,16 @@ describe("login-password attempts per account", () => {
 		expect((await login(right, elsewhere())).status).toBe(200);
 	});
 
+	it("makes an identifier's first wait as long as account-first-wait, doubling it after", async () => {
+		const { login, simulated } = await serve({ login: { ...budget, "account-first-wait": "10s" } });
+		await login(wrong("alice"), elsewhere());
+		await login(wrong("alice"), elsewhere());
+		expect((await login(wrong("alice"), elsewhere())).headers.get("retry-after")).toBe("10");
+		simulated.shiftClock(10_000);
+		expect((await login(wrong("alice"), elsewhere())).status).toBe(401);
+		expect((await login(wrong("alice"), elsewhere())).headers.get("retry-after")).toBe("20");
+	});
+
 	it("hands back the attempt of a guess users could not judge", async () => {
 		const down = unavailableSwitch<Users>("users");
 		const { login } = await serve({
@@ -654,6 +664,26 @@ describe("login-password attempts per account", () => {
 		expect((await login(wrong("alice"), elsewhere())).status).toBe(429);
 	});
 
+	it("refuses to boot on a wait longer than the one after it, naming both keys", async () => {
+		for (const [login, where, reason] of [
+			[
+				{ "account-first-wait": "2m", "account-max-wait": "1m" },
+				"account-first-wait",
+				"account-max-wait",
+			],
+			[
+				{ "account-window": "10m", "account-max-wait": "15m" },
+				"account-max-wait",
+				"account-window",
+			],
+		] as const) {
+			const refused = await serve({ login }).catch((error) => error);
+			expect(refused.refusals, JSON.stringify(login)).toMatchObject([
+				{ where: `login-password.${where}`, reason: `longer than login-password.${reason}` },
+			]);
+		}
+	});
+
 	it("refuses to boot on attempts, a window or a longest wait out of bounds, or a wait that names no unit", async () => {
 		for (const login of [
 			{ "account-attempts": 0 },
@@ -663,6 +693,9 @@ describe("login-password attempts per account", () => {
 			{ "account-max-wait": "1.5s" },
 			{ "account-max-wait": 60 },
 			{ "account-window": "10m", "account-max-wait": "15m" },
+			{ "account-first-wait": "0s" },
+			{ "account-first-wait": 1 },
+			{ "account-first-wait": "2m", "account-max-wait": "1m" },
 		]) {
 			await expect(serve({ login }), JSON.stringify(login)).rejects.toBeInstanceOf(BootRefused);
 		}

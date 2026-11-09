@@ -125,6 +125,36 @@ describe("a confirmation round, run once", () => {
 	});
 });
 
+describe("good replicas, with replicas", () => {
+	it("answers unready while fewer replicas are good than min-replicas-to-write, booting all the same, and ready once enough are", async () => {
+		const redis = primary();
+		redis.replication.goodReplicas = 0;
+		redis.writes.noReplicas = true;
+		const { warned, ready } = await boot(await redis.listen(), "replicas");
+		expect(await ready()).toBe("unready");
+		expect(warned()).toContainEqual([
+			"redis.settings_unmet",
+			{
+				problems: expect.stringMatching(
+					/fewer good replicas \(0\) than min-replicas-to-write \(1\)/,
+				),
+			},
+		]);
+		redis.replication.goodReplicas = 1;
+		redis.writes.noReplicas = false;
+		expect(await ready()).toBe("ready");
+		redis.down();
+	});
+
+	it("asks them only where replicas are declared", async () => {
+		const redis = primary();
+		redis.replication.goodReplicas = 0;
+		const { ready } = await boot(await redis.listen(), "none");
+		expect(await ready()).toBe("ready");
+		redis.down();
+	});
+});
+
 describe("a store script, run once", () => {
 	it("refuses boot, naming a store script, where the server cannot run it", async () => {
 		const redis = primary();

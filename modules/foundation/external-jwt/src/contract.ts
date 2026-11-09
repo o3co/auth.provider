@@ -3,6 +3,8 @@ import { type VerifyAlgorithm, verifyAlgorithms } from "@mod/keys";
 import type { Narrower } from "@mod/outbound";
 import { z } from "zod";
 
+export { boundAlgorithm } from "./keys.ts";
+
 export type Jwk = Readonly<Record<string, unknown>>;
 
 /** An asymmetric JWS algorithm, one of those `keys` verifies under and `algorithms` lists. */

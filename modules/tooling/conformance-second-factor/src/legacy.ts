@@ -36,5 +36,8 @@ onLegacy(secondFactorArea, {
 		// Recovery codes are made for a first factor that does not count (a code by mail kept as a way
 		// back); the new target makes them only where a factor that counts stands, as its reissue asks.
 		"mfa-codes-for-a-first-way-back",
+		// Under a required second factor, a code by mail whose proof adds no mfa is bound all the same;
+		// the new target does not take that kind there, and answers its binding 400.
+		"mfa-required-binds-a-way-back",
 	],
 });

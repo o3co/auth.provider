@@ -209,7 +209,8 @@ export function expectedOf(runs: readonly Run[], release: boolean): Expected {
 	);
 	const noSkip = new Set(runs.filter((r) => r.noSkip).map((r) => r.entry));
 	const gate = new Set(runs.filter((r) => r.gate).map((r) => r.entry));
-	return { entries, areas, runsOf: harness, suffixed, noSkip, gate };
+	const shards = new Map(runs.flatMap((r) => (r.shards ? [[r.entry, r.shards] as const] : [])));
+	return { entries, areas, runsOf: harness, suffixed, noSkip, gate, shards };
 }
 
 /** Each workspace package's directory, relative to the root. */

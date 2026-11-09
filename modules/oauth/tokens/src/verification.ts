@@ -1,4 +1,4 @@
-import { type AddedClaims, addedClaimsIn, addedClaimsReadBack } from "@mod/added-claims";
+import { type AddedClaims, addedClaimsIn } from "@mod/added-claims";
 import type { AccessTokenSigning } from "@mod/keys";
 import type { SenderBindings } from "@mod/sender-binding";
 import { z } from "zod";
@@ -63,9 +63,12 @@ const grantOf = (claims: Claims, added: AddedClaims | undefined): AccessGrant =>
 	});
 
 /** The added claims of a verified payload, copied by `added-claims`' reading of them; undefined for a token none of tokens' issued. */
-const addedOf = (payload: Readonly<Record<string, unknown>>) => {
+const addedOf = (
+	payload: Readonly<Record<string, unknown>>,
+	readBack: CheckingParts["readBack"],
+) => {
 	try {
-		return { added: addedClaimsReadBack(addedClaimsIn(payload)) };
+		return { added: readBack(addedClaimsIn(payload)) };
 	} catch (error) {
 		if (error instanceof TypeError) return undefined;
 		throw error;
@@ -78,17 +81,19 @@ export interface CheckingParts {
 	/** The issuer a token must name. */
 	readonly iss: string;
 	readonly now: () => number;
+	/** `added-claims`' reading of a token's added claims back, under the section's limits. */
+	readonly readBack: (given: unknown) => AddedClaims | undefined;
 }
 
 /** Verifies everything but revocation; `allowanceMs` keeps a just-expired token valid. */
-export function checkingWith({ signing, bindings, iss, now }: CheckingParts) {
+export function checkingWith({ signing, bindings, iss, now, readBack }: CheckingParts) {
 	return async (token: string, allowanceMs = 0): Promise<Checked> => {
 		if (token.length > compactLimit) return { kind: "invalid", reason: "shape" };
 		const verified = await signing.verify(token);
 		if (verified.kind === "invalid") return { kind: "invalid", reason: "signature" };
 		// Taken from the payload as signed, before the shape drops what it does not name: a member
 		// reserved and never written, or one outside the rules, is no token of tokens'.
-		const extra = addedOf(verified.claims);
+		const extra = addedOf(verified.claims, readBack);
 		if (!extra || !actorsWithin(verified.claims.act)) return { kind: "invalid", reason: "shape" };
 		const parsed = claimsShape.safeParse(verified.claims);
 		if (!parsed.success) return { kind: "invalid", reason: "shape" };

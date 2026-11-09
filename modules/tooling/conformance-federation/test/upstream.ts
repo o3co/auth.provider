@@ -32,6 +32,9 @@ interface Granted extends Authorized {
 	used?: boolean;
 }
 
+/** How a fake upstream's description answers: as itself, with a status alone, or naming another issuer. */
+export type Describing = "itself" | number | { readonly issuer: string };
+
 /** Where a fake upstream answers, and the issuer it names: its own base unless one is given. */
 export interface UpstreamShape {
 	readonly issuer?: string;
@@ -62,7 +65,8 @@ export const googleShape: UpstreamShape = {
  * description (when it is its own issuer) and keys, hands out codes for the authorizations the
  * scene makes, and answers its token endpoint as a real one would, checking the client (by HTTP
  * Basic or in the form), the redirect URI and the PKCE verifier. It answers refreshes as the scene
- * scripts them, and names its end of session where asked.
+ * scripts them, and names its end of session where asked. Its description answers as the scene
+ * switches it (`describing`): as itself (the default), with a status, or naming another issuer.
  */
 export async function fakeUpstream(
 	client: { id: string; secret: string },
@@ -95,6 +99,8 @@ export async function fakeUpstream(
 	/** What the next UserInfo requests answer, in turn, each as given or when it comes; past them, the subject and its name. */
 	const userinfoAnswers: (Scripted | (() => Promise<Scripted>))[] = [];
 	const userinfoCalls: string[] = [];
+	/** How its description answers: as itself, with a status alone, or naming another issuer. */
+	let describing: Describing = "itself";
 	let n = 0;
 	const refresh = (form: URLSearchParams): Scripted => {
 		const presented = form.get("refresh_token") ?? "";
@@ -176,9 +182,10 @@ export async function fakeUpstream(
 	const fake = await fakeHttp((asked, own) => {
 		const base = options.origin ?? own;
 		if (asked.path === "/.well-known/openid-configuration" && !shape.issuer) {
+			if (typeof describing === "number") return { status: describing, json: {} };
 			return {
 				json: {
-					issuer: base,
+					issuer: typeof describing === "object" ? describing.issuer : base,
 					authorization_endpoint: `${base}${shape.authorize}`,
 					token_endpoint: `${base}${shape.token}`,
 					jwks_uri: `${base}${shape.jwks}`,
@@ -226,6 +233,10 @@ export async function fakeUpstream(
 		/** The next UserInfo answers as given, before any already set. */
 		answerUserinfo: (...answers: (Scripted | (() => Promise<Scripted>))[]) => {
 			userinfoAnswers.push(...answers);
+		},
+		/** How its description answers from now on. */
+		describing: (as: Describing) => {
+			describing = as;
 		},
 		/** The next refresh answers as given, before any already set. */
 		answerRefresh: (...answers: Scripted[]) => {

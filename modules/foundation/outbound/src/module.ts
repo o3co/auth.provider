@@ -35,7 +35,13 @@ import {
 import { plainIpv4Rules, plainIpv4Setting, takesIpv4 } from "./plain-ipv4.ts";
 import { type ResolverPool, resolverPool } from "./resolver-process/contract.ts";
 import type { Tls } from "./tls/tls.ts";
-import { type Lookup, type Resolver, type Route, send, systemLookup } from "./transport.ts";
+import {
+	type Lookup,
+	type Resolver,
+	type Route,
+	send,
+	systemLookup,
+} from "./transport/transport.ts";
 
 export const section = policySettings
 	.safeExtend({

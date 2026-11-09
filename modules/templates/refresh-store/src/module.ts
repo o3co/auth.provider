@@ -37,9 +37,8 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
-// Safe on many instances given the same `settle-shards` and `settles-per-shard` on each
-// (deployment-guarantees, Several instances): revocations to settle go to a shard by their hash, and a
-// sweep walks only the shards it counts.
+// Safe on many instances: each record is in the shared store; the settle list's shards, deprecated, are
+// read by no one.
 export default defineModule(
 	{ name: "refresh-store", replicaSafe: true, section, takes: [store] },
 	(m) => [

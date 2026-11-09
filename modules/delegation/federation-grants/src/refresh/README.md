@@ -14,7 +14,7 @@ Internal module of `federation-grants`: handing a grant's upstream token, and re
 ## Invariants
 - A token is due near its end, below the asked `min_ttl`, or lacking an asked scope, and only past half its life.
 - One lock holder per grant refreshes, under a mark of 128 random bits, and reads the grant again under the lock; it hands out nothing (`gone`) unless the grant read then is in use, not past its end, and not ended by its subject's revocation, so a revocation or an end that came while it waited holds.
-- While the upstream is asked, the lock is kept for its life again every half of it, only under that mark; once lost, nothing the upstream answered is written, and a store that cannot answer stops the keeping. It is kept no longer, then let go (ending a millisecond later) only while it holds that mark, never one another took after it ran out.
+- While the upstream is asked, the lock is kept for its life again every half of it, only under that mark; once lost, nothing the upstream answered is written, and a store that cannot answer stops the keeping. It is kept no longer, then let go (ending a millisecond later, `records`' conditional removal) only while it holds that mark, never one another took after it ran out.
 - A write lands only as its own write over the version read, and never on a grant no longer in use.
 - A rotation is written before the upstream is asked; with the window spent, the held token serves, else `limited`.
 - The upstream down, limiting or refusing leaves the credential, and a live held token serves; of the upstream's answers, only `invalid_grant`, or `interaction_required` (the user must act at the upstream), removes it, each under its own reason (`upstream_invalid_grant`, `upstream_interaction_required`).
@@ -23,7 +23,7 @@ Internal module of `federation-grants`: handing a grant's upstream token, and re
 - A rotated refresh token is written before the rest is judged; an answer that cannot be held marks the grant ineligible.
 
 ## Data
-- The lock lives 10 seconds unless kept, as it is every 5 while its holder refreshes; a request waits up to 5 between its asks for it, and the time each ask takes to answer comes on top.
+- The lock lives the package's `lock-lifetime` (10 seconds unless set) unless kept, as it is every half of it while its holder refreshes; a request waits up to half of it between its asks for it, and the time each ask takes to answer comes on top. A waiting request asks again every 100 ms, and a held token with less than a second left is due at once, never handed out: fixed margins, as such a token would end on its way to the client.
 - A held token serves in place of a refresh that cannot be made only while the grant, read again then, is still in use, not past its end, and not ended by its subject's revocation: one revoked or ended while the upstream was asked hands out nothing (`gone`).
 - A refresh the upstream answered hands out and writes nothing when the grant is past its end by then, or its subject's revocation ends it, even a grant its subject's listing missed, which only the boundary ends.
 

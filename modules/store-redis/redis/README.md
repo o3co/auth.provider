@@ -11,9 +11,9 @@
 
 ## Offers
 - Composition definition only.
-- The probe `redis` at `kernel`'s `probes`: each run PINGs both connections and, at most once a second, checks again what boot checked of the server, answering unready and logging `redis.settings_unmet` with what no longer holds when that changes.
+- The probe `redis` at `kernel`'s `probes` (internal module `probe`), given what boot checked of the server to check again.
 - Operator section:
-  - `url` (`redis` or `rediss`, with no query), `address-family` (`ipv4`, `ipv6`, or either unset), `prefix` (lower-case letters, digits and `-`; default `store`).
+  - `url` (`redis` or `rediss`, with no query), `accept-plaintext` (false), `address-family` (`ipv4`, `ipv6`, or either unset), `prefix` (lower-case letters, digits and `-`; default `store`).
   - `connect-timeout` (default `2s`), `command-timeout` (default `1s`), `replication-timeout` (default `1s`); times written with their unit, a bare number refused.
   - `replication`: `replicas` or `none`, required when a space needs replicated or confirmed reads.
   - `durability`: `none`, or unset.
@@ -30,7 +30,7 @@
 - `replicas`: no replica seen is unavailable, a confirmed read at boot too, so a module reading at boot refuses a restart.
 - `none`: the operator states there is no failover, so even confirmed writes are lost by one; a replica seen at runtime is unavailable; every boot warns `redis.replication_none` naming the replicated spaces.
 - A timeout, too few replicas, or another server than the one that answered is unavailable, the answer then unknown.
-- Internal module `client`: boot warns `redis.plaintext` where the URL is in the clear. Production refuses `url` while `DEBUG` covers ioredis. Another floor refuses boot.
+- Internal module `client`: boot warns `redis.plaintext` where the URL is in the clear, deprecated in production without `accept-plaintext`. Production refuses `url` while `DEBUG` covers ioredis. Another floor refuses boot.
 - Every script first deletes keys whose expiry is at or before its time, as Redis still holds them then.
 - Versions are `server.epoch.n` and never repeat after a restart, a failover, or the end of the key counting them.
 - Nothing a connection does ends the process.

@@ -70,11 +70,13 @@ export function assemblyFor(
 	const indexed = JSON.parse(readFileSync(index, "utf8")) as Indexed;
 	const sealed = sealedOf(indexed);
 	const bundles = new Map(indexed.packages.map((entry) => [entry.name, entry.package]));
-	const read = readOutside(plan.outside.from, plan.outside.names, {
-		version: indexed.version,
-		zod: appZod,
-		bundleOf: (module) => bundles.get(module),
-	});
+	const read = readOutside(
+		plan.outside.from,
+		plan.outside.names,
+		{ version: indexed.version, zod: appZod, bundleOf: (module) => bundles.get(module) },
+		{},
+		plan.outside.fresh,
+	);
 	// The app holds an outside package's release peers to one copy too: each must be one the release sealed.
 	for (const { record } of read.outside) {
 		for (const peer of Object.keys(record.peerDependencies).filter(isReleasePackage)) {

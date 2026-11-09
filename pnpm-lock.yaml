@@ -229,6 +229,13 @@ importers:
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/foundation/added-claims:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       vitest:
         specifier: 5.0.5
@@ -301,8 +308,8 @@ importers:
         specifier: workspace:*
         version: link:../outbound
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -375,8 +382,8 @@ importers:
         specifier: workspace:*
         version: link:../kernel
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -392,9 +399,18 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@mod/mail-address':
+        specifier: workspace:*
+        version: link:../mail-address
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/foundation/mail-address:
     devDependencies:
       vitest:
         specifier: 5.0.5
@@ -615,6 +631,9 @@ importers:
 
   modules/identity/login-attributes:
     dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
       '@mod/users':
         specifier: workspace:*
         version: link:../users
@@ -828,9 +847,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/mail':
+      '@mod/mail-address':
         specifier: workspace:*
-        version: link:../../foundation/mail
+        version: link:../../foundation/mail-address
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -1079,8 +1098,8 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/url-setting
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1395,8 +1414,8 @@ importers:
         specifier: workspace:*
         version: link:../sender-binding
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1429,8 +1448,8 @@ importers:
         specifier: workspace:*
         version: link:../../identity/users
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1557,8 +1576,8 @@ importers:
         specifier: workspace:*
         version: link:../../identity/users
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1679,8 +1698,8 @@ importers:
         specifier: workspace:*
         version: link:../../identity/users
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -1869,9 +1888,6 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
-      '@mod/session-participants':
-        specifier: workspace:*
-        version: link:../../identity/session-participants
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1900,6 +1916,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/session-requirements':
         specifier: workspace:*
         version: link:../../identity/session-requirements
@@ -2867,6 +2886,31 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/second-factor/account-mail-code:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mail':
+        specifier: workspace:*
+        version: link:../../foundation/mail
+      '@mod/mail-address':
+        specifier: workspace:*
+        version: link:../../foundation/mail-address
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+      '@mod/subject-attributes':
+        specifier: workspace:*
+        version: link:../../identity/subject-attributes
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/second-factor/mfa:
     dependencies:
       '@mod/audit':
@@ -2989,6 +3033,9 @@ importers:
 
   modules/second-factor/mfa-email:
     dependencies:
+      '@mod/account-mail-code':
+        specifier: workspace:*
+        version: link:../account-mail-code
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -3001,6 +3048,9 @@ importers:
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
+      '@mod/mfa-email-proof':
+        specifier: workspace:*
+        version: link:../mfa-email-proof
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
@@ -3020,15 +3070,18 @@ importers:
 
   modules/second-factor/mfa-email-proof:
     dependencies:
+      '@mod/account-mail-code':
+        specifier: workspace:*
+        version: link:../account-mail-code
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/mail':
+        specifier: workspace:*
+        version: link:../../foundation/mail
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
-      '@mod/mfa-email':
-        specifier: workspace:*
-        version: link:../mfa-email
       '@mod/users':
         specifier: workspace:*
         version: link:../../identity/users
@@ -3036,12 +3089,25 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@mod/mail':
-        specifier: workspace:*
-        version: link:../../foundation/mail
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/second-factor/mfa-email-proof-wording:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mail':
+        specifier: workspace:*
+        version: link:../../foundation/mail
+      '@mod/mfa-email-proof':
+        specifier: workspace:*
+        version: link:../mfa-email-proof
+    devDependencies:
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -3496,6 +3562,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   modules/second-factor/mfa-witness:
     dependencies:
@@ -3555,6 +3624,9 @@ importers:
       '@mod/mail':
         specifier: workspace:*
         version: link:../../foundation/mail
+      '@mod/mail-address':
+        specifier: workspace:*
+        version: link:../../foundation/mail-address
       '@mod/tls-options':
         specifier: workspace:*
         version: link:../../foundation/tls-options
@@ -3562,8 +3634,8 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/url-setting
       nodemailer:
-        specifier: 10.2.1
-        version: 10.2.1
+        specifier: 10.3.1
+        version: 10.3.1
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -3857,6 +3929,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   modules/templates/mfa-store:
     dependencies:
@@ -4193,8 +4268,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-checklist
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4258,8 +4333,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-checklist
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4298,8 +4373,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-checklist
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4382,8 +4457,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-checklist
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4407,8 +4482,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-checklist
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4472,8 +4547,8 @@ importers:
         specifier: workspace:*
         version: link:../../passkey/webauthn
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
 
   modules/tooling/conformance-recipes:
     dependencies:
@@ -4505,6 +4580,9 @@ importers:
       '@mod/ledger-fakes':
         specifier: workspace:*
         version: link:../ledger-fakes
+      '@mod/local-registry':
+        specifier: workspace:*
+        version: link:../local-registry
       '@mod/spec-checklist':
         specifier: workspace:*
         version: link:../spec-checklist
@@ -4554,6 +4632,9 @@ importers:
       '@mod/docker-client':
         specifier: workspace:*
         version: link:../docker-client
+      '@mod/local-registry':
+        specifier: workspace:*
+        version: link:../local-registry
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
@@ -4674,6 +4755,12 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/tooling/local-registry:
     devDependencies:
       vitest:
         specifier: 5.0.5
@@ -4935,8 +5022,8 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/url-setting
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -5047,8 +5134,8 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/tls-options
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -5342,8 +5429,8 @@ importers:
         specifier: workspace:*
         version: link:../../oauth/tokens
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
 
   modules/user-ledger-http/subject-revocation-http:
     dependencies:
@@ -5850,8 +5937,8 @@ packages:
     resolution: {integrity: sha512-ehuGcf94bQXhfagULNXrJdfnWO38v070jxSx/qE87Kjzmu2fU7ro5EFAb+OPituLqgfyuQaym5DlrNydW2sJ9A==}
     engines: {node: '>=12.22.0'}
 
-  jose@6.2.13:
-    resolution: {integrity: sha512-7TIg10ZE1x82YediN+lcrPNvGMKge9yFHQD+Qho/b8y2adfugU3AsvvHfxV0fzyFllT6l9xCjf4RWY9g/Z9PJQ==}
+  jose@6.2.15:
+    resolution: {integrity: sha512-qdF6ewcZARtef63fJ9AKKZPgxw+t7USH6HLXYcD4CrdmSvDp79rpJSPFEKc90QBeGS63u1KQtN2MZQHC0yDIzA==}
 
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
@@ -5955,8 +6042,8 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  nodemailer@10.2.1:
-    resolution: {integrity: sha512-ZrDNsPFoDMwefNs7sJwrYiEJ/CG4ClJWDZv05iNJsEBWa8GRDry1QJHTJxsuTAY9eDDKjX4k+q3SxslXJOao7w==}
+  nodemailer@10.3.1:
+    resolution: {integrity: sha512-uF0AFsJC07Y1vdW7p580DKAnh7rAO+4UPSSB3mDCPNDufoiaOebV6JmrzpxB14OjEEEiBsNdYoM2Y+fN8M7BBA==}
     engines: {node: '>=20.0.0'}
 
   oauth4webapi@3.8.8:
@@ -6601,7 +6688,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  jose@6.2.13: {}
+  jose@6.2.15: {}
 
   lightningcss-android-arm64@1.33.0:
     optional: true
@@ -6682,7 +6769,7 @@ snapshots:
 
   nanoid@3.3.20: {}
 
-  nodemailer@10.2.1: {}
+  nodemailer@10.3.1: {}
 
   oauth4webapi@3.8.8: {}
 
@@ -6690,7 +6777,7 @@ snapshots:
 
   openid-client@6.8.8:
     dependencies:
-      jose: 6.2.13
+      jose: 6.2.15
       oauth4webapi: 3.8.8
 
   picocolors@1.1.1: {}

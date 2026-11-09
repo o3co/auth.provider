@@ -32,6 +32,7 @@
 - An `oidc.id-token-alg` written other than `RS256`, which OpenID Connect Discovery 1.0 §3 has `id_token_signing_alg_values_supported` include, warns `oidc.id_token_alg_not_rs256` at each boot, with the algorithm's name alone.
 - A `keys.next` key of another algorithm is not refused, so a rotation can publish it first: each boot warns `oidc.next_key_alg_differs`, by the algorithms' names alone, that `id-token-alg` changes with its promotion.
 - The ID token's `typ` is the standard `JWT`. Telling token kinds apart is the receiver's check of its own kind, not this spelling.
+- A hint past 64 KiB is not read, checked before it is parsed or verified: the routes that take one let none longer through (a GET's 16 KiB, rp-logout's 64 KiB form).
 - A hint is taken only as an ID token `keys` verifies under `JWT`, from `issuer`'s URL, with a subject, `iat` and `exp`, whatever its `exp` (OpenID Connect RP-Initiated Logout 1.0 §2: an expired hint is still taken); its audience is not pinned. Its client is `azp` when the audience names it, else the one audience.
 - `auth_time` never exceeds `iat` (so clock skew cannot put it later).
 - An unknown authentication time is never claimed: the ID token then carries no `auth_time`.

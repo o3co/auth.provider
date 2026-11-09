@@ -21,7 +21,7 @@ type ByCrl = (cert: pkijs.Certificate, issuer: pkijs.Certificate, fetch: Fetch) 
 
 /** What a certificate's OCSP responders answer, each answer kept by the certificate's key. */
 export function ocspSource(
-	policy: RevocationPolicy & Pick<PathPolicy, "minRsaBits">,
+	policy: RevocationPolicy & Pick<PathPolicy, "minRsaBits" | "signatureAlgorithms">,
 	sources: Sources,
 	answers: Expiring<KeptAnswer | Failed>,
 	alone: Alone,
@@ -62,6 +62,7 @@ export function ocspSource(
 				skewMs: policy.skewMs,
 				freshMs: policy.ocspFreshMs,
 				minRsaBits: policy.minRsaBits,
+				signatureAlgorithms: policy.signatureAlgorithms,
 				...(nonce ? { nonce } : {}),
 			});
 			if (answer.kind === "busy") {

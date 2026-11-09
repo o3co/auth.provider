@@ -4,7 +4,6 @@ import type { AskedFrom, Sending } from "@mod/mfa-extensions";
 import { type SubjectAttributes, subjectAttributes } from "@mod/subject-attributes";
 import { type Users, userAttribute, users } from "@mod/users";
 import { addressOf, masked } from "./address.ts";
-import type { Purpose } from "./purposes.ts";
 
 export interface MailedParts {
 	readonly mail: Pick<Mail, "send">;
@@ -21,8 +20,8 @@ export interface MailedCodes {
 	 * or the session's) gave when `users` vouches for it. Never an upstream's. None when there is none.
 	 */
 	addressNow(subject: string, from?: AskedFrom): Promise<string | undefined>;
-	/** Mails the code, good until `until`: sent, with what the user is shown and what to keep, or limited. */
-	send(purpose: Purpose, to: string, code: string, until: number): Promise<Sending>;
+	/** Mails the code under the caller's purpose, good until `until`: sent, with what the user is shown and what to keep, or limited. */
+	send(purpose: string, to: string, code: string, until: number): Promise<Sending>;
 	/** Whether `typed`, read as its kind of code, is the kept code, before its end. */
 	matches(
 		kept: { readonly code: string; readonly until: number } | undefined,

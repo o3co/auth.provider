@@ -227,7 +227,7 @@ async function open(world: World = {}) {
 		.lines()
 		.filter((line) => line.level === "warn")
 		.map(({ event, fields }) => ({ event, fields }));
-	return { upstream, settings, asked: stub.asked, warned };
+	return { upstream, settings, asked: stub.asked, warned, logged: recorded.lines };
 }
 
 const codeExchange = (more: Partial<CodeExchange> = {}): CodeExchange => ({
@@ -262,6 +262,17 @@ const outcome = (run: Promise<unknown>) =>
 		(error) =>
 			UpstreamRefused.is(error) ? "refused" : isUnavailable(error) ? "unavailable" : error,
 	);
+/** What a call answering at once throws: "unavailable", or the error itself; "none" where it answers. */
+const thrownBy = (run: () => unknown) => {
+	try {
+		run();
+		return "none";
+	} catch (error) {
+		return isUnavailable(error) ? "unavailable" : error;
+	}
+};
+/** Lets a read begun in the background end. */
+const settled = () => new Promise((resolve) => setImmediate(resolve));
 /** An upstream whose token endpoint hands over `idToken`, with what `world` changes. */
 const answering = (idToken: string, world: Omit<World, "token"> = {}) =>
 	open({ ...world, token: () => granted(idToken) });
@@ -691,9 +702,11 @@ describe("idp-oidc", () => {
 		};
 		const fromAnotherCopy = await open({ describes }).catch((e) => e);
 		expect(fromAnotherCopy).toBeInstanceOf(UpstreamMismatch);
-		// An issuer that cannot be reached is not one that does not match.
-		const unreachable = await open({ describes: () => "unreachable" }).catch((e) => e);
-		expect(isUnavailable(unreachable)).toBe(true);
+		// An issuer that cannot be reached is not one that does not match: it opens, unavailable.
+		const unreachable = await open({ describes: () => "unreachable" });
+		expect(thrownBy(() => unreachable.upstream.authorizationUrl(authorizationStart))).toBe(
+			"unavailable",
+		);
 	});
 
 	it("reaches as the operator's URL the issuer for all its description names, and each given endpoint for itself [oidc-core-3.1.3.7-j]", async () => {
@@ -733,9 +746,13 @@ describe("idp-oidc", () => {
 		// Unlisted, the address refuses the description at the issuer, as an upstream that does not match.
 		const refused = await open({ settings, reach: reachOf([]) }).catch((e) => e);
 		expect([refused instanceof UpstreamMismatch, refused.at]).toEqual([true, ["issuer"]]);
-		// Listed, it gets past the address to the connection, which cannot be made here.
-		const reached = await open({ settings, reach: reachOf(["idp.corp"]) }).catch((e) => e);
-		expect(isUnavailable(reached)).toBe(true);
+		// Listed, it gets past the address to the connection, which cannot be made here: it opens,
+		// unavailable, as outbound words the failure.
+		const reached = await open({ settings, reach: reachOf(["idp.corp"]) });
+		expect(reached.warned.map((line) => line.event)).toEqual(["idp-oidc.description_unavailable"]);
+		expect(thrownBy(() => reached.upstream.authorizationUrl(authorizationStart))).toBe(
+			"unavailable",
+		);
 	});
 
 	it("reaches an endpoint the operator gives on another host [oidc-core-3.1.3.7-j]", async () => {
@@ -1240,7 +1257,7 @@ describe("idp-oidc", () => {
 				idTokenHint: "idt",
 				postLogoutRedirectUri: "https://app.example/bye",
 				state: "st",
-			}),
+			}) ?? "",
 		);
 		expect(`${url.origin}${url.pathname}`).toBe(`${issuer}/logout`);
 		expect(Object.fromEntries(url.searchParams)).toEqual({
@@ -1250,7 +1267,7 @@ describe("idp-oidc", () => {
 			state: "st",
 			client_id: "client",
 		});
-		expect(new URL(endSession({})).search).toBe("?ui=1&client_id=client");
+		expect(new URL(endSession({}) ?? "").search).toBe("?ui=1&client_id=client");
 		expect((await open()).upstream.endSession).toBeUndefined();
 		const configured = await open({
 			settings: { ...givenEndpoints, "end-session-endpoint": `${issuer}/bye` },
@@ -1639,6 +1656,191 @@ describe("idp-oidc", () => {
 			expect(asked.filter((a) => a.request.credential === "Bearer at")).toEqual([
 				expect.objectContaining({ url: userinfoAt, internal: userinfoAt }),
 			]);
+		});
+	});
+	describe("a description that cannot be read at boot", () => {
+		const described = (more: Record<string, unknown> = {}) =>
+			ok({
+				issuer,
+				authorization_endpoint: `${issuer}/authorize`,
+				token_endpoint: `${issuer}/token`,
+				jwks_uri: `${issuer}/jwks`,
+				...more,
+			});
+		const answered = (status: number): OutboundResponse => ({
+			status,
+			headers: new Map(),
+			body: new TextEncoder().encode("{}"),
+		});
+		/** How many times the description was fetched. */
+		const reads = (asked: readonly { url: string }[]) =>
+			asked.filter((a) => a.url.endsWith("/.well-known/openid-configuration")).length;
+		const lines = (logged: () => readonly { level: string; event: string; fields?: unknown }[]) =>
+			logged()
+				.filter((line) => line.event.startsWith("idp-oidc.description_"))
+				.map(({ level, event, fields }) => ({ level, event, fields }));
+
+		it("opens without it, warning with outbound's word or the status, and answers Unavailable for all that needs it", async () => {
+			const token = await idToken();
+			for (const [describes, failure] of [
+				[() => "unreachable" as const, "unavailable"],
+				[() => answered(503), "status-5xx"],
+				[() => answered(500), "status-5xx"],
+				[() => answered(429), "status-429"],
+			] as const) {
+				const { upstream, warned } = await open({ describes, token: () => granted(token) });
+				expect(warned, failure).toEqual([
+					{ event: "idp-oidc.description_unavailable", fields: { idp: "corp", failure } },
+				]);
+				expect(thrownBy(() => upstream.authorizationUrl(authorizationStart))).toBe("unavailable");
+				const delegation = offered(upstream.delegation, "delegation");
+				expect(thrownBy(() => delegation.authorizationUrl(delegationStart))).toBe("unavailable");
+				// A start it refuses as a value needs no endpoint: refused still.
+				expect(delegation.authorizationUrl({ ...delegationStart, scopes: ["files.read"] })).toEqual(
+					{ kind: "refused" },
+				);
+				expect(thrownBy(() => offered(upstream.endSession, "endSession")({}))).toBe("unavailable");
+				expect(await outcome(upstream.exchange(codeExchange()))).toBe("unavailable");
+				expect(await outcome(offered(upstream.refresh, "refresh")("r", []))).toBe("unavailable");
+				expect(await outcome(delegation.exchange(delegatedExchange()))).toBe("unavailable");
+				expect(await outcome(delegation.refresh("r", []))).toBe("unavailable");
+			}
+		});
+
+		it("reads it again when needed, a minute after the last read began at the soonest, and goes on as described once one holds", async () => {
+			let down = true;
+			const { upstream, asked, logged } = await open({
+				describes: () => (down ? answered(503) : described()),
+			});
+			expect(reads(asked)).toBe(1);
+			// Within the minute, nothing is read: the start answers at once.
+			now += 59_999;
+			down = false;
+			expect(thrownBy(() => upstream.authorizationUrl(authorizationStart))).toBe("unavailable");
+			await settled();
+			expect(reads(asked)).toBe(1);
+			// A start that answers at once begins the read, and is unavailable itself.
+			now += 1;
+			expect(thrownBy(() => upstream.authorizationUrl(authorizationStart))).toBe("unavailable");
+			await settled();
+			expect(reads(asked)).toBe(2);
+			const url = new URL(upstream.authorizationUrl(authorizationStart));
+			expect(`${url.origin}${url.pathname}`).toBe(`${issuer}/authorize`);
+			// Once read, never again.
+			now += 120_000;
+			upstream.authorizationUrl(authorizationStart);
+			expect(reads(asked)).toBe(2);
+			expect(lines(logged)).toEqual([
+				{
+					level: "warn",
+					event: "idp-oidc.description_unavailable",
+					fields: { idp: "corp", failure: "status-5xx" },
+				},
+				{ level: "info", event: "idp-oidc.description_read", fields: { idp: "corp" } },
+			]);
+		});
+
+		it("counts the minute from when the read at boot began, however long it took", async () => {
+			let down = true;
+			const { upstream, asked } = await open({
+				describes: () => {
+					if (!down) return described();
+					// The read at boot takes 30 seconds to fail, as a timeout does.
+					now += 30_000;
+					return answered(503);
+				},
+			});
+			down = false;
+			now += 30_000;
+			expect(thrownBy(() => upstream.authorizationUrl(authorizationStart))).toBe("unavailable");
+			await settled();
+			expect(reads(asked)).toBe(2);
+		});
+
+		it("lets what awaits a read go on at once where it holds, every caller sharing the one read", async () => {
+			const token = await idToken();
+			let down = true;
+			const { upstream, asked } = await open({
+				describes: () => (down ? "unreachable" : described()),
+				token: () => granted(token),
+			});
+			now += 60_000;
+			down = false;
+			const both = await Promise.all([
+				outcome(upstream.exchange(codeExchange())),
+				outcome(upstream.exchange(codeExchange())),
+			]);
+			expect(both.map((login) => (login as { subject?: string }).subject)).toEqual([
+				"u-alice",
+				"u-alice",
+			]);
+			expect(reads(asked)).toBe(2);
+		});
+
+		it("never uses a read that does not hold, telling it as an error once, and reads again", async () => {
+			let describes: Handler = () => answered(503);
+			const { upstream, asked, logged } = await open({ describes: (r) => describes(r) });
+			describes = () => described({ issuer: "https://elsewhere.example" });
+			for (let i = 0; i < 2; i++) {
+				now += 60_000;
+				expect(await outcome(upstream.exchange(codeExchange()))).toBe("unavailable");
+			}
+			expect(reads(asked)).toBe(3);
+			describes = () => answered(404);
+			now += 60_000;
+			expect(await outcome(upstream.exchange(codeExchange()))).toBe("unavailable");
+			describes = () => described();
+			now += 60_000;
+			expect(thrownBy(() => upstream.authorizationUrl(authorizationStart))).toBe("unavailable");
+			await settled();
+			expect(thrownBy(() => upstream.authorizationUrl(authorizationStart))).toBe("none");
+			expect(lines(logged)).toEqual([
+				{
+					level: "warn",
+					event: "idp-oidc.description_unavailable",
+					fields: { idp: "corp", failure: "status-5xx" },
+				},
+				{
+					level: "error",
+					event: "idp-oidc.description_mismatch",
+					fields: { idp: "corp", reason: "the description names another issuer" },
+				},
+				{ level: "info", event: "idp-oidc.description_read", fields: { idp: "corp" } },
+			]);
+		});
+
+		it("ends the session where the description read names one, and answers none where it names none", async () => {
+			for (const [more, expected] of [
+				[{ end_session_endpoint: `${issuer}/logout` }, `${issuer}/logout`],
+				[{}, undefined],
+			] as const) {
+				let down = true;
+				const { upstream } = await open({
+					describes: () => (down ? "unreachable" : described(more)),
+				});
+				now += 60_000;
+				down = false;
+				const ending = offered(upstream.endSession, "endSession");
+				expect(thrownBy(() => ending({}))).toBe("unavailable");
+				await settled();
+				const url = ending({});
+				expect(
+					url === undefined ? undefined : `${new URL(url).origin}${new URL(url).pathname}`,
+				).toBe(expected);
+			}
+		});
+
+		it("still refuses boot for a description that answers but does not hold", async () => {
+			for (const describes of [
+				() => answered(404),
+				() => answered(400),
+				() => answered(301),
+				() => ({ ...answered(200), body: new TextEncoder().encode("not json") }),
+				() => described({ issuer: "https://elsewhere.example" }),
+			]) {
+				const thrown = await open({ describes }).catch((e) => e);
+				expect(UpstreamRefused.is(thrown) || UpstreamMismatch.is(thrown)).toBe(true);
+			}
 		});
 	});
 });

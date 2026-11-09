@@ -1,3 +1,4 @@
+import { Unavailable } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import {
 	type Answer,
@@ -19,14 +20,28 @@ const said = (answer: Answer) =>
 describe("a connection in the browser, through the assembled module", () => {
 	it("answers an upstream whose authorization URL throws at once as unavailable, leaving the question open", async () => {
 		const h = await harness();
-		h.script.startThrows = true;
+		h.script.startThrows = new Error("cannot build");
 		const flow = await h.started();
 		expect(said(flow.answered)).toBe("503 temporarily_unavailable upstream_unavailable");
 		expect(h.events.map((e) => e.attributes?.outcome)).toContain("upstream_unavailable");
-		h.script.startThrows = false;
+		h.script.startThrows = undefined;
 		h.script.withdrawn = true;
 		expect((await h.decide(flow.challenge, flow.browser)).answered.status).toBe(503);
 		h.script.withdrawn = false;
+		const again = await h.browse("POST", "/session/federation-grants/consent", flow.browser, {
+			challenge: flow.challenge,
+			decision: "accept",
+		});
+		expect(again.status).toBe(303);
+		expect(h.location(again).origin).toBe("https://up.example");
+	});
+
+	it("answers a start the upstream cannot build yet as unavailable, and starts once it can", async () => {
+		const h = await harness();
+		h.script.startThrows = new Unavailable("upstream");
+		const flow = await h.started();
+		expect(said(flow.answered)).toBe("503 temporarily_unavailable upstream_unavailable");
+		h.script.startThrows = undefined;
 		const again = await h.browse("POST", "/session/federation-grants/consent", flow.browser, {
 			challenge: flow.challenge,
 			decision: "accept",

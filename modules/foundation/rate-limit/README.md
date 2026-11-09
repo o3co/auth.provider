@@ -13,7 +13,7 @@
 - Both are marked `per-source` for every method at `http`'s `marks`; the stand-in marks them too.
 - An undetermined source is logged as a deployment error and answered `503` by both policies.
 - `sourceKey` (a source address, in `request-source`'s canonical form): the key both policies count it by, for a route counting in its own handler.
-- `lockouts`: check; record a failure; reserve an attempt; end a run on success; hand back an abandoned attempt; tell a release's standing; release, whole or on terms judged as written.
+- `lockouts`: check; record a failure; reserve an attempt; end a run on success; hand back an abandoned attempt; tell a release's standing; release, whole or on terms judged as written, refusing terms that keep their id for no positive whole number of ms.
 - A reservation is the check and one counted attempt in one write; a held key counts nothing; the reservation that starts a hold says so.
 - `lockoutProblem`: why a lockout policy cannot be used, for the caller to refuse boot.
 - Audit events: declared in `./audit-events`, listed in the audit event reference; a policy's uncounted request says whether it was refused or let through.
@@ -28,7 +28,7 @@
 - Handing back the attempt that fixed a hold lifts it; handing back any other keeps it.
 - Attempt times are unique within a key and never go back, so a reservation names one attempt.
 - A success ends the run but keeps failures in the budget; the budget's window is the caller's.
-- A lockout that keeps losing races is unavailable; a reservation it cannot hand back stays a failure, the safe side.
+- A lockout that keeps losing races is unavailable; a reservation it cannot hand back stays a failure, the safe side. A stored lockout state of another shape is unavailable, never read as no hold.
 
 ## Data
 - Limit windows: no eviction, so a flood cannot reset a count; not replicated, as no credential depends on them.

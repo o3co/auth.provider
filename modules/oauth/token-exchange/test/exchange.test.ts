@@ -517,6 +517,22 @@ describe("token-exchange: refusals", () => {
 		expect(scope.length).toBeGreaterThan(0);
 		expect(unasked).toMatchObject({ kind: "issued", body: { scope: scope.join(" ") } });
 	});
+
+	it("refuses, scope left out, a subject token whose scope the client's allowance takes all of, and issues one that holds none", async () => {
+		const s = await serve();
+		const outside = await s.exchange("app", subjectOf((await s.issue({ scope: ["admin"] })).token));
+		expect(said(outside)).toEqual([
+			"invalid_scope",
+			"no scope of the subject token is within the client's",
+		]);
+		const kept = await s.exchange(
+			"app",
+			subjectOf((await s.issue({ scope: ["admin", "read"] })).token),
+		);
+		expect((await s.issued(kept)).grant.scope).toEqual(["read"]);
+		const none = await s.exchange("app", subjectOf((await s.issue({ scope: [] })).token));
+		expect((await s.issued(none)).grant.scope).toEqual([]);
+	});
 });
 
 describe("token-exchange: bindings", () => {

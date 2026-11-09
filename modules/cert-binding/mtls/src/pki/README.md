@@ -12,6 +12,7 @@
 - `pkiOver` (path policy, and revocation policy with sources, or none): a check of a leaf, the chain sent and a time.
   - It answers valid, invalid with a reason, revoked, or outage with a reason. No engine type crosses it.
 - Whether bytes are one certificate.
+- The names of the signature algorithms a policy may take.
 - The sources a caller implements: GET or POST of a body (material, outage or refused), the time, randomness.
 - A test authority for its own and `mtls`'s tests: certificates, CRLs and OCSP answers.
 
@@ -19,14 +20,15 @@
 - The path is chosen from the leaf, the intermediates sent (copies of the leaf dropped; 10, or the intermediates allowed and one more, at most) and the anchors, shallowest first: an issuer is one whose name the certificate names and whose key signed it, at most 4 for a certificate, none entered twice. The engine validates that path alone.
 - Anything not one certificate is malformed.
 - A path is refused for more intermediates than allowed, or an RSA key below the bits.
-- A path is refused for a signature other than SHA-2 RSA, PSS over SHA-2 or ECDSA, anchors aside.
+- A path is refused for a signature not among the policy's algorithms, anchors aside: SHA-2 RSA, PSS over SHA-2 or ECDSA, each named.
+- It is refused too for a signature stated beside it otherwise than inside, or of another family than its signer's key.
 - A path is refused for an unknown critical extension, or an extension not parsing as its kind, anchor included.
 - A path is refused for a CA leaf, or an issuer past its path length (self-issued CAs not counted).
 - A leaf's EKU must allow client authentication, and its key usage, where given, signing or key agreement.
 - Every DNS and IP name on the path (a self-issued CA's aside) lies in a permitted subtree of its kind of each CA above, and in no excluded one (RFC 5280 §4.2.1.10).
 - DNS compares by labels in any case (a leading dot: below it alone); IP by network, in its own family.
 - Constraints on other kinds of name, or limiting depth, refuse the path.
-- Revocation is checked by the internal module `revocation`, with the path's RSA bits.
+- Revocation is checked by the internal module `revocation`, with the path's RSA bits and signature algorithms.
 
 ## Depends on
 - `pkijs`, `asn1js`; nothing in the workspace

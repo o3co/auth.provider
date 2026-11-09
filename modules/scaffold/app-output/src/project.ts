@@ -2,6 +2,7 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { configFiles, kernel } from "@mod/app-entries";
+import { stringify } from "yaml";
 
 /** An npm package name, scoped or not: what the app's imports and dependencies can name. */
 const packageName = /^(@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
@@ -31,8 +32,23 @@ export async function vacant(target: string): Promise<void> {
 	if (held.length > 0) throw new Error(`${target} is not empty`);
 }
 
-/** The pnpm the workspace builds with, so the lockfile reads alike in the image. */
-const pnpm = "pnpm@11.28.7";
+/** The pnpm the workspace builds with, so the lockfile reads alike in the image; corepack checks it by its sha512. */
+const pnpm =
+	"pnpm@12.18.0+sha512.9d7882d5dc82147ecfc4e062aa34834e0ad0296710a1837a1115ae012127d36b7109e321ac1598a1dd0a65597681b1e99917e12ed0d749eae91187943363beb3";
+
+/** The setting that keeps `pnpm-lock.yaml` one YAML document, and why, for the operator who reads it. */
+const oneDocument = `# Keeps pnpm-lock.yaml one YAML document. Otherwise pnpm writes the pnpm that
+# packageManager pins into a document of its own ahead of the lockfile, which
+# GitHub's dependency graph does not read, so Dependabot raises no alert on the
+# app's dependencies, and which scripts/check-outside.mjs, where the app has it,
+# refuses. It also stops pnpm checking that it runs the pinned version: corepack
+# runs the version packageManager pins, checked against the sha512 there.
+pmOnFail: ignore
+`;
+
+/** The project's `pnpm-workspace.yaml`: the settings given, and the one keeping the lockfile one document. */
+export const workspaceFile = (settings: object) =>
+	`${Object.keys(settings).length === 0 ? "" : stringify(settings)}${oneDocument}`;
 
 /** The zod the packages take, so a section the app writes is read by the same copy. */
 export const zod = "4.6.7";

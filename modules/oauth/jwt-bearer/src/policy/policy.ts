@@ -2,7 +2,7 @@ import type { Ceiling } from "@mod/client-allowance";
 import type { Policy } from "@mod/external-jwt";
 import { algorithms } from "../contract.ts";
 import { idJagTyp } from "../id-jag/id-jag.ts";
-import type { IssuerEntry } from "../issuers/issuers.ts";
+import { type IssuerEntry, widestSkewSeconds } from "../issuers/issuers.ts";
 
 /** The section's lifetime and clock skew, in seconds, which an entry narrows. */
 export interface Limits {
@@ -10,8 +10,8 @@ export interface Limits {
 	readonly "clock-skew": number;
 }
 
-/** The widest clock skew a setting takes (5m): a spent assertion is kept past it, whatever is set. */
-const widestSkewMs = 300_000;
+/** The widest clock skew a setting takes: a spent assertion is kept past it, whatever is set. */
+const widestSkewMs = widestSkewSeconds * 1000;
 /** Kept longer than any assertion is taken by this much, so clock differences never let one back. */
 const usedAllowanceMs = 60_000;
 

@@ -98,6 +98,7 @@ export default defineModule(
 				credential: c.section.credential,
 				narrowerOf,
 				warn: (event, fields) => c.log.warn(event, fields),
+				now: c.clock.now,
 			});
 			const {
 				"verify-url": verifyUrl,

@@ -2,6 +2,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { accessTokenSigning, keys } from "@mod/keys";
 import { afterEach, expect, it } from "vitest";
 import { idTokenHints } from "../src/contract.ts";
+import { hintsOver } from "../src/hints.ts";
 import { booted, readers } from "./parts.ts";
 
 const start = 1_800_000_000_000;
@@ -118,4 +119,24 @@ it("reads for authorize the subject of a hint it takes, a long expired one inclu
 	now += 30 * 86_400_000;
 	expect(await read(hint)).toEqual({ kind: "subject", subject: "alice" });
 	for (const token of others) expect(await read(token)).toEqual({ kind: "invalid" });
+});
+
+it("reads no hint past 64 KiB, verifying nothing, and reads one at it", async () => {
+	const { check } = await serve();
+	const app = await booted({ runtime });
+	let verified = 0;
+	const signer = app.get(keys);
+	const counting = {
+		...signer,
+		verify: (...args: Parameters<typeof signer.verify>) => {
+			verified++;
+			return signer.verify(...args);
+		},
+	};
+	const hints = hintsOver({ keys: counting, issuer: "https://as.example" });
+	expect(await hints.check("a".repeat(65_537))).toEqual({ kind: "invalid" });
+	expect(verified).toBe(0);
+	expect(await hints.check("a".repeat(65_536))).toEqual({ kind: "invalid" });
+	expect(verified).toBe(1);
+	expect((await check("a".repeat(65_537))).kind).toBe("invalid");
 });

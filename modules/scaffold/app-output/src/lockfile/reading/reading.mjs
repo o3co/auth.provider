@@ -49,18 +49,33 @@ export function specOf(spec) {
 	return semver.validRange(text) ? { range: text } : undefined;
 }
 
-/** The lockfile as data: pnpm's version 9, no anchor resolved, no unknown tag, within its bound. */
-export function lockOf(text) {
-	if (Buffer.byteLength(text) > lockBytes) throw new Error(`lockfile over ${lockBytes} bytes`);
+const merges = (value) =>
+	value !== null &&
+	typeof value === "object" &&
+	(Object.hasOwn(value, "<<") || Object.values(value).some(merges));
+
+/** YAML as data: no anchor resolved, no merge key, no unknown tag, no duplicate key. */
+function dataOf(text, what) {
 	const doc = parseDocument(text, { merge: false, uniqueKeys: true });
 	const [problem] = [...doc.errors, ...doc.warnings];
-	if (problem) throw new Error(`lockfile not read: ${problem.message.split("\n")[0]}`);
-	const lock = doc.toJS({ maxAliasCount: 0 });
+	if (problem) throw new Error(`${what} not read: ${problem.message.split("\n")[0]}`);
+	const data = doc.toJS({ maxAliasCount: 0 });
+	if (merges(data)) throw new Error(`${what} not read: it holds a merge key (<<)`);
+	return data;
+}
+
+/** The lockfile as data, pnpm's version 9, within its bound. */
+export function lockOf(text) {
+	if (Buffer.byteLength(text) > lockBytes) throw new Error(`lockfile over ${lockBytes} bytes`);
+	const lock = dataOf(text, "lockfile");
 	if (own(lock).get("lockfileVersion") !== "9.0") {
 		throw new Error(`lockfile version ${own(lock).get("lockfileVersion")}, where 9.0 is read`);
 	}
 	return lock;
 }
+
+/** pnpm's workspace settings as data, read as a lockfile is. */
+export const workspaceOf = (text) => dataOf(text, "pnpm-workspace.yaml");
 
 /** Every reference the lockfile holds: each importer's three kinds of dependency, and each snapshot's two. */
 export function referencesIn(lock) {

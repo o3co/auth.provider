@@ -13,7 +13,7 @@ Internal module of `http`: the security headers every answer carries, and a page
 
 ## Invariants
 - A Content-Security-Policy whose default source is none: scripts from this origin, styles and fonts from it or over https (styles inline too, fonts and images as data URLs), images from it, forms posted to it; no object, no inline script attribute, and no one framing the answer.
-- HSTS, `nosniff`, `X-Frame-Options`, `Referrer-Policy: no-referrer` and the cross-origin ones.
+- HSTS of a year with `includeSubDomains`, fixed: it meets the common baselines, and a proxy in front rewrites it where a rollout needs another; `nosniff`, `X-Frame-Options`, `Referrer-Policy: no-referrer` and the cross-origin ones.
 - A route's own values of them, its policy included, are replaced.
 - Only `loads` widens a page's policy.
 - A page's policy allows the frames and scripts it declares, and forms posted to this origin where it declares them, and nothing else; its forms post nowhere otherwise.

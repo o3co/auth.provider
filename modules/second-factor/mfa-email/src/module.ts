@@ -1,15 +1,13 @@
 import { type BuildContext, defineModule } from "@mod/kernel";
 import { mail, mailPurposes } from "@mod/mail";
 import { bindingProof, bindingProofs } from "@mod/mfa-binding-proof";
+import { proofName } from "@mod/mfa-email-proof";
 import { factorKinds } from "@mod/mfa-extensions";
 import { subjectAttributes } from "@mod/subject-attributes";
 import { users } from "@mod/users";
 import { purposes } from "./contract.ts";
 import { emailFactor } from "./kind.ts";
 import { type Settings, section } from "./section.ts";
-
-/** The binding proof of the account's address, which mfa-email-proof contributes. */
-const accountEmail = "account-email";
 
 export default defineModule(
 	{
@@ -25,7 +23,7 @@ export default defineModule(
 			// without it, whatever contributes the proof. Without either a first factor binds unproved.
 			c.late(bindingProof);
 			const proofs = await c.collect(bindingProofs);
-			if (!proofs.some((proof) => proof.name === accountEmail)) {
+			if (!proofs.some((proof) => proof.name === proofName)) {
 				c.refuse(
 					"mfa-email",
 					"a code by email is composed without mfa-email-proof, which proves the account's address before a first binding: compose it",

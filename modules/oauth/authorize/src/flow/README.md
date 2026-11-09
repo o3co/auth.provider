@@ -12,7 +12,7 @@ Internal module of `authorize`: the steps a request goes through once its redire
 - `flowOver` → `flowWith` → a trusted request → a decision.
   - `flowOver` takes the build context, the issuer's URL and the endpoint's.
   - `flowOver` takes `reauth`'s records from the assembly, and builds `step-up`, `consent-decision`, the target check and the hint check.
-  - `flowWith` takes the issuer's URL and the endpoint's, `session`'s entry, `code-grant`'s issuing, `claims-selection`'s selections (reading, selecting and keeping a claims request's names), `tokens`' admits, the clock, the package's `login-page` and `login-url-limit`, whether `openid` is required, whether a claims request's names are taken (`claims-parameter`), the steps `reauth`, `step-up` and `consent-decision`, `checks`' target check and `hint`'s check.
+  - `flowWith` takes the issuer's URL and the endpoint's, `session`'s entry, `code-grant`'s issuing, `claims-selection`'s selections (reading, selecting and keeping a claims request's names), `tokens`' admits, the clock, the package's `login-page` and `login-url-limit`, whether `openid` is required, whether a claims request's names are taken (`claims-parameter`), the steps `reauth`, `step-up` and `consent-decision`, `checks`' request and target checks and `hint`'s check.
   - A trusted request: client, redirect URI, single values, parameters, the request.
   - A decision: a refusal, a page to go to, or the code and its subject.
 

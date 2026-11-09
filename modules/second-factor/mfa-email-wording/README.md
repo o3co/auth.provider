@@ -7,7 +7,7 @@
 - What is sent, to whom and when (`mfa-email`). Rendering and sending (`mail`).
 
 ## Offers
-- Contributions to `mail`'s templates: `mfa-email.enrollment`, `mfa-email.login` and `mfa-email.proof`, plain text in English for every locale, taking `code` and `minutes`.
+- Contributions to `mail`'s templates: `mfa-email.enrollment` and `mfa-email.login`, plain text in English for every locale, taking `code` and `minutes`.
 
 ## Invariants
 - Every purpose `mfa-email` names has a template here, and no other: the type ties the two.

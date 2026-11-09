@@ -23,11 +23,14 @@ export function refreshConfig(settings: Partial<RefreshSettings> = {}) {
 export interface RefreshStorePlace {
 	readonly families: FamilyStore;
 	readonly redemptions: RedemptionStore;
+	/** @deprecated Neither read nor written by refresh; a later release removes it. */
 	readonly sessionFamilies: MemberLists;
+	/** @deprecated Neither read nor written by refresh; a later release removes it. */
 	readonly issuedAccess: MemberLists;
 	readonly tokenFamilies: TokenFamilies;
+	/** @deprecated Neither read nor written by refresh; a later release removes it. */
 	readonly settles: SettleList;
-	/** How many members each list keeps to a key. */
+	/** How many members each list keeps to a key. @deprecated Neither read nor written by refresh; a later release removes it. */
 	readonly caps: { readonly sessionFamilies: number; readonly issuedAccess: number };
 	/** Moves the place's clock on, so lifetimes run out. */
 	advance(ms: number): void;

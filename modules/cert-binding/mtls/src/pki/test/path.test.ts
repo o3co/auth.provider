@@ -3,13 +3,15 @@ import * as pkijs from "pkijs";
 import { describe, expect, it } from "vitest";
 import type { PathPolicy } from "../contract.ts";
 import { pathOf } from "../path.ts";
-import { ecKeys, hierarchy, issue, pssKeys, rsaKeys } from "./authority.ts";
+import { signatureAlgorithms } from "../signatures/signatures.ts";
+import { ecKeys, hierarchy, issue, pssKeys, restated, rsaKeys } from "./authority.ts";
 
 const now = Date.now();
 const policyOf = (anchors: Uint8Array[], more: Partial<PathPolicy> = {}): PathPolicy => ({
 	anchors,
 	maxIntermediates: 4,
 	minRsaBits: 2048,
+	signatureAlgorithms,
 	...more,
 });
 /** Refused, by the engine or by the path's rules, whichever comes first. */
@@ -94,6 +96,31 @@ describe("path validation", () => {
 		expect(await reasonOf(under.der, [weakSigner.der], anchors)).toBe("signature algorithm");
 		const critical = await issue({ cn: "client", by: intermediate, criticalUnknown: true });
 		expect(await reasonOf(critical.der, [intermediate.der], anchors)).toEqual(refusedAny);
+	});
+
+	it("refuses a signature its policy leaves out, the anchor's own aside", async () => {
+		const { root, intermediate } = await hierarchy();
+		const signed = await issue({ cn: "client", by: intermediate, hash: "SHA-384" });
+		const narrowed = policyOf([root.der], { signatureAlgorithms: ["ecdsa-sha256"] });
+		expect(await reasonOf(signed.der, [intermediate.der], narrowed)).toBe("signature algorithm");
+		const taking = policyOf([root.der], { signatureAlgorithms: ["ecdsa-sha384"] });
+		expect(await reasonOf(signed.der, [intermediate.der], taking)).toBe("signature algorithm");
+		const both = policyOf([root.der], { signatureAlgorithms: ["ecdsa-sha256", "ecdsa-sha384"] });
+		expect(await reasonOf(signed.der, [intermediate.der], both)).toBe("path of 3");
+		const anchor = await issue({ cn: "root", ca: true, hash: "SHA-384" });
+		const under = await issue({ cn: "client", by: anchor });
+		const anchored = policyOf([anchor.der], { signatureAlgorithms: ["ecdsa-sha256"] });
+		expect(await reasonOf(under.der, [], anchored)).toBe("path of 2");
+	});
+
+	it("refuses a signature stated as another algorithm than it was signed by, or as one of another family than its signer's key", async () => {
+		const root = await issue({ cn: "root", ca: true });
+		const intermediate = await issue({ cn: "int", by: root, ca: true, keys: await rsaKeys(2048) });
+		const client = await issue({ cn: "client", by: intermediate, eku: ["1.3.6.1.5.5.7.3.2"] });
+		const policy = policyOf([root.der]);
+		expect(await reasonOf(client.der, [intermediate.der], policy)).toBe("path of 3");
+		const asEcdsa = restated("certificate", client.der, "1.2.840.10045.4.3.2");
+		expect(await reasonOf(asEcdsa, [intermediate.der], policy)).toBe("signature algorithm");
 	});
 
 	it("counts an RSA key's bits from its first, however many zero bytes its encoding puts before them", async () => {

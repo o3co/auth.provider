@@ -3,6 +3,7 @@ import * as pkijs from "pkijs";
 import { expect, it } from "vitest";
 import type { PathPolicy } from "../contract.ts";
 import { pathOf } from "../path.ts";
+import { signatureAlgorithms } from "../signatures/signatures.ts";
 import { dns, type Issuing, ip, issue, subtree } from "./authority.ts";
 
 const clientAuth = ["1.3.6.1.5.5.7.3.2"];
@@ -10,6 +11,7 @@ const policyOf = (anchors: Uint8Array[]): PathPolicy => ({
 	anchors,
 	maxIntermediates: 4,
 	minRsaBits: 2048,
+	signatureAlgorithms,
 });
 
 /** What becomes of a client under an intermediate under a root, each stating what it is given. */

@@ -93,7 +93,7 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/added-claims` | foundation | none |
+| `@mod/added-claims` | foundation | `@mod/kernel` |
 | `@mod/address-reach` | foundation | `@mod/url-setting` |
 | `@mod/audit` | foundation | `@mod/kernel`, `@mod/metrics` |
 | `@mod/client-certificate` | foundation | `@mod/kernel` |
@@ -106,7 +106,8 @@ flowchart LR
 | `@mod/kernel` | common | none |
 | `@mod/keys` | foundation | `@mod/http`, `@mod/kernel` |
 | `@mod/labels` | foundation | none |
-| `@mod/mail` | foundation | `@mod/kernel` |
+| `@mod/mail` | foundation | `@mod/kernel`, `@mod/mail-address` |
+| `@mod/mail-address` | foundation | none |
 | `@mod/metrics` | foundation | `@mod/kernel` |
 | `@mod/outbound` | foundation | `@mod/address-reach`, `@mod/host-entries`, `@mod/kernel`, `@mod/outbound-policy`, `@mod/tls-options`, `@mod/url-setting` |
 | `@mod/outbound-policy` | foundation | `@mod/address-reach`, `@mod/host-entries`, `@mod/kernel`, `@mod/url-setting` |
@@ -126,7 +127,7 @@ flowchart LR
 | `@mod/client-documents` | feature | `@mod/clients`, `@mod/kernel` |
 | `@mod/clients` | feature | `@mod/audit`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/secret-hash` |
 | `@mod/csrf` | feature | `@mod/cookies`, `@mod/http`, `@mod/kernel` |
-| `@mod/login-attributes` | feature | `@mod/users` |
+| `@mod/login-attributes` | feature | `@mod/kernel`, `@mod/users` |
 | `@mod/login-gates` | feature | `@mod/http`, `@mod/kernel`, `@mod/session`, `@mod/url-setting` |
 | `@mod/login-password` | feature | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/login-gates`, `@mod/rate-limit`, `@mod/request-source`, `@mod/users` |
 | `@mod/session` | feature | `@mod/cookies`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/subject-revocation` |
@@ -135,7 +136,7 @@ flowchart LR
 | `@mod/session-requirements` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/subject-attributes` | feature | `@mod/kernel`, `@mod/login-attributes`, `@mod/session`, `@mod/users` |
 | `@mod/subject-revocation` | feature | `@mod/kernel` |
-| `@mod/users` | feature | `@mod/kernel`, `@mod/mail`, `@mod/secret-hash` |
+| `@mod/users` | feature | `@mod/kernel`, `@mod/mail-address`, `@mod/secret-hash` |
 
 ### log-sinks
 
@@ -176,7 +177,7 @@ flowchart LR
 | `@mod/oidc` | feature | `@mod/authorize`, `@mod/claims-selection`, `@mod/client-documents`, `@mod/clients`, `@mod/code-grant`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/subject-attributes`, `@mod/users` |
 | `@mod/reauth` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/redirect-uris` | feature | `@mod/client-documents`, `@mod/clients`, `@mod/url-setting` |
-| `@mod/refresh` | feature | `@mod/audit`, `@mod/claims-selection`, `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/session-participants`, `@mod/subject-revocation`, `@mod/token-control`, `@mod/tokens` |
+| `@mod/refresh` | feature | `@mod/audit`, `@mod/claims-selection`, `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/subject-revocation`, `@mod/token-control`, `@mod/tokens` |
 | `@mod/resource-indicators` | feature | `@mod/grants`, `@mod/kernel` |
 | `@mod/rp-logout` | feature | `@mod/audit`, `@mod/clients`, `@mod/code-grant`, `@mod/csrf`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/oidc`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/session-participants`, `@mod/url-setting` |
 | `@mod/sender-binding` | feature | `@mod/clients`, `@mod/http`, `@mod/issuer`, `@mod/kernel` |
@@ -221,11 +222,13 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
+| `@mod/account-mail-code` | feature | `@mod/kernel`, `@mod/mail`, `@mod/mail-address`, `@mod/mfa-extensions`, `@mod/subject-attributes`, `@mod/users` |
 | `@mod/mfa` | feature | `@mod/audit`, `@mod/kernel`, `@mod/labels`, `@mod/login-gates`, `@mod/mfa-binding`, `@mod/mfa-extensions`, `@mod/mfa-managing`, `@mod/mfa-reading`, `@mod/mfa-witness`, `@mod/seal` |
 | `@mod/mfa-binding` | feature | `@mod/kernel`, `@mod/mfa-extensions`, `@mod/mfa-reading` |
 | `@mod/mfa-binding-proof` | feature | `@mod/kernel`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading`, `@mod/seal` |
-| `@mod/mfa-email` | feature | `@mod/kernel`, `@mod/mail`, `@mod/mfa`, `@mod/mfa-binding-proof`, `@mod/mfa-extensions`, `@mod/subject-attributes`, `@mod/users` |
-| `@mod/mfa-email-proof` | feature | `@mod/kernel`, `@mod/mfa-binding-proof`, `@mod/mfa-email`, `@mod/users` |
+| `@mod/mfa-email` | feature | `@mod/account-mail-code`, `@mod/kernel`, `@mod/mail`, `@mod/mfa`, `@mod/mfa-binding-proof`, `@mod/mfa-email-proof`, `@mod/mfa-extensions`, `@mod/subject-attributes`, `@mod/users` |
+| `@mod/mfa-email-proof` | feature | `@mod/account-mail-code`, `@mod/kernel`, `@mod/mail`, `@mod/mfa-binding-proof`, `@mod/users` |
+| `@mod/mfa-email-proof-wording` | adapter | `@mod/kernel`, `@mod/mail`, `@mod/mfa-email-proof` |
 | `@mod/mfa-email-wording` | adapter | `@mod/kernel`, `@mod/mail`, `@mod/mfa-email` |
 | `@mod/mfa-enrollment` | feature | `@mod/http`, `@mod/kernel`, `@mod/labels`, `@mod/mfa`, `@mod/mfa-binding`, `@mod/mfa-binding-proof`, `@mod/mfa-extensions`, `@mod/mfa-flows`, `@mod/mfa-managing`, `@mod/session`, `@mod/subject-revocation` |
 | `@mod/mfa-entry` | feature | `@mod/kernel`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading`, `@mod/session`, `@mod/session-requirements` |
@@ -245,7 +248,7 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/mail-smtp` | adapter | `@mod/address-reach`, `@mod/kernel`, `@mod/mail`, `@mod/tls-options`, `@mod/url-setting` |
+| `@mod/mail-smtp` | adapter | `@mod/address-reach`, `@mod/kernel`, `@mod/mail`, `@mod/mail-address`, `@mod/tls-options`, `@mod/url-setting` |
 
 ### store-redis
 
@@ -302,13 +305,14 @@ flowchart LR
 | `@mod/conformance-recipes` | verification | `@mod/conformance`, `@mod/create-app` |
 | `@mod/conformance-second-factor` | verification | `@mod/conformance`, `@mod/conformance-legacy` |
 | `@mod/conformance-tunnel` | verification | none |
-| `@mod/distribution` | assembly | `@mod/combinations`, `@mod/create-app`, `@mod/docker-client`, `@mod/trial` |
+| `@mod/distribution` | assembly | `@mod/combinations`, `@mod/create-app`, `@mod/docker-client`, `@mod/local-registry`, `@mod/trial` |
 | `@mod/docker-client` | assembly | none |
 | `@mod/guard` | verification | `@mod/guard-imports`, `@mod/kinds` |
 | `@mod/guard-imports` | verification | none |
 | `@mod/interop-clients` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-device`, `@mod/conformance-exchange`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/conformance-tunnel`, `@mod/spec-checklist` |
 | `@mod/interop-oidf` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-federation`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/conformance-tunnel`, `@mod/spec-checklist` |
 | `@mod/ledger-fakes` | verification | `@mod/ledger-wire` |
+| `@mod/local-registry` | assembly | none |
 | `@mod/references` | assembly | `@mod/app-entries`, `@mod/app-output`, `@mod/combinations`, `@mod/config-files`, `@mod/create-app`, `@mod/guard-imports`, `@mod/kernel`, `@mod/trial` |
 | `@mod/spec-checklist` | verification | `@mod/guard-imports` |
 

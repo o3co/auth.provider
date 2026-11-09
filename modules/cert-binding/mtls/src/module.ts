@@ -34,6 +34,7 @@ export default defineModule(
 					anchors,
 					maxIntermediates: s["max-intermediates"],
 					minRsaBits: s["min-rsa-bits"],
+					signatureAlgorithms: s["signature-algorithms"],
 				};
 				const r = s.revocation;
 				// The operator's choices, yet said at every start: a revoked certificate binds.

@@ -8,6 +8,7 @@ import {
 	sessions,
 } from "@mod/session";
 import { revocationFollowers, subjectRevocation } from "@mod/subject-revocation";
+import { attributesUnder } from "./attributes.ts";
 import { lifecycleOver } from "./lifecycle/lifecycle.ts";
 import { raiseOver } from "./raise/raise.ts";
 import { section } from "./section.ts";
@@ -62,6 +63,7 @@ export default defineModule(
 				log: c.log,
 				lifetimeMs,
 				sweepMs,
+				attributes: attributesUnder(c.section.attributes),
 				recent,
 			});
 			c.every(sweepMs, lifecycle.sweep);

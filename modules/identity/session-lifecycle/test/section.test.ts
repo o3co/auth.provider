@@ -10,7 +10,12 @@ describe("session-lifecycle's section", () => {
 	it("reads each key written with its unit, as seconds", () => {
 		expect(
 			section.parse({ lifetime: "8h", "sweep-interval": "1m", "recent-authentication": "10m" }),
-		).toEqual({ lifetime: 28_800, "sweep-interval": 60, "recent-authentication": 600 });
+		).toEqual({
+			lifetime: 28_800,
+			"sweep-interval": 60,
+			"recent-authentication": 600,
+			attributes: { "groups-limit": 64, "group-limit": 256, "picture-limit": 2048 },
+		});
 	});
 
 	it.each(keys)("refuses %s as a bare number, or a string of digits only", (key) => {
@@ -41,6 +46,7 @@ describe("session-lifecycle's section", () => {
 			lifetime: 3600,
 			"sweep-interval": 30,
 			"recent-authentication": 300,
+			attributes: { "groups-limit": 64, "group-limit": 256, "picture-limit": 2048 },
 		});
 	});
 

@@ -28,7 +28,8 @@
 - The manifest's `bundledInside` names each bundled file the package ships, by its path in the package, with every package from outside it holds inside, for the release's list of what it ships: the package's test holds it to the files there and to the packages each bundle's own regions name.
 - A target that holds anything is refused, never overwritten; a missing or empty one is taken. Every file is made before any is written.
 - A name not an npm package is refused by `namesPackages`, before anything is written.
-- The manifest names the pnpm the workspace builds with, and the app also depends on `zod` at the packages' version.
+- The manifest names the pnpm the workspace builds with, by version and sha512, which corepack checks the pnpm it runs against, and the app also depends on `zod` at the packages' version.
+- Every app has `pnpm-workspace.yaml`, holding the settings `outside` gives and `pmOnFail: ignore`, and saying why: pnpm otherwise writes the pnpm the manifest pins in a YAML document of its own ahead of `pnpm-lock.yaml`'s, which GitHub's dependency graph does not read and `lockfile`'s check refuses. Interim: once GitHub's graph reads that document, `lockfile` learns it and the setting goes.
 - The manifest holds `start` and each entry's script, and the guide starts the app with `pnpm start`; beside a package outside the release it holds no `scripts` (`outside`), and the guide's start gives the command itself.
 - A scalar its owner's example gives in several lines is still read from env, but left out of the env example and listed among the keys written in the local layer; the guide and the env example say such a value goes in the local layer.
 - Git leaves out every env file but `.env.example`, the local layer, `*.pem` and `*.key`; the image's build context leaves out those, `.env.example` and `.git`.
@@ -41,7 +42,7 @@
 
 ## Depends on
 - `app-entries`: the app's entries, and `kernel` and `configFiles`, the packages every app depends on.
-- The HOCON library, through `fragments`; `yaml` and `semver`, through `lockfile` and `outside`.
+- The HOCON library, through `fragments`; `yaml` (to write `pnpm-workspace.yaml`); `yaml` and `semver`, through `lockfile`.
 
 ## Vocabulary
 - output: a project written from the templates.

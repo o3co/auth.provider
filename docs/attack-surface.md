@@ -191,6 +191,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `dpop.nonce.required` | `@mod/dpop` | `"as"` | `never`: no nonce is asked, so a proof made ahead is taken within its window |
 | `exchange-id-tokens.max-age` | `@mod/exchange-id-tokens` | `"10m"` | past the default ten minutes, up to an hour: an older id_token is taken for an exchange |
 | `external-jwt.key-set-max-age` | `@mod/external-jwt` | `"1d"` | past the default day, up to 30: a key set is still used that long after its fetch while no new one can be had, a key removed upstream among it |
+| `external-jwt.key-set-refresh` | `@mod/external-jwt` | `"1h"` | past the default hour, up to `key-set-max-age`: a key removed upstream is still taken that long after the set's fetch |
 | `federation-grants-connect.identity-check` | `@mod/federation-grants-connect` | `"required"` | `none`: a callback whose upstream account another user holds is not refused |
 | `federation-grants.keep-on-subject-revocation` | `@mod/federation-grants` | `false` | an established grant answers only to the `delegations` boundary when a revocation asks to keep delegations |
 | `federation-grants.max-lifetime` | `@mod/federation-grants` | `"30d"` | past the default 30 days, up to 365: a federation grant answers that long from its activation |
@@ -207,6 +208,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `jwt-bearer.max-assertion-lifetime` | `@mod/jwt-bearer` | `"1h"` | past the default hour, up to a day: a jwt-bearer assertion is taken with its `exp` that far ahead, and its `exp` no further from its `iat` |
 | `kernel.deployment` | `@mod/kernel` |  | `single`: modules unsafe on several instances (the memory store, mail that only logs) are taken |
 | `kernel.environment` | `@mod/kernel` | `"production"` | `development`: plain-http origins and pages are taken |
+| `keys.jwks-cache` | `@mod/keys` | `"5m"` | past the default five minutes, up to a day: a verifier may keep taking a key removed from the published set that long |
 | `login-passkey.attempts` | `@mod/login-passkey` | `20` | raised, up to 100: more requests from one source in each window |
 | `login-passkey.password-exempt-group` | `@mod/login-passkey` |  | its members keep password logins where passkey holders are refused them |
 | `login-password.account-attempts` | `@mod/login-password` | `10` | raised, up to 100: more failed guesses at one identifier before each next one waits |
@@ -223,6 +225,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `mfa-flows.lockout.max-backoff` | `@mod/mfa-flows` | `"1d"` | shortened: holds after failed second-factor guesses end sooner, so more guesses go through |
 | `mfa-flows.lockout.memory` | `@mod/mfa-flows` | `"1d"` | shortened: holds after failed second-factor guesses end sooner, so more guesses go through |
 | `mfa-flows.lockout.threshold` | `@mod/mfa-flows` | `5` | raised, with no upper bound: more second-factor guesses before a hold, so past enough no lockout at all |
+| `mfa-totp.period` | `@mod/mfa-totp` | `"30s"` | `60s`: a code is taken for up to three steps of a minute (with `drift-steps` 1), twice the default's window, so a code phished or read over a shoulder works for an attacker that much longer; it applies to factors enrolled under it |
 | `mfa-webauthn.user-verification` | `@mod/mfa-webauthn` | `"preferred"` | `discouraged`: the authenticator is not asked to verify its user, so whoever holds it passes |
 | `mfa.mode` | `@mod/mfa` | `"required"` | below `required`, using a session needs no second factor |
 | `mtls.mode` | `@mod/mtls` |  | `self-signed`: any certificate that parses binds, with no revocation |
@@ -239,9 +242,11 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `outbound.resolution` | `@mod/outbound` | `"helper"` | `in-process`: names resolve in the app's own process, not in helpers that take none of its environment |
 | `passkeys.user-verification` | `@mod/passkeys` | `"preferred"` | `discouraged`: the authenticator is not asked to verify its user, so whoever holds it passes |
 | `rate-limit.fail-mode` | `@mod/rate-limit` | `"closed"` | `open`: while the store cannot count, a route's request limit lets every request through |
+| `redis.accept-plaintext` | `@mod/redis` | `false` | `true`: `redis://` off this host is taken in production too, the store's traffic and the URL's password readable and changeable on the way; warned at every boot |
 | `redis.durability` | `@mod/redis` |  | `none`: a crash loses the latest writes, spent assertion and proof ids and lockout records among them |
 | `redis.replication` | `@mod/redis` |  | `none`: a failover loses writes, confirmed ones too |
 | `refresh.lifetime` | `@mod/refresh` | `"1d"` | past the default day, up to 365 days: a leaked refresh token family is used that long |
+| `rp-logout.logout-token-lifetime` | `@mod/rp-logout` | `"5m"` | past the default five minutes, up to 15: a logout token is taken that long, and one without `sid`, replayed where the client keeps no `jti`, ends the subject's later sessions there |
 | `sections.client-assertion.accept-loose-audience` | `@mod/client-assertion` | `false` | named so (`accept-*` and the like) |
 | `sections.consent.first-party` | `@mod/consent` | `false` | `true`: that client's users are never asked for consent; taken only for a client the operator registered |
 | `sections.federation-tokens.receives` | `@mod/federation-tokens` | `false` | `true`: the client is handed its sessions' upstream tokens |

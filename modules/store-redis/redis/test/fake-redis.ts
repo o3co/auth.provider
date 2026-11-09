@@ -46,6 +46,8 @@ export function fakeRedis() {
 		keysRefusedIn: [] as string[],
 	};
 	const writes = { noReplicas: false, keysRefused: false };
+	/** The good replicas `INFO` counts (`min_slaves_good_slaves`), shown only when set. */
+	const replication = { goodReplicas: undefined as number | undefined };
 	const cluster = { keysAnswer: undefined as string | undefined };
 	/** The run id each connection's server answers, by the order the connections came: the last for any after. */
 	const servers = {
@@ -118,7 +120,11 @@ export function fakeRedis() {
 		}
 		if (name === "INFO")
 			return bulk(
-				`redis_version:7.4.0\r\ncluster_enabled:0\r\nloading:0\r\nrun_id:${runIdOf(connection)}\r\n`,
+				`redis_version:7.4.0\r\ncluster_enabled:0\r\nloading:0\r\nrun_id:${runIdOf(connection)}\r\n${
+					replication.goodReplicas === undefined
+						? ""
+						: `min_slaves_good_slaves:${replication.goodReplicas}\r\n`
+				}`,
 			);
 		if (name === "ROLE") return `*3\r\n${bulk(settings.role ?? "")}:0\r\n*0\r\n`;
 		const setting = args[2] ?? "";
@@ -153,6 +159,7 @@ export function fakeRedis() {
 		refused,
 		scripts,
 		writes,
+		replication,
 		cluster,
 		servers,
 		storeScripts,

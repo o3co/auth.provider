@@ -13,11 +13,11 @@ import sealModule from "@mod/seal/module";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, expect, it } from "vitest";
-import { enforcers, proofSteps } from "../src/contract.ts";
-import mfaModule from "../src/module.ts";
-import type { StoredFactors } from "../src/store.ts";
-import { mfaConfig } from "../src/testing.ts";
-import { memoryFactors } from "./stores.ts";
+import { memoryFactors } from "../../../test/stores.ts";
+import { enforcers, proofSteps } from "../../contract.ts";
+import mfaModule from "../../module.ts";
+import type { StoredFactors } from "../../store.ts";
+import { mfaConfig } from "../../testing.ts";
 
 const runtime = quietRuntime({ clock: { now: () => 1_800_000_000_000 } });
 let stop = async () => {};

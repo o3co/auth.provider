@@ -1,6 +1,7 @@
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import { describe, expect, it } from "vitest";
+import { signatureAlgorithms } from "../../signatures/signatures.ts";
 import {
 	crlOf,
 	ecKeys,
@@ -9,6 +10,7 @@ import {
 	issue,
 	pointAt,
 	type Revoking,
+	restated,
 	rsaKeys,
 } from "../../test/authority.ts";
 import { crlUrlsOf, judgeCrl } from "../crl.ts";
@@ -17,7 +19,14 @@ const skewMs = 300_000;
 
 /** What the CRL says of `cert`: its reason when unusable, else its kind. */
 async function said(der: Uint8Array, cert: Issued, issuer: Issued, at = Date.now()) {
-	const judged = await judgeCrl(der, cert.certificate, issuer.certificate, at, skewMs);
+	const judged = await judgeCrl(
+		der,
+		cert.certificate,
+		issuer.certificate,
+		at,
+		skewMs,
+		signatureAlgorithms,
+	);
 	return judged.kind === "unusable" ? judged.reason : judged.kind;
 }
 
@@ -27,7 +36,14 @@ describe("judging a CRL", () => {
 		const other = await issue({ cn: "other", by: intermediate });
 		const next = Date.now() + 3_600_000;
 		const judge = async (der: Uint8Array) =>
-			judgeCrl(der, client.certificate, intermediate.certificate, Date.now(), skewMs);
+			judgeCrl(
+				der,
+				client.certificate,
+				intermediate.certificate,
+				Date.now(),
+				skewMs,
+				signatureAlgorithms,
+			);
 		expect(
 			await judge(await crlOf({ by: intermediate, revoked: [client], nextUpdate: next })),
 		).toEqual({ kind: "revoked", until: Math.floor(next / 1000) * 1000, held: false });
@@ -52,6 +68,7 @@ describe("judging a CRL", () => {
 			intermediate.certificate,
 			Date.now(),
 			skewMs,
+			signatureAlgorithms,
 		);
 		expect(judged).toEqual({
 			kind: "good",
@@ -67,7 +84,14 @@ describe("judging a CRL", () => {
 		const next = Date.UTC(2055, 0, 1);
 		const der = await crlOf({ by: intermediate, revoked: [client], nextUpdate: next });
 		expect(
-			await judgeCrl(der, client.certificate, intermediate.certificate, Date.now(), skewMs),
+			await judgeCrl(
+				der,
+				client.certificate,
+				intermediate.certificate,
+				Date.now(),
+				skewMs,
+				signatureAlgorithms,
+			),
 		).toEqual({ kind: "revoked", until: next, held: false });
 	});
 
@@ -112,6 +136,28 @@ describe("judging a CRL", () => {
 		expect(await reasonOf(new Uint8Array([...good, 0]))).toBe("malformed");
 	});
 
+	it("uses nothing from a CRL signed by an algorithm its policy leaves out", async () => {
+		const { intermediate, client } = await hierarchy();
+		const der = await crlOf({ by: intermediate, hash: "SHA-384" });
+		const judge = (taken: Parameters<typeof judgeCrl>[5]) =>
+			judgeCrl(der, client.certificate, intermediate.certificate, Date.now(), skewMs, taken);
+		expect(await judge(["ecdsa-sha256"])).toEqual({
+			kind: "unusable",
+			reason: "signature algorithm",
+		});
+		expect((await judge(["ecdsa-sha384"])).kind).toBe("good");
+	});
+
+	it("uses nothing from a CRL stating another algorithm than it was signed by", async () => {
+		const root = await issue({ cn: "root", ca: true });
+		const intermediate = await issue({ cn: "int", by: root, ca: true, keys: await rsaKeys(2048) });
+		const client = await issue({ cn: "client", by: intermediate });
+		const der = await crlOf({ by: intermediate });
+		expect(await said(der, client, intermediate)).toBe("good");
+		const asEcdsa = restated("crl", der, "1.2.840.10045.4.3.2");
+		expect(await said(asEcdsa, client, intermediate)).toBe("signature algorithm");
+	});
+
 	it("takes a CRL only from an issuer whose key usage, where it has one, signs CRLs", async () => {
 		const { root } = await hierarchy();
 		const reasonOf = async (keyUsage: number) => {
@@ -144,7 +190,14 @@ describe("judging a CRL", () => {
 			await crlOf({ by: intermediate, revoked: [client], criticalEntryExtension: true }),
 		]) {
 			expect(
-				await judgeCrl(der, client.certificate, intermediate.certificate, Date.now(), skewMs),
+				await judgeCrl(
+					der,
+					client.certificate,
+					intermediate.certificate,
+					Date.now(),
+					skewMs,
+					signatureAlgorithms,
+				),
 			).toEqual({ kind: "unusable", reason: "unsupported" });
 		}
 	});

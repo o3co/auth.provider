@@ -245,6 +245,8 @@ describe("mtls", () => {
 			{ ...section, revocation: { ...revocation, hosts: [] } },
 			{ ...section, revocation: { mode: "disabled", hosts: ["ca.example"] } },
 			{ ...section, "min-rsa-bits": 1024 },
+			{ ...section, "signature-algorithms": [] },
+			{ ...section, "signature-algorithms": ["ed25519"] },
 		]) {
 			await expect(boot(bad), JSON.stringify(bad)).rejects.toBeInstanceOf(BootRefused);
 		}
@@ -261,6 +263,30 @@ describe("mtls", () => {
 		const rsa = await issue({ cn: "client", by: root, keys: await rsaKeys(2048) });
 		expect(await bits.bindingOf(rsa)).toMatchObject({ kind: "refused" });
 		expect(await (await boot(disabled)).bindingOf(rsa)).toMatchObject({ kind: "bound" });
+		const narrowed = await boot({ ...disabled, "signature-algorithms": ["rsa-pkcs1-sha256"] });
+		expect(await narrowed.bindingOf(client, [intermediate])).toMatchObject({ kind: "refused" });
+	});
+
+	it("refuses, whatever on-unavailable says, a certificate whose CRL is signed by an algorithm left out: not an outage", async () => {
+		const { root, intermediate, client, section } = await pki();
+		const allowing = {
+			...section,
+			"signature-algorithms": ["ecdsa-sha256"],
+			revocation: { ...section.revocation, "on-unavailable": "allow" },
+		};
+		const table = {
+			"http://ca.example/crl": await crlOf({ by: intermediate, hash: "SHA-384" }),
+			"http://root.example/crl": await crlOf({ by: root }),
+		};
+		const leftOut = await boot(allowing, { table });
+		expect(await leftOut.bindingOf(client, [intermediate])).toMatchObject({ kind: "refused" });
+		const down = await boot(allowing, { missing: 503 });
+		expect(await down.bindingOf(client, [intermediate])).toMatchObject({ kind: "bound" });
+		const taking = await boot(
+			{ ...allowing, "signature-algorithms": ["ecdsa-sha256", "ecdsa-sha384"] },
+			{ table },
+		);
+		expect(await taking.bindingOf(client, [intermediate])).toMatchObject({ kind: "bound" });
 	});
 
 	it("asks for revocation material within the section's hosts and time", async () => {

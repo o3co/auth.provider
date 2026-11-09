@@ -10,16 +10,17 @@ Internal module of `federation-grants`: what a grant and a browser step are, and
 - When records are written (`api`, `intents`, `refresh`), sealing itself (`seal`), the boundaries (`subject-revocation`).
 
 ## Offers
-- `shared`, built by `sharedOver` from the build context: the public origin, `recordsWith`, `judgeWith` and `listingWith` over its contracts, once for the package. It refuses boot when connections lack the origin or their IdP's delegation. The other internal modules take the contracts they use from the build context; the package's module only declares the routes and contributions they fill, and starts the sweep with these shared parts.
+- `shared`, built by `sharedOver` from the build context: the public origin, `recordsWith`, `judgeWith` and `listingWith` over its contracts, once for the package. It refuses boot when connections lack the origin or their IdP's delegation. The other internal modules take the contracts they use from the build context; the package's module only declares the routes and contributions they fill.
 - `recordsOver`: the records alone, for the follower, which `shared` cannot wait for.
 - `recordsWith` (seal): `grantOf`, `stored`, `stepOf`, `storedStep`, `open`, `seal`.
 - `judgeWith` (revocations, keep, longest life): `revoked`, `intentRevoked`, `endOf`.
 - `listingWith` (listing, log): lists a grant under its subject, logging a failed write.
 - `credentialsFrom` (tokens, now, longest life, scopes shown, held refresh token, the access token kept) → held, or refused with why and any rotated refresh token. Its end is `upstreams`' `refreshedExpiry`: the access token kept, answered again, keeps the earlier of the two ends, its life counted from now.
 - `connectionsIn` (settings, upstreams): a connection by name, and one with its IdP's delegation.
-- `clientSection`, `permits`, `returnsTo`, `scopeTokens`, `within`, `withoutCredentials`, `secretFrom`, `retentionMs`.
+- `clientSection`, `permits`, `returnsTo`, `scopeTokens`, `within`, `withoutCredentials`, `secretFrom`.
 
 ## Invariants
+- A refresh answering the access token kept counts its life from now: a back-off, as the next refresh waits half of what is left, so an upstream that keeps answering the same token is asked about five times before its end. Counted from its first obtaining, it would be asked on every request within `refresh-before` until the rotation budget ran out.
 - A record of another shape is none; credentials open only under the grant they were sealed for.
 - Each part of an upstream's tokens is read once; one that throws is none.
 - A grant ends at the earlier of its own end and its activation plus the longest life allowed now, on `kernel`'s clock.

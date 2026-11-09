@@ -32,6 +32,9 @@
 		}
 	},
 	"takenBy": {
+		"passkeyClearing": [
+			"@mod/passkey-reset"
+		],
 		"passkeyHolders": [
 			"@mod/login-passkey",
 			"@mod/passkey-reset"

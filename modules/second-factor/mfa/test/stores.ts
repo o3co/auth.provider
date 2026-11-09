@@ -7,8 +7,9 @@ import { updatingTogether } from "../src/testing.ts";
 /**
  * mfa's factor store on the records stand-in, its lists kept without end on the given clock; `down`
  * makes calls unavailable, and `hooks.beforeSave` runs before each save, `hooks.afterRead` after each
- * read has taken its answer, as a request racing it would, and `hooks.afterTogether` after a write
- * of a list and a claim together has taken effect, as an answer lost would.
+ * read has taken its answer, as a request racing it would, and `hooks.afterUpdate` and
+ * `hooks.afterTogether` after a change, or a write of a list and a claim together, has taken
+ * effect, as an answer lost would.
  */
 export function memoryFactors(now: () => number = () => 0) {
 	const stand = memoryRecords<StoredFactors>(now, { shards: 1, perShard: 1 });
@@ -16,6 +17,7 @@ export function memoryFactors(now: () => number = () => 0) {
 	const hooks: {
 		beforeSave?: (key: string) => Promise<void>;
 		afterRead?: (key: string) => Promise<void>;
+		afterUpdate?: (() => Promise<void>) | undefined;
 		afterTogether?: (() => Promise<void>) | undefined;
 	} = {};
 	const joint = updatingTogether(stand.records);
@@ -29,7 +31,11 @@ export function memoryFactors(now: () => number = () => 0) {
 			await hooks.afterRead?.(key);
 			return found;
 		},
-		update: stand.records.change,
+		update: async (...args: Parameters<typeof stand.records.change>) => {
+			const changed = await stand.records.change(...args);
+			await hooks.afterUpdate?.();
+			return changed;
+		},
 		scan: stand.records.scan,
 		updateTogether: async (...args: Parameters<typeof joint>) => {
 			const changed = await joint(...args);

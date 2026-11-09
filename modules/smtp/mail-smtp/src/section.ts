@@ -1,5 +1,5 @@
 import { setting } from "@mod/kernel";
-import { canonicalAddress, isAddress } from "@mod/mail";
+import { canonicalAddress, isAddress } from "@mod/mail-address";
 import { isLoopbackName } from "@mod/url-setting";
 import { z } from "zod";
 import { mailboxOf } from "./relay/relay.ts";

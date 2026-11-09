@@ -1,5 +1,5 @@
 import { contract, extensionPoint } from "@mod/kernel";
-import { isAddress } from "@mod/mail";
+import { isAddress } from "@mod/mail-address";
 
 export interface User {
 	readonly subject: string;

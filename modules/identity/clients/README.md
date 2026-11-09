@@ -1,7 +1,7 @@
 # clients
 
 ## Responsibilities
-- Looks up and authenticates clients, checking and freezing their records at the boundary, with built-in methods `client_secret_basic`, `client_secret_post` and `none`.
+- Looks up and authenticates clients, checking and freezing their records at the boundary, with built-in methods `client_secret_basic`, `client_secret_post` and `none`, and freezing the registry every taker shares, so none reassigns a member for the others.
 
 ## Not here
 - What each metadata field means: the module that reads one contributes it as a section, and its default applies to a client without it.
@@ -30,7 +30,7 @@
 - `client_secret_post` and `none` read `client_id` and `client_secret` from a form or JSON body, where a value that is not a string still counts as sent.
 - A registered client wins over the same id from another source.
 - A record failing any section check is refused as a whole; a source's record is also refused unless it passes the registered rule, names a known method and carries the id asked, and when reading it throws.
-- An id that is empty, over 256 UTF-16 code units, with a lone surrogate, or with a C0, DEL, C1, U+2028, U+2029 or BOM character is unknown, and no source is asked; registered, it refuses boot.
+- An id that is empty, over 256 UTF-16 code units (a fixed bound: an id is also a store key, and every reader of an id holds it to this one), with a lone surrogate, or with a C0, DEL, C1, U+2028, U+2029 or BOM character is unknown, and no source is asked; registered, it refuses boot.
 - `checkAtBoot` sees each registered client that carries the section, and never a source's client, which the section's owner checks at request time.
 - A `checkAtBoot` reason refuses boot at `clients.registered.<i>.sections.<name>`, which names the client by its place and the section; the reason is the check's own, unchanged, so it never holds a configuration value, the client's id included.
 - A secret is checked through `secret-hash`, within its assembly's `max-concurrent`, with decoys of the registered hashes' work; boot refuses a registered `hash` it cannot read (plain text included) or a secret method's client with none, and a source's such secret matches nothing.

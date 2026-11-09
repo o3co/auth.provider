@@ -20,6 +20,7 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 - `keep` (a change of what the transaction holds for its work, from what it holds) → what it holds now, or none when it is no longer in use or the change gives nothing.
 - `askedFrom` (a transaction's purpose) → whom `mfa`'s kinds are asked for: a held login by the email its login gave, `vouched` when `subject-attributes`' `vouches` says `users` stands behind it, else the session by its handle.
 - `cleared` → the cookie that ends the transaction's binding to its browser.
+- The listings' contract test holds a place to the cap it gives; a place that gives none is held to 5, as every place was before one could give it.
 
 ## Invariants
 - The store interface's contract test (`./testing`) checks every implementation: kept whole and once, changed only from what it holds, ended at exactly its lifetime; restarts, memory pressure, lost answers and failovers where the place has them.
@@ -33,6 +34,7 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 - Taking marks the transaction; a marked one is kept until its lifetime and read as gone.
 - A start whose identifier is already held is unavailable.
 - A start lists the transaction under its holder (the session it is tied to, or the held login's subject) by a digest of its identifier, after keeping it; a listing that cannot answer makes the start unavailable.
+- A transaction counts only while its holder's listing still holds it, read once each time it is used (`503` when the listing cannot tell). A holder keeps up to its listing's cap, the store wiring's: one more pushes out the one ending first, so one device's held login can push out another's. A taken one, or one out of attempts, leaves the listing; a removal that fails is logged and passed.
 - `find` answers a transaction only while its holder's listing holds it and an attempt is left; taking it takes it off the listing, logging `mfa-flows.listing_failed` when that fails. Every caller takes it once its last attempt is judged.
 
 ## Depends on

@@ -9,7 +9,7 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 // The contract first, as the package loads it: transport and credential import each other through it.
 import "../../contract.ts";
 import type { OutboundUnavailable } from "../../contract.ts";
-import { type Route, send } from "../../transport.ts";
+import { type Route, send } from "../../transport/transport.ts";
 import { handshakeCodeOf, tlsOf } from "../tls.ts";
 
 const anyPublic = policyOf(policySettings.parse({ "allow-any-public": true }));

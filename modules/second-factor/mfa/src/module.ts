@@ -8,7 +8,7 @@ import { factorReading } from "@mod/mfa-reading";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { resealers, seal } from "@mod/seal";
 import { enforcers, factorStore, proofSteps } from "./contract.ts";
-import { addsMfa, byKind, type Decisions, factorDecisions } from "./factors.ts";
+import { addsMfa, byKind, type Decisions, factorDecisions, leftOut } from "./factors.ts";
 import { resealerOver } from "./records/resealer.ts";
 import { section } from "./section.ts";
 
@@ -34,19 +34,28 @@ export default defineModule(
 	},
 	(m) => [
 		m.contribute(amrSources).by(async (c) => {
-			const kinds = await c.collect(factorKinds);
+			const required = c.section.mode === "required";
+			const kinds = (await c.collect(factorKinds)).filter((k) => !leftOut(k, required));
 			const second = kinds.some(addsMfa) ? [secondFactorAmr] : [];
 			return { name: "mfa", amr: [...second, ...kinds.flatMap((k) => k.amr)] };
 		}),
 		m.provide(decisions).by(async (c) => {
 			await c.collect(proofSteps);
-			const kinds = await c.collect(factorKinds);
-			if (c.section.mode === "required" && !kinds.some((k) => k.counts)) {
+			const required = c.section.mode === "required";
+			const composed = await c.collect(factorKinds);
+			if (required && !composed.some((k) => k.counts)) {
 				return c.refuse("mfa.mode", "required needs a factor kind that counts");
 			}
 			// The operator's choice, yet said at every start: a session is used with no second factor.
 			if (c.section.mode !== "required") {
 				c.log.warn("mfa.not_required", { reason: "using a session needs no second factor" });
+			}
+			// The kinds taken: under required, one whose proof adds no mfa would let a login prove
+			// nothing a session may use, so it is left out, and every lookup by kind answers as for a
+			// kind not composed. Said at every start, from the same judgment, rather than refused.
+			const taken = composed.filter((k) => !leftOut(k, required));
+			for (const k of composed.filter((k) => leftOut(k, required))) {
+				c.log.warn("mfa.kind_not_taken", { kind: k.kind });
 			}
 			// Sessions are held to the factors elsewhere: without that module, using them would ask for none.
 			if ((await c.collect(enforcers)).length === 0) {
@@ -72,9 +81,9 @@ export default defineModule(
 			}
 			return factorDecisions({
 				stored,
-				kinds: byKind(kinds),
+				kinds: byKind(taken),
 				seal: await c.get(seal),
-				required: c.section.mode === "required",
+				required,
 				maxFactors: c.section["max-factors"],
 				gates: await c.collect(firstBindingGates),
 				random: c.random.bytes,

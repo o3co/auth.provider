@@ -38,8 +38,35 @@ type State = {
 type Hold = Extract<Lockout, { kind: "held" }>["hold"];
 
 const empty: State = { run: 0, lastAt: 0, spent: [], holdUntil: 0, fixed: false };
-const stateOf = (value: Json | null | undefined): State =>
-	value && typeof value === "object" && !Array.isArray(value) ? (value as State) : empty;
+const time = (v: unknown) => Number.isSafeInteger(v);
+const timeOrNone = (v: unknown) => v === undefined || time(v);
+const wellShaped = (v: { readonly [k: string]: unknown }) =>
+	time(v.run) &&
+	time(v.lastAt) &&
+	time(v.holdUntil) &&
+	Array.isArray(v.spent) &&
+	v.spent.every(time) &&
+	typeof v.fixed === "boolean" &&
+	timeOrNone(v.fixedAt) &&
+	timeOrNone(v.named) &&
+	timeOrNone(v.generation) &&
+	(v.used === undefined ||
+		(Array.isArray(v.used) &&
+			v.used.every(
+				(u) => u !== null && typeof u === "object" && typeof u.id === "string" && time(u.until),
+			)));
+/** No state is no hold; one of another shape is unavailable, never read as no hold. */
+const stateOf = (value: Json | null | undefined): State => {
+	if (value === null || value === undefined) return empty;
+	if (
+		typeof value !== "object" ||
+		Array.isArray(value) ||
+		!wellShaped(value as { readonly [k: string]: unknown })
+	) {
+		throw new Unavailable("rate-limit");
+	}
+	return value as unknown as State;
+};
 
 /** The state as of `now`: a quiet run is forgotten; failures older than the budget window and ids past keeping drop out. */
 function aged(state: State, policy: LockoutPolicy, now: number): State {
@@ -55,6 +82,8 @@ const kept = (state: State): Partial<State> => ({
 	...(state.generation === undefined ? {} : { generation: state.generation }),
 	...(state.used?.length ? { used: state.used } : {}),
 });
+
+const keepRefused = "rate-limit: a release's keepMs is a positive integer a time can hold";
 
 const fixedOf = (state: State) =>
 	state.fixed && state.fixedAt !== undefined ? { fixedAt: state.fixedAt } : {};
@@ -84,6 +113,9 @@ function released(
 		terms.forgive !== undefined && terms.forgive.firstFailureAt === stands.firstFailureAt;
 	const lifted = terms.lift !== undefined && terms.lift.fixedAt === stands.fixedAt;
 	if (!forgiven && !lifted) return { answer: { kind: "unchanged", ...fixedOf(was) } };
+	const until = now + terms.once.keepMs;
+	// Past the safe range, the time would store a state none can read.
+	if (!Number.isSafeInteger(until)) throw new Error(keepRefused);
 	const staysFixed = was.fixed && !lifted;
 	const endsRun = lifted || (forgiven && !staysFixed);
 	const next: State = {
@@ -95,7 +127,7 @@ function released(
 		fixed: staysFixed,
 		...(staysFixed ? fixedOf(was) : {}),
 		generation: nextGeneration,
-		used: [...(was.used ?? []), { id: terms.once.id, until: now + terms.once.keepMs }],
+		used: [...(was.used ?? []), { id: terms.once.id, until }],
 	};
 	const cleared = { budget: forgiven, run: endsRun, hard: lifted };
 	const answer: Released = {
@@ -257,14 +289,20 @@ export function lockoutCounter(states: LockoutStates): Lockouts {
 			const { value, now } = await states.read(name, key);
 			return standingOf(aged(stateOf(value), policy, now));
 		},
-		releaseUnder: (name, key, policy, terms) =>
-			changing(name, key, (current, now) => {
+		releaseUnder: async (name, key, policy, terms) => {
+			// An id kept for no time is never kept; a keep of no whole number stores a state none can read.
+			const keep = terms.kind === "checked" ? terms.once.keepMs : undefined;
+			if (keep !== undefined && (!Number.isSafeInteger(keep) || keep < 1)) {
+				throw new Error(keepRefused);
+			}
+			return changing(name, key, (current, now) => {
 				const done = released(aged(stateOf(current), policy, now), terms, now);
 				const decision: Decision =
 					"next" in done
 						? { kind: "write", value: done.next, expiry: expiryOf(done.next, policy) }
 						: { kind: "keep" };
 				return { decision, answer: done.answer };
-			}),
+			});
+		},
 	};
 }

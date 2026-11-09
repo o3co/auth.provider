@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { Fetched, RevocationPolicy } from "../contract.ts";
-import { isCertificate, pkiOver } from "../pki.ts";
+import { isCertificate, pkiOver, signatureAlgorithms } from "../pki.ts";
 import { crlOf, ecKeys, issue, ocspOf, rsaKeys } from "./authority.ts";
 
 const revocation = (served: Record<string, Uint8Array | "down">) => ({
@@ -29,7 +29,12 @@ const revocation = (served: Record<string, Uint8Array | "down">) => ({
 it("tells a path valid, invalid, revoked, or held up by an outage of its sources", async () => {
 	const root = await issue({ cn: "root", ca: true });
 	const client = await issue({ cn: "client", by: root, crl: "http://ca.example/crl" });
-	const policy = { anchors: [root.der], maxIntermediates: 4, minRsaBits: 2048 };
+	const policy = {
+		anchors: [root.der],
+		maxIntermediates: 4,
+		minRsaBits: 2048,
+		signatureAlgorithms,
+	};
 	const check = (served?: Record<string, Uint8Array | "down">) =>
 		pkiOver(policy, served && revocation(served)).check(client.der, [], Date.now());
 	expect(await check()).toEqual({ kind: "valid" });
@@ -64,11 +69,10 @@ it("holds an OCSP responder to the path's RSA bits", async () => {
 	const { policy, sources } = revocation({ "http://ca.example/ocsp": answer });
 	const ocsp = { policy: { ...policy, mode: "ocsp", nonce: false } as const, sources };
 	const check = (minRsaBits: number) =>
-		pkiOver({ anchors: [root.der], maxIntermediates: 4, minRsaBits }, ocsp).check(
-			client.der,
-			[],
-			Date.now(),
-		);
+		pkiOver(
+			{ anchors: [root.der], maxIntermediates: 4, minRsaBits, signatureAlgorithms },
+			ocsp,
+		).check(client.der, [], Date.now());
 	expect(await check(2048)).toEqual({ kind: "valid" });
 	expect(await check(3072)).toEqual({ kind: "invalid", reason: "signer" });
 });

@@ -9,7 +9,7 @@ import { redirectsFor } from "@mod/redirect-uris/testing";
 import { describe, expect, it } from "vitest";
 import { type Decision, recorded as refused } from "../../decision.ts";
 import type { Flow } from "../../flow/flow.ts";
-import { routeWith } from "../route.ts";
+import { type RouteParts, routeWith } from "../route.ts";
 
 const callback = "https://app.example/cb";
 const sections: Record<string, unknown> = redirectsFor([callback]);
@@ -26,6 +26,8 @@ const nocode: Client = {
 function route(
 	flow: Flow = async () => refused("unauthorized_client", "grant_type_not_allowed"),
 	find = async (id: string) => (id === nocode.id ? nocode : undefined),
+	stateLimit = 512,
+	rule: RouteParts["rule"] = {},
 ) {
 	const recorded: AuditRecord[] = [];
 	const logged = recordingLog();
@@ -36,8 +38,9 @@ function route(
 		audit: { record: (event: AuditRecord) => void recorded.push(event) },
 		flow,
 		log: logged.log,
-		// No rule composed: a repeated parameter is a malformed request.
-		rule: {},
+		// No rule composed by default: a repeated parameter is a malformed request.
+		rule,
+		stateLimit,
 	});
 	return { answer: declared.handle, declared, recorded, lines: logged.lines };
 }
@@ -196,9 +199,51 @@ describe("route: an OpenID Connect request", () => {
 		const repeated = oidc();
 		repeated.set("nonce", ["n1", "n2"]);
 		expect(await sentBack(issued.answer, repeated)).toEqual(refused("invalid_request"));
-		expect(await sentBack(issued.answer, oidc({ nonce: "n".repeat(2049) }))).toEqual(
-			refused("invalid_request"),
-		);
+	});
+
+	it("hands a value of any length but state's on to the flow, each held to its reader's bound there", async () => {
+		const read: (string | undefined)[] = [];
+		const reading = route(async ({ one }) => {
+			read.push(
+				...["id_token_hint", "claims", "nonce", "x-other"].map(one).map((v) => v?.slice(0, 1)),
+			);
+			return { kind: "code", code: "c1", subject: "a" };
+		}, find);
+		const long = (c: string) => c.repeat(4096);
+		const sent = oidc({
+			id_token_hint: long("h"),
+			claims: long("c"),
+			nonce: long("n"),
+			"x-other": long("x"),
+		});
+		expect((await sentBack(reading.answer, sent))[2]).toBe("c1");
+		expect(read).toEqual(["h", "c", "n", "x"]);
+	});
+
+	it("sends back a state up to the package's state-limit, and refuses a longer one without it", async () => {
+		const flow: Flow = async ({ refused }) => refused ?? { kind: "code", code: "c1", subject: "a" };
+		const longer = route(flow, find, 600);
+		const state = "s".repeat(600);
+		const taken = await sentBack(longer.answer, oidc({ state }));
+		expect([taken[2], taken[4]]).toEqual(["c1", state]);
+		const refused = await sentBack(longer.answer, oidc({ state: `${state}s` }));
+		expect([refused[3], refused[4]]).toEqual(["invalid_request", null]);
+	});
+
+	it("sends a rule's description back in RFC 6749's characters alone, any other shown as ? [rfc6749-4.1.2.1-e]", async () => {
+		const flow: Flow = async ({ refused }) => refused ?? { kind: "code", code: "c1", subject: "a" };
+		const loud = route(flow, find, 512, {
+			repeated: () => ({
+				kind: "error",
+				error: "invalid_target",
+				description: 'one "resource", caf\u00e9\n\\',
+			}),
+		});
+		const sent = oidc();
+		sent.set("resource", ["https://two", "https://api"]);
+		const res = await loud.answer(testRequest({ query: sent }));
+		const at = new URL(res.headers?.location ?? "");
+		expect(at.searchParams.get("error_description")).toBe("one ?resource?, caf???");
 	});
 
 	it("hands a repeated or too long parameter's refusal to the flow, and answers one the flow keeps at the endpoint by 400 [rfc9700-4.11.2-b]", async () => {
@@ -210,7 +255,7 @@ describe("route: an OpenID Connect request", () => {
 		const repeated = oidc();
 		repeated.set("nonce", ["n1", "n2"]);
 		await kept.answer(testRequest({ query: repeated }));
-		const answered = await kept.answer(testRequest({ query: oidc({ nonce: "n".repeat(2049) }) }));
+		const answered = await kept.answer(testRequest({ query: oidc({ state: "s".repeat(513) }) }));
 		expect(handed).toEqual([
 			{ kind: "refuse", error: "invalid_request", description: "repeated parameter" },
 			{ kind: "refuse", error: "invalid_request", description: "parameter too long" },

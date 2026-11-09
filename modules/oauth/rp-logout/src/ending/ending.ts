@@ -30,6 +30,10 @@ export interface EndingParts {
 	/** The deployment's page a browser's refused request is sent to; none, and every refusal is JSON. */
 	readonly errorPage?: string;
 	readonly now: () => number;
+	/** A hint issued longer ago than this is refused, by GET or POST, as a logout another site may have started. */
+	readonly hintMaxAgeMs: number;
+	/** How long the front-channel page's frames get to load (the package's `frame-wait`). */
+	readonly frameWaitMs: number;
 	readonly log: Log;
 }
 
@@ -59,8 +63,6 @@ const carriedNotValid = refused("invalid_request", "request is not valid");
 const sessionless = refused("invalid_request", "id_token_hint names no session");
 /** What a hinted request names; none comes beside a carried request. */
 const hinted = ["id_token_hint", "client_id", "post_logout_redirect_uri", "state"];
-/** A hint issued longer ago than this is refused, by GET or POST, as a logout another site may have started. */
-const confirmAfterMs = 86_400_000;
 
 /** The q a media range gives `type`, the most specific range first; 0 when none names it. */
 const qualityOf = (accept: string, type: string) => {
@@ -119,7 +121,12 @@ export function endingOver(p: EndingParts) {
 	): Promise<HttpResponse> => {
 		const { cookies } = closed;
 		const page = wantsPage(request)
-			? frontChannelPage(await closed.frames(), { issuer: p.issuer, session: sid, next })
+			? frontChannelPage(await closed.frames(), {
+					issuer: p.issuer,
+					session: sid,
+					next,
+					waitMs: p.frameWaitMs,
+				})
 			: undefined;
 		if (page) {
 			if (page.skipped > 0) p.log.warn("rp-logout.frames_skipped", { count: page.skipped });
@@ -151,7 +158,7 @@ export function endingOver(p: EndingParts) {
 			return refuse(request, sessionless);
 		}
 		if (checked.kind === "invalid") return refuse(request, unverified);
-		if (p.now() - checked.issuedAt > confirmAfterMs) return refuse(request, unverified);
+		if (p.now() - checked.issuedAt > p.hintMaxAgeMs) return refuse(request, unverified);
 		// A client_id beside the hint names the client the token was issued to, or the request is refused.
 		const named = values.single("client_id");
 		if (named && named !== checked.client) return refuse(request, mismatched);
@@ -235,6 +242,8 @@ export async function endingFrom(
 		issuer: (await c.get(issuer)).url,
 		...(c.section["error-page"] === undefined ? {} : { errorPage: c.section["error-page"] }),
 		now: c.clock.now,
+		hintMaxAgeMs: c.section["hint-max-age"] * 1000,
+		frameWaitMs: c.section["frame-wait"],
 		log: c.log,
 	});
 }

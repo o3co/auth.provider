@@ -3,7 +3,7 @@
 Internal module of `federation-grants`: erasing the credentials of grants no request reads.
 
 ## Responsibilities
-- On each host, every `sweep-interval`, walks every grant kept and erases the credentials of one past its end, or ended by its subject's revocation.
+- On each host, every `sweep-interval`, walks every grant kept and erases the credentials of one past its end, or ended by its subject's revocation, which it revokes and unlists by `retention`'s rules.
 
 ## Not here
 - Answering a grant's state (the routes, which judge it on each read). Ending a grant's intent (judged when the intent is used). The listing a revocation's follower walks (`api`).
@@ -24,4 +24,4 @@ Internal module of `federation-grants`: erasing the credentials of grants no req
 - How soon credentials go is not bounded: while passes keep running, those of an ended grant go; with the store answering and a pass done within `sweep-interval`, about that long after the end.
 
 ## Depends on
-- `kernel` (the build context, the clock, randomness, every), `audit`; the package's grant records, judge, store interfaces and audit events.
+- `kernel` (the build context, the clock, randomness, every), `audit`; the package's grant records, judge, store interfaces and audit events; `retention` (the revoked rewrite and the unlisting).

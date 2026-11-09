@@ -39,6 +39,8 @@ export function externalJwtOver(deps: {
 	readonly outbound: Outbound;
 	/** How long after it was fetched a key set may still be used. */
 	readonly keySetMaxAgeMs: number;
+	/** How long after it was fetched a key set is used before it is fetched again. */
+	readonly keySetRefreshMs: number;
 }): ExternalJwt {
 	const sets = new Map<string, KeySet>();
 	const setAt = ({ url, hosts: written, internal }: JwksSource) => {
@@ -50,7 +52,12 @@ export function externalJwtOver(deps: {
 		if (kept) return kept;
 		const made = jwksAt(
 			{ url, hosts, ...(internal === undefined ? {} : { internal }) },
-			{ clock: deps.clock, outbound: deps.outbound, maxAgeMs: deps.keySetMaxAgeMs },
+			{
+				clock: deps.clock,
+				outbound: deps.outbound,
+				maxAgeMs: deps.keySetMaxAgeMs,
+				holdMs: deps.keySetRefreshMs,
+			},
 		);
 		sets.set(key, made);
 		return made;

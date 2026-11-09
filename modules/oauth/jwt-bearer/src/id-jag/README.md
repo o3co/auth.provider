@@ -31,7 +31,7 @@ Preview: the ID-JAG profile follows draft-ietf-oauth-identity-assertion-authz-gr
 - The grant reads and admits an ID-JAG where it binds an assertion to its client, before its issuer's conditions and subject; its ceiling joins its issuer's, and `recheck` is asked once the scope and audience are chosen, all before the `jti` is spent, so a refusal leaves it usable. Its answer names the audience issued as `resource` (one, or a list), however it was chosen; no other entry's answer does.
 - Its verified header's `typ` is the ID-JAG's, as `typOf` reads it (`untrusted signer` otherwise).
 - An `aud` list holds one audience (`wrong audience`). A `tenant` or `aud_tenant` is refused (`tenant not taken`).
-- `iat` is a number, and `client_id` a string of 1 to 255 characters. An `act` has a string `sub`. A claim of no such form is `missing or malformed claims`, as are those below.
+- `iat` is a number, and `client_id` a string not empty; its length is `clients`' bound, as it must equal the authenticated client's id. An `act` has a string `sub`. A claim of no such form is `missing or malformed claims`, as are those below.
 - A `scope` is a non-empty RFC 6749 scope: one signed empty is refused, as it would read as none and let the client's defaults stand in.
 - A `resource` is an absolute URI with no fragment (RFC 8707 §2), or a non-empty list of them. A `cnf` names `jkt` alone, a 43-character thumbprint.
 - `authorization_details` is a list of objects each with a non-empty `type`. None is served, so they are dropped, and refused where no `scope` says what was allowed (`authorization details are not served`).

@@ -1,4 +1,4 @@
-import { addedClaimsOf } from "@mod/added-claims";
+import type { AddedClaims } from "@mod/added-claims";
 import { deepFreeze, Unavailable } from "@mod/kernel";
 import type {
 	Admitted,
@@ -73,7 +73,17 @@ export type IssueAccess = (
 	grant: IssuanceRequest["grant"],
 	askedAt: number,
 	limits?: IssueLimits,
-) => Promise<{ readonly access: IssuedAccess; readonly keep?: () => void }>;
+) => Promise<
+	{ readonly access: IssuedAccess; readonly keep?: () => void } | { readonly kind: "too-large" }
+>;
+
+/** tokens' own refusal of a token past what it reads once signed: handed to no one. */
+const tooLarge = {
+	kind: "refused",
+	policy: "tokens",
+	reason: "token_too_large",
+	description: "too large",
+} as const;
 
 /** The least a token may have left once signed: a second. */
 const leastLeftMs = 1000;
@@ -91,12 +101,15 @@ const noLifetimeLeft = {
  * an empty set is none. Throws TypeError, the grant's maker's mistake, on claims outside the rules
  * or an actor chain deeper than tokens reads, counted before anything copies it.
  */
-function checkedRequest(request: IssuanceRequest): IssuanceRequest {
+function checkedRequest(
+	request: IssuanceRequest,
+	addedOf: (given: unknown) => AddedClaims | undefined,
+): IssuanceRequest {
 	// Each of the caller's properties is read once: what is checked is what is copied and signed.
 	const { grant: given, ...rest } = request;
 	const { claims: added, actor: chain, ...grant } = given;
 	const actor = actorSnapshot(chain);
-	const claims = addedClaimsOf(added);
+	const claims = addedOf(added);
 	return {
 		...rest,
 		grant: { ...grant, ...(actor ? { actor } : {}), ...(claims ? { claims } : {}) },
@@ -113,18 +126,24 @@ export function issuing(
 	judge: (request: IssuanceRequest) => Promise<Admitted>,
 	issueAccess: IssueAccess,
 	now: () => number,
+	/** `added-claims`' check of a grant's claims, under the section's limits. */
+	addedOf: (given: unknown) => AddedClaims | undefined,
 ): Pick<Tokens, "admits" | "issue"> {
 	return {
-		admits: async (request) => judge(checkedRequest(request)),
+		admits: async (request) => judge(checkedRequest(request, addedOf)),
 		issue: async (request, limits) => {
 			// One frozen copy, taken before anything waits, is both what the policies judge and what is
 			// signed: a caller changing its own grant or limits meanwhile changes neither.
-			const taken = deepFreeze(structuredClone({ request: checkedRequest(request), limits }));
+			const taken = deepFreeze(
+				structuredClone({ request: checkedRequest(request, addedOf), limits }),
+			);
 			// When it was asked, with that copy: the token's iat, so the policies' wait cannot move it past a boundary.
 			const askedAt = now();
 			const judged = await judge(taken.request);
 			if (judged.kind === "refused") return judged;
-			const { access, keep } = await issueAccess(taken.request.grant, askedAt, taken.limits);
+			const made = await issueAccess(taken.request.grant, askedAt, taken.limits);
+			if ("kind" in made) return tooLarge;
+			const { access, keep } = made;
 			// Less than a second left once signed, its end come, its cap passed or its signing slow: handed
 			// to no one, and nothing of it kept.
 			const leftMs = access.expiresAt - now();

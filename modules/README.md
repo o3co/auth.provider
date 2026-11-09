@@ -58,6 +58,7 @@ What each module contains is described by that module's contract card (each modu
 | Sealing at rest (keyring) | contract / setting | seal |
 | Checking a secret against a stored hash (bcrypt, scrypt), with the same work when there is none to check | contract | secret-hash |
 | The rule for a name a user gives something that a page shows back as it is (a label) | contract | labels |
+| The rule for an address mail takes, and its one form to compare by | contract | mail-address |
 | Sending mail (one address per send), preparing a message for a sender | contract | mail |
 | Mail purposes and mail templates | extension point kind | mail |
 | The logging-only mail sender | contract implementation / setting | mail |
@@ -273,9 +274,11 @@ What each module contains is described by that module's contract card (each modu
 | An operator's reset of a subject's passkeys, and the passkeys' step of mfa-reset's parts | contract | passkey-reset |
 | Having an operator's reset of second factors remove the subject's passkeys too | contribution | mfa-reset-passkeys |
 | WebAuthn as a second factor (the subject's user handle for it, its amr, the name an authenticator shows) | contribution / setting | mfa-webauthn |
-| A code by mail as a second factor, how a code is mailed to the account's address, and the mail purposes of both below | contribution / setting / contract | mfa-email |
-| The proof of the account's address before a first binding (`account-email`), by mfa-email's rules | contribution | mfa-email-proof |
+| A code by mail as a second factor, and the mail purposes it declares | contribution / setting / contract | mfa-email |
+| The proof of the account's address before a first binding (`account-email`), by account-mail-code's rules | contribution | mfa-email-proof |
 | The wording of mfa-email's mails, which a deployment replaces | contribution | mfa-email-wording |
+| Mailing a code to the account's address and checking it typed back, for the caller's purpose | contract | account-mail-code |
+| The wording of mfa-email-proof's mails, which a deployment replaces | contribution | mfa-email-proof-wording |
 | Budget numbers and invariant checks | setting | guard |
 | Kind names, their order, and which way a dependency between kinds may point | vocabulary / contract | kinds |
 | The checks each kind gets | setting | guard |
@@ -284,6 +287,7 @@ What each module contains is described by that module's contract card (each modu
 | Running each pattern's conformance areas on its app, and leaving out as `not-in-pattern` the scenes it cannot hold | contract | conformance |
 | The local layer that boots a generated app for a test or a conformance run, from each composed module's trial file | contract | trial |
 | Running the docker client within a time, and how each of its commands fails, for every package that drives Docker | contract | docker-client |
+| Serving packed tarballs as an npm registry, at the publish times its caller gives, for the checks that install them | contract | local-registry |
 | An https front before a running app, for a harness's outside party | contract | conformance-front |
 | A way out from a harness's app to a party on this machine by its name alone (an HTTP CONNECT proxy on loopback, as `outbound.proxy`) | contract | conformance-tunnel |
 | Starting the legacy build, and registering legacy set-ups | contract | conformance-legacy |

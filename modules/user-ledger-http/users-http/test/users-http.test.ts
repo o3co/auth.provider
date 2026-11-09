@@ -116,11 +116,14 @@ beforeEach(() => {
 	script = aliceLedger;
 	received.length = 0;
 	logged.length = 0;
+	pinned = undefined;
 });
 
 const logged: unknown[][] = [];
+/** The runtime clock's time where a test pins it, else the wall clock's. */
+let pinned: number | undefined;
 const runtime: Runtime = {
-	clock: { now: () => Date.now() },
+	clock: { now: () => pinned ?? Date.now() },
 	random: { bytes: (n) => new Uint8Array(n) },
 	log: {
 		trace: () => {},
@@ -314,6 +317,28 @@ describe("users-http", () => {
 			script = () => ({ status: 401, headers: { "www-authenticate": challenge } });
 			expect(await ledger.verify("alice", "x"), challenge).toEqual({ kind: "none" });
 		}
+	});
+
+	it("warns that a 401 read as none is deprecated, at most once an hour, challenged or not", async () => {
+		const { ledger } = await open();
+		const deprecated = ["users-http.ledger_deprecated_refusal", { status: 401 }];
+		const start = Date.now();
+		pinned = start;
+		expect(await ledger.verify("nobody", "x")).toEqual({ kind: "none" });
+		expect(await ledger.verify("alice", "x")).toEqual({ kind: "none" });
+		expect(logged).toEqual([deprecated]);
+		pinned = start + 60 * 60 * 1000 - 1;
+		expect(await ledger.verify("alice", "x")).toEqual({ kind: "none" });
+		expect(logged).toEqual([deprecated]);
+		pinned = start + 60 * 60 * 1000;
+		expect(await ledger.verify("alice", "x")).toEqual({ kind: "none" });
+		expect(logged).toEqual([deprecated, deprecated]);
+		const app = await boot({ "verify-url": `http://${pair}/ledger/authenticate` });
+		const [uncredentialed] = app.get(collected);
+		logged.length = 0;
+		script = () => ({ status: 401, headers: { "www-authenticate": "Bearer" } });
+		expect(await uncredentialed?.verify("alice", "x")).toEqual({ kind: "none" });
+		expect(logged).toEqual([deprecated]);
 	});
 
 	it("answers none to a 404 or a 410 saying it knows no such user, as a lookup does, unlogged [guarantee-3-m]", async () => {

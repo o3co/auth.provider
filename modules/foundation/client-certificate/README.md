@@ -13,7 +13,7 @@
 
 ## Invariants
 - No client's certificate is read unless `client-certificate` is set.
-- The client's certificate is read only from a direct peer that is a trusted proxy, each header at most 16 KiB.
+- The client's certificate is read only from a direct peer that is a trusted proxy, each header at most 16 KiB, a fixed bound guarding the server alone: the proxy's own header limit binds before it.
 - A certificate sent by another peer is ignored, and logged at most once a minute.
 - Whether the proxy removes the header a client sends is the proxy's to ensure.
 - A certificate read is handed on as copies of its bytes, frozen.

@@ -9,14 +9,7 @@ import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import type { Delegation, Upstreams, UpstreamTokens } from "@mod/upstreams";
 import { memoryStores } from "../../../test/stores.ts";
 import type { IntentRef } from "../../browser.ts";
-import {
-	type Grant,
-	type Intent,
-	judgeWith,
-	listingWith,
-	recordsWith,
-	retentionMs,
-} from "../../grant/grant.ts";
+import { type Grant, type Intent, judgeWith, listingWith, recordsWith } from "../../grant/grant.ts";
 import { section } from "../../section.ts";
 import { intentsWith } from "../intents.ts";
 
@@ -135,7 +128,11 @@ export async function intents(options: { readonly settings?: Record<string, unkn
 			...grantMore,
 		};
 		const connectMs = settings["connect-lifetime"] * 1000;
-		await stores.grants.create(grant.id, records.stored(grant), connectMs + retentionMs);
+		await stores.grants.create(
+			grant.id,
+			records.stored(grant),
+			connectMs + settings.retention * 1000,
+		);
 		const link = `link-${grant.id}`;
 		const step = { format: 1, kind: "link", grant: grant.id, intent: intent.id } as const;
 		await stores.steps.create(link, records.storedStep(step), connectMs);

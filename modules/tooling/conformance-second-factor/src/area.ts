@@ -19,6 +19,8 @@ export interface SecondFactorPart {
 		readonly budget: number;
 		readonly hardLimit: number;
 	};
+	/** The sealing key, where a scene starts again on what an earlier start sealed; else one of its own. */
+	readonly sealKey?: string;
 }
 
 export const secondFactorArea = area<SecondFactorPart>("second-factor");

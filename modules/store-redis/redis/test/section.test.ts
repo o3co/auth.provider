@@ -154,7 +154,10 @@ it("refuses production where DEBUG turns on the client's own debug log, at redis
 
 it("warns at every boot where redis.url reaches Redis in the clear off this host, telling neither host nor URL", async () => {
 	const plaintext = async (url: string) => {
-		const { warned } = await refusalOf({ url, "connect-timeout": "100ms" });
+		const { warned } = await refusalOf(
+			{ url, "connect-timeout": "100ms" },
+			{ environment: "development" },
+		);
 		expect(JSON.stringify(warned), url).not.toContain("s3cr3t");
 		expect(JSON.stringify(warned), url).not.toContain("192.0.2.1");
 		return warned.filter((line) => line.event === "redis.plaintext");
@@ -168,6 +171,27 @@ it("warns at every boot where redis.url reaches Redis in the clear off this host
 	]);
 	expect(await plaintext(`redis://user:s3cr3t-pass@127.0.0.1:${refusedPort}`)).toEqual([]);
 	expect(await plaintext("rediss://user:s3cr3t-pass@192.0.2.1:6379")).toEqual([]);
+});
+
+it("warns in production without accept-plaintext that a later release refuses boot for it, and as accepted where it is set, booting either way", async () => {
+	const url = "redis://user:s3cr3t-pass@192.0.2.1:6379";
+	const reasonOf = async (redis: object, environment: "production" | "development") => {
+		const { refused, warned } = await refusalOf(
+			{ url, "connect-timeout": "100ms", ...redis },
+			{ environment },
+		);
+		// Refused only as the server cannot be reached, never for the clear connection.
+		expect((refused as BootRefused).refusals?.map((r) => r.where)).toEqual(["redis.url"]);
+		expect(JSON.stringify(warned)).not.toContain("s3cr3t");
+		return warned.filter((line) => line.event === "redis.plaintext").map((l) => l.fields.reason);
+	};
+	expect(await reasonOf({}, "production")).toEqual([
+		"the connection to Redis is not encrypted; deprecated: a later release refuses boot for it in production unless redis.url is rediss or redis.accept-plaintext is true",
+	]);
+	const accepted = ["the connection to Redis is not encrypted, as redis.accept-plaintext accepts"];
+	expect(await reasonOf({ "accept-plaintext": true }, "production")).toEqual(accepted);
+	expect(await reasonOf({ "accept-plaintext": true }, "development")).toEqual(accepted);
+	expect(await reasonOf({}, "development")).toEqual(["the connection to Redis is not encrypted"]);
 });
 
 it("refuses boot without telling the URL's password, in the refusal or in a warning", async () => {

@@ -108,3 +108,32 @@ it("names the commit the checkout holds, not the event's, unless one is given", 
 	expect(commitOf({ SPEC_EVIDENCE_COMMIT: "c1", GITHUB_SHA: "the event's" }, root)).toBe("c1");
 	expect(commitOf({}, tmpdir())).toBe("local");
 });
+
+it("names the shard a run made of its files, each shard's files its own and together all of them, an empty shard's report too", {
+	timeout: 120_000,
+}, () => {
+	const shardRun = (shard: string) => {
+		const dir = mkdtempSync(join(tmpdir(), "spec-evidence-"));
+		spawnSync(
+			"pnpm",
+			[
+				"exec",
+				"vitest",
+				"run",
+				"--config",
+				join(fixture, "vitest.config.ts"),
+				`--shard=${shard}`,
+				"--passWithNoTests",
+			],
+			{ cwd: root, encoding: "utf8", env: { ...process.env, SPEC_EVIDENCE_DIR: dir } },
+		);
+		const [file] = readdirSync(dir);
+		return JSON.parse(readFileSync(join(dir, file ?? ""), "utf8")) as EvidenceReport;
+	};
+	const files = (r: EvidenceReport) => new Set(r.tests.map((t) => t.file));
+	const [one, two] = [shardRun("1/2"), shardRun("2/2")];
+	expect([one.identity.shard, two.identity.shard]).toEqual(["1/2", "2/2"]);
+	expect([...files(one)].filter((f) => files(two).has(f))).toEqual([]);
+	expect(files(one).size + files(two).size).toBe(4);
+	expect(shardRun("9/9")).toMatchObject({ identity: { shard: "9/9" }, tests: [] });
+});

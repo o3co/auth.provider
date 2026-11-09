@@ -364,17 +364,37 @@ describe("redis", () => {
 		expect(refused).not.toContain("acl:");
 	});
 
-	it("boots while no replica takes writes: that leaves the commands undetermined, never refused", async () => {
+	it("boots while no replica takes writes, answering unready until one does: that leaves the commands undetermined, never refused", async () => {
+		let context: BuildContext<unknown> | undefined;
+		// Safe: it keeps the build context for the test once, at build; no request writes it.
+		const asker = defineModule({ name: "asker", replicaSafe: true, takes: [] }, (m) => [
+			m.provide(contract<object>("asker")).by((c) => {
+				context = c;
+				return {};
+			}),
+		]);
 		docker("pause", replica);
 		docker("pause", secondReplica);
+		let paused = true;
+		let app: Awaited<ReturnType<typeof open>> | undefined;
 		try {
 			cli(container, "client", "kill", "type", "replica");
 			await waitFor(() => connectedReplicas() === 0 && !writable(), 20_000);
-			const app = await open();
-			await app.stop(1000);
-		} finally {
+			app = await open([durable, asker]);
+			expect((await context?.readinessReport(1000))?.answer).toBe("unready");
 			docker("unpause", replica);
 			docker("unpause", secondReplica);
+			paused = false;
+			await waitFor(() => connectedReplicas() === 2 && writable(), 60_000);
+			// Past the second a check of the server serves.
+			await new Promise((r) => setTimeout(r, 1100));
+			expect((await context?.readinessReport(1000))?.answer).toBe("ready");
+		} finally {
+			await app?.stop(1000);
+			if (paused) {
+				docker("unpause", replica);
+				docker("unpause", secondReplica);
+			}
 			await waitFor(() => connectedReplicas() === 2 && writable(), 60_000);
 		}
 	}, 90_000);

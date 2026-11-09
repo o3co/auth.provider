@@ -44,7 +44,8 @@ export function bindingWith(
 			if (p.gates.length > 0 && first) {
 				const ask = { subject, kind: name, transaction, passed, from };
 				for (const gate of p.gates) {
-					if (!(await gate.admits(ask))) return { kind: "binding-proof-required" };
+					// Only `true` admits: a gate answering anything else, whatever its type says, has not.
+					if ((await gate.admits(ask)) !== true) return { kind: "binding-proof-required" };
 				}
 			}
 			const enrolled = await kind.enroll(subject, heldOf(subject, all, kind.kind), from);

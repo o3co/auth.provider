@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import { assemble, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { passkeyHolders, passkeyStore, passkeys, registrations } from "@mod/passkeys";
+import { passkeyClearing, passkeyStore, passkeys, registrations } from "@mod/passkeys";
 import passkeysModule from "@mod/passkeys/module";
 import { passkeysConfig } from "@mod/passkeys/testing";
 import { simulatedStore } from "@mod/store/testing";
@@ -53,7 +53,7 @@ async function composed() {
 	stop = () => app.stop(1000);
 	const between: { afterFirst?: Step; afterRemoval?: Step } = {};
 	const recorded = app.get(revocations);
-	const holders = app.get(passkeyHolders);
+	const holders = app.get(passkeyClearing);
 	let boundaries = 0;
 	const { reset } = resetOver({
 		revocations: {

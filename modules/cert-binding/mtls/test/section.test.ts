@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { signatureAlgorithms } from "../src/pki/pki.ts";
 import { anchorOf, revocationPolicyOf, section } from "../src/section.ts";
 
 const revocationOf = (stated: Record<string, unknown>) => {
@@ -58,6 +59,15 @@ it("holds a path to four intermediates and 2048-bit RSA keys unless stated, and 
 	expect(stated({}).data).toMatchObject({ "max-intermediates": 4, "min-rsa-bits": 2048 });
 	expect(stated({ "max-intermediates": 14 }).success).toBe(true);
 	expect(stated({ "max-intermediates": 15 }).success).toBe(false);
+});
+
+it("takes all nine signature algorithms unless stated, and only those it names", () => {
+	const stated = (more: Record<string, unknown>) =>
+		section.safeParse({ mode: "pki", anchors: ["x"], revocation: { mode: "disabled" }, ...more });
+	expect(stated({}).data).toMatchObject({ "signature-algorithms": signatureAlgorithms });
+	expect(stated({ "signature-algorithms": ["ecdsa-sha384"] }).success).toBe(true);
+	expect(stated({ "signature-algorithms": [] }).success).toBe(false);
+	expect(stated({ "signature-algorithms": ["rsa-pkcs1-sha1"] }).success).toBe(false);
 });
 
 it("reads no anchor from text without a certificate block", () => {

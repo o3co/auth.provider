@@ -35,7 +35,7 @@
 - Boot is refused where access tokens cannot be revoked.
 
 ## Data
-- References of the tokens issued in each session, and the token index, each kept for the token's remaining lifetime on `kernel`'s clock plus an allowance. If lost, tokens would survive a closed session, or answer no session. Pushed-out references still to revoke are kept until done.
+- References of the tokens issued in each session, and the token index, each kept for the token's remaining lifetime on `kernel`'s clock plus an allowance of two minutes, for hosts whose clocks lag (keeping them synchronized is the deployment's). If lost, tokens would survive a closed session, or answer no session. Pushed-out references still to revoke are kept until done.
 
 ## Depends on
 - `kernel`, `session`, `session-participants`, `tokens`, `grants`

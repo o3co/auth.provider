@@ -1,3 +1,5 @@
+import type { SignatureAlgorithm } from "./signatures/signatures.ts";
+
 /** What a client certificate is held to. */
 export interface PathPolicy {
 	/** Trust anchors (DER); a peer never sends one that counts. */
@@ -5,6 +7,8 @@ export interface PathPolicy {
 	/** At most this many certificates between the leaf and an anchor. */
 	readonly maxIntermediates: number;
 	readonly minRsaBits: number;
+	/** The signature algorithms taken on the path, its CRLs and OCSP answers, anchors aside. */
+	readonly signatureAlgorithms: readonly SignatureAlgorithm[];
 }
 
 export interface RevocationPolicy {

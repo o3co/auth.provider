@@ -1,7 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
-import { namesPackages, type OutsideRecord, outsideLock, type Registries } from "@mod/app-output";
+import {
+	namesPackages,
+	type OutsideRecord,
+	outsideLock,
+	type Recorded,
+	type Registries,
+} from "@mod/app-output";
 import type { Declaration } from "@mod/combinations";
 import semver from "semver";
 import { loadsSubpath } from "../exported/contract.ts";
@@ -26,10 +32,11 @@ export interface Outside {
 	readonly references?: string;
 }
 
-/** What was read from a project: the packages, and the registries it installs from. */
+/** What was read from a project: the packages, the registries it installs from, and the dependencies of those let through though fresh. */
 export interface Read {
 	readonly outside: readonly Outside[];
 	readonly registries: Registries;
+	readonly freshDependencies?: readonly Recorded[];
 }
 
 /** The files of a package read, each at most this long; any other is never read. */
@@ -337,14 +344,16 @@ function outsideOf(
 /**
  * The packages outside the release named, as read from `project`, where the operator had pnpm
  * install them: each one's record from the project's lockfile, its manifest and files from its
- * `node_modules`, and the registries the project installs from (pnpm's settings there). Refuses,
- * naming each, what cannot be composed beside the release.
+ * `node_modules`, and the registries the project installs from (pnpm's settings there); and each
+ * name in `fresh` not named so, a package one of them declares, recorded from that lockfile.
+ * Refuses, naming each, what cannot be composed beside the release.
  */
 export function readOutside(
 	project: string,
 	names: readonly string[],
 	release: Release,
 	asking: Asking = {},
+	fresh: readonly string[] = [],
 ): Read {
 	const refusals: string[] = [];
 	const said = (name: string, why: readonly string[]) =>
@@ -360,8 +369,12 @@ export function readOutside(
 			said(name, ["a name in the release's scope"]);
 		return !releaseScopes.some((scope) => name.startsWith(scope));
 	});
+	const dependencies = [...new Set(fresh.filter((name) => !named.includes(name)))];
+	for (const name of dependencies.filter((name) => name === "zod" || isReleaseName(name))) {
+		refusals.push(`--allow-fresh ${name}: held to the release's version`);
+	}
 	if (refusals.length > 0) throw new Error(refusals.join("; "));
-	const registries = registriesIn(project, named, asking);
+	const registries = registriesIn(project, [...named, ...dependencies], asking);
 	if (named.length === 0) return { outside: [], registries };
 	const lock = readFileSync(join(project, "pnpm-lock.yaml"), "utf8");
 	const read: Outside[] = [];
@@ -374,6 +387,53 @@ export function readOutside(
 			refusals.push((error as Error).message);
 		}
 	}
+	const freshDependencies: Recorded[] = [];
+	for (const name of dependencies) {
+		const ranges = read.flatMap(({ record }) => declaredRanges(record, name));
+		if (ranges.length === 0) {
+			const aliased = read.some(({ record }) =>
+				[record.dependencies, record.optionalDependencies, record.peerDependencies].some((group) =>
+					Object.hasOwn(group, name),
+				),
+			);
+			refusals.push(
+				aliased
+					? `--allow-fresh ${name}: declared only as an alias of another package, so no package named so declares it itself`
+					: `--allow-fresh ${name}: neither named npm:${name} nor declared by a package named so`,
+			);
+			continue;
+		}
+		try {
+			const recorded = outsideLock.dependencyRecordOf(lock, name, registries);
+			if (ranges.every((range) => semver.satisfies(recorded.version, range))) {
+				freshDependencies.push(recorded);
+			} else {
+				refusals.push(
+					`--allow-fresh ${name}: the project resolves ${recorded.version}, outside the range a package declares it by`,
+				);
+			}
+		} catch (error) {
+			refusals.push(`--allow-fresh ${(error as Error).message}`);
+		}
+	}
 	if (refusals.length > 0) throw new Error(refusals.join("; "));
-	return { outside: read, registries };
+	return {
+		outside: read,
+		registries,
+		...(freshDependencies.length > 0 ? { freshDependencies } : {}),
+	};
+}
+
+const isReleaseName = (name: string) => releaseScopes.some((scope) => name.startsWith(scope));
+
+/**
+ * Every registry range a record declares `name` by itself, as a dependency, an optional one or a peer
+ * (each resolves beside it); none where it does not, or declares it anywhere as an alias of another package.
+ */
+export function declaredRanges(record: OutsideRecord, name: string): readonly string[] {
+	const groups = [record.dependencies, record.optionalDependencies, record.peerDependencies];
+	const declared = groups.flatMap((group) =>
+		Object.hasOwn(group, name) ? [group[name] as string] : [],
+	);
+	return declared.every((range) => semver.validRange(range) !== null) ? declared : [];
 }

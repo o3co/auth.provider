@@ -27,6 +27,7 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 	const down = { families: unavailableSwitch<FamilyStore>("family store") };
 	let meanwhile: ((id: string) => Promise<void>) | undefined;
 	let beforeAccess: ((id: string) => Promise<void>) | undefined;
+	let beforeLink: (() => Promise<void>) | undefined;
 	/** What redemptions and the settle list were given, as written. */
 	const given: unknown[] = [];
 	const module = defineModule({ name: "refresh-stores", replicaSafe: false, takes: [] }, (m) => [
@@ -60,7 +61,15 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 				return byFamily.add(key, member, lifetimeMs);
 			},
 		})),
-		m.provide(tokenFamilies).by(() => ({ save: links.records.create, read: links.records.read })),
+		m.provide(tokenFamilies).by(() => ({
+			save: async (tokenId: string, record: StoredLink, lifetimeMs: number) => {
+				const first = beforeLink;
+				beforeLink = undefined;
+				if (first) await first();
+				return links.records.create(tokenId, record, lifetimeMs);
+			},
+			read: links.records.read,
+		})),
 		m.provide(settleList).by(() => ({
 			...kept.deferred,
 			add: (id: string) => {
@@ -77,6 +86,10 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 	const landingBeforeAccess = (write: (id: string) => Promise<void>) => {
 		beforeAccess = write;
 	};
+	/** The next link of an access token to its family is preceded by this write. */
+	const landingBeforeLink = (write: () => Promise<void>) => {
+		beforeLink = write;
+	};
 	return {
 		module,
 		kept,
@@ -87,6 +100,7 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 		down,
 		landing,
 		landingBeforeAccess,
+		landingBeforeLink,
 		given,
 	};
 }

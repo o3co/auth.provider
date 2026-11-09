@@ -1,5 +1,5 @@
 import { auditStandIn } from "@mod/audit/testing";
-import { clients } from "@mod/clients";
+import { type Client, type Clients, clients } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import {
 	clientSecret,
@@ -190,6 +190,37 @@ export async function harness(
 		})),
 		m.provide(probed).by((c) => c.collect(routes)),
 	]);
+	/** What `relist` last set, which the clients then answer as every client's section. */
+	let listed: { connections: string[]; "return-uris": string[] } | undefined;
+	/** The clients as built, answering a client found with `listed` once set: a new object, as the one built is shared. */
+	const relisting: Module = {
+		...clientsModule,
+		provides: (clientsModule.provides ?? []).map((part) =>
+			part.contract !== clients
+				? part
+				: {
+						contract: part.contract,
+						create: async (context: Parameters<typeof part.create>[0]) => {
+							const real = (await part.create(context)) as Clients;
+							const relisted = (client: Client): Client =>
+								listed === undefined ? client : { ...client, section: (() => listed) as never };
+							return {
+								...real,
+								find: async (id: string) => {
+									const found = await real.find(id);
+									return found && relisted(found);
+								},
+								authenticate: async (request: HttpRequest) => {
+									const found = await real.authenticate(request);
+									return found.kind === "authenticated"
+										? { ...found, client: relisted(found.client) }
+										: found;
+								},
+							};
+						},
+					},
+		),
+	};
 	const worker = (id: string) =>
 		confidentialClient({
 			id,
@@ -199,7 +230,7 @@ export async function harness(
 	const app = await assemble({
 		modules: [
 			http,
-			clientsModule,
+			relisting,
 			secretHashModule,
 			sessionStandIn,
 			csrfStandIn,
@@ -259,19 +290,7 @@ export async function harness(
 	};
 	/** From now on the clients answer the worker with these connections and returns. */
 	const relist = (connections: string[], returns: string[]) => {
-		const all = app.get(clients);
-		const { find, authenticate } = all;
-		const section = () => ({ connections, "return-uris": returns }) as never;
-		all.find = async (id) => {
-			const found = await find(id);
-			return found && { ...found, section };
-		};
-		all.authenticate = async (request) => {
-			const found = await authenticate(request);
-			return found.kind === "authenticated"
-				? { ...found, client: { ...found.client, section } }
-				: found;
-		};
+		listed = { connections, "return-uris": returns };
 	};
 	const lodge = (more: Record<string, unknown> = {}, as = "worker") =>
 		call(

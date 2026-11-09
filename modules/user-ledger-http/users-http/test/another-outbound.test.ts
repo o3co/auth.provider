@@ -21,6 +21,7 @@ it("logs the failure a second copy of outbound throws by its kind, not as no ans
 		credential: undefined,
 		narrowerOf: () => ({}),
 		warn: (event, fields) => void warned.push([event, fields]),
+		now: Date.now,
 	});
 	await expect(
 		ledger.verify(configuredUrl("https://users.example/v"), "alice", "pw"),

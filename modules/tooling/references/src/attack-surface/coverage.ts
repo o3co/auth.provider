@@ -106,6 +106,11 @@ export const coverage: Coverage = {
 	],
 	loosening: [
 		{
+			key: "redis.accept-plaintext",
+			weakens:
+				"`true`: `redis://` off this host is taken in production too, the store's traffic and the URL's password readable and changeable on the way; warned at every boot",
+		},
+		{
 			key: "mail-smtp.security",
 			weakens:
 				"`none`: no TLS, so the relay's authentication and the mail go in the clear, to a loopback relay only",
@@ -284,6 +289,26 @@ export const coverage: Coverage = {
 				"past the default day, up to 30: a key set is still used that long after its fetch while no new one can be had, a key removed upstream among it",
 		},
 		{
+			key: "external-jwt.key-set-refresh",
+			weakens:
+				"past the default hour, up to `key-set-max-age`: a key removed upstream is still taken that long after the set's fetch",
+		},
+		{
+			key: "keys.jwks-cache",
+			weakens:
+				"past the default five minutes, up to a day: a verifier may keep taking a key removed from the published set that long",
+		},
+		{
+			key: "rp-logout.logout-token-lifetime",
+			weakens:
+				"past the default five minutes, up to 15: a logout token is taken that long, and one without `sid`, replayed where the client keeps no `jti`, ends the subject's later sessions there",
+		},
+		{
+			key: "mfa-totp.period",
+			weakens:
+				"`60s`: a code is taken for up to three steps of a minute (with `drift-steps` 1), twice the default's window, so a code phished or read over a shoulder works for an attacker that much longer; it applies to factors enrolled under it",
+		},
+		{
 			key: "client-assertion.max-lifetime",
 			weakens: "past the default hour, up to a day: a client assertion is taken that long",
 		},
@@ -443,6 +468,10 @@ export const coverage: Coverage = {
 			why: "how deep forwarding is followed through trusted proxies: part of naming them",
 		},
 		{
+			key: "metrics-prometheus.path",
+			why: "only where the scrape route answers; keeping it from outside the deployment is the layer in front's, whatever the path, as the security model leaves it",
+		},
+		{
 			key: "outbound.direct-despite-proxy",
 			why: "only whether boot goes on while a proxy variable is set; the variables are never read",
 		},
@@ -472,6 +501,10 @@ export const coverage: Coverage = {
 		{
 			key: "http.trusted-proxies",
 			why: "the peers whose forwarding is believed: a trust assumption the security model states",
+		},
+		{
+			key: "login-passkey.counts-as-mfa",
+			why: "on by default, as holding the key and the user verified in one operation make a multi-factor authenticator; `false` takes `mfa` from a passkey login, which only narrows. Trusting the authenticator's word that it verified its user is the deployment's, as the security model leaves it",
 		},
 	],
 	manualTasks: [

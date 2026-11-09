@@ -1,6 +1,6 @@
 import type { BuildContext } from "@mod/kernel";
 import type { LoginGate } from "@mod/login-gates";
-import { type PasskeyHolders, passkeyHolders } from "@mod/passkeys";
+import { type PasskeyHolding, passkeyHolding } from "@mod/passkeys";
 import { type Recorded, recordedIn, recordedTakes } from "../audited/audited.ts";
 import type { Settings } from "../section.ts";
 
@@ -11,7 +11,7 @@ import type { Settings } from "../section.ts";
  */
 export function credentialPolicy(p: {
 	readonly refuses: boolean;
-	readonly holders: Pick<PasskeyHolders, "held">;
+	readonly holders: Pick<PasskeyHolding, "held">;
 	readonly recorded: Recorded;
 	readonly exempt: string | undefined;
 }): LoginGate {
@@ -31,11 +31,11 @@ export function credentialPolicy(p: {
 }
 
 /** What `gateIn` takes from the build context, its own and the records' it asks. */
-export const gateTakes = [passkeyHolders, ...recordedTakes] as const;
+export const gateTakes = [passkeyHolding, ...recordedTakes] as const;
 
 export const gateIn = async (c: BuildContext<Settings>) => {
 	const refuses = c.section.password === "refused-when-held";
-	const holders = await c.get(passkeyHolders);
+	const holders = await c.get(passkeyHolding);
 	// Without a witness a lost passkey store reads as holding none, letting a former holder's password in.
 	if (refuses && !holders.witnessed) {
 		return c.refuse(

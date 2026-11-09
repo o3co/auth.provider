@@ -4,7 +4,7 @@ import { site } from "@mod/http";
 import { issuer } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
-import { clientKeys, clientKeysIn, keysTakes } from "./keys/keys.ts";
+import { clientKeys, clientKeysIn, keysTakes, unreadKeys } from "./keys/keys.ts";
 import { assertionMethod } from "./method.ts";
 import { section } from "./section.ts";
 import { spentAssertions } from "./store.ts";
@@ -31,12 +31,17 @@ export default defineModule(
 				return c.refuse("client-assertion", "the token endpoint's location needs a public origin");
 			}
 			// Told at each start, by client: an assertion such a client made for another authorization
-			// server that names this one's token endpoint can be used here.
+			// server that names this one's token endpoint can be used here; and each written key none of
+			// the algorithms taken reads, as no assertion is checked against it.
 			const known = c.late(clients);
 			c.onStart(() => {
 				for (const client of known().registered()) {
-					if (client.section(clientKeys)["accept-loose-audience"]) {
+					const keys = client.section(clientKeys);
+					if (keys["accept-loose-audience"]) {
 						c.log.warn("client-assertion.accept_loose_audience", { client: client.id });
+					}
+					for (const key of unreadKeys(keys, c.section.algorithms)) {
+						c.log.warn("client-assertion.key_unread", { client: client.id, key });
 					}
 				}
 			});
