@@ -162,7 +162,7 @@ describe("judging a CRL", () => {
 		}));
 		const der = await crlOf({ by: root, revoked: serials as unknown as Issued[] });
 		const ends: string[] = [];
-		const read = (name: string, signal?: AbortSignal) =>
+		const read = (name: string, signal = new AbortController().signal) =>
 			verifyCrl(der, root.certificate, now, 0, signatureAlgorithms, signal).then((verified) => {
 				ends.push(name);
 				return verified.kind;
@@ -172,13 +172,11 @@ describe("judging a CRL", () => {
 		const second = read("second");
 		const third = read("third", leaving.signal);
 		leaving.abort();
-		expect(await third).toBe("unusable");
+		// Its own kind, not the CRL's: it says nothing of the CRL.
+		expect(await third).toBe("aborted");
 		expect(
 			await verifyCrl(der, root.certificate, now, 0, signatureAlgorithms, leaving.signal),
-		).toEqual({
-			kind: "unusable",
-			reason: "aborted",
-		});
+		).toEqual({ kind: "aborted" });
 		expect([await first, await second]).toEqual(["verified", "verified"]);
 		// The one that left ended first; the others in turn.
 		expect(ends).toEqual(["third", "first", "second"]);

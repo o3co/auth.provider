@@ -20,7 +20,7 @@ Internal module of `x509-path`: reading a certificate's revocation material, CRL
 - CRL: a delta or scoped CRL, an indirect entry, or any other critical extension is unsupported.
 - CRL: its CRLNumber is read whole, however large; one that is not a non-negative INTEGER makes the CRL malformed.
 - CRL: one past 1 MiB is malformed, unread. One is read allowing as many ASN.1 nodes as its bytes could hold (asn1js's own 10,000 would refuse some 3,300 entries); OCSP answers and certificates keep asn1js's cap.
-- CRL: read one at a time in the process, mtls's and outbound's alike, as each peaks while it is read: a dense one of 1 MiB (some 45,000 serials) near 165 MB and 1 s, one of 20-byte serials near 98 MB. A waiter whose signal ends leaves unread (`aborted`). A verified CRL keeps about 47 B a serial it lists.
+- CRL: read one at a time in the process, mtls's and outbound's alike, as each peaks while it is read: a dense one of 1 MiB (some 45,000 serials) near 165 MB and 1 s, one of 20-byte serials near 98 MB. A waiter whose signal ends leaves unread, answered `aborted`, a kind apart from unusable as it says nothing of the CRL. A verified CRL keeps about 47 B a serial it lists.
 - CRL: judged of a certificate, its issuer's name, its right to sign CRLs and its dates are asked again, every time.
 - OCSP: the request names the certificate by SHA-1 hashes of its issuer's name and key, with a nonce the answer must carry back where asked.
 - OCSP: the signer is the issuer, or a responder it signed: in date, for OCSP signing, held to the path's key and signature rules, with no unknown or unparsable extension.

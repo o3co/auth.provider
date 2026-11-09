@@ -111,8 +111,30 @@ const reading = turns();
  * with the issuer's key, by an algorithm `taken`; a this update past `now` by more than `skewMs` is
  * not yet in force; a delta, scoped or indirect CRL, or any critical extension, is unsupported.
  * Past 1 MiB, it is malformed, unread. CRLs are read one at a time; one whose `signal` ends while it
- * waits its turn is `aborted`, unread.
+ * waits its turn is `aborted`, unread: that says nothing of the CRL, so a caller tells it apart.
  */
+export function verifyCrl(
+	der: Uint8Array,
+	issuer: pkijs.Certificate,
+	now: number,
+	skewMs: number,
+	taken: readonly SignatureAlgorithm[],
+): Promise<
+	| { readonly kind: "verified"; readonly crl: VerifiedCrl }
+	| { readonly kind: "unusable"; readonly reason: string }
+>;
+export function verifyCrl(
+	der: Uint8Array,
+	issuer: pkijs.Certificate,
+	now: number,
+	skewMs: number,
+	taken: readonly SignatureAlgorithm[],
+	signal: AbortSignal,
+): Promise<
+	| { readonly kind: "verified"; readonly crl: VerifiedCrl }
+	| { readonly kind: "unusable"; readonly reason: string }
+	| { readonly kind: "aborted" }
+>;
 export async function verifyCrl(
 	der: Uint8Array,
 	issuer: pkijs.Certificate,
@@ -123,9 +145,10 @@ export async function verifyCrl(
 ): Promise<
 	| { readonly kind: "verified"; readonly crl: VerifiedCrl }
 	| { readonly kind: "unusable"; readonly reason: string }
+	| { readonly kind: "aborted" }
 > {
 	if (der.byteLength > mostCrlBytes) return { kind: "unusable", reason: "malformed" };
-	if (!(await reading.take(signal))) return { kind: "unusable", reason: "aborted" };
+	if (!(await reading.take(signal))) return { kind: "aborted" };
 	try {
 		return await readCrl(der, issuer, now, skewMs, taken);
 	} finally {
@@ -139,7 +162,10 @@ async function readCrl(
 	now: number,
 	skewMs: number,
 	taken: readonly SignatureAlgorithm[],
-): ReturnType<typeof verifyCrl> {
+): Promise<
+	| { readonly kind: "verified"; readonly crl: VerifiedCrl }
+	| { readonly kind: "unusable"; readonly reason: string }
+> {
 	const unusable = (reason: string) => ({ kind: "unusable" as const, reason });
 	const crl = decoded(
 		der,
