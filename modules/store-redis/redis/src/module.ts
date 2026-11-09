@@ -5,13 +5,16 @@ import { Redis } from "ioredis";
 import { z } from "zod";
 import { clientDebugs, clientOptions, plaintextWarning, queryRefusal } from "./client/client.ts";
 import { goodReplicaProblems, redisProbe } from "./probe/probe.ts";
+import { clusterRefused, redisStore, refusedCommands, roundProblems } from "./redis-store.ts";
 import {
-	clusterRefused,
-	redisStore,
-	refusedCommands,
-	refusedForGood,
-	roundProblems,
-} from "./redis-store.ts";
+	durabilityProblems,
+	evictionProblems,
+	type Role,
+	replicationProblems,
+	roleOf,
+	type SettingName,
+	serverSettings,
+} from "./settings/settings.ts";
 
 const section = z.strictObject({
 	url: z
@@ -101,55 +104,7 @@ const section = z.strictObject({
 		),
 });
 
-type Declared = NonNullable<z.output<typeof section>["server-settings"]>;
-type SettingName = keyof Declared;
-
 const minimumVersion = [7, 0];
-
-/** Reads a server setting by CONFIG GET; where the server refuses it or shows nothing, the operator's declaration. */
-type Settings = (name: SettingName) => Promise<string | undefined>;
-
-/**
- * The server's settings: CONFIG GET where it answers, a declared value that differs then refused;
- * the declaration where the server refuses CONFIG or its answer is empty, which shows nothing to
- * compare, a setting left undeclared then refused.
- */
-function serverSettings(client: Redis, declared: Declared) {
-	const problems: string[] = [];
-	const used = new Set<SettingName>();
-	const declaredOf = (name: SettingName) =>
-		declared[name] === undefined ? undefined : String(declared[name]);
-	const taken = (name: SettingName, why: string) => {
-		used.add(name);
-		const value = declaredOf(name);
-		if (value === undefined) problems.push(`${why}: declare ${name} in redis.server-settings`);
-		return value;
-	};
-	const read: Settings = async (name) => {
-		let answered: string | undefined;
-		try {
-			answered = ((await client.config("GET", name)) as string[])[1];
-		} catch (error) {
-			if (!refusedForGood(error)) throw error;
-			return taken(name, "the server refuses CONFIG GET");
-		}
-		if (answered === undefined) return taken(name, "the server's CONFIG GET does not show it");
-		const value = declaredOf(name);
-		if (value !== undefined && value !== answered) {
-			problems.push(`redis.server-settings.${name} differs from what the server answers`);
-		}
-		return answered;
-	};
-	/** Compares every declared setting the checks did not read, so none is left unchecked where it can be. */
-	const rest = async () => {
-		for (const name of Object.keys(declared) as SettingName[]) await read(name);
-	};
-	return { read, rest, problems, used };
-}
-
-type Role = [string, number, unknown[]];
-const roleOf = async (client: Redis) => (await client.call("ROLE")) as Role;
-const replicasOf = (role: Role) => (Array.isArray(role[2]) ? role[2].length : 0);
 
 async function serverProblems(client: Redis, role: Role): Promise<string[]> {
 	const problems: string[] = [];
@@ -166,66 +121,6 @@ async function serverProblems(client: Redis, role: Role): Promise<string[]> {
 		problems.push(`needs Redis ${minimumVersion.join(".")} or later`);
 	}
 	return problems;
-}
-
-async function evictionProblems(settings: Settings, declared: readonly Space[]): Promise<string[]> {
-	const kept = declared.filter((s) => s.guarantees.includes("no-eviction"));
-	if (kept.length === 0 || (await settings("maxmemory-policy")) === "noeviction") return [];
-	const names = kept.map((s) => s.name).join(", ");
-	return [`the no eviction guarantee needs maxmemory-policy noeviction: ${names}`];
-}
-
-async function replicationProblems(
-	settings: Settings,
-	role: Role,
-	declared: readonly Space[],
-	replication: "none" | "replicas" | undefined,
-): Promise<string[]> {
-	const replicated = declared.filter(
-		(s) => s.guarantees.includes("replicated") || s.guarantees.includes("confirmed-reads"),
-	);
-	if (replicated.length === 0) return [];
-	if (replication === undefined) {
-		const names = replicated.map((s) => s.name).join(", ");
-		return [
-			`spaces need replicated or confirmed reads, so redis.replication (none or replicas) is required: ${names}`,
-		];
-	}
-	if (
-		replication === "replicas" &&
-		(Number(await settings("min-replicas-to-write")) < 1 ||
-			Number(await settings("min-replicas-max-lag")) < 1)
-	) {
-		return [
-			"with replication replicas, set min-replicas-to-write and min-replicas-max-lag to 1 or more",
-		];
-	}
-	if (replication === "none" && replicasOf(role) > 0) {
-		return ["replication is none but a replica is connected"];
-	}
-	return [];
-}
-
-async function durabilityProblems(
-	settings: Settings,
-	declared: readonly Space[],
-	durability: "none" | undefined,
-): Promise<string[]> {
-	const durable = declared.filter((s) => s.guarantees.includes("durable"));
-	if (durable.length === 0 || durability === "none") return [];
-	// Each is read, so a refusal names every setting left undeclared at once. A rewrite that skips
-	// its fsyncs loses an acknowledged write in a crash, as appendfsync other than always does.
-	const [appendonly, appendfsync, onRewrite] = [
-		await settings("appendonly"),
-		await settings("appendfsync"),
-		await settings("no-appendfsync-on-rewrite"),
-	];
-	const persisted = appendonly === "yes" && appendfsync === "always" && onRewrite === "no";
-	if (persisted) return [];
-	const names = durable.map((s) => s.name).join(", ");
-	return [
-		`set appendonly yes, appendfsync always and no-appendfsync-on-rewrite no on the server (docs/runbook.md, Redis), which the durable guarantee of these spaces needs: ${names}`,
-	];
 }
 
 /** What the server's settings fail to give the declared spaces, empty when everything holds; and the settings taken as declared. */

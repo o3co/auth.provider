@@ -16,6 +16,7 @@ import { answerOf, list } from "./answer/answer.ts";
 import { keysUnder } from "./keys.ts";
 import { confirmationPipeline, confirmationRounds } from "./round/round.ts";
 import * as scripts from "./scripts.ts";
+import { refusedForGood } from "./settings/settings.ts";
 
 /** How many keys SCAN is asked for at a time. */
 const scanPage = 200;
@@ -36,11 +37,6 @@ export interface RedisStoreOptions {
 	/** What the operator declared: no failover at all, or replicas that must take every write. */
 	readonly replication: "none" | "replicas" | undefined;
 }
-
-/** Whether the server refuses a command for good, for want of permission or of the command; any other error is no answer. */
-export const refusedForGood = (error: unknown) =>
-	error instanceof ReplyError &&
-	/^(NOPERM|ERR unknown (sub)?command)\b/i.test((error as Error).message);
 
 /** How boot refuses a server that holds only some of the store's keys, as a cluster node does. */
 export const clusterRefused =
