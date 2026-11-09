@@ -334,6 +334,20 @@ describe("the rules a caller chooses", () => {
 			...more,
 		});
 
+	it("takes as many certificates sent as the intermediates allowed and one more, and refuses allowing more than 14", async () => {
+		const { root, intermediate, client } = await hierarchy();
+		const twelve = policyOf([root.der], { maxIntermediates: 12 });
+		const padding = await Promise.all(Array.from({ length: 13 }, (_, n) => issue({ cn: `p${n}` })));
+		const sent = (n: number) => [intermediate.der, ...padding.slice(0, n - 1).map((p) => p.der)];
+		expect(await reasonOf(client.der, sent(13), twelve)).toBe("path of 3");
+		expect(await reasonOf(client.der, sent(14), twelve)).toBe("path");
+		const trust = trustOf({ anchors: [root.der], selfSignedAnchorsOnly: false });
+		const fifteen = policyOf([root.der], { maxIntermediates: 15 });
+		await expect(pathOf(client.der, [intermediate.der], trust, fifteen, now)).rejects.toThrow(
+			TypeError,
+		);
+	});
+
 	it("takes an EC key only on a curve taken, anchor included, and any curve where none is given", async () => {
 		const root = await issue({ cn: "root", ca: true, keys: await ecKeys("P-384") });
 		const leaf = await issue({ cn: "leaf", by: root, eku: [serverAuth] });

@@ -47,7 +47,7 @@ describe("choosing a path", () => {
 		expect(pickOf(leaf, [x, yByX, yByRoot], [root])).toBe("leaf > X > Y > R");
 	});
 
-	it("takes no certificate with more than four issuers, nor more than ten sent", async () => {
+	it("takes no certificate with more than four issuers, nor more than ten sent, or the intermediates allowed and one more", async () => {
 		const root = await issue({ cn: "R", ca: true });
 		const first = await issue({ cn: "I", by: root, ca: true });
 		const leaf = await issue({ cn: "leaf", by: first });
@@ -60,6 +60,13 @@ describe("choosing a path", () => {
 		expect(pickOf(leaf, [first, ...(await again(4))], [root])).toBe("path");
 		const padding = await Promise.all(Array.from({ length: 10 }, (_, n) => issue({ cn: `p${n}` })));
 		expect(pickOf(leaf, [first, ...padding], [root])).toBe("path");
+		// With 14 intermediates allowed, a peer may send 15.
+		const extra = await Promise.all(Array.from({ length: 4 }, (_, n) => issue({ cn: `q${n}` })));
+		const fifteen = [first, ...padding, ...extra];
+		expect(pickOf(leaf, fifteen, [root], 14)).toBe("leaf > I > R");
+		expect(pickOf(leaf, [...fifteen, await issue({ cn: "q4" })], [root], 14)).toBe("path");
+		for (const allowed of [15, -1, 1.5])
+			expect(() => pickOf(leaf, [], [root], allowed)).toThrow(TypeError);
 	});
 
 	it("goes on past an intermediate the trust holds to its root, and tells a path past the intermediates allowed", async () => {

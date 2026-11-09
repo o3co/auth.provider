@@ -3,8 +3,11 @@ import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import { decoded, oid, parsedExtension } from "../der.ts";
 
-/** The most certificates a peer may send, issuers one certificate may have, and certificates one choice looks at. */
-const most = { sent: 10, edges: 4, looked: 32 } as const;
+/**
+ * The most certificates a peer may send, short of a path's intermediates, issuers one certificate may
+ * have, certificates one choice looks at, and intermediates a caller may allow.
+ */
+const most = { sent: 10, edges: 4, looked: 32, intermediates: 14 } as const;
 
 /** A certificate as a choice reads it: its DER and key, node's reading, and what an issuer is found by. */
 interface Read {
@@ -107,8 +110,9 @@ export type Chosen =
  * trust's certificates. An issuer is one node takes as its issuer (`checkIssued`) whose key verifies
  * its signature; none is entered twice, no certificate may have more than 4 of them, no choice looks at
  * more than 32 certificates or more than `maxIntermediates` deep (told so where that alone left an
- * issuer out), and a peer sends 10 at most. Among
- * issuers, those sent come first, in the order sent, then the trust's, in DER order.
+ * issuer out), and a peer sends 10, or the intermediates allowed and one more, at most. Among
+ * issuers, those sent come first, in the order sent, then the trust's, in DER order. Allowing more
+ * than 14 intermediates, or a count that is not one, is a TypeError.
  */
 export function chosen(
 	leaf: Uint8Array,
@@ -117,7 +121,14 @@ export function chosen(
 	maxIntermediates: number,
 ): Chosen {
 	const trust = given as unknown as Held;
-	if (sent.length > most.sent) return { kind: "path" };
+	if (
+		!Number.isInteger(maxIntermediates) ||
+		maxIntermediates < 0 ||
+		maxIntermediates > most.intermediates
+	) {
+		throw new TypeError("intermediates allowed outside 0 to 14");
+	}
+	if (sent.length > Math.max(most.sent, maxIntermediates + 1)) return { kind: "path" };
 	const start = readOf(leaf);
 	const offered = sent.map(readOf);
 	if (!start || offered.some((one) => one === undefined)) return { kind: "malformed" };
