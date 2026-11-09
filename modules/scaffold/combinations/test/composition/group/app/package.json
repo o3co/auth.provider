@@ -10,7 +10,7 @@
 		"@c/audit": "workspace:*",
 		"@c/helper": "workspace:*",
 		"@c/shapes": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.6"
 	},
 	"devDependencies": {
 		"@c/extra": "workspace:*"
