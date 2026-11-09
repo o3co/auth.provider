@@ -1,6 +1,7 @@
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import {
+	berOf,
 	decoded,
 	generalName,
 	isHold,
@@ -133,7 +134,7 @@ function reasonOf(status: asn1js.BaseBlock) {
 
 function echoes(extensions: readonly pkijs.Extension[], nonce: Uint8Array): boolean {
 	const echoed = extensions.find((e) => e.extnID === oid.ocspNonce);
-	const value = echoed && asn1js.fromBER(echoed.extnValue.valueBlock.valueHexView).result;
+	const value = echoed && berOf(echoed.extnValue.valueBlock.valueHexView).result;
 	return value instanceof asn1js.OctetString && same(value.valueBlock.valueHexView, nonce);
 }
 
@@ -157,7 +158,7 @@ export async function judgeOcsp(
 	// The inner response is read as the engine reads it, bytes past its end ignored.
 	let basic: pkijs.BasicOCSPResponse;
 	try {
-		const inner = asn1js.fromBER(bytes.response.valueBlock.valueHexView);
+		const inner = berOf(bytes.response.valueBlock.valueHexView);
 		basic = new pkijs.BasicOCSPResponse({ schema: inner.result });
 	} catch {
 		return unusable("malformed");

@@ -113,6 +113,37 @@ describe("judging a CRL", () => {
 		).toEqual({ kind: "revoked", until: next, held: false });
 	});
 
+	it("reads a CRL of tens of thousands of entries, past asn1js's own cap of nodes, in time linear in its size", async () => {
+		const now = Date.now();
+		const root = await issue({ cn: "root", ca: true });
+		const listed = await issue({ cn: "client", by: root });
+		const other = await issue({ cn: "other", by: root });
+		// Serials as a public CA writes them, sixteen bytes; each entry some three nodes.
+		const serialOf = (n: number) => {
+			const bytes = new Uint8Array(16);
+			bytes[0] = 0x01;
+			new DataView(bytes.buffer).setUint32(12, n);
+			return { certificate: { serialNumber: new asn1js.Integer({ valueHex: bytes.buffer }) } };
+		};
+		const timed = async (entries: number) => {
+			const revoked = [listed, ...Array.from({ length: entries - 1 }, (_, n) => serialOf(n))];
+			const der = await crlOf({ by: root, revoked: revoked as Issued[] });
+			const started = performance.now();
+			const verified = await verifyCrl(der, root.certificate, now, 0, signatureAlgorithms);
+			const ms = performance.now() - started;
+			if (verified.kind !== "verified") throw new Error(verified.reason);
+			expect(verified.crl.listed.size).toBe(entries);
+			const says = (cert: Issued) => crlSays(verified.crl, cert.certificate, root.certificate, now);
+			expect([says(listed).kind, says(other).kind]).toEqual(["revoked", "good"]);
+			return ms;
+		};
+		const small = await timed(3_000);
+		await timed(3_500);
+		const large = await timed(30_000);
+		// Ten times the entries; well under a hundred times the time.
+		expect(large).toBeLessThan(small * 40);
+	}, 60_000);
+
 	it("takes a CRL holding a string that does not decode as malformed", async () => {
 		const { intermediate, client } = await hierarchy();
 		const garbled = new pkijs.CertificateRevocationList({
