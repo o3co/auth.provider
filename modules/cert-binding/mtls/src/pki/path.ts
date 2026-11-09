@@ -1,5 +1,6 @@
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
+import { chosen } from "./choice/choice.ts";
 import type { PathPolicy } from "./contract.ts";
 import { decoded, keyUsageAllows, oid, parsedExtension, same, usage } from "./der.ts";
 import { isSelfIssued, nameConstraintsRefusal } from "./names.ts";
@@ -87,8 +88,6 @@ function refusalOf(path: readonly pkijs.Certificate[], policy: PathPolicy): stri
 export const certificateOf = (der: Uint8Array) =>
 	decoded(der, (schema) => new pkijs.Certificate({ schema }));
 
-const parsed = (c: pkijs.Certificate | undefined): c is pkijs.Certificate => c !== undefined;
-
 /** The path from the leaf to an anchor, through the chain the client sent, as of `now`. */
 export async function pathOf(
 	leaf: Uint8Array,
@@ -99,23 +98,27 @@ export async function pathOf(
 	| { readonly kind: "path"; readonly path: readonly pkijs.Certificate[] }
 	| { readonly kind: "invalid"; readonly reason: string }
 > {
-	// The engine takes the end entity last, and drops a certificate sent twice.
-	const sent = [...chain.filter((der) => !same(der, leaf)), leaf];
-	const certificates = sent.map(certificateOf);
-	const anchors = policy.anchors.map(certificateOf);
-	if (!certificates.every(parsed) || !anchors.every(parsed)) {
-		return { kind: "invalid", reason: "malformed" };
-	}
+	const sent = chain.filter((der) => !same(der, leaf));
+	const picked = chosen(leaf, sent, policy.anchors, policy.maxIntermediates);
+	if (picked.kind !== "chain") return { kind: "invalid", reason: picked.kind };
+	const certificates = picked.chain.map(certificateOf) as pkijs.Certificate[];
+	// The engine walks this chain alone: each certificate's issuer is the next, where it signed it.
+	const next = new Map(certificates.slice(0, -1).map((cert, at) => [cert, certificates[at + 1]]));
 	const engine = new pkijs.CertificateChainValidationEngine({
-		trustedCerts: anchors,
-		certs: certificates,
+		trustedCerts: certificates.slice(-1),
+		// The end entity last, as the engine takes it.
+		certs: certificates.slice(0, -1).reverse(),
 		checkDate: new Date(now),
+		findIssuer: async (cert, _engine, crypto) => {
+			const issuer = next.get(cert);
+			return issuer && (await cert.verify(issuer, crypto).catch(() => false)) ? [issuer] : [];
+		},
 	});
 	const built = await engine.verify().catch(() => undefined);
 	const path = built?.certificatePath ?? [];
-	if (!built?.result || path.length === 0) return { kind: "invalid", reason: "path" };
-	// The path must start with the leaf sent itself: the certificate a token is bound to.
-	if (path[0] !== certificates.at(-1)) return { kind: "invalid", reason: "path" };
+	const walked =
+		path.length === certificates.length && path.every((cert, at) => cert === certificates[at]);
+	if (!built?.result || !walked) return { kind: "invalid", reason: "path" };
 	const refused = refusalOf(path, policy);
 	return refused ? { kind: "invalid", reason: refused } : { kind: "path", path };
 }
