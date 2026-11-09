@@ -1,5 +1,8 @@
+import { issue } from "@mod/x509-path/testing";
+import * as asn1js from "asn1js";
+import * as pkijs from "pkijs";
 import { expect, it } from "vitest";
-import { signatureAlgorithms } from "../src/pki/pki.ts";
+import { isCertificate, signatureAlgorithms } from "../src/pki/pki.ts";
 import { anchorOf, revocationPolicyOf, section } from "../src/section.ts";
 
 const revocationOf = (stated: Record<string, unknown>) => {
@@ -72,6 +75,19 @@ it("takes all nine signature algorithms unless stated, and only those it names",
 
 it("reads no anchor from text without a certificate block", () => {
 	expect(anchorOf("   ")).toBeUndefined();
+});
+
+it("reads an anchor x509-path takes, and none from a certificate it would not, though pkijs reads it", async () => {
+	const pem = (der: Uint8Array) =>
+		`-----BEGIN CERTIFICATE-----\n${Buffer.from(der).toString("base64")}\n-----END CERTIFICATE-----`;
+	const root = await issue({ cn: "root", ca: true });
+	expect(anchorOf(pem(root.der))).toEqual(root.der);
+	// An empty serial number: pkijs reads it, node does not, so it could make no trust.
+	const bare = new pkijs.Certificate({ schema: asn1js.fromBER(root.der.slice().buffer).result });
+	bare.serialNumber = new asn1js.Integer({ valueHex: new ArrayBuffer(0) });
+	const unread = new Uint8Array(bare.toSchema(true).toBER(false));
+	expect(isCertificate(unread)).toBe(true);
+	expect(anchorOf(pem(unread))).toBeUndefined();
 });
 
 it("takes revocation hosts as host-entries reads a host list, and refuses anything else", () => {

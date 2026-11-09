@@ -2,7 +2,7 @@ import { hostEntry } from "@mod/host-entries";
 import { setting } from "@mod/kernel";
 import { z } from "zod";
 import type { RevocationPolicy } from "./pki/contract.ts";
-import { isCertificate, signatureAlgorithms } from "./pki/pki.ts";
+import { isAnchor, signatureAlgorithms } from "./pki/pki.ts";
 
 const positive = (max: number, fallback: number) =>
 	z.number().int().min(1).max(max).prefault(fallback);
@@ -100,7 +100,7 @@ export function anchorOf(pem: string): Uint8Array | undefined {
 	const [only, ...more] = [...pem.matchAll(pattern)];
 	if (!only || more.length > 0 || pem.replace(pattern, "").trim() !== "") return undefined;
 	const der = new Uint8Array(Buffer.from((only[1] ?? "").replace(/\s+/g, ""), "base64"));
-	return isCertificate(der) ? der : undefined;
+	return isAnchor(der) ? der : undefined;
 }
 
 type PkiSection = Extract<z.output<typeof section>, { mode: "pki" }>;

@@ -22,6 +22,16 @@ const reasonOf = (refusal: PathRefusal) =>
 /** Whether the bytes are one certificate (DER) and nothing else. */
 export const isCertificate = (der: Uint8Array) => certificateOf(der) !== undefined;
 
+/** Whether the bytes are a certificate `x509-path` takes as an anchor, as the operator writes them. */
+export function isAnchor(der: Uint8Array): boolean {
+	try {
+		trustOf({ anchors: [der], selfSignedAnchorsOnly: false });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /** Checks a client's path to the anchors, and its revocation where a policy says how. */
 export function pkiOver(
 	path: PathPolicy,
