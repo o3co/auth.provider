@@ -1,6 +1,6 @@
 import type * as pkijs from "pkijs";
 import type { PathPolicy, RevocationPolicy, Sources } from "../contract.ts";
-import { crlSource } from "./crl-source.ts";
+import { crlSource, type KeptCrl, mostKeptSerials, serialsIn } from "./crl-source.ts";
 import { expiring, keyOf, oneAtATime } from "./kept.ts";
 import { type KeptAnswer, ocspSource } from "./ocsp-source.ts";
 import {
@@ -25,7 +25,10 @@ export function revocationOver(
 	policy: RevocationPolicy & Pick<PathPolicy, "minRsaBits" | "signatureAlgorithms">,
 	sources: Sources,
 ) {
-	const crls = expiring<Uint8Array | Failed>(policy.crlEntries, sources.now);
+	const crls = expiring<KeptCrl>(policy.crlEntries, sources.now, {
+		most: mostKeptSerials,
+		weigh: serialsIn,
+	});
 	const answers = expiring<KeptAnswer | Failed>(policy.ocspEntries, sources.now);
 	// Only a hold is ever lifted, so any other revocation stands after what said it ends.
 	const revoked = expiring<true>(policy.ocspEntries, sources.now);
