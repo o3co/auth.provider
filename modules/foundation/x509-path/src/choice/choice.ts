@@ -53,6 +53,8 @@ export type Trust = { readonly [trusted]: true };
 /** What a trust holds: its anchors' keys, and every certificate indexed by key identifier and subject. */
 interface Held {
 	readonly anchors: ReadonlySet<string>;
+	/** Every certificate, in DER order: asked in turn where the index finds no issuer. */
+	readonly all: readonly Read[];
 	readonly bySki: ReadonlyMap<string, readonly Read[]>;
 	readonly bySubject: ReadonlyMap<string, readonly Read[]>;
 }
@@ -94,6 +96,7 @@ export function trustOf(given: {
 	);
 	const held: Held = Object.freeze({
 		anchors: new Set(anchors.map((anchor) => anchor.key)),
+		all,
 		bySki: indexed(all, (one) => one.ski),
 		bySubject: indexed(all, (one) => one.subject),
 	});
@@ -133,18 +136,24 @@ export function chosen(
 	const offered = sent.map(readOf);
 	if (!start || offered.some((one) => one === undefined)) return { kind: "malformed" };
 	const fromPeer = offered as Read[];
-	const candidatesOf = (node: Read) => {
+	const issuersOf = (node: Read) => {
 		const seen = new Set<string>();
 		const keep = (one: Read) => {
 			if (seen.has(one.key)) return false;
 			seen.add(one.key);
 			return true;
 		};
-		const fromTrust = [
+		const isIssuer = (issuer: Read) =>
+			node.x509.checkIssued(issuer.x509) && node.x509.verify(issuer.x509.publicKey);
+		const found = [
 			...(node.aki ? (trust.bySki.get(node.aki) ?? []) : []),
 			...(trust.bySubject.get(node.issuer) ?? []),
 		].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-		return [...fromPeer.filter(keep), ...fromTrust.filter(keep)];
+		const sent = fromPeer.filter(keep).filter(isIssuer);
+		const trusted = found.filter(keep).filter(isIssuer);
+		// The index matches a name's DER as written; where it finds none, every one is asked, as node
+		// compares names (another string type, say).
+		return [...sent, ...(trusted.length > 0 ? trusted : trust.all.filter(keep).filter(isIssuer))];
 	};
 	const visited = new Set([start.key]);
 	// Whether an issuer was left for lying past the intermediates allowed.
@@ -152,9 +161,7 @@ export function chosen(
 	const queue: (readonly Read[])[] = [[start]];
 	for (let path = queue.shift(); path; path = queue.shift()) {
 		const node = path.at(-1) as Read;
-		const issuers = candidatesOf(node).filter(
-			(issuer) => node.x509.checkIssued(issuer.x509) && node.x509.verify(issuer.x509.publicKey),
-		);
+		const issuers = issuersOf(node);
 		if (issuers.length > most.edges) return { kind: "path" };
 		for (const issuer of issuers) {
 			if (visited.has(issuer.key)) continue;

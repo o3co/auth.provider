@@ -20,8 +20,10 @@ export async function rsaKeys(bits: number, name = "RSASSA-PKCS1-v1_5", hash = "
 /** RSA keys for PSS signatures over the given hash. */
 export const pssKeys = (hash: "SHA-1" | "SHA-256") => rsaKeys(2048, "RSA-PSS", hash);
 
-const name = (cn: string) => {
-	const value = new asn1js.Utf8String({ value: cn });
+const name = (cn: string, printable = false) => {
+	const value = printable
+		? new asn1js.PrintableString({ value: cn })
+		: new asn1js.Utf8String({ value: cn });
 	const typesAndValues = [new pkijs.AttributeTypeAndValue({ type: "2.5.4.3", value })];
 	return new pkijs.RelativeDistinguishedNames({ typesAndValues });
 };
@@ -72,6 +74,8 @@ export interface Issuing {
 	readonly access?: readonly pkijs.AccessDescription[];
 	/** Names this issuer instead of the signer's name. */
 	readonly issuerName?: string;
+	/** The subject's CN written as a PrintableString; any certificate's issuer name is a UTF8String. */
+	readonly printableSubject?: boolean;
 	readonly criticalUnknown?: boolean;
 	/** The first byte of key usage; none when left out. */
 	readonly keyUsage?: number;
@@ -104,7 +108,7 @@ export async function issue(spec: Issuing): Promise<Issued> {
 	const c = new pkijs.Certificate();
 	c.version = 2;
 	c.serialNumber = new asn1js.Integer({ value: spec.serial ?? ++serials });
-	c.subject = name(spec.cn);
+	c.subject = name(spec.cn, spec.printableSubject);
 	c.issuer = name(spec.issuerName ?? spec.by?.cn ?? spec.cn);
 	c.notBefore = timeOf(spec.notBefore ?? Date.now() - 60_000);
 	c.notAfter = timeOf(spec.notAfter ?? Date.now() + 86_400_000);

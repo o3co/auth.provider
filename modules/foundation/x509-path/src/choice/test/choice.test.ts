@@ -34,6 +34,17 @@ describe("choosing a path", () => {
 		expect(pickOf(under, [named], [root])).toBe("leaf > A > B");
 	});
 
+	it("finds an anchor without key identifiers whose name is written in another string type than the name below it gives", async () => {
+		// The root's name a PrintableString, its intermediate's issuer name a UTF8String: node takes them as one.
+		const root = await issue({ cn: "R", ca: true, printableSubject: true });
+		const intermediate = await issue({ cn: "I", by: root, ca: true });
+		const leaf = await issue({ cn: "leaf", by: intermediate });
+		expect(pickOf(leaf, [intermediate], [root])).toBe("leaf > I > R");
+		// A name that differs is still no issuer's.
+		const other = await issue({ cn: "Q", by: { ...root, cn: "Q" }, ca: true });
+		expect(pickOf(await issue({ cn: "leaf", by: other }), [other], [root])).toBe("path");
+	});
+
 	it("ends on a cycle of two issuers with no anchor, and takes the root a cycle also reaches", async () => {
 		const root = await issue({ cn: "R", ca: true });
 		const y = await issue({ cn: "Y", ca: true });
@@ -100,7 +111,7 @@ describe("choosing a path", () => {
 });
 
 describe("a choice's cost, against the platform's store and one root more", () => {
-	it("chooses an ordinary chain, a full budget and a cycle each within a bound, and logs how long", async () => {
+	it("chooses an ordinary chain, a full budget, the most a peer may send and a cycle each within a bound, and logs how long", async () => {
 		const extra = await issue({ cn: "extra root", ca: true });
 		const store = getCACertificates("default").map((pem) => new X509Certificate(pem));
 		const selfSigned = store.filter((c) => c.checkIssued(c) && c.verify(c.publicKey));
@@ -109,7 +120,7 @@ describe("a choice's cost, against the platform's store and one root more", () =
 			intermediates: store.filter((c) => !selfSigned.includes(c)).map((c) => new Uint8Array(c.raw)),
 			selfSignedAnchorsOnly: true,
 		});
-		const timed = (leaf: Issued, sent: readonly Issued[]) => {
+		const timed = (leaf: Issued, sent: readonly Issued[], depth = 6) => {
 			const runs = 20;
 			const started = performance.now();
 			for (let run = 0; run < runs; run++)
@@ -117,7 +128,7 @@ describe("a choice's cost, against the platform's store and one root more", () =
 					leaf.der,
 					sent.map((s) => s.der),
 					trust,
-					6,
+					depth,
 				);
 			return (performance.now() - started) / runs;
 		};
@@ -140,13 +151,20 @@ describe("a choice's cost, against the platform's store and one root more", () =
 			...(await Promise.all(Array.from({ length: 6 }, (_, n) => issue({ cn: `w${n}`, ca: true })))),
 		];
 		const full = timed(under, sentWide);
+		// The most a peer may send: fifteen under fourteen intermediates allowed, a chain to no anchor,
+		// so every step finds no issuer in the index and asks the whole store.
+		const deep: Issued[] = [await issue({ cn: "d14", ca: true })];
+		for (let n = 13; n >= 0; n--) {
+			deep.unshift(await issue({ cn: `d${n}`, by: deep[0] as Issued, ca: true }));
+		}
+		const deepest = timed(await issue({ cn: "leaf", by: deep[0] as Issued }), deep, 14);
 		// A cycle of two.
 		const y = await issue({ cn: "Y", ca: true });
 		const x = await signedBy("X", "Y", y);
 		const yByX = await signedBy("Y", "X", { ...x, keys: x.keys });
 		const cycled = await issue({ cn: "leaf", by: x });
 		const cycle = timed(cycled, [x, yByX]);
-		console.log(JSON.stringify({ store: store.length, ordinary, full, cycle }));
-		for (const ms of [ordinary, full, cycle]) expect(ms).toBeLessThan(250);
+		console.log(JSON.stringify({ store: store.length, ordinary, full, deepest, cycle }));
+		for (const ms of [ordinary, full, deepest, cycle]) expect(ms).toBeLessThan(250);
 	});
 });
