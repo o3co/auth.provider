@@ -120,7 +120,8 @@ describe("path validation", () => {
 		const policy = policyOf([root.der]);
 		expect(await reasonOf(client.der, [intermediate.der], policy)).toBe("path of 3");
 		const asEcdsa = restated("certificate", client.der, "1.2.840.10045.4.3.2");
-		expect(await reasonOf(asEcdsa, [intermediate.der], policy)).toBe("signature algorithm");
+		// node checks the signature by the algorithm stated, so it is no issuer's: no path.
+		expect(await reasonOf(asEcdsa, [intermediate.der], policy)).toBe("path");
 	});
 
 	it("counts an RSA key's bits from its first, however many zero bytes its encoding puts before them", async () => {
