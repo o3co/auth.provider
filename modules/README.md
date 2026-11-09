@@ -204,7 +204,7 @@ What each module contains is described by that module's contract card (each modu
 | The client credentials grant | grant contribution | client-credentials |
 | Sender binding (binding kinds, reading a request's binding, the shape of a binding), admitting a request presenting a token at a resource | extension point kind / contract | sender-binding |
 | DPoP proofs (RFC 9449) as a binding kind, each proof's `jti` spent once | contribution / setting | dpop |
-| Certificate-bound tokens: the `x5t#S256` binding kind, certificate path validation and revocation checking, trust anchors | contribution / setting | mtls |
+| Certificate-bound tokens: the `x5t#S256` binding kind, a client certificate's path (validated by `x509-path`) and revocation checking, trust anchors | contribution / setting | mtls |
 | Extra checks added to access token verification | extension point kind | tokens |
 | The check of subject revocation on access tokens, and stating there is none | extension point kind / setting | tokens |
 | Checking access tokens against the subject revocation boundary | contribution | subject-tokens |

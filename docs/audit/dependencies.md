@@ -80,7 +80,7 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/mtls` | feature | `@mod/client-certificate`, `@mod/host-entries`, `@mod/issuer`, `@mod/kernel`, `@mod/outbound`, `@mod/sender-binding` |
+| `@mod/mtls` | feature | `@mod/client-certificate`, `@mod/host-entries`, `@mod/issuer`, `@mod/kernel`, `@mod/outbound`, `@mod/sender-binding`, `@mod/x509-path` |
 
 ### delegation
 

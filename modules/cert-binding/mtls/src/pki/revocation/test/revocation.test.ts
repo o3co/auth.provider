@@ -1,8 +1,4 @@
-import * as asn1js from "asn1js";
-import * as pkijs from "pkijs";
-import { describe, expect, it } from "vitest";
-import type { Fetched, PathPolicy, RevocationPolicy } from "../../contract.ts";
-import { signatureAlgorithms } from "../../signatures/signatures.ts";
+import { signatureAlgorithms } from "@mod/x509-path";
 import {
 	type Answering,
 	crlOf,
@@ -12,7 +8,11 @@ import {
 	ocspOf,
 	pointAt,
 	rsaKeys,
-} from "../../test/authority.ts";
+} from "@mod/x509-path/testing";
+import * as asn1js from "asn1js";
+import * as pkijs from "pkijs";
+import { describe, expect, it } from "vitest";
+import type { Fetched, PathPolicy, RevocationPolicy } from "../../contract.ts";
 import { revocationOver } from "../revocation.ts";
 
 const ocspSigning = "1.3.6.1.5.5.7.3.9";

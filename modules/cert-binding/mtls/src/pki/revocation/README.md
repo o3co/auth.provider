@@ -12,13 +12,8 @@
 - `revocationOver` (revocation policy, the path's RSA bits and signature algorithms, sources): a check of a path, answering good, revoked, or a refusal or an outage with a reason.
 
 ## Invariants
-- Nothing in revocation material is used before its signature is checked by an algorithm the path would take.
+- CRLs and OCSP answers are read and judged by `x509-path`, as its `revocation` card states: nothing in them is used before their signature is checked by an algorithm the path would take.
 - Material is used from its this update (up to the allowance ahead) to its next update, or for a set time without one.
-- CRL: read from http and https full-name points covering every reason and naming no other issuer.
-- CRL: the issuer's key usage, where given, signs CRLs; no next update is stale.
-- CRL: a delta or scoped CRL, an indirect entry, or any other critical extension is unsupported.
-- OCSP: the request names the certificate by SHA-1 hashes of its issuer's name and key, with a nonce the answer must carry back where asked.
-- OCSP: the signer is the issuer, or a responder it signed: in date, for OCSP signing, held to the path's key and signature rules, with no unknown or unparsable extension.
 - OCSP: a delegated responder's own revocation is checked before its good is taken, unless it says it needs none.
 - Under both, OCSP comes first, and the CRL may only add a revocation to an unknown; where OCSP gives no answer it can use, the CRL alone decides.
 - Any certificate revoked revokes the path.
@@ -34,4 +29,4 @@
 - Each held to a number of entries, oldest first out, in this process alone; checks under way together look each up one at a time.
 
 ## Depends on
-- `pkijs`, `asn1js`; `pki`'s reading of DER and the path's key rules; `signatures`
+- `x509-path` (reading and judging CRLs and OCSP answers); `pkijs`, `asn1js`

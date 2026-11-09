@@ -1,7 +1,7 @@
+import { type Answer, judgeOcsp, ocspRequestOf, ocspUrlsOf } from "@mod/x509-path";
 import type * as pkijs from "pkijs";
 import type { PathPolicy, RevocationPolicy, Sources } from "../contract.ts";
 import { type Alone, type Expiring, keyOf } from "./kept.ts";
-import { type Answer, judgeOcsp, ocspRequestOf, ocspUrlsOf } from "./ocsp.ts";
 import {
 	type Failed,
 	type Fetch,

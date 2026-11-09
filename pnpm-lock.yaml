@@ -83,6 +83,9 @@ importers:
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../../oauth/sender-binding
+      '@mod/x509-path':
+        specifier: workspace:*
+        version: link:../../foundation/x509-path
       asn1js:
         specifier: 4.0.0
         version: 4.0.0
