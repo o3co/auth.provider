@@ -1,7 +1,7 @@
 # store
 
 ## Responsibilities
-- Owns the contract of feature-neutral storage operations, each atomic and judged on the store clock, collects space declarations, and holds one memory implementation, not safe on many instances.
+- Owns the contract of feature-neutral storage operations, each atomic and judged on the store clock, collects space declarations, and holds one memory implementation, not safe on many instances, whose `honours` answers durable and replicated unmet.
 
 ## Not here
 - What values mean, their shapes and rules; feature vocabulary; connections to outside infrastructure.

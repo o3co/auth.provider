@@ -8,10 +8,10 @@ export interface Mark {
 }
 
 /**
- * The one control record of a store's data. Every change is checked against its epoch, which is
- * random and set on entering maintenance, null where none ever was. `requires` names the spaces
- * every process must declare to start. `marks` are values their owners name, prefixed with the
- * owner's name as space names are; store keeps them and never reads them.
+ * The one control record of a store's data. Every change is checked against its epoch, new on
+ * each entry to maintenance and never one the data had, null where none ever was. `requires` names
+ * the spaces every process must declare to start. `marks` are values their owners name, prefixed
+ * with the owner's name as space names are; store keeps them and never reads them.
  */
 export interface Control {
 	readonly epoch: string | null;

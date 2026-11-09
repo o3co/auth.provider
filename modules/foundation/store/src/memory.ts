@@ -1,9 +1,10 @@
-import { deepFreeze, type Runtime } from "@mod/kernel";
+import { deepFreeze, type Runtime, Unavailable } from "@mod/kernel";
 import {
 	type BatchWrite,
 	type Condition,
 	canonicalJson,
 	checkedStore,
+	checkedUpkeep,
 	type Entry,
 	type Expiry,
 	idempotencyRequest,
@@ -11,9 +12,13 @@ import {
 	type Json,
 	type Key,
 	type Late,
+	type Mark,
+	noSubjectData,
 	type Reused,
 	type Space,
 	type Store,
+	type StoreControl,
+	type StoreUpkeep,
 } from "./contract.ts";
 
 type Answer = { readonly kind: string };
@@ -66,19 +71,83 @@ const counting = () => {
 	return () => String(++last);
 };
 
-/** A store in memory; `nextVersion` names each written version, by default from its own count. */
+/** Counts the data opened in this process, so each names itself apart in `sweep`'s answers. */
+let dataOpened = 0;
+
+/** A store's data in memory, which one process or more opens (`memoryProcess`). */
+export interface MemoryData {
+	readonly clock: Runtime["clock"];
+	readonly nextVersion: () => string;
+	/** Names each new epoch, never one the data had: nothing outlives the data, so a count will do. */
+	readonly nextEpoch: () => string;
+	readonly values: Map<string, Held>;
+	readonly counters: Map<string, { count: number; resetAt: number }>;
+	readonly answers: Map<string, { digest: string; answer: Answer; until: number }>;
+	/** Each space ever declared, and whether a declaration may have held a subject's data. */
+	readonly ledger: Map<string, boolean>;
+	readonly control: {
+		epoch: string | null;
+		maintenance: boolean;
+		requires: readonly string[];
+		readonly marks: Map<string, Mark>;
+	};
+	/** Names the data as `sweep` answers it, apart from other data in the process. */
+	readonly server: string;
+	operations: number;
+}
+
+/** Fresh data; `nextVersion` names each written version, by default from its own count. */
+export function memoryData(
+	clock: Runtime["clock"],
+	nextVersion: () => string = counting(),
+): MemoryData {
+	return {
+		clock,
+		nextVersion,
+		nextEpoch: counting(),
+		values: new Map(),
+		counters: new Map(),
+		answers: new Map(),
+		ledger: new Map(),
+		control: { epoch: null, maintenance: false, requires: [], marks: new Map() },
+		server: `memory-${++dataOpened}`,
+		operations: 0,
+	};
+}
+
+/** A store in memory, over data of its own. */
 export function memoryStore(
 	clock: Runtime["clock"],
 	declared: readonly Space[],
 	nextVersion: () => string = counting(),
 ): Store {
-	const values = new Map<string, Held>();
-	const counters = new Map<string, { count: number; resetAt: number }>();
-	const answers = new Map<string, { digest: string; answer: Answer; until: number }>();
-	let operations = 0;
+	return memoryProcess(memoryData(clock, nextVersion), declared).store;
+}
+
+/**
+ * A process over `data`: it takes the control record's epoch and adds its spaces to the ledger as
+ * it starts; each change it makes once the record's epoch is another is unavailable.
+ */
+export function memoryProcess(
+	data: MemoryData,
+	declared: readonly Space[],
+): { readonly store: Store; readonly control: StoreControl; readonly upkeep: StoreUpkeep } {
+	const { clock, nextVersion, values, counters, answers, ledger, control: record } = data;
+	let taken = record.epoch;
+	/** Refuses a change once the record's epoch is not the one this process took. */
+	const refuseStale = () => {
+		if (record.epoch !== taken) throw new Unavailable("store");
+	};
+	for (const space of declared) {
+		ledger.set(
+			space.name,
+			(ledger.get(space.name) ?? false) || space.subjectData !== noSubjectData,
+		);
+	}
+	const known = new Set(declared.map((space) => space.name));
 
 	const sweep = (now: number) => {
-		if (++operations % sweepEvery !== 0) return;
+		if (++data.operations % sweepEvery !== 0) return;
 		for (const [k, v] of values) if (!live(v, now)) values.delete(k);
 		for (const [k, v] of answers) if (v.until <= now) answers.delete(k);
 		for (const [k, v] of counters) if (v.resetAt <= now) counters.delete(k);
@@ -119,6 +188,7 @@ export function memoryStore(
 		options: Limits,
 		apply: (now: number) => A,
 	): Promise<A | Late | Reused> => {
+		refuseStale();
 		const now = clock.now();
 		sweep(now);
 		const mark =
@@ -149,6 +219,7 @@ export function memoryStore(
 		options: Limits,
 		apply: (now: number) => A,
 	): Promise<A | Late | Reused> => {
+		refuseStale();
 		const now = clock.now();
 		sweep(now);
 		const marks = options?.idempotency
@@ -178,7 +249,84 @@ export function memoryStore(
 			throw new Error("keys span more than one partition");
 	};
 
-	return checkedStore(
+	/** A page of the space's live value keys after `cursor`, and the cursor on where more remain. */
+	const pageOf = (space: Space, cursor: string | undefined, now: number) => {
+		const ids = [...values]
+			.filter(([at, held]) => live(held, now) && JSON.parse(at)[0] === space.name)
+			.map(([at]) => at)
+			.filter((at) => cursor === undefined || at > cursor)
+			.sort();
+		const page = ids.slice(0, scanPage);
+		const keys = page.map((at) => {
+			const [, partition, name] = JSON.parse(at) as [string, string, string];
+			return { space, partition, name };
+		});
+		const last = page.at(-1);
+		return ids.length > scanPage && last ? { keys, cursor: last } : { keys };
+	};
+	const readControl: StoreControl = {
+		control: async () =>
+			deepFreeze({
+				epoch: record.epoch,
+				maintenance: record.maintenance,
+				requires: [...record.requires],
+				marks: Object.fromEntries(
+					[...record.marks].map(([name, mark]) => [name, structuredClone(mark)]),
+				),
+			}),
+	};
+	// The memory store gives what one process holds: nothing lost to eviction, every read confirmed.
+	const unmet: Record<string, string> = {
+		durable: "memory loses everything on restart",
+		replicated: "memory has no replica",
+	};
+	const upkeep: StoreUpkeep = {
+		mark: async (name, value) => {
+			refuseStale();
+			record.marks.set(name, { value: JSON.parse(canonicalJson(value)), epoch: record.epoch });
+			return { kind: "marked" };
+		},
+		require: async (names) => {
+			refuseStale();
+			if (!record.maintenance) return { kind: "not-in-maintenance" };
+			record.requires = [...names];
+			return { kind: "required" };
+		},
+		enterMaintenance: async () => {
+			refuseStale();
+			const epoch = data.nextEpoch();
+			record.epoch = epoch;
+			record.maintenance = true;
+			taken = epoch;
+			return { kind: "entered", epoch };
+		},
+		leaveMaintenance: async () => {
+			refuseStale();
+			record.maintenance = false;
+			return { kind: "left" };
+		},
+		kept: async () =>
+			deepFreeze([...ledger].map(([name, subjectDataEver]) => ({ name, subjectDataEver }))),
+		retire: async (name) => {
+			refuseStale();
+			if (known.has(name)) return { kind: "declared" };
+			return ledger.delete(name) ? { kind: "retired" } : { kind: "missing" };
+		},
+		honours: async (guarantees) => {
+			const reasons = guarantees.flatMap((g) => (unmet[g] ? [unmet[g]] : []));
+			return deepFreeze(reasons.length > 0 ? { kind: "unmet", reasons } : { kind: "verified" });
+		},
+		sweep: async (space, cursor) => {
+			refuseStale();
+			const now = clock.now();
+			for (const [at, held] of values) {
+				if (!live(held, now) && JSON.parse(at)[0] === space.name) values.delete(at);
+			}
+			return deepFreeze({ ...pageOf(space, cursor, now), server: data.server });
+		},
+	};
+
+	const store = checkedStore(
 		{
 			get: async (key) => {
 				const now = clock.now();
@@ -287,22 +435,9 @@ export function memoryStore(
 					},
 				),
 			now: async () => clock.now(),
-			scan: async (space, cursor) => {
-				const now = clock.now();
-				const ids = [...values]
-					.filter(([at, held]) => live(held, now) && JSON.parse(at)[0] === space.name)
-					.map(([at]) => at)
-					.filter((at) => cursor === undefined || at > cursor)
-					.sort();
-				const page = ids.slice(0, scanPage);
-				const keys = page.map((at) => {
-					const [, partition, name] = JSON.parse(at) as [string, string, string];
-					return { space, partition, name };
-				});
-				const last = page.at(-1);
-				return deepFreeze(ids.length > scanPage && last ? { keys, cursor: last } : { keys });
-			},
+			scan: async (space, cursor) => deepFreeze(pageOf(space, cursor, clock.now())),
 		},
 		declared,
 	);
+	return { store, control: readControl, upkeep: checkedUpkeep(upkeep, declared) };
 }
