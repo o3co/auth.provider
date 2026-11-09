@@ -420,6 +420,12 @@ function readWriteOptions(value: unknown): WriteOptions {
 	};
 }
 
+/**
+ * The longest cursor taken back: longer than any a store gives, as memory's names a whole key
+ * (three texts of 512 characters, each escaped to at most 6) and Redis's is a number.
+ */
+const cursorLength = 16_384;
+
 /** The largest count a window may allow. */
 const largestLimit = 1_000_000_000;
 
@@ -524,7 +530,7 @@ export function checkedUpkeep(inner: StoreUpkeep, declared: readonly Space[]): S
 		sweep: async (target, cursor) =>
 			inner.sweep(
 				spaceIn(known, target),
-				cursor === undefined ? undefined : text("cursor", cursor),
+				cursor === undefined ? undefined : text("cursor", cursor, cursorLength),
 			),
 	};
 }
@@ -584,7 +590,10 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 		count: async (k, window, o) => inner.count(key(k), readWindow(window), readLimits(o)),
 		...(getMany ? { getMany: async (keys) => getMany([...keys].map(key)) } : {}),
 		scan: async (target, cursor) =>
-			inner.scan(spaceIn(known, target), cursor === undefined ? undefined : text("cursor", cursor)),
+			inner.scan(
+				spaceIn(known, target),
+				cursor === undefined ? undefined : text("cursor", cursor, cursorLength),
+			),
 		now: () => inner.now(),
 	};
 }

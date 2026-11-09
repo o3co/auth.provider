@@ -996,7 +996,10 @@ export function storeContract(name: string, harness: StoreHarness): void {
 
 			it("lists each live value's key in the space, over pages, and no counter, set or other space", async () => {
 				const s = await harness.open();
-				const live = Array.from({ length: 250 }, (_, i) => fresh(space, `q${i % 7}`)(`k${i}`));
+				// Names of the longest length, so each cursor given, which may name a key, is taken back.
+				const live = Array.from({ length: 250 }, (_, i) =>
+					fresh(space, `q${i % 7}`.padEnd(512, "q"))(`k${i}`.padEnd(512, "k")),
+				);
 				for (const k of live) await overwrite(s, k, 1, never);
 				const { now } = await s.get(fresh()("probe"));
 				const ends = now + 30;

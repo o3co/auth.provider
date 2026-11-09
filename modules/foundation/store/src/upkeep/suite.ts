@@ -163,10 +163,19 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				expect(kept.get(held.name)).toBe(true);
 			});
 
-			it("retires a space no longer declared, never one the process declares", async () => {
+			it("keeps a space a process no longer declares, while its data stays, outside maintenance", async () => {
 				const p = await harness.start(upkeepSpaces);
+				const k = fresh(held);
+				await p.store.putIfAbsent(k, 1, never);
 				const fewer = await harness.another(p, [none]);
 				expect(await fewer.upkeep.retire(held.name)).toEqual({ kind: "not-in-maintenance" });
+				expect((await p.upkeep.kept()).map((s) => s.name)).toContain(held.name);
+				expect((await p.store.get(k)).entry?.value).toBe(1);
+			});
+
+			it("retires a space no longer declared under the maintenance key, never one the process declares", async () => {
+				const p = await harness.start(upkeepSpaces);
+				const fewer = await harness.another(p, [none]);
 				await fewer.upkeep.enterMaintenance();
 				expect(await fewer.upkeep.retire(held.name)).toEqual({ kind: "retired" });
 				expect(await fewer.upkeep.retire(none.name)).toEqual({ kind: "declared" });
@@ -208,6 +217,26 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				} while (cursor !== undefined);
 				for (const k of keys) expect(seen.has(`${k.partition}/${k.name}`)).toBe(true);
 				expect(servers.size).toBe(1);
+			});
+
+			it("takes back every cursor it gives, over keys of the longest names", async () => {
+				const p = await harness.start(upkeepSpaces);
+				const partition = `sweep${++n}`.padEnd(512, "p");
+				for (let i = 0; i < 101; i++) {
+					await p.store.putIfAbsent(
+						{ space: held, partition, name: `${i}`.padEnd(512, "k") },
+						i,
+						never,
+					);
+				}
+				let seen = 0;
+				let cursor: string | undefined;
+				do {
+					const page = await p.upkeep.sweep(held, cursor);
+					seen += page.keys.filter((k) => k.partition === partition).length;
+					cursor = page.cursor;
+				} while (cursor !== undefined);
+				expect(seen).toBe(101);
 			});
 
 			it("removes for good an expired key it meets, and lists it no more", async () => {
