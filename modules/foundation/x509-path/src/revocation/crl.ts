@@ -40,6 +40,9 @@ export type DistributionPoints =
 	  };
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+/** What a CRL says of a serial it lists, one object for every entry alike: a large CRL holds many. */
+const held = Object.freeze({ held: true });
+const revoked = Object.freeze({ held: false });
 
 /** A certificate's CRL distribution points, told by the extension's identifier and its value. */
 export function distributionPointsOf(cert: pkijs.Certificate): DistributionPoints {
@@ -114,10 +117,7 @@ export async function verifyCrl(
 	for (const entry of entries) {
 		const reason = entry.crlEntryExtensions?.extensions.find((e) => e.extnID === oid.reasonCode);
 		const read = reason && decoded(reason.extnValue.valueBlock.valueHexView, (schema) => schema);
-		listed.set(
-			hex(entry.userCertificate.valueBlock.valueHexView),
-			Object.freeze({ held: isHold(read) }),
-		);
+		listed.set(hex(entry.userCertificate.valueBlock.valueHexView), isHold(read) ? held : revoked);
 	}
 	const number = crl.crlExtensions?.extensions.find((e) => e.extnID === oid.crlNumber);
 	const read = number && decoded(number.extnValue.valueBlock.valueHexView, (schema) => schema);
