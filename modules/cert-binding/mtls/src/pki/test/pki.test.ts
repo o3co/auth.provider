@@ -110,3 +110,36 @@ it("refuses, in bounded time, a client's chain that cycles between two issuers, 
 		reason: "path",
 	});
 });
+
+it("holds the leaf alone to client authentication: its extended key usage, and its key usage, where given, to signing or key agreement", async () => {
+	const clientAuth = "1.3.6.1.5.5.7.3.2";
+	const serverAuth = "1.3.6.1.5.5.7.3.1";
+	const root = await issue({ cn: "root", ca: true });
+	const pki = pkiOver({
+		anchors: [root.der],
+		maxIntermediates: 4,
+		minRsaBits: 2048,
+		signatureAlgorithms,
+	});
+	const checked = async (leaf: { der: Uint8Array }, chain: { der: Uint8Array }[] = []) =>
+		pki.check(
+			leaf.der,
+			chain.map((one) => one.der),
+			Date.now(),
+		);
+	const refused = { kind: "invalid", reason: "not for client authentication" };
+	expect(await checked(await issue({ cn: "client", by: root, eku: [serverAuth] }))).toEqual(
+		refused,
+	);
+	// Key encipherment alone.
+	const enciphering = await issue({ cn: "client", by: root, eku: [clientAuth], keyUsage: 0x20 });
+	expect(await checked(enciphering)).toEqual(refused);
+	for (const keyUsage of [0x80, 0x08]) {
+		const leaf = await issue({ cn: "client", by: root, eku: [clientAuth], keyUsage });
+		expect(await checked(leaf)).toEqual({ kind: "valid" });
+	}
+	// An intermediate for server authentication alone: the leaf alone is held to the purpose.
+	const intermediate = await issue({ cn: "intermediate", by: root, ca: true, eku: [serverAuth] });
+	const under = await issue({ cn: "client", by: intermediate, eku: [clientAuth] });
+	expect(await checked(under, [intermediate])).toEqual({ kind: "valid" });
+});
