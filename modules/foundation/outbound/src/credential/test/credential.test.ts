@@ -6,7 +6,7 @@ import { testTlsOptions, tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { credentialHeaderRefusal, DestinationRefused } from "../../contract.ts";
 import outboundModule, { outboundOver, section } from "../../module.ts";
-import type { Lookup } from "../../transport.ts";
+import type { Lookup } from "../../transport/transport.ts";
 
 let server: Server;
 let port = 0;

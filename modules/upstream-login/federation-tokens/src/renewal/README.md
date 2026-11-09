@@ -17,10 +17,11 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 - When a token ends is judged here only, on `kernel`'s clock, capped at the longest lifetime. At login, an end not a positive number is due now, and none stays none unless a refresh token can renew it. At a refresh, none is the cap and one not a positive number refuses the answer.
 - A refresh's end is `upstreams`' `refreshedExpiry`: the same access token keeps the earlier of the two ends. Its life is counted from the refresh, so it is not due again at once: a back-off, as the next refresh waits half of what is left, so an upstream that keeps answering the same token is asked about five times before its end. Counted from its first obtaining, it would be asked on every request within `refresh-before` until the rotation budget ran out.
 - A token is due within `refresh-before` of its end, once half its life is spent; at once with less than a second left, or no time it was obtained.
-- A token with less than a second left is unavailable, never handed.
-- The lock is taken per session and IdP for `lock-lifetime`, under a mark of 128 random bits; a request waits for it up to that long between its asks, the time each ask takes to answer coming on top, then reads the entry again.
+- A token with less than a second left is unavailable, never handed: a fixed margin, as it would end on its way.
+- A failed refresh answers the same for 30 seconds without asking the upstream (fixed: shorter asks a failing upstream more often, longer only delays recovery): kept in each process, by session, IdP and a hash of the access token.
+- The lock is taken per session and IdP for `lock-lifetime`, under a mark of 128 random bits; a request waits for it up to that long between its asks (every 100 ms, a fixed pace), the time each ask takes to answer coming on top, then reads the entry again.
 - While the refresh runs, the lock is kept for its lifetime again every half of it, only under that mark; once lost, nothing the refresh answered is written, and a store that cannot answer stops the keeping. It is kept no longer, then let go (ending a millisecond later, `records`' conditional removal) only while it holds that mark.
-- Writes land only over the version read; a new version is 128 random bits.
+- Writes land only over the version read, tried three times under a changing version (a fixed contention margin); a new version is 128 random bits.
 - What the upstream says is read once: a part that cannot be read refuses the answer, never counts as absent.
 - An entry that does not open is removed.
 - A refresh asks for the granted scope.

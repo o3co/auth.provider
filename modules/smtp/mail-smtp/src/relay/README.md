@@ -14,7 +14,7 @@ Internal module of `mail-smtp`: one SMTP conversation per send, over a pinned `n
 ## Invariants
 - Before STARTTLS, only EHLO and STARTTLS are sent in the clear.
 - Each connection's TLS is held to the floor by `tls-options`' `heldToFloor`, once when the relay is made: the floor's own keys last, the certificate checked among them.
-- Connecting (the TLS handshake too, under `tls`) and the greeting get a quarter of the deadline each, a silence half; the whole send ends at the deadline.
+- Connecting (the TLS handshake too, under `tls`) and the greeting get a quarter of the deadline each, a silence half; the whole send ends at the deadline. The split is fixed: a slow relay is met by `deadline` itself. After the mail is accepted, QUIT is waited on a second at most, as nothing then depends on it.
 - A `RelayFailure` keeps no text from the relay or the library, and no cause; of a refused handshake, only the TLS alert's number.
 
 ## Depends on

@@ -18,17 +18,12 @@
 ## Invariants
 - Sends every request that leaves the deployment itself, as no other package does (`network`: `outbound`).
 - A request goes only to a URL the policy admits; a name is resolved once, as the URL writes it (a trailing dot kept), and the request connects only to the first of the addresses the policy checked, all it resolved to.
-- outbound alone sets `User-Agent` (`auth-provider`), `Accept-Encoding`, `Host` and the headers that frame and carry the message.
 - A credential goes only as a request's `credential`, under the internal module `credential`'s rules.
-- A 3xx other than 304 is refused as a redirect; a 101, an encoded answer, a body past the size cap, or headers past Node's 16 KiB are unavailable, and the connection is closed; other 1xx answers are waited past.
+- Internal module `transport` carries each request: direct or through the proxy's tunnel, under one deadline, as its card says.
 - Every TLS connection, direct or through the proxy's tunnel, takes `tls-options`' floor, as the internal module `tls` says.
-- One deadline, the policy's limit, covers resolving (or the tunnel), connecting, the headers and the body; the body is cut at the policy's size.
 - A request past `max-concurrent` is unavailable at once, and each request gives its place back however it ends. Name lookups count apart: `max-lookups` at once (four unless set, never more than `max-concurrent`); one more is unavailable at once.
 - Names resolve as the system does, hosts file included: by default (`resolution`: `helper`) in helper processes, a helper that does not start refusing boot; with `in-process`, here, no deadline stopping one. See the internal modules `resolver-process` and `lookups`.
 - Of those lookups, names a caller marks `outsideChosen` resolve in a pool of their own, its share as `lookups` says, so an outside party's slow names never hold every lookup. `outbound.limits` answers each caller's share (`lookupsOf`), so a caller given none refuses boot.
-- A `proxy` (an http origin alone, as the URL parser writes it, without credentials; `proxy-authorization` apart) carries every https request, but to `direct-hosts` (list internal hosts there too), by CONNECT with TLS to the destination inside. Then outbound resolves no name but the proxy's own, as one of the deployment's lookups: it checks the name and any address in the URL; the proxy checks where a name resolves. A refused tunnel is `proxy-refused`.
-- Plain http, a `plain-loopback` or `plain-internal` pair's, never goes through the proxy: outbound resolves the name and checks every address itself.
-- For plain http taken as such a pair's (signed material too), to a host and port `plain-ipv4` names, the name is resolved to IPv4 addresses alone: every one of those is checked by the policy, the first reached, and an IPv6 one is neither checked nor reached. Other ports of the name, https to it, and plain http not taken as the pair's resolve every family.
 - A `plain-ipv4` entry names, by name and once, a pair `plain-loopback` or `plain-internal` names; else boot is refused, naming neither host nor port.
 - Each start warns of each list it is given by the entries' count alone, never a host: `outbound.plain_internal` (what goes to those pairs, passwords, tokens, credentials and keys, is in the clear), `outbound.plain_loopback`, `outbound.plain_ipv4`, `outbound.internal_hosts`.
 - Each start warns, by a reason alone: `outbound.any_public_host` (`allow-any-public`); `outbound.resolution_in_process`; `outbound.proxy_checks_addresses` (a `proxy`); and `outbound.proxy_credentials_in_clear` where `proxy-authorization` goes to a proxy not a loopback address written as one (judged as written).

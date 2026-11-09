@@ -10,7 +10,7 @@ export const section = z.strictObject({
 		.pipe(z.number().int().min(lifetimeSecondsRange.min).max(lifetimeSecondsRange.max))
 		.prefault("1h")
 		.describe(
-			"How long an access token lives, from when it is asked for (the issuance policies' wait included), from `2s` to `1d` in whole seconds.",
+			"How long an access token lives, from when it is asked for (the issuance policies' wait included), from `2s` to `1d` in whole seconds; the range is fixed: under two seconds a token signed in whole seconds keeps under one, and a day is the ceiling every lifetime is held to.",
 		),
 	revocation: z
 		.enum(["denylist", "unsupported"])

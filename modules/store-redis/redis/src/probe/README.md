@@ -14,7 +14,7 @@ Internal module of `redis`: the readiness probe `redis`.
 
 ## Invariants
 - Each run PINGs both connections; a dropped one fails at once, as the client keeps no offline queue.
-- At most once a second, counted from its start, it checks again what the package checks; a run within that second reads its answer, pass or fail, and joins it while it runs. A clock set back runs anew.
+- At most once a second (a fixed pace, shorter than any probe period), counted from its start, it checks again what the package checks; a run within that second reads its answer, pass or fail, and joins it while it runs. A clock set back runs anew.
 - Anything that no longer holds answers unready, logging `redis.settings_unmet` with it when that changes, not on every run.
 - With `replicas`, the package asks too whether replicas are good enough for the server to take writes, short of which it answers unready; boot never asks it, so a passing want of replicas leaves boot alone.
 - With `replication`, a primary demoted after boot answers the confirming `SET` `READONLY`: the run fails (`kernel.probe_failed`), with no `redis.settings_unmet`.
