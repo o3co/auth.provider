@@ -68,10 +68,50 @@ export function distributionPointsOf(cert: pkijs.Certificate): DistributionPoint
 	};
 }
 
+/** The most bytes of a CRL read; a dense one of 1 MiB lists some 45,000 serials. */
+const mostCrlBytes = 1 << 20;
+
+/**
+ * Turns at reading a CRL, one at a time in this process: one of 1 MiB peaks near 165 MB while it is
+ * read. A waiter leaves on its signal, given no turn.
+ */
+function turns() {
+	const waiting: (() => void)[] = [];
+	let taken = false;
+	return {
+		take: (signal?: AbortSignal) =>
+			new Promise<boolean>((given) => {
+				if (signal?.aborted) return given(false);
+				if (!taken) {
+					taken = true;
+					return given(true);
+				}
+				const go = () => {
+					signal?.removeEventListener("abort", leave);
+					given(true);
+				};
+				const leave = () => {
+					waiting.splice(waiting.indexOf(go), 1);
+					given(false);
+				};
+				waiting.push(go);
+				signal?.addEventListener("abort", leave, { once: true });
+			}),
+		give: () => {
+			const next = waiting.shift();
+			if (next) next();
+			else taken = false;
+		},
+	};
+}
+const reading = turns();
+
 /**
  * The CRL `issuer` signed, read as of `now`. Nothing in it is used before its signature is checked
  * with the issuer's key, by an algorithm `taken`; a this update past `now` by more than `skewMs` is
  * not yet in force; a delta, scoped or indirect CRL, or any critical extension, is unsupported.
+ * Past 1 MiB, it is malformed, unread. CRLs are read one at a time; one whose `signal` ends while it
+ * waits its turn is `aborted`, unread.
  */
 export async function verifyCrl(
 	der: Uint8Array,
@@ -79,10 +119,27 @@ export async function verifyCrl(
 	now: number,
 	skewMs: number,
 	taken: readonly SignatureAlgorithm[],
+	signal?: AbortSignal,
 ): Promise<
 	| { readonly kind: "verified"; readonly crl: VerifiedCrl }
 	| { readonly kind: "unusable"; readonly reason: string }
 > {
+	if (der.byteLength > mostCrlBytes) return { kind: "unusable", reason: "malformed" };
+	if (!(await reading.take(signal))) return { kind: "unusable", reason: "aborted" };
+	try {
+		return await readCrl(der, issuer, now, skewMs, taken);
+	} finally {
+		reading.give();
+	}
+}
+
+async function readCrl(
+	der: Uint8Array,
+	issuer: pkijs.Certificate,
+	now: number,
+	skewMs: number,
+	taken: readonly SignatureAlgorithm[],
+): ReturnType<typeof verifyCrl> {
 	const unusable = (reason: string) => ({ kind: "unusable" as const, reason });
 	const crl = decoded(
 		der,
