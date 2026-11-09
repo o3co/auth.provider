@@ -84,6 +84,22 @@ describe("path validation", () => {
 		expect(await reasonOf(spoiled, [intermediate.der, client.der], anchors)).toBe("path");
 	});
 
+	it("has the engine walk the chain chosen alone, though a certificate on it would sign as another's issuer too", async () => {
+		const root = await issue({ cn: "root", ca: true, keyIds: true });
+		const intermediate = await issue({ cn: "intermediate", by: root, ca: true, keyIds: true });
+		// The leaf holds the root's key: by key identifier and signature, it reads as the intermediate's issuer too.
+		const leaf = await issue({
+			cn: "client",
+			by: intermediate,
+			keys: root.keys,
+			keyIds: true,
+			eku: ["1.3.6.1.5.5.7.3.2"],
+		});
+		const started = performance.now();
+		expect(await reasonOf(leaf.der, [intermediate.der], policyOf([root.der]))).toBe("path of 3");
+		expect(performance.now() - started).toBeLessThan(1000);
+	});
+
 	it("refuses a weak signature, a small RSA key, or an unknown critical extension anywhere on the path", async () => {
 		const { root, intermediate } = await hierarchy();
 		const anchors = policyOf([root.der]);

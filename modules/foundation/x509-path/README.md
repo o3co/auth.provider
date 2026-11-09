@@ -18,7 +18,7 @@
 - `./testing`: a test authority for its own and its callers' tests: certificates, CRLs and OCSP answers.
 
 ## Invariants
-- The path is chosen by the internal module `choice`, bounded and every edge checked, and the engine validates that chain alone.
+- The path is chosen by the internal module `choice`, bounded and every edge checked, and the engine validates that chain alone, each certificate's issuer the next on it.
 - Anything not one certificate is malformed.
 - A path is refused for more intermediates than allowed, or an RSA key below the bits.
 - A path is refused for a signature not among the rules' algorithms, anchors aside: SHA-2 RSA, PSS over SHA-2 or ECDSA, each named. An anchor's own signature is neither verified nor held to them, as RFC 5280 trusts its key; its extended key usage, key strength, curve and extensions are held as every certificate's.
