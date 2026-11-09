@@ -486,7 +486,7 @@ it("loses on failover a batch across whose answer was lost, mark and all, and ke
 	const entries = await Promise.all(kept.map(async (k) => (await s.get(k)).entry));
 	expect(entries.map((e) => e?.value)).toEqual([1, 1]);
 	// The mark was kept with it: the resend learns the first answer, though its condition fails now.
-	expect(await request(kept, "kept")).toEqual({
+	expect(await request(kept, "kept")).toMatchObject({
 		kind: "committed",
 		versions: entries.map((e) => e?.version),
 	});

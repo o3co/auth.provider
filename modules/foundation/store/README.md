@@ -7,9 +7,11 @@
 - What values mean, their shapes and rules; feature vocabulary; connections to outside infrastructure.
 
 ## Offers
-- The `store` contract: reads of one key, answering value, version and the store clock's time; and a scan of a space's live value keys by pages, which lists each key living through the walk unless a failover or restart falls in it (a later walk lists it).
-- Writes: if absent, on a version, remove on a version or a value, take once, a batch in one partition under conditions, and `mutate`, whose pure function runs again on each retry, 8 times where the caller names no count (a fixed margin against contention).
+- The `store` contract: reads of one key, answering value, version and the store clock's time; and a scan of a space's live value keys by pages, which lists each key living through the walk unless a failover or restart falls in it (a later walk lists it); `getMany`, reads of several keys, where a store offers it.
+- Writes: if absent, on a version, remove on a version or a value, take once, a batch in one partition under conditions, and `mutate`, whose pure function runs again on each retry, 8 times where the caller names no count (a fixed margin against contention). A batch's answer tells the time it committed (`at`) where the store tells it.
   - `batchAcross`, where a store offers it: a batch over keys of any partition, and of any spaces declaring the same guarantees. A store without it leaves it out.
+- `storeControl` (reading) and `storeUpkeep` (keeping the data whole), for wirings alone to take: the control record, the ledger of spaces, `honours` and `sweep` (internal module `upkeep`).
+- A declaration's erasure fields (`subjectData`, `erasedBy`, `boundedMs`, `requiredOnceErasing`): erasure's words, carried for erasure to read and checked for their shape; store reads `subjectData` only as `none` or not (`noSubjectData`).
 - Expiry after a duration, at a time, none, keep, or extend only; counting in a fixed window.
 - `codePointOrder`: the order of members and of ties, by code point, which is also the order of their UTF-8 bytes, the same for every store.
 - The space declaration extension point, and the composition definition with `accept-volatile` (default false), which lets spaces needing durable or replicated boot on memory; every start that boots such spaces so warns `store.volatile_accepted`, naming them.

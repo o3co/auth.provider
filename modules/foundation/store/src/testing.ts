@@ -12,6 +12,12 @@ import {
 import type { section } from "./section.ts";
 
 export { type SimulatedStore, simulatedStore } from "./simulated.ts";
+export {
+	type UpkeepHarness,
+	type UpkeepProcess,
+	upkeepContract,
+	upkeepSpaces,
+} from "./upkeep/suite.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -759,12 +765,12 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				expect(stale).toEqual({ kind: "conflict", index: 0 });
 				expect((await s.get(written)).entry).toBeNull();
 				const { now } = await s.get(watched);
-				expect(await batchAcross([], [], { deadline: now + 60_000, idempotency: "empty" })).toEqual(
-					{
-						kind: "committed",
-						versions: [],
-					},
-				);
+				expect(
+					await batchAcross([], [], { deadline: now + 60_000, idempotency: "empty" }),
+				).toMatchObject({
+					kind: "committed",
+					versions: [],
+				});
 				expect((await batchAcross([], [], { deadline: now - 1 })).kind).toBe("late");
 			});
 
@@ -944,6 +950,30 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				}
 				expect(now > resetAt, "the store clock did not pass resetAt").toBe(true);
 				expect(await s.count(k, window)).toMatchObject({ kind: "counted", count: 1 });
+			});
+		});
+
+		describe("reads of several keys, and a batch's time", () => {
+			it("reads several keys in the order asked, none where absent", async (ctx) => {
+				const s = await harness.open();
+				if (!s.getMany) return ctx.skip();
+				const key = fresh();
+				await s.putIfAbsent(key("a"), "a", never);
+				await s.putIfAbsent(key("c"), "c", never);
+				const reads = await s.getMany([key("c"), key("b"), key("a")]);
+				expect(reads.map((r) => r.entry?.value ?? null)).toEqual(["c", null, "a"]);
+			});
+
+			it("tells the store time a batch committed at, where it tells one, and the same on a resend", async () => {
+				const s = await harness.open();
+				const key = fresh();
+				const before = await s.now();
+				const write = [{ key: key("a"), put: 1, expiry: { kind: "never" } }] as const;
+				const first = await s.batch([], write, { idempotency: "timed" });
+				if (first.kind !== "committed" || first.at === undefined) return;
+				expect(first.at).toBeGreaterThanOrEqual(before);
+				expect(first.at).toBeLessThanOrEqual(await s.now());
+				expect(await s.batch([], write, { idempotency: "timed" })).toEqual(first);
 			});
 		});
 

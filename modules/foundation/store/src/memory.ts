@@ -110,7 +110,7 @@ export function memoryStore(
 			}
 			return write(w.key, w.put, w.expiry, now);
 		});
-		return { kind: "committed" as const, versions };
+		return { kind: "committed" as const, versions, at: now };
 	};
 	/** Runs a write once per idempotency mark and request, refusing it after its deadline. */
 	const guarded = async <A extends Answer>(
@@ -184,6 +184,15 @@ export function memoryStore(
 				const now = clock.now();
 				const held = current(key, now);
 				return { entry: held ? entryOf(held) : null, now };
+			},
+			getMany: async (keys) => {
+				const now = clock.now();
+				return deepFreeze(
+					keys.map((key) => {
+						const held = current(key, now);
+						return { entry: held ? entryOf(held) : null, now };
+					}),
+				);
 			},
 			putIfAbsent: (key, value, options) =>
 				guarded(
