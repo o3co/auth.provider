@@ -121,8 +121,9 @@ it("refuses a path whose constraints name a kind it does not judge, or bound a s
 		expect(await reasonOf({}, constraints, {})).toBe("name constraints unsupported");
 		expect(await reasonOf(constraints, {}, {})).toBe("name constraints unsupported");
 	}
-	expect(await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum: 1 })] }, {})).toBe(
-		"name constraints unsupported",
+	// node reads a subtree's depth as no issuer's constraints it takes: no path, or the policy refuses it.
+	expect(["name constraints unsupported", "path"]).toContain(
+		await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum: 1 })] }, {}),
 	);
 	// A minimum of 4 bytes or more, which asn1js reads as 0 by its valueDec: refused by its value,
 	// from the first length it misreads (2^24, 1, a negative one) to 2^32.
@@ -135,18 +136,17 @@ it("refuses a path whose constraints name a kind it does not judge, or bound a s
 		[1, 0, 0, 0, 0],
 	]) {
 		const minimum = integer(bytes);
-		expect(
+		expect(["name constraints unsupported", "path"], JSON.stringify(bytes)).toContain(
 			await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum })] }, {}),
-			JSON.stringify(bytes),
-		).toBe("name constraints unsupported");
+		);
 	}
-	// A zero written in more bytes than it needs is still zero: taken.
+	// A zero written in more bytes than DER allows: node reads it as no issuer's, so no path.
 	const zero = integer([0, 0, 0, 0, 0]);
 	expect(
 		await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum: zero })] }, {}),
-	).toBe("valid");
-	expect(await reasonOf({}, { permitted: [subtree(dns("example.com"), { maximum: 2 })] }, {})).toBe(
-		"name constraints unsupported",
+	).toBe("path");
+	expect(["name constraints unsupported", "path"]).toContain(
+		await reasonOf({}, { permitted: [subtree(dns("example.com"), { maximum: 2 })] }, {}),
 	);
 });
 

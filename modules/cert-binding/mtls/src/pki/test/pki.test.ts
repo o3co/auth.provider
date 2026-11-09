@@ -78,3 +78,26 @@ it("tells one certificate from anything else", async () => {
 	expect([isCertificate(one.der), isCertificate(new Uint8Array([1, 2]))]).toEqual([true, false]);
 	expect(isCertificate(new Uint8Array([...one.der, 0]))).toBe(false);
 });
+
+it("refuses, in bounded time, a client's chain that cycles between two issuers, and an edge only its key identifier and signature join", async () => {
+	const root = await issue({ cn: "root", ca: true, keyIds: true });
+	const pki = pkiOver({ anchors: [root.der], maxIntermediates: 4, minRsaBits: 2048 });
+	// Two issuers that name and sign each other, as a client may send them; no anchor above.
+	const y = await issue({ cn: "Y", ca: true });
+	const x = await issue({ cn: "X", by: { ...y, cn: "Y" }, ca: true });
+	const yByX = await issue({ cn: "Y", by: { ...x, cn: "X" }, ca: true, keys: y.keys });
+	const cycled = await issue({ cn: "client", by: x, eku: ["1.3.6.1.5.5.7.3.2"] });
+	const started = performance.now();
+	expect(await pki.check(cycled.der, [x.der, yByX.der], Date.now())).toEqual({
+		kind: "invalid",
+		reason: "path",
+	});
+	expect(performance.now() - started).toBeLessThan(1000);
+	// Self-issued "A", its key identifier the root's and signed by it, yet not the root's by name.
+	const posing = await issue({ cn: "A", issuerName: "A", by: root, ca: true, keyIds: true });
+	const under = await issue({ cn: "client", by: posing, keyIds: true, eku: ["1.3.6.1.5.5.7.3.2"] });
+	expect(await pki.check(under.der, [posing.der], Date.now())).toEqual({
+		kind: "invalid",
+		reason: "path",
+	});
+});

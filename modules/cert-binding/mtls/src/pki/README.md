@@ -16,7 +16,7 @@
 - A test authority for its own and `mtls`'s tests: certificates, CRLs and OCSP answers.
 
 ## Invariants
-- The path is built from the leaf, the intermediates sent (copies of the leaf dropped) and the anchors; one not starting with the leaf sent is refused.
+- The path is chosen from the leaf, the intermediates sent (copies of the leaf dropped; 10, or the intermediates allowed and one more, at most) and the anchors, shallowest first: an issuer is one whose name the certificate names and whose key signed it, at most 4 for a certificate, none entered twice. The engine validates that path alone.
 - Anything not one certificate is malformed.
 - A path is refused for more intermediates than allowed, or an RSA key below the bits.
 - A path is refused for a signature other than SHA-2 RSA, PSS over SHA-2 or ECDSA, anchors aside.
