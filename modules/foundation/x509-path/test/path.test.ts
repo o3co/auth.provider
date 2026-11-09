@@ -100,6 +100,14 @@ describe("path validation", () => {
 		expect(performance.now() - started).toBeLessThan(1000);
 	});
 
+	it("takes an anchor without key identifiers whose name is written in another string type than the name below it gives", async () => {
+		// The root's name a PrintableString, its intermediate's issuer name a UTF8String.
+		const root = await issue({ cn: "root", ca: true, printableSubject: true });
+		const intermediate = await issue({ cn: "intermediate", by: root, ca: true });
+		const client = await issue({ cn: "client", by: intermediate, eku: ["1.3.6.1.5.5.7.3.2"] });
+		expect(await reasonOf(client.der, [intermediate.der], policyOf([root.der]))).toBe("path of 3");
+	});
+
 	it("refuses a weak signature, a small RSA key, or an unknown critical extension anywhere on the path", async () => {
 		const { root, intermediate } = await hierarchy();
 		const anchors = policyOf([root.der]);
