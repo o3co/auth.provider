@@ -580,6 +580,19 @@ importers:
         specifier: workspace:*
         version: link:../kernel
 
+  modules/foundation/x509-path:
+    dependencies:
+      asn1js:
+        specifier: 4.0.0
+        version: 4.0.0
+      pkijs:
+        specifier: 4.0.1
+        version: 4.0.1(asn1js@4.0.0)
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/identity/client-documents:
     dependencies:
       '@mod/clients':

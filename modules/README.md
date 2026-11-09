@@ -71,6 +71,7 @@ What each module contains is described by that module's contract card (each modu
 | Keyed records (also under a secret), deferred work and keyed sets | implementation | records |
 | Place (where records are kept: the store and space a wiring gives) | vocabulary | records |
 | Checking JWTs signed by outside keys (header, key choice, signature, times, expected issuer, audience and subject), and fetching key sets | contract | external-jwt |
+| Validating an X.509 certification path under the caller's rules, its signature rules, and reading CRLs and OCSP answers | contract | x509-path |
 | How large a feature's deferred work may grow | setting | the per-owner modules in templates |
 | Wiring a feature's store interface to a capability's implementation | wiring | the per-owner modules in templates |
 | Wiring code-grant's store interface to records | wiring | code-grant-store |
