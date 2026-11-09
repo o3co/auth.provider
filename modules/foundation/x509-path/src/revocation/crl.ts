@@ -1,6 +1,6 @@
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
-import { decoded, generalName, isHold, keyUsageAllows, oid, usage } from "../der.ts";
+import { decoded, generalName, isHold, keyUsageAllows, nodesIn, oid, usage } from "../der.ts";
 import {
 	isTaken,
 	type SignatureAlgorithm,
@@ -84,7 +84,11 @@ export async function verifyCrl(
 	| { readonly kind: "unusable"; readonly reason: string }
 > {
 	const unusable = (reason: string) => ({ kind: "unusable" as const, reason });
-	const crl = decoded(der, (schema) => new pkijs.CertificateRevocationList({ schema }));
+	const crl = decoded(
+		der,
+		(schema) => new pkijs.CertificateRevocationList({ schema }),
+		nodesIn(der),
+	);
 	if (!crl) return unusable("malformed");
 	if (!isTaken(crl.signatureAlgorithm, taken)) return unusable("signature algorithm");
 	if (!sameAlgorithm(crl.signature, crl.signatureAlgorithm)) return unusable("signature algorithm");
