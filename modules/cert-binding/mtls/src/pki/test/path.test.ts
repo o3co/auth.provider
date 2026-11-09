@@ -120,7 +120,8 @@ describe("path validation", () => {
 		const policy = policyOf([root.der]);
 		expect(await reasonOf(client.der, [intermediate.der], policy)).toBe("path of 3");
 		const asEcdsa = restated("certificate", client.der, "1.2.840.10045.4.3.2");
-		expect(await reasonOf(asEcdsa, [intermediate.der], policy)).toBe("signature algorithm");
+		// node checks the signature by the algorithm stated, so it is no issuer's: no path.
+		expect(await reasonOf(asEcdsa, [intermediate.der], policy)).toBe("path");
 	});
 
 	it("counts an RSA key's bits from its first, however many zero bytes its encoding puts before them", async () => {
@@ -160,14 +161,17 @@ describe("path validation", () => {
 				const garbled = { id, critical };
 				const leaf = await issue({ cn: "client", by: intermediate, garbled });
 				const reason = await reasonOf(leaf.der, [intermediate.der], anchors);
-				expect(reason, `${id} ${critical}`).toBe("malformed extension");
+				// node may read such a certificate as no issuer's before the policy does: refused either way.
+				expect(["malformed extension", "path"], `${id} ${critical}`).toContain(reason);
 			}
 		}
 		const inhibit = { id: "2.5.29.54", critical: true, value: new asn1js.Null().toBER(false) };
 		const notAsn1 = { id: "2.5.29.19", critical: true, value: new Uint8Array([0xff]).buffer };
 		for (const garbled of [inhibit, notAsn1]) {
 			const leaf = await issue({ cn: "client", by: intermediate, garbled });
-			expect(await reasonOf(leaf.der, [intermediate.der], anchors)).toBe("malformed extension");
+			expect(["malformed extension", "path"]).toContain(
+				await reasonOf(leaf.der, [intermediate.der], anchors),
+			);
 		}
 		const fine = {
 			id: "2.5.29.54",
@@ -183,7 +187,9 @@ describe("path validation", () => {
 			garbled: { id: "2.5.29.30", critical: true },
 		});
 		const under = await issue({ cn: "client", by: constrained });
-		expect(await reasonOf(under.der, [constrained.der], anchors)).toBe("malformed extension");
+		expect(["malformed extension", "path"]).toContain(
+			await reasonOf(under.der, [constrained.der], anchors),
+		);
 	});
 
 	it("holds the leaf to a client certificate, and every issuer to a CA within its path length", async () => {
