@@ -1,4 +1,4 @@
-import { mkdtemp, stat, truncate } from "node:fs/promises";
+import { mkdtemp, stat, truncate, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ErasureJournal } from "@mod/erasure-journal";
@@ -74,11 +74,24 @@ it("throws unavailable while another holds the journal's lock, and appends once 
 	const path = join(await mkdtemp(join(tmpdir(), "erasure-journal-")), "journal");
 	const journal = at(path);
 	await journal.create();
-	const release = await nodeFiles.lock(path);
+	const release = await nodeFiles.lock(path, '{"pid":1}');
 	try {
 		await expect(journal.begun("s", "o")).rejects.toMatchObject({ name: "Unavailable" });
 	} finally {
 		await release();
 	}
+	expect(await journal.begun("s", "o")).toEqual({ number: 1 });
+});
+
+it("names the lock path and its holder where a lock a crash left behind holds every append, and appends once it is removed", async () => {
+	const path = join(await mkdtemp(join(tmpdir(), "erasure-journal-")), "journal");
+	const journal = at(path);
+	await journal.create();
+	await writeFile(`${path}.lock`, '{"pid":4242,"host":"gone","at":0}');
+	const held = await journal.begun("s", "o").catch((error: unknown) => error);
+	expect(held).toMatchObject({ name: "Unavailable" });
+	expect(String((held as Error).message)).toContain(`${path}.lock`);
+	expect(String((held as Error).message)).toContain('"pid":4242');
+	await unlink(`${path}.lock`);
 	expect(await journal.begun("s", "o")).toEqual({ number: 1 });
 });

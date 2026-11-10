@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { hostname } from "node:os";
 import type { ErasureJournal, JournalEntry, JournalHeader, Unusable } from "@mod/erasure-journal";
 import { type Clock, type Random, Unavailable } from "@mod/kernel";
 import type { JournalFiles } from "./files.ts";
@@ -88,8 +89,14 @@ export function journalFileWith(parts: {
 	const appended = async (record: (n: number) => Entry) => {
 		let release: () => Promise<void>;
 		try {
-			release = await files.lock(path);
-		} catch {
+			const holder = JSON.stringify({ pid: process.pid, host: hostname(), at: parts.clock.now() });
+			release = await files.lock(path, holder);
+		} catch (error) {
+			const { code, holder } = error as { code?: unknown; holder?: unknown };
+			// Named, so an operator finds a lock a crash left behind, and whose it was.
+			if (code === "EEXIST") {
+				throw new Unavailable(`erasure-journal (its lock ${path}.lock is held: ${String(holder)})`);
+			}
 			throw new Unavailable("erasure-journal");
 		}
 		try {

@@ -10,8 +10,11 @@ export interface JournalFiles {
 	create(path: string, bytes: Buffer): Promise<void>;
 	/** Appends and syncs; where the write fails, cuts the file back to its length before. */
 	append(path: string, bytes: Buffer): Promise<void>;
-	/** Takes the file's lock, a file beside it, refusing one held (`code` `EEXIST`); answers its release. */
-	lock(path: string): Promise<() => Promise<void>>;
+	/**
+	 * Takes the file's lock, a file beside it holding `holder`; one held refuses with `code` `EEXIST`
+	 * and the holder it records. Answers its release.
+	 */
+	lock(path: string, holder: string): Promise<() => Promise<void>>;
 }
 
 const syncDirectory = async (path: string) => {
@@ -53,10 +56,22 @@ export const nodeFiles: JournalFiles = {
 			await file.close();
 		}
 	},
-	lock: async (path) => {
+	lock: async (path, holder) => {
 		const lockPath = `${path}.lock`;
-		const held = await open(lockPath, "wx");
-		await held.close();
+		let held: Awaited<ReturnType<typeof open>>;
+		try {
+			held = await open(lockPath, "wx");
+		} catch (error) {
+			if ((error as { code?: unknown }).code !== "EEXIST") throw error;
+			const recorded = await readFile(lockPath, "utf8").catch(() => "unread");
+			throw Object.assign(new Error("held"), { code: "EEXIST", holder: recorded.trim() });
+		}
+		try {
+			await held.writeFile(holder);
+			await held.sync();
+		} finally {
+			await held.close();
+		}
 		return () => unlink(lockPath);
 	},
 };
