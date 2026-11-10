@@ -18,8 +18,9 @@ import {
 	softwareAuthenticator,
 } from "@mod/webauthn/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { passkeyArea } from "../src/area.ts";
 import { witnessLedger } from "../src/ledger.ts";
-import { type PasskeyPart, passkeyArea } from "../src/main.ts";
+import type { PasskeyPart } from "../src/main.ts";
 
 const pair = generateKeyPairSync("ed25519");
 const rpId = new URL(issuer).hostname;
