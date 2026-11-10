@@ -3212,6 +3212,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
