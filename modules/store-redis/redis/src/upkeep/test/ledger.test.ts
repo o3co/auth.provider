@@ -48,7 +48,7 @@ function heldLedger(
 		declared,
 		taken,
 		random: quietRuntime().random,
-		honours: async () => ({ kind: "verified" }),
+		honours: async () => ({ kind: "verified", witness: "w" }),
 	});
 	const store = redisStore(
 		client,

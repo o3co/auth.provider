@@ -333,7 +333,8 @@ export default defineModule(
 				declared,
 				taken,
 				random: c.random,
-				honours: (wanted) => honoursOf(client, c.section, wanted),
+				honours: (wanted) =>
+					honoursOf(client, c.section, wanted, `${options.prefix}:{#check}:fsync`),
 			});
 			try {
 				await upkeep.start();

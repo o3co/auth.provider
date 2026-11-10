@@ -16,7 +16,7 @@ Internal module of `redis`: `store`'s upkeep on Redis, the control record and th
 - Every script that changes data, the store's and these, first checks the record's epoch against the one the process took, before deleting what expired and before any replay: under another epoch it changes nothing, and is unavailable.
 - A change here is confirmed where replication is declared; so is the control read.
 - `start` takes the record's epoch and tries to add each declared space to the ledger; where writes are refused, as while too few replicas are good, it boots all the same. Until the spaces are added, the process changes nothing: each change, the store's and these, first tries once more, and is unavailable where that fails.
-- The ledger's entry is confirmed as a replicated write; until it is, the process changes nothing and is unready.
+- The ledger's entry is confirmed as a replicated write; until it is, the process changes nothing and is unready. A replica that never acknowledged it, promoted, looks a healthy primary, which `honours` does not catch: that rests on the operator keeping such a replica from promotion (Deployment), as every replicated write does.
 - `recheck`, for the probe: the record's epoch moved from the one taken, or the declared spaces not yet added, tried again, is a problem; a declared space missing from the ledger, or held as holding no subject's data where this process declares it may, is added again.
 - A new epoch is 16 random bytes from the kernel's randomness, so data restored from an old backup never holds a later epoch.
 - `require` and `retire` hold under the maintenance key alone, answering `not-in-maintenance` otherwise; `retire` refuses a space the process declares.
