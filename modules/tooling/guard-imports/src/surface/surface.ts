@@ -218,7 +218,7 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 		ts.SymbolFlags.TypeAlias |
 		ts.SymbolFlags.Class |
 		ts.SymbolFlags.Enum;
-	/** A value's type as inferred: the exported types it names, stopping at a named type (one outside the package at its arguments). */
+	/** A value's type as inferred: the exported types it names, stopping at a named type's members but reading its type arguments. */
 	const inferredIn = (type: ts.Type, carried: Set<string>, seen = new Set<ts.Type>()): void => {
 		if (seen.has(type)) return;
 		seen.add(type);
@@ -228,7 +228,7 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 		if (type.aliasSymbol) {
 			const own = name(resolveAlias(type.aliasSymbol));
 			if (own) carried.add(own);
-			else (type.aliasTypeArguments ?? []).forEach(next);
+			(type.aliasTypeArguments ?? []).forEach(next);
 			return;
 		}
 		if (type.isUnionOrIntersection()) {
@@ -240,7 +240,9 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 		if (symbol && symbol.flags & nameable) {
 			const own = name(symbol);
 			if (own) carried.add(own);
-			else checker.getTypeArguments(type as ts.TypeReference).forEach(next);
+			if ((type as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) {
+				checker.getTypeArguments(type as ts.TypeReference).forEach(next);
+			}
 			return;
 		}
 		for (const s of [...type.getCallSignatures(), ...type.getConstructSignatures()]) {

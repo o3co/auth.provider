@@ -155,3 +155,16 @@ export const loop = { part: { size: 1 } as Part, again() { return this; } };
 	);
 	expect([...(carries.get("loop") ?? [])]).toEqual(["Part"]);
 });
+
+it("reads the type arguments of a named type the package exports, as a token of its own makes them", () => {
+	const { carries } = surface(
+		"@mod/sig-own-point",
+		`
+export interface Point<T> { readonly label: string; readonly of?: T }
+export function point<T>(label: string): Point<T> { return { label }; }
+export interface Sink { write(line: string): void }
+export const sinks = point<Sink>("sinks");
+`,
+	);
+	expect([...(carries.get("sinks") ?? [])].sort()).toEqual(["Point", "Sink"]);
+});
