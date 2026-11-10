@@ -31,6 +31,8 @@ export const mostKeptSerials = 1 << 19;
 export const serialsIn = (kept: KeptCrl) => ("listed" in kept ? kept.listed.size : 0);
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+/** The most bytes an issuer's name may take, keyed by: a CRL naming a longer one is refused anyway. */
+const mostNameBytes = 4096;
 
 /** A CRL kept by where it came from and the issuer whose key verified it: another's is never taken for it. */
 const keptAs = (url: string, issuer: pkijs.Certificate) =>
@@ -110,6 +112,10 @@ export function crlSource(
 		issuer: pkijs.Certificate,
 		fetch: Fetch,
 	): Promise<Said> {
+		// The issuer's name keys what is kept: one past the bound is refused, never kept.
+		if (issuer.subject.toSchema().toBER(false).byteLength > mostNameBytes) {
+			return refused("malformed");
+		}
 		const urls = crlUrlsOf(cert);
 		if (urls.length === 0) return refused("no source");
 		let failed: Failed | undefined;

@@ -103,6 +103,28 @@ const answering = (spec: Omit<Answering, "nonce">) => async (body: Uint8Array | 
 };
 
 describe("revocation by CRL", () => {
+	it("refuses a certificate whose only CRL location is past 2 KiB, or whose issuer's name is past 4 KiB, never taking it as having no CRL", async () => {
+		const root = await issue({ cn: "root", ca: true });
+		const long = `http://root.example/${"a".repeat(2100)}`;
+		const farOff = await issue({ cn: "client", by: root, crl: long });
+		const named = await issue({ cn: "n".repeat(5000), ca: true });
+		const under = await issue({ cn: "client", by: named, crl: "http://root.example/crl" });
+		const s = sources({
+			[long]: await crlOf({ by: root }),
+			"http://root.example/crl": await crlOf({ by: named }),
+		});
+		const revocation = revocationOver(policyOf(), s);
+		expect(await revocation.check([farOff.certificate, root.certificate])).toEqual({
+			kind: "refused",
+			reason: "no source",
+		});
+		expect(await revocation.check([under.certificate, named.certificate])).toEqual({
+			kind: "refused",
+			reason: "malformed",
+		});
+		expect(s.asked).toEqual([]);
+	});
+
 	it("judges a kept CRL again for each certificate, refusing it for one of another issuer", async () => {
 		const root = await issue({ cn: "root", ca: true });
 		const a = await issue({ cn: "a", by: root, ca: true, crl: "http://root.example/crl" });
