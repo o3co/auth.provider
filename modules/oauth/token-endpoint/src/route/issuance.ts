@@ -35,9 +35,10 @@ export function issuanceFor(
 		const judged = await tokens.admits(requestOf(grant, from));
 		return judged.kind === "allowed" ? judged : { kind: "refused", refusal: judged };
 	};
-	const issue: GrantInput["issue"] = async (grant, from = {}) => {
+	const issue: GrantInput["issue"] = async (given, from = {}) => {
 		const { session, continuing: _, ...limits } = from;
-		// The subject as handed to tokens, never the grant read again once it is signed.
+		// Read once: tokens signs the subject the bundle notes, whatever the grant answers later.
+		const grant = { ...given };
 		const { subject } = grant;
 		const issued = await tokens.issue(requestOf(grant, from), { ...limits, ...bound });
 		if (issued.kind !== "issued") return { kind: "refused", refusal: issued };
