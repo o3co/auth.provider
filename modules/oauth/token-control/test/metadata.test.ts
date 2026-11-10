@@ -4,6 +4,7 @@ import { authMethods } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { type MetadataItem, metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
@@ -32,6 +33,7 @@ const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadat
 const assembly = (revocable: boolean, origin?: string, extra: Module[] = []) => ({
 	modules: [
 		http,
+		httpServer,
 		tokensStandIn({ revocable }),
 		issuerModule,
 		clientsModule,
