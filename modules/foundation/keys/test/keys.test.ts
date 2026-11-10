@@ -2,6 +2,7 @@ import { createPrivateKey, generateKeyPairSync, type KeyObject, randomBytes } fr
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { CompactSign } from "jose";
@@ -30,7 +31,7 @@ afterEach(() => stop());
 
 async function boot(keysSection: unknown, http_: Record<string, unknown> = {}) {
 	const app = await assemble({
-		modules: [http, keysModule],
+		modules: [http, httpServer, keysModule],
 		config: { ...kernelConfig(), ...httpConfig(http_), keys: keysSection },
 		runtime,
 	});
