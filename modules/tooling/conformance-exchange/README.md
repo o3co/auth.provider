@@ -6,13 +6,13 @@
 - Owns the scene of a subject the ledger revokes across every way to a token: a code redeemed and one not yet, refresh, token exchange, a device's approval polled and one not yet, the back-channel logout token to the session's client, and the fresh login the authorization endpoint then asks for; and the scene of a token exchanged with an actor, which the revocation of the actor's subject leaves and its own subject's ends.
 - Owns the fault scenes of the exchange area, on a Redis topology and a deployment of their own, each after a control with no fault: a subject's revocation boundary refusing the exchange of a token given before it (internal module `revocation-boundary`), an Apple id_token taken once by the token exchange or as a JWT bearer assertion (internal module `id-token-once`), with what they share (`faults`).
 - Sets up the exchange area's part (the actor chain's limit and the lifetime cap) on each of the legacy and new targets, and on the new target Apple's id_tokens taken by both grants for the clients named, outbound reaching Apple through the proxy given.
+- Builds its own scenes' key, identity, OAuth and code parts, with refresh, introspection and revocation, from the form written in a scene.
 
 ## Not here
 - Scene composition and drivers (`conformance`). Starting the legacy system (`conformance-legacy`). Key, user, client, code-flow and device parts (their own areas).
 
 ## Offers
-- Area `exchange` and the shape of its part
-- Scene builder (builds the key, identity, OAuth and code parts, with refresh, introspection and revocation, from the form written in a scene)
+- Area `exchange` (`exchangeArea`) and the shape of its part
 - The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run only with `CONFORMANCE_FAULTS=1`, as CI sets and the script does not; named to the evidence as `@mod/conformance-exchange#faults` by the run itself; the area's own run and its pattern runs leave them out
 
 ## Invariants
