@@ -11,6 +11,7 @@ import {
 	listedWithout,
 	type SubjectPlace,
 	targetOf,
+	UnreadableIndex,
 } from "../index/index.ts";
 
 /** Entries settled in one write: their records and sets, and the bucket listing them. */
@@ -60,7 +61,7 @@ async function settled(
 			});
 			answer = { removed, left: leaving.size };
 			if (!bucket) return { targets: next };
-			const left = listedWithout(listed, (e) =>
+			const left = listedWithout(listed, place.space.name, (e) =>
 				[...leaving].some((l) => l.key === e.key && l.name === e.name),
 			);
 			return { targets: [left, ...next] };
@@ -142,7 +143,7 @@ export async function eraseSubject(
 			for (;;) {
 				if (options.signal?.aborted) return stopped("aborted");
 				const { entry } = await place.store.get(changeRecords.keyOf(bucket));
-				const entries = entriesIn(entry?.value).slice(0, perBatch);
+				const entries = entriesIn(entry?.value, space).slice(0, perBatch);
 				if (entries.length === 0) break;
 				removed += (await settled(place, bucket, entries, theirs)).removed;
 			}
@@ -150,6 +151,7 @@ export async function eraseSubject(
 		return report({ kind: "erased", space, removed });
 	} catch (error) {
 		if (error instanceof Unavailable) return stopped("unavailable");
+		if (error instanceof UnreadableIndex) return stopped("index-unreadable");
 		throw error;
 	}
 }
@@ -173,7 +175,7 @@ export async function sweepIndex(
 	let swept = 0;
 	for (const key of page.keys) {
 		if (key.name !== name || !/\.m[0-9a-f]$/.test(key.partition)) continue;
-		const entries = entriesIn((await place.store.get(key)).entry?.value);
+		const entries = entriesIn((await place.store.get(key)).entry?.value, place.space.name);
 		for (let from = 0; from < entries.length; from += perBatch) {
 			const batch = entries.slice(from, from + perBatch);
 			swept += (await settled(place, entryAt(key.partition), batch, absent)).left;

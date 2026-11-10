@@ -95,7 +95,9 @@ export function subjectRecordsIn<T extends Json>(
 						lifetimeMs: lifetime,
 					};
 					if (!byKeys) return { targets: [record] };
-					return { targets: [record, listedWith(bucket, { key, name: "record" })] };
+					return {
+						targets: [record, listedWith(bucket, place.space.name, { key, name: "record" })],
+					};
 				},
 			});
 			return answer;
@@ -158,7 +160,7 @@ export function subjectRecordsIn<T extends Json>(
 					if (subject === undefined || !byKeys) return { targets: [{ remove: true }] };
 					return {
 						targets: [{ remove: true }],
-						watched: [listedWithout(bucket, isRecord(key))],
+						watched: [listedWithout(bucket, place.space.name, isRecord(key))],
 					};
 				},
 			});
@@ -191,8 +193,8 @@ export function subjectRecordsIn<T extends Json>(
 					return {
 						targets: [
 							{ value: kept(found.value as Json, to) },
-							listedWithout(fromBucket, isRecord(key)),
-							listedWith(toBucket, { key, name: "record" }),
+							listedWithout(fromBucket, place.space.name, isRecord(key)),
+							listedWith(toBucket, place.space.name, { key, name: "record" }),
 						],
 					};
 				},

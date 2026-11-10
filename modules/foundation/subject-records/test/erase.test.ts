@@ -315,3 +315,29 @@ it("reads every value raw while records are only read, whatever its shape, and c
 	});
 	expect(await raw(indexed, "old")).toEqual({ pii: "none" });
 });
+
+it("reads a bucket in no shape it knows as unreadable everywhere, skipping no entry", async () => {
+	const { s, at, raw } = await opened();
+	const put = (space: Space, partition: string, value: Json, name = "record") =>
+		s.putIfAbsent({ space, partition, name }, value, { expiry: { kind: "never" } });
+	const envelope = { "records:v": 1, subject: "alice", value: 1 };
+	await put(indexed, "k", envelope);
+	await put(indexed, "k", envelope, "set");
+	await put(indexSpaceOf(indexed), `${part(indexed, "alice")}.${bucketOf("k")}`, [
+		"k",
+		["k", "set"],
+	]);
+	const records = subjectRecordsIn<number>(at(indexed), "w", refuse);
+	const sibling = Array.from({ length: 64 }, (_, i) => `x${i}`).find(
+		(key) => bucketOf(key) === bucketOf("k"),
+	);
+	await expect(records.create(sibling ?? "", "alice", 1, 60_000)).rejects.toThrow(/no shape/);
+	await expect(records.remove("k")).rejects.toThrow(/no shape/);
+	await expect(sweepIndex(at(indexed))).rejects.toThrow(/no shape/);
+	expect(await eraseSubject(at(indexed), "alice")).toMatchObject({
+		kind: "stopped",
+		reason: "index-unreadable",
+	});
+	expect(await raw(indexed, "k")).toEqual(envelope);
+	expect(await raw(indexed, "k", "set")).toEqual(envelope);
+});

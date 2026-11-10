@@ -23,18 +23,28 @@ export interface Entry {
 	readonly name: "record" | "set";
 }
 
-/** A bucket's entries: `[key, name]` pairs, sorted; anything else is no entry. */
-export const entriesIn = (value: Json | undefined): Entry[] =>
-	Array.isArray(value)
-		? value.flatMap((e): Entry[] =>
-				Array.isArray(e) &&
-				e.length === 2 &&
-				typeof e[0] === "string" &&
-				(e[1] === "record" || e[1] === "set")
-					? [{ key: e[0], name: e[1] }]
-					: [],
-			)
-		: [];
+/** A bucket in no shape this reader knows: nothing reading it goes on, so no entry is skipped. */
+export class UnreadableIndex extends Error {
+	readonly space: string;
+	constructor(space: string) {
+		super(`subject-records: a bucket of ${space} is in no shape this version reads`);
+		this.name = "UnreadableIndex";
+		this.space = space;
+	}
+}
+
+const isEntry = (e: Json): e is [string, "record" | "set"] =>
+	Array.isArray(e) &&
+	e.length === 2 &&
+	typeof e[0] === "string" &&
+	(e[1] === "record" || e[1] === "set");
+
+/** A bucket's entries, each `[key, name]`; a bucket holding anything else throws `UnreadableIndex`. */
+export const entriesIn = (value: Json | undefined, space: string): Entry[] => {
+	if (value === undefined) return [];
+	if (!Array.isArray(value) || !value.every(isEntry)) throw new UnreadableIndex(space);
+	return value.map(([key, name]) => ({ key, name }));
+};
 
 const order = (a: Entry, b: Entry) =>
 	codePointOrder(a.key, b.key) || codePointOrder(a.name, b.name);
@@ -44,8 +54,8 @@ const stored = (entries: readonly Entry[]): Next<Json> =>
 		: { value: [...entries].sort(order).map((e) => [e.key, e.name]), lifetimeMs: "endless" };
 
 /** A bucket's next, `entry` listed in it; nothing where it is listed already. */
-export const listedWith = (bucket: Json | undefined, entry: Entry): Next<Json> => {
-	const entries = entriesIn(bucket);
+export const listedWith = (bucket: Json | undefined, space: string, entry: Entry): Next<Json> => {
+	const entries = entriesIn(bucket, space);
 	const listed = entries.some((e) => e.key === entry.key && e.name === entry.name);
 	return listed ? undefined : stored([...entries, entry]);
 };
@@ -53,9 +63,10 @@ export const listedWith = (bucket: Json | undefined, entry: Entry): Next<Json> =
 /** A bucket's next without the entries `leaving` picks: nothing where none leaves, removed with its last. */
 export const listedWithout = (
 	bucket: Json | undefined,
+	space: string,
 	leaving: (e: Entry) => boolean,
 ): Next<Json> => {
-	const entries = entriesIn(bucket);
+	const entries = entriesIn(bucket, space);
 	const rest = entries.filter((e) => !leaving(e));
 	return rest.length === entries.length ? undefined : stored(rest);
 };

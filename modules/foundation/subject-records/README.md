@@ -21,7 +21,7 @@
 ## Invariants
 - Every write goes through `records`' `changeRecords`, the one door to a space holding a subject's data; a read goes to the store and writes nothing.
 - Once indexed, a record of an `online-*` space is kept in an envelope with its subject (internal module `envelope`), and an owner's value holding `records:v` at its top is refused. Before, every value is raw by the phase, whatever its shape, and the one migration reads every value it meets so.
-- A subject's part of the index (internal module `index`) holds its tombstone and 16 buckets, each the sorted entries of the subject's records and sets whose key's SHA-256 starts with that hex digit: a key, and whether it lists the record or the set; no key holds a subject.
+- A subject's part of the index (internal module `index`) holds its tombstone and 16 buckets, each the sorted entries of the subject's records and sets whose key's SHA-256 starts with that hex digit: a key, and whether it lists the record or the set; no key holds a subject. A bucket in another shape is refused wherever it is read, never skipped.
 - A create holds the record absent, the subject's tombstone absent and the bucket as read, and writes the record and its entry in the bucket, as one.
 - A value may be made from the attempt's deadline: owners whose value bounds a time by the write, as subject-revocation's boundaries do, need it.
 - `erased` answers a create the tombstone stopped: an owner takes it as refused, never as `exists`, and never tries it again.

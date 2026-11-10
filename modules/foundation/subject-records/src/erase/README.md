@@ -9,7 +9,7 @@ Internal module of `subject-records`: erasing a subject from one space, and swee
 - Which spaces an owner erases, and when: its eraser, which passes the reports on. The journal, the order and the answers of erasure: `account-erasure`. Naming the index: internal module `index`.
 
 ## Offers
-- `eraseSubject` (a place, a subject, a signal) → a `SpaceReport`: `erased` with the records and sets removed, `fenced` until a store-clock time, or `stopped` (`not-indexed`, `aborted`, `unavailable`).
+- `eraseSubject` (a place, a subject, a signal) → a `SpaceReport`: `erased` with the records and sets removed, `fenced` until a store-clock time, or `stopped` (`not-indexed`, `aborted`, `unavailable`, `index-unreadable`: a bucket in no shape this version reads, nothing skipped).
 - `sweepIndex` (a place, a cursor) → the entries a page of the index space dropped, and where to go on.
 - `clockAllowanceMs`, the 5 minutes a bounded fence allows for the store's clock.
 

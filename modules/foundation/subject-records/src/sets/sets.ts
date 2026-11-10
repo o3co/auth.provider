@@ -82,7 +82,7 @@ export function subjectKeyedSetsIn(
 						lifetimeMs: added.next.lifetimeMs,
 					};
 					if (!byKeys) return { targets: [set] };
-					return { targets: [set, listedWith(bucket, { key, name: "set" })] };
+					return { targets: [set, listedWith(bucket, place.space.name, { key, name: "set" })] };
 				},
 			});
 			if (typeof answer === "object" && answer.pushedOut.length > 0) {
