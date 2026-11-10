@@ -16,6 +16,7 @@ Internal module of `tokens`: the judgment `admits` and `issue` share, and the is
 
 ## Invariants
 - The order policies are asked in: tokens' own rule first (an authentication time over 300 s ahead of the clock, a fixed allowance for hosts' clocks, as 0.17 allowed), then the issuance policies in name order, each asked the grant as its caller verified it; any answer but allowed refuses. All of them answer within `issuance-timeout` together: past it the issuance is unavailable, and the signal each policy is given aborts.
+- A policy reads session-built state late (`c.late`), else boot cycles.
 - `admits` makes the same judgment without issuing, but for the lifetime, which only `issue`'s limits and signing fix; a policy that cannot tell is unavailable.
 - `issue` takes one frozen copy of the request and its limits, and the time, before anything waits: every policy reads it and the issuing signs it, so neither a policy nor a caller changing its own objects meanwhile changes what is signed; that time is handed to the issuing (`IssueAccess`' `askedAt`) as the token's `iat`, so the policies' wait moves it past no boundary.
 - A token with less than a second left once signed, its end come, its cap passed, its lifetime spent in the policies' wait or its signing slow, is refused as tokens' own rule: policy `tokens`, reason `no_lifetime_left`, the client's word `expired`, which `token-endpoint` answers `invalid_grant` whatever the grant. Any other answers its expires-in: what is left once signed, rounded up to whole seconds, at least 1.
