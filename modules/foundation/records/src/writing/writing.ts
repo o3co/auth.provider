@@ -138,6 +138,23 @@ const openedFor = new WeakMap<Store, Map<string, "records" | "secret records">>(
 export const nameOf = (space: Space, secret: string) =>
 	`1.${createHash("sha256").update(`${space.name}\n${secret}`).digest("base64url")}`;
 
+/** The categories of a space holding a subject's data, which subject-records alone writes. */
+const heldForSubjects = new Set(["online-indexed", "online-keyed", "bounded"]);
+
+/**
+ * Refuses the boot where a plain builder (records, under a secret, deferred work, keyed sets)
+ * opens a space holding a subject's data: subject-records writes those, through `changeRecords`.
+ */
+export function plainDoor(place: Place) {
+	const held = place.space.subjectData;
+	if (held !== undefined && heldForSubjects.has(held)) {
+		throw new BuildRefused(
+			place.space.name,
+			"a space holding a subject's data is written through subject-records",
+		);
+	}
+}
+
 export function claim(place: Place, kind: "records" | "secret records") {
 	const kinds = openedFor.get(place.store) ?? new Map<string, "records" | "secret records">();
 	openedFor.set(place.store, kinds);

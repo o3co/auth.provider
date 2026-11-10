@@ -17,6 +17,7 @@ import {
 	markedAt,
 	nameOf,
 	type Place,
+	plainDoor,
 	retried,
 	rewrite,
 	untilAnswered,
@@ -27,6 +28,7 @@ export type { DeferredSize };
 
 /** Records of one shape by key, each changed atomically from what it holds. */
 export function recordsIn<T extends Json>(place: Place) {
+	plainDoor(place);
 	claim(place, "records");
 	return recordsOf<T>(place);
 }
@@ -131,6 +133,7 @@ export function pairedRecordsIn<T extends Json>(
 	if (!changesTogether(place.store)) {
 		refuse(where, "its store writes no records of two partitions as one");
 	}
+	plainDoor(place);
 	claim(place, "records");
 	const at = (key: string): Target => ({ place, key });
 	return {
@@ -360,6 +363,8 @@ export function pairedRecordsAcross<A extends Json, B extends Json>(
 			"its two spaces declare other guarantees, so a fault could keep one and drop the other",
 		);
 	}
+	plainDoor(first);
+	plainDoor(second);
 	claim(first, "records");
 	claim(second, "records");
 	type Read = {
@@ -436,6 +441,7 @@ export function pairedRecordsAcross<A extends Json, B extends Json>(
 
 /** Records under a name made per space from an unguessable secret; the store never receives it. */
 export function secretRecordsIn<T extends Json>(place: Place) {
+	plainDoor(place);
 	claim(place, "secret records");
 	const named = recordsOf<T>(place);
 	const nameFor = (secret: string) => nameOf(place.space, secret);
@@ -453,6 +459,7 @@ export function secretRecordsIn<T extends Json>(place: Place) {
 
 /** Work that must be done later, kept until it is said done. */
 export function deferredIn(place: Place & DeferredSize) {
+	plainDoor(place);
 	const shardKey = (shard: number) => ({
 		space: place.space,
 		partition: `jobs-${shard}`,
@@ -532,6 +539,7 @@ export function checkedCap(cap: number): number {
 
 /** Sets of members by key, at most `cap` to a key, ending on the kernel's clock; what an add pushes out awaits in the same write. */
 export function keyedSetsIn(place: Place & { readonly cap: number; readonly clock: Clock }) {
+	plainDoor(place);
 	const codec = keyedSetsIn.codec(place);
 	const keyOf = (key: string) => ({ space: place.space, partition: key, name: "set" });
 	/** Rewrites a set as the codec decides on what it holds. */
