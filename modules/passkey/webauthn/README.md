@@ -14,7 +14,7 @@
   - A challenge kept bare, with no ending saying it named credentials, reads as none named: an answer without a handle is refused, and a new challenge passes.
 - `credentialOf`: a value read as a credential in the shape webauthn writes, with its fields alone and the canonical checks and limits of its id, key and handle (`isCanonical`, `credentialLimits`); nothing for any other value. `freshHandle`: a new user handle from the randomness given, by the rule webauthn makes its own by.
 - Operator section: `rp-id`, `rp-name`, `origins` (required), `top-origins` (default none), `challenge-lifetime` (10s–10m, default `2m`, written with its unit), `algorithms` (`EdDSA`, `ES256`, `RS256`, at least one, each once; default all three).
-- Test configuration builders, the ceremonies over a relying party a test gives (`testCeremonies`), and a software authenticator behind a browser (`./testing`), which answers options as a browser does and takes twists for refusal tests.
+- `./testing`: `webauthnConfig`, the ceremonies over a relying party a test gives (`testCeremonies`) at `testOrigin`, and a software authenticator behind a browser (`softwareAuthenticator`), which answers options as a browser does and takes twists for refusal tests; `statingCertificate` is the twist of an attestation stating a certificate.
 
 ## Invariants
 - A challenge is 32 random bytes, answered within `challenge-lifetime` of its making on `kernel`'s clock.
