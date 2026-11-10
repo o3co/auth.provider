@@ -3,7 +3,8 @@ import { type AreaScene, areaTarget, faultyTarget, type Started, sceneOf } from 
 import { keysArea, type SigningScene } from "@mod/conformance-keys";
 import { oauthScene } from "@mod/conformance-oauth";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { opsArea, scrapePathSetting } from "../src/main.ts";
+import { opsArea } from "../src/area.ts";
+import { scrapePathSetting } from "../src/main.ts";
 
 const driver = areaTarget();
 const jwksPath = "/.well-known/jwks.json";

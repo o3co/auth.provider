@@ -24,8 +24,8 @@
 - Extension point `closingParticipants`: the session (its handle and context, never the cookie secret) → each participant that failed, by name and the error's kind.
   - None is called for a session that ends by expiry alone, while a close calls them for a session whose record it finds, even one the lifetime in force has ended.
 - Each seam takes at most one contribution, from the module keeping the requirements (`session-requirements`) or the participants (`session-participants`); its factory takes `sessions` only late.
-- An implementation refuses to boot where a seam has no contribution; the stand-in takes none as no requirement and no participant, the `credentials` floor still kept.
-- `./testing`: a stub, a stand-in in memory behind cookies by `cookies`' rule (each subject's listing as the contract has it; a pending close goes on only when asked again), `openedOf` (`open`'s session and cookie, or its throw), and contract tests of the sessions.
+- An implementation refuses to boot where a seam has no contribution; the stand-in boots without them (`sessionStandIn`).
+- `./testing`: `stubSessions`; `sessionStandIn`, in memory behind cookies, as its doc comment says, with `standInListingCap`, `standInLifetimeSeconds` and `failStandInListing`; `openedOf` (`open`'s session and cookie, or its throw); `sessionsContract`, the contract tests.
 
 ## Invariants
 - A session's state only moves forward. A host that cannot read a record (one a newer host wrote, during a rolling upgrade) lets nobody in on it and answers a login or close over its cookie Unavailable; the cookie stays.

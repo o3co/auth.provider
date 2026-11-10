@@ -475,13 +475,14 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `budget` (`src/budget`): G7, how much each unit may hold and make a reader read, with G9 and G17 on what it measures.
   - `change-record` (`src/change-record`): a change record's machine rows, what two commits of the workspace differ in.
   - `network` (`src/network`): G26, how product code may reach the network, and G27, where a card states the server it needs.
+  - `offers` (`src/offers`): whether a package's card lists what its entry points export.
   - `protocol` (`src/protocol`): G33, a protocol package holds a wire's contract alone.
 - `@mod/guard-imports` (verification, `modules/tooling/guard-imports`): Reads the workspace: its packages and their manifests, what each source file imports, and each package's public surface.
   - `facts` (`src/facts`): what each source file says, read by one lexical program per run for the rules that read syntax: the modules it reaches and where each leads, and what each name it uses is bound to and stands for.
   - `owned-property` (`src/owned-property`): G32, that the property an owner holds to declaration (the narrower's `internal`) is written only by the packages declaring it.
   - `writes` (`src/owned-property/writes`): where a source writes the owned property, by type in a source and by name in a template.
   - `recorded` (`src/recorded`): G30, that an audit event is recorded only through its declarations.
-  - `surface` (`src/surface`): a package's public surface, read from its `.` entry by a TypeScript program of its own.
+  - `surface` (`src/surface`): a package's public surface, read from one of its entries by a TypeScript program of its own.
   - `taken` (`src/taken`): G31, that a contract its owner declares `takenBy` is imported by the packages it names alone.
 - `@mod/interop-clients` (verification, `modules/tooling/interop-clients`): Runs the provider against independent client libraries, each through an adapter of its own, and checks what each library gave back: a run per library.
   - `dialog` (`src/dialog`): one flow's exchange with an adapter.

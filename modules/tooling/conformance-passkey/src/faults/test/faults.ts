@@ -18,7 +18,7 @@ import {
 } from "@mod/webauthn/testing";
 import { expect } from "vitest";
 // The package's entry, which sets the area up on each target.
-import { passkeyArea } from "../../main.ts";
+import { passkeyArea } from "../../area.ts";
 
 export const grantType = "urn:o3co:oauth:grant-type:webauthn";
 const signing = generateKeyPairSync("ed25519");

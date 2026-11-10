@@ -5,7 +5,6 @@ export {
 	type ConnectionScene,
 	type FederationPart,
 	type FederationScene,
-	federationArea,
 	federationScene,
 	type GrantsPart,
 	grantsLoginPage,

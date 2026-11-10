@@ -4,7 +4,8 @@ import { browserAt } from "@mod/conformance-code/testing";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type ExchangeScene, exchangeScene } from "../src/main.ts";
+import { exchangeScene } from "../src/area.ts";
+import type { ExchangeScene } from "../src/main.ts";
 
 /** The request parameter asking a lifetime, by the target: the legacy build reads `expires_in`. */
 const lifetimeParam = areaTarget().differs("lifetime-asked-as-expires-in")

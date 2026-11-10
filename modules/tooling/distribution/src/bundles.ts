@@ -1,8 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { buildBundles } from "./build.ts";
-import { readBundles } from "./contract.ts";
-import { releaseOf } from "./workspace.ts";
+import { readBundles, releaseOf } from "./workspace.ts";
 
 const root = process.env.INIT_CWD ?? process.cwd();
 const release = releaseOf(root);

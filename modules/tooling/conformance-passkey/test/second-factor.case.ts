@@ -19,7 +19,7 @@ import {
 	type Twist,
 } from "@mod/webauthn/testing";
 import { describe, expect, it } from "vitest";
-import { passkeyArea } from "../src/main.ts";
+import { passkeyArea } from "../src/area.ts";
 
 const pair = generateKeyPairSync("ed25519");
 const at: Client = { origin: issuer };

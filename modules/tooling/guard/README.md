@@ -17,10 +17,12 @@
   - G27: a package whose declared `network` word reaches a server the deployment provides (`redis`, `smtp`) states what that server must be in a `## Deployment` section of its card (the `network` internal module).
   - G33: a protocol package holds a wire's contract alone: it imports `zod` and its own files alone, reaches only the globals that hold no behaviour of the host, and keeps no state nor runs code as it loads (the `protocol` internal module).
 - Measures each package's public surface: its exported values, and the members of its exported interfaces and type aliases.
+- Measures, for each entry point, the exports its package's card does not list, reported and not refused (the `offers` internal module).
 
 ## Not here
 - Lists of names, fixed places, snapshots, lists of exceptions.
 - Findings, approvals and past change records: the private ledger's. A change record is written from the two commits each time, and kept by no one here.
+- Whether a card's words name exports that exist (the other way from `offers`): review judges.
 - Whether a card's dependency item agrees with the package's dependencies, whether a verification base holds legacy-system names, and whether a card holds only the current contract beyond the phrase match: review judges.
 - The map, which review reads as the README of the deepest folder that holds every package: an owner cell made only of lowercase names and separators (`,`, `/`, `and`) lists packages; any other cell is a general phrase.
 - A dependency item, which review reads as naming modules with the lowercase names it opens with, before any note in brackets or sentence after a full stop.

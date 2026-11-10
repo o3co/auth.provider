@@ -12,7 +12,7 @@ import {
 } from "@mod/conformance/testing";
 import { oauthScene } from "@mod/conformance-oauth";
 import { describe, expect, it } from "vitest";
-import { opsArea } from "../src/main.ts";
+import { opsArea } from "../src/area.ts";
 
 const pair = generateKeyPairSync("ed25519");
 const oauth = oauthScene({

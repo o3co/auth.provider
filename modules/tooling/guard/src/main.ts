@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readWorkspace } from "@mod/guard-imports";
 import { branchingImports, heavyDependencyCards } from "./budget/budget.ts";
-import { type Budget, check } from "./contract.ts";
+import { check } from "./check.ts";
+import type { Budget } from "./contract.ts";
 import { kindRules } from "./kinds.ts";
+import { unlistedExports } from "./offers/offers.ts";
 import { readDocuments } from "./workspace.ts";
 
 const root = process.env.INIT_CWD ?? process.cwd();
@@ -21,6 +23,12 @@ for (const { where, packages: alone } of branchingImports(packages, budget)) {
 for (const { where, bytes } of heavyDependencyCards(packages, budget)) {
 	process.stdout.write(
 		`measure  dependency cards  ${where}  ${bytes} > ${budget.dependencyCardBytes}\n`,
+	);
+}
+// Reported, not refused: an entry point's exports its card does not list.
+for (const { where, entry, names } of unlistedExports(packages)) {
+	process.stdout.write(
+		`measure  offers  ${where}  ${entry}  ${names.length}: ${names.join(", ")}\n`,
 	);
 }
 for (const v of violations) process.stdout.write(`${v.rule}  ${v.where}  ${v.detail}\n`);
