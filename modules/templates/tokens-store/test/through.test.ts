@@ -1,5 +1,6 @@
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, kernelConfig } from "@mod/kernel";
@@ -30,6 +31,7 @@ async function boot() {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			keysModule,
 			issuerModule,
 			senderBindingModule,

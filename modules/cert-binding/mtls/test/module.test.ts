@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { type MetadataItem, metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
@@ -67,7 +68,15 @@ async function boot(
 ) {
 	const sent: Sent[] = [];
 	const app = await assemble({
-		modules: [http, issuerModule, senderBindingModule, reader, serving(table, missing, sent), mtls],
+		modules: [
+			http,
+			httpServer,
+			issuerModule,
+			senderBindingModule,
+			reader,
+			serving(table, missing, sent),
+			mtls,
+		],
 		config: {
 			...kernelConfig(),
 			...httpConfig(

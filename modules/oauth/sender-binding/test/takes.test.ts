@@ -1,5 +1,6 @@
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { kernelConfig } from "@mod/kernel";
@@ -10,7 +11,7 @@ import senderBindingModule from "../src/module.ts";
 it("takes all it names, under either dispatch", async () => {
 	for (const dispatch of ["intent-explicit", "strict-mutual-exclusion"]) {
 		const input = {
-			modules: [http, issuerModule, senderBindingModule],
+			modules: [http, httpServer, issuerModule, senderBindingModule],
 			config: {
 				...kernelConfig(),
 				...httpConfig(),

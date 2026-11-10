@@ -28,6 +28,7 @@
 	},
 	"devDependencies": {
 		"@mod/cookies": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa": "workspace:*",
 		"@mod/mfa-entry": "workspace:*",

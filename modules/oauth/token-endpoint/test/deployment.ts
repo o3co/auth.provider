@@ -2,6 +2,7 @@ import clientCredentialsModule from "@mod/client-credentials/module";
 import clientsModule from "@mod/clients/module";
 import http from "@mod/http/module";
 import { type HttpSettings, httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { kernelConfig, type Module } from "@mod/kernel";
@@ -16,6 +17,7 @@ import tokenEndpoint from "../src/module.ts";
 /** The token endpoint and the modules it cannot run without, then `extra`. */
 export const endpointModules = (...extra: Module[]): Module[] => [
 	http,
+	httpServer,
 	keysModule,
 	tokensModule,
 	issuerModule,

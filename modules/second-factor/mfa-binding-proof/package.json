@@ -26,6 +26,7 @@
 		"@mod/audit": "workspace:*",
 		"@mod/mfa-binding": "workspace:*",
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa-entry": "workspace:*",
 		"@mod/records": "workspace:*",

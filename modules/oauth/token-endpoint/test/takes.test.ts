@@ -4,6 +4,7 @@ import clientsModule from "@mod/clients/module";
 import { clientsConfig } from "@mod/clients/testing";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { kernelConfig } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
@@ -29,6 +30,7 @@ it("takes all it names as the grant caller other packages' tests compose in its 
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			tokensStandIn(),

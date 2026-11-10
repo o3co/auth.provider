@@ -1,6 +1,7 @@
 import type { HttpRequest } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
@@ -32,7 +33,7 @@ const readerWith = async (
 	...kinds: ReturnType<typeof kind>[]
 ) => {
 	const app = await assemble({
-		modules: [http, issuerModule, senderBindingModule, ...kinds],
+		modules: [http, httpServer, issuerModule, senderBindingModule, ...kinds],
 		config: {
 			...kernelConfig(),
 			...httpConfig(),

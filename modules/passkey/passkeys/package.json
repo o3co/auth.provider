@@ -20,6 +20,7 @@
 	"devDependencies": {
 		"@mod/audit": "workspace:*",
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/records": "workspace:*",
 		"vitest": "5.0.5"
 	},

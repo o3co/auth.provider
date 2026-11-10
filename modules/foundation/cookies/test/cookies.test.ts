@@ -1,5 +1,6 @@
 import http from "@mod/http/module";
 import { testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { describe, expect, it } from "vitest";
@@ -16,7 +17,7 @@ async function at(origin: string, logged = recordingLog()) {
 	const insecure = plain ? { "insecure-origin": true } : {};
 	const environment = plain ? "development" : "production";
 	const app = await assemble({
-		modules: [http, cookiesModule],
+		modules: [http, httpServer, cookiesModule],
 		config: {
 			...kernelConfig({ environment }),
 			http: { port: 0, "public-origin": origin, ...insecure },
@@ -150,5 +151,7 @@ describe("lookup", () => {
 
 it("takes every handle its takes name, on a site of its own", async () => {
 	const config = { ...kernelConfig(), http: { port: 0, "public-origin": "https://app.example" } };
-	expect((await takesUnused({ modules: [http, cookiesModule], config })).cookies).toBeUndefined();
+	expect(
+		(await takesUnused({ modules: [http, httpServer, cookiesModule], config })).cookies,
+	).toBeUndefined();
 });

@@ -33,6 +33,7 @@
 		}
 	},
 	"devDependencies": {
+		"@mod/http-server": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/tls-options": "workspace:*",

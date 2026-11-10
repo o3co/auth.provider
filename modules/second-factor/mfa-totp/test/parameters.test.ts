@@ -1,5 +1,6 @@
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { type FactorKind, factorKinds } from "@mod/mfa-extensions";
@@ -20,6 +21,7 @@ async function totpUnder(settings: Record<string, unknown> = {}) {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			totpModule,
 			defineModule({ name: "reader", replicaSafe: true, takes: [factorKinds] }, (m) => [
 				m.provide(kinds).by((c) => c.collect(factorKinds)),

@@ -1,6 +1,7 @@
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
@@ -22,7 +23,7 @@ const item = (name: string, value: unknown) =>
 
 /** discovery beside http, keys and issuer, with these modules besides. */
 const composition = (extra: Module[], url = "https://as.example", corsOrigins: string[] = []) => ({
-	modules: [http, keysModule, issuerModule, discovery, ...extra],
+	modules: [http, httpServer, keysModule, issuerModule, discovery, ...extra],
 	config: {
 		...kernelConfig(),
 		...httpConfig(corsOrigins.length > 0 ? { "cors-origins": corsOrigins } : {}),

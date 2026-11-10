@@ -1,6 +1,7 @@
 import { createHash, generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { type MetadataItem, metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
@@ -77,7 +78,16 @@ const assembly = (
 	at = issuer,
 	counts: Counts = rateLimitStandIn,
 ) => ({
-	modules: [http, issuerModule, senderBindingModule, dpop, reader, spent.module, counts],
+	modules: [
+		http,
+		httpServer,
+		issuerModule,
+		senderBindingModule,
+		dpop,
+		reader,
+		spent.module,
+		counts,
+	],
 	config: {
 		...kernelConfig(),
 		...httpConfig(),

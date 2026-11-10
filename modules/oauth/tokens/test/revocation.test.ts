@@ -1,5 +1,6 @@
 import { inspect } from "node:util";
 import http from "@mod/http/module";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { assemble, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
@@ -31,7 +32,15 @@ const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: [] };
 async function boot() {
 	const { module: revoked, place } = revokedInMemory(() => now);
 	const app = await assemble({
-		modules: [http, keysModule, issuerModule, senderBindingModule, tokensModule, revoked],
+		modules: [
+			http,
+			httpServer,
+			keysModule,
+			issuerModule,
+			senderBindingModule,
+			tokensModule,
+			revoked,
+		],
 		config: {
 			...composedConfig(),
 			...tokensConfig({ revocation: "denylist", "access-token-lifetime": "1h" }),

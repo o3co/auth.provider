@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
@@ -68,6 +69,7 @@ async function rotated() {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			auditStandIn().module,
 			sessionStandIn,
 			subjectRevocationStandIn,

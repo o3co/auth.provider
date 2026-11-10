@@ -25,6 +25,7 @@
 		"@mod/client-allowance": "workspace:*",
 		"@mod/grants": "workspace:*",
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/outbound": "workspace:*",
 		"@mod/records": "workspace:*",

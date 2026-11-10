@@ -30,6 +30,7 @@
 		}
 	},
 	"devDependencies": {
+		"@mod/http-server": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/session-participants": "workspace:*",
 		"@mod/session-requirements": "workspace:*",
