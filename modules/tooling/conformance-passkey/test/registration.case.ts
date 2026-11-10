@@ -18,8 +18,7 @@ import {
 	type Twist,
 } from "@mod/webauthn/testing";
 import { describe, expect, it } from "vitest";
-import { passkeyArea } from "../src/area.ts";
-import type { PasskeyPart } from "../src/main.ts";
+import { type PasskeyPart, passkeyArea } from "../src/area.ts";
 
 const pair = generateKeyPairSync("ed25519");
 const rpId = new URL(issuer).hostname;
