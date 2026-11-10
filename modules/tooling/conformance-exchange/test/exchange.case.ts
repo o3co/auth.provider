@@ -1,5 +1,3 @@
-// The area's set-ups register as its package's entry loads.
-import "../src/main.ts";
 import { createHash, generateKeyPairSync, type KeyObject, randomUUID } from "node:crypto";
 import { type AreaScene, areaTarget, faultyTarget, type Started } from "@mod/conformance";
 import { browserAt } from "@mod/conformance-code/testing";
