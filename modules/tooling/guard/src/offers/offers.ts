@@ -27,7 +27,7 @@ export function listedOn(card: string): Set<string> {
 	return listed;
 }
 
-/** An entry's exports the card does not list: each value, a module's default aside, and each type no value carries, in turn. */
+/** An entry's exports the card does not list: each value, and each type no value carries, in turn. */
 export function unlistedIn(surface: Surface, listed: ReadonlySet<string>): string[] {
 	const carried = new Set<string>();
 	const reach = (name: string): void => {
@@ -39,9 +39,8 @@ export function unlistedIn(surface: Surface, listed: ReadonlySet<string>): strin
 		}
 	};
 	for (const value of surface.values) reach(value);
-	const values = [...surface.values].filter((value) => value !== "default");
 	const types = [...surface.types].filter((type) => !carried.has(type));
-	return [...values, ...types].filter((name) => !listed.has(name));
+	return [...surface.values, ...types].filter((name) => !listed.has(name));
 }
 
 /** Every package's entry points whose exports its card does not all list, by the entries its manifest names. */
@@ -51,7 +50,10 @@ export function unlistedExports(packages: readonly Pkg[]): Unlisted[] {
 		const surfaces = surfacesOf(packages, entry);
 		return packages.flatMap((p) => {
 			const surface = surfaces.get(p.name);
-			const names = surface ? unlistedIn(surface, listedOn(p.card ?? "")) : [];
+			// A `./module`'s default is the module itself, not a name the card lists.
+			const names = (surface ? unlistedIn(surface, listedOn(p.card ?? "")) : []).filter(
+				(name) => entry !== "./module" || name !== "default",
+			);
 			return names.length > 0 ? [{ where: p.name, entry, names }] : [];
 		});
 	});

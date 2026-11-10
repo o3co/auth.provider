@@ -58,3 +58,15 @@ it("asks every value, and the types no value carries, at each entry; a module's 
 		{ where: "@mod/offers-listed", entry: "./module", names: ["section"] },
 	]);
 });
+
+it("asks a default exported from any entry but `./module`", () => {
+	const p = {
+		...pkg("@mod/offers-default", {
+			"src/contract.ts": "export default function made(): void {}\n",
+		}),
+		card: card("- Nothing named."),
+	};
+	expect(unlistedExports([p])).toEqual([
+		{ where: "@mod/offers-default", entry: ".", names: ["default"] },
+	]);
+});
