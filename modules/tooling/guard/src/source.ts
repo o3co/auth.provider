@@ -176,6 +176,17 @@ const walking = new Set([
 	"toSorted",
 ]);
 
+/**
+ * Whether a call walks a collection: one of the walking names, but `find` only with a function to
+ * call, an array's; the build context's `find` takes a contract and walks nothing.
+ */
+const walks = (node: ts.Node, method: string) =>
+	walking.has(method) &&
+	(method !== "find" ||
+		(ts.isCallExpression(node) &&
+			node.arguments[0] !== undefined &&
+			(ts.isArrowFunction(node.arguments[0]) || ts.isFunctionExpression(node.arguments[0]))));
+
 /** The method a call names, when it is a call on a property. */
 const calledMethod = (node: ts.Node) =>
 	ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
@@ -192,7 +203,7 @@ export function branchesOf(path: string): string[] {
 		const method = calledMethod(node);
 		const word = ts.isBinaryExpression(node)
 			? choosing[node.operatorToken.kind]
-			: method !== undefined && walking.has(method)
+			: method !== undefined && walks(node, method)
 				? `.${method}()`
 				: branching[node.kind];
 		if (word) found.push(word);

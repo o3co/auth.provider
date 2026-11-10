@@ -490,7 +490,7 @@ describe("guard", () => {
 
 	it("G15 refuses branches, loops, choosing operators and walking calls in a wiring module's source", () => {
 		const branchy =
-			"export const a = (x: number) => (x > 0 ? 1 : 2);\nexport function b(xs: number[]) {\n\tfor (const x of xs) if (x) return x;\n\twhile (xs.length) xs.pop();\n\tswitch (xs.length) {\n\t\tdefault:\n\t}\n\tdo {} while (false);\n\txs.map((x) => x).filter(Boolean);\n\treturn (xs[0] ?? xs[1]) || (xs[2] && xs[3]);\n}\n";
+			"export const a = (x: number) => (x > 0 ? 1 : 2);\nexport function b(xs: number[]) {\n\tfor (const x of xs) if (x) return x;\n\twhile (xs.length) xs.pop();\n\tswitch (xs.length) {\n\t\tdefault:\n\t}\n\tdo {} while (false);\n\txs.map((x) => x).filter(Boolean);\n\txs.find((x) => x);\n\tc.find(control);\n\treturn (xs[0] ?? xs[1]) || (xs[2] && xs[3]);\n}\n";
 		const wiring = pkg(
 			"@t/wiring",
 			{ "src/contract.ts": branchy, "test/x.test.ts": branchy },
@@ -505,6 +505,7 @@ describe("guard", () => {
 		).toEqual([
 			"&&",
 			".filter()",
+			".find()",
 			".map()",
 			"?:",
 			"??",
