@@ -86,6 +86,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `kept` (`src/revocation/kept`): what outbound keeps of revocation, by issuer (its name's DER and key's SHA-256), in this process alone.
   - `tls` (`src/tls`): the options each TLS connection outbound makes takes.
   - `transport` (`src/transport`): carrying one request, admitted by the policy, to its destination and its answer back: direct, or through the proxy's tunnel.
+  - `ways` (`src/transport/ways`): the way a request reaches its destination: directly at an address checked here, through the proxy's tunnel, or, for plain http the caller asks the proxy to carry, in absolute form to the proxy.
 - `@mod/outbound-policy` (foundation, `modules/foundation/outbound-policy`): Owns the destination policy: where an outbound request may go, at which addresses, with what credential, and how far it may run, judged from the operator's settings without sending anything.
 - `@mod/rate-limit` (foundation, `modules/foundation/rate-limit`): Counts uses in windows on `store`, and locks keys out after failures (backoff, a budget in a window, a hard limit, forgetting a quiet run).
 - `@mod/records` (capability, `modules/foundation/records`): Provides records that know no feature: keyed records, records under a secret, deferred work, and keyed sets.

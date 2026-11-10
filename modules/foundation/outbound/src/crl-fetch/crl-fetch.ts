@@ -8,10 +8,13 @@ import { type Resolver, type Route, send } from "../transport/transport.ts";
 const mayAnswerLater = (status: number) =>
 	(status >= 500 && status <= 599) || status === 429 || status === 408;
 
+/** What a proxy answers a request it will not carry: forbidden, the method refused, credentials asked for. */
+const refusedByProxy = new Set([403, 405, 407]);
+
 /**
  * How a CRL is fetched for a peer's check: as signed material, plain http at `hosts` and public
- * addresses alone, 1 MiB and 5 seconds at most, in the place of the request it is for, never around
- * the proxy (until a CRL goes through it, one the proxy would carry is unreachable); `aborted` where
+ * addresses alone, 1 MiB and 5 seconds at most, in the place of the request it is for, through the
+ * proxy where one is set (but to direct hosts), which may refuse it (`proxy-refused`); `aborted` where
  * the request's own signal ended it.
  */
 export function crlFetchOf(
@@ -27,7 +30,7 @@ export function crlFetchOf(
 		if (signal.aborted) return "aborted";
 		try {
 			const admitted = policy.admit(url, narrower, true);
-			if (route !== undefined && !route.direct(admitted.host)) return "unreachable";
+			const proxied = route !== undefined && !route.direct(admitted.host);
 			const answer = await send(
 				admitted,
 				{ method: "GET" },
@@ -37,8 +40,12 @@ export function crlFetchOf(
 				route,
 				tls,
 				(ms) => AbortSignal.any([signal, deadlineOf(ms)]),
+				undefined,
+				undefined,
+				true,
 			);
 			if (answer.status === 200) return answer.body;
+			if (proxied && refusedByProxy.has(answer.status)) return "proxy-refused";
 			return mayAnswerLater(answer.status) ? "unreachable" : "refused";
 		} catch (error) {
 			if (signal.aborted) return "aborted";
