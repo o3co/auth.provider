@@ -10,14 +10,8 @@ import { oauthArea } from "@mod/conformance-oauth";
 import { totp } from "@mod/conformance-second-factor/testing";
 import { usersLedger } from "@mod/ledger-fakes";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-	commands,
-	composedBy,
-	recipesArea,
-	shownCommand,
-	transcript,
-	withBlocks,
-} from "../src/main.ts";
+import { recipesArea } from "../src/area.ts";
+import { commands, composedBy, shownCommand, transcript, withBlocks } from "../src/main.ts";
 
 const workspace = join(import.meta.dirname, "..", "..", "..", "..");
 const recipe = join(workspace, "docs", "recipe-mfa-page.md");
