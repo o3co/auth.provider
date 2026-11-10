@@ -7,7 +7,7 @@
 - Which peers are trusted proxies (`request-source`); what a certificate holds (its reader).
 
 ## Offers
-- The forwarded certificate: its leaf and chain, or `malformed`, as `request-source`'s source carries it.
+- The forwarded certificate (`certificateOf`, from a trusted proxy's headers): its leaf and chain, or `malformed`, as `request-source`'s source carries it. `ignoredCertificates`: whether to warn now of certificate headers sent but not taken, at most once a minute.
 - `certificateForwarding`: whether the operator named where certificates are forwarded.
 - `certificateSettings`, the schema part `http`'s section takes as `client-certificate` (its keys in the settings list).
 
