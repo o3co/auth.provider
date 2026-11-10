@@ -6,6 +6,7 @@ import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/te
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import {
@@ -129,6 +130,7 @@ async function serve(
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			issuerModule,
