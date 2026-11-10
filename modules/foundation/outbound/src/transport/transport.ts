@@ -178,20 +178,24 @@ async function secured(socket: TLSSocket, signal: AbortSignal, check?: PeerCheck
 	socket.on("error", (error) => {
 		lost ??= error;
 	});
+	let aborted = () => {};
+	let closed = () => {};
 	try {
 		await new Promise<void>((done, failed) => {
-			const aborted = () => failed(unavailable("timeout"));
-			const closed = () => failed(lost ?? unavailable("unreachable"));
+			aborted = () => failed(unavailable("timeout"));
+			closed = () => failed(lost ?? unavailable("unreachable"));
 			signal.addEventListener("abort", aborted, { once: true });
 			socket.once("close", closed);
-			socket.once("secureConnect", () => {
-				signal.removeEventListener("abort", aborted);
-				socket.off("close", closed);
-				done();
-			});
+			socket.once("secureConnect", () => done());
 			if (signal.aborted) aborted();
+		}).finally(() => {
+			signal.removeEventListener("abort", aborted);
+			socket.off("close", closed);
 		});
 		await check?.(socket, signal);
+		// A deadline that came due while work in hand held its timer back fires here, first: timers
+		// run in the order they fall due, before this one, set after it.
+		await new Promise((later) => setTimeout(later, 0));
 		if (lost !== undefined || socket.destroyed) throw lost ?? unavailable("unreachable");
 		if (signal.aborted) throw unavailable("timeout");
 		return socket;

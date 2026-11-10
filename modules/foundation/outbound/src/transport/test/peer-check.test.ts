@@ -15,6 +15,8 @@ const tls = { floor: testTlsOptions, ca: authority };
 /** Whether the check had ended when the destination read each request. */
 const readAfterCheck: boolean[] = [];
 let checked = false;
+/** Bytes the destination received after a handshake, before any parse: a request begun, however cut. */
+let received = 0;
 let server: Server;
 let proxy: Server;
 let port = 0;
@@ -25,6 +27,11 @@ beforeAll(async () => {
 		readAfterCheck.push(checked);
 		res.end("{}");
 	});
+	server.on("secureConnection", (socket) =>
+		socket.on("data", (chunk: Buffer) => {
+			received += chunk.length;
+		}),
+	);
 	await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
 	port = (server.address() as AddressInfo).port;
 	proxy = createPlainServer();
@@ -61,6 +68,7 @@ const sending = (
 	way: Route | undefined,
 	timeoutMs: number,
 	check: (s: TLSSocket, signal: AbortSignal) => Promise<void>,
+	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
 ) =>
 	send(
 		admitted(),
@@ -70,7 +78,7 @@ const sending = (
 		anyPublic,
 		way,
 		tls,
-		AbortSignal.timeout,
+		deadlineOf,
 		check,
 	);
 
@@ -101,4 +109,22 @@ it("ends the connection at the deadline while the peer is checked, sending nothi
 		expect(held?.destroyed).toBe(true);
 	}
 	expect(readAfterCheck.length).toBe(read);
+});
+
+it("ends the connection at a deadline that came due while the check held its timer back, as work in hand does", async () => {
+	const read = readAfterCheck.length;
+	const before = received;
+	let held: TLSSocket | undefined;
+	// The deadline's timer cannot fire while the check holds the loop past it.
+	const failing = sending(undefined, 30, async (socket) => {
+		held = socket;
+		const until = Date.now() + 100;
+		while (Date.now() < until) {}
+	});
+	await expect(failing).rejects.toMatchObject({ failure: "timeout" });
+	expect(held?.destroyed).toBe(true);
+	expect(readAfterCheck.length).toBe(read);
+	// Not a byte of the request went, though the timer fired only after the check.
+	await new Promise((later) => setTimeout(later, 50));
+	expect(received).toBe(before);
 });
