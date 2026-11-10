@@ -168,11 +168,17 @@ async function tunnel(route: Route, admitted: Admitted, signal: AbortSignal) {
 /** A check of the peer a TLS connection reached, waited on before any byte of a request goes on it. */
 export type PeerCheck = (socket: TLSSocket, signal: AbortSignal) => Promise<void>;
 
+/** A request's deadline on the kernel's monotonic time: the time, and when the deadline falls. */
+interface Until {
+	readonly monotonic: () => number;
+	readonly at: number;
+}
+
 /**
  * A TLS connection once its handshake is done and its peer checked, the deadline asked again after;
  * else it is ended, and the failure thrown is the connection's. A socket lost meanwhile ends it too.
  */
-async function secured(socket: TLSSocket, signal: AbortSignal, check?: PeerCheck) {
+async function secured(socket: TLSSocket, signal: AbortSignal, check?: PeerCheck, until?: Until) {
 	let lost: unknown;
 	// Kept for the socket's life: an error while the peer is checked must not go unheard.
 	socket.on("error", (error) => {
@@ -193,11 +199,11 @@ async function secured(socket: TLSSocket, signal: AbortSignal, check?: PeerCheck
 			socket.off("close", closed);
 		});
 		await check?.(socket, signal);
-		// A deadline that came due while work in hand held its timer back fires here, first: timers
-		// run in the order they fall due, before this one, set after it.
+		// Timers held back by the check get their turn; the deadline is then asked by the monotonic
+		// time, which a timer held back cannot pass.
 		await new Promise((later) => setTimeout(later, 0));
 		if (lost !== undefined || socket.destroyed) throw lost ?? unavailable("unreachable");
-		if (signal.aborted) throw unavailable("timeout");
+		if (signal.aborted || (until && until.monotonic() >= until.at)) throw unavailable("timeout");
 		return socket;
 	} catch (error) {
 		socket.destroy();
@@ -219,6 +225,7 @@ async function viaProxy(
 	signal: AbortSignal,
 	tls: Tls,
 	check?: PeerCheck,
+	until?: Until,
 ): Promise<Way> {
 	const written = writtenAddress(admitted);
 	const literal = written !== undefined;
@@ -233,6 +240,7 @@ async function viaProxy(
 		}),
 		signal,
 		check,
+		until,
 	);
 	const agent = new TlsAgent({ keepAlive: false });
 	agent.createConnection = () => socket;
@@ -247,6 +255,7 @@ async function atCheckedAddress(
 	signal: AbortSignal,
 	tls: Tls,
 	check?: PeerCheck,
+	until?: Until,
 ): Promise<Way> {
 	const checked = policy.admitAddresses(await addressesOf(admitted, resolve, signal), admitted);
 	const [address = ""] = checked;
@@ -261,6 +270,7 @@ async function atCheckedAddress(
 		tlsConnect({ ...at, ...(literal ? {} : { servername: admitted.host }), ...tlsOf(tls) }),
 		signal,
 		check,
+		until,
 	);
 	const agent = new TlsAgent({ keepAlive: false });
 	agent.createConnection = () => socket;
@@ -281,12 +291,15 @@ export async function send(
 	tls: Tls,
 	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
 	check?: PeerCheck,
+	/** The kernel's monotonic time, which holds a checked connection to the deadline; none, its signal alone. */
+	monotonic?: () => number,
 ): Promise<OutboundResponse> {
 	const signal = deadlineOf(limits.timeoutMs);
+	const until = monotonic && { monotonic, at: monotonic() + limits.timeoutMs };
 	const proxied = route !== undefined && !admitted.plain && !route.direct(admitted.host);
 	const way = proxied
-		? await viaProxy(route, admitted, policy, signal, tls, check)
-		: await atCheckedAddress(admitted, resolve, policy, signal, tls, check);
+		? await viaProxy(route, admitted, policy, signal, tls, check, until)
+		: await atCheckedAddress(admitted, resolve, policy, signal, tls, check, until);
 	const answer = await new Promise<IncomingMessage>((answered, failed) => {
 		let outgoing: ClientRequest;
 		try {

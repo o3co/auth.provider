@@ -69,6 +69,7 @@ const sending = (
 	timeoutMs: number,
 	check: (s: TLSSocket, signal: AbortSignal) => Promise<void>,
 	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
+	monotonic?: () => number,
 ) =>
 	send(
 		admitted(),
@@ -80,6 +81,7 @@ const sending = (
 		tls,
 		deadlineOf,
 		check,
+		monotonic,
 	);
 
 it("waits on the peer's check before any byte of the request goes, directly and through the proxy's tunnel", async () => {
@@ -116,15 +118,38 @@ it("ends the connection at a deadline that came due while the check held its tim
 	const before = received;
 	let held: TLSSocket | undefined;
 	// The deadline's timer cannot fire while the check holds the loop past it.
-	const failing = sending(undefined, 30, async (socket) => {
-		held = socket;
-		const until = Date.now() + 100;
-		while (Date.now() < until) {}
-	});
+	const failing = sending(
+		undefined,
+		30,
+		async (socket) => {
+			held = socket;
+			const until = Date.now() + 100;
+			while (Date.now() < until) {}
+		},
+		AbortSignal.timeout,
+		() => performance.now(),
+	);
 	await expect(failing).rejects.toMatchObject({ failure: "timeout" });
 	expect(held?.destroyed).toBe(true);
 	expect(readAfterCheck.length).toBe(read);
 	// Not a byte of the request went, though the timer fired only after the check.
 	await new Promise((later) => setTimeout(later, 50));
 	expect(received).toBe(before);
+});
+
+it("holds a checked connection to its deadline by the monotonic time, whatever its timer does, and by the timer alone without one", async () => {
+	const before = received;
+	// A deadline whose timer never fires, and a monotonic time the check moves past it.
+	const never = () => new AbortController().signal;
+	let time = 0;
+	const passing = async () => {
+		time += 1000;
+	};
+	await expect(sending(undefined, 500, passing, never, () => time)).rejects.toMatchObject({
+		failure: "timeout",
+	});
+	await new Promise((later) => setTimeout(later, 50));
+	expect(received).toBe(before);
+	// Without a monotonic time, the timer alone holds it: here it never fires, so the request goes.
+	expect((await sending(undefined, 500, passing, never)).status).toBe(200);
 });
