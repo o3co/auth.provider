@@ -107,3 +107,51 @@ export type Names = ReadonlyMap<string, string>;
 		expect(other.signatures.get(name)).toBe(one.signatures.get(name));
 	}
 });
+
+it("names the exported types each export carries, one step, by symbol: through an alias the printer expands, as re-exported, and as a value's type is inferred", () => {
+	const { carries, hidden } = surface(
+		"@mod/sig-carries",
+		`
+declare const section: { readonly _input: { port?: number } };
+type Input<T> = T extends { readonly _input: infer I } ? I : never;
+export type Settings = Input<typeof section>;
+export interface Part { readonly size: number }
+export interface Whole { readonly part: Part }
+interface Options { readonly whole: Whole }
+export interface Store { get(key: string): Promise<Part | undefined> }
+export type { Kept as Renamed } from "./kept.ts";
+import type { Kept } from "./kept.ts";
+declare function contract<T>(name: string): { readonly name: string; readonly of?: T };
+declare function whole(): Whole;
+export function configured(settings: Partial<Settings> = {}) { return settings; }
+export function kept(item: Kept): void {}
+export function opened(options: Options): void {}
+export const made = () => whole();
+export const store = contract<Store>("store");
+export const limit = 3;
+`,
+		{ "src/kept.ts": "export interface Kept { readonly id: string }\n" },
+	);
+	const of = (name: string) => [...(carries.get(name) ?? [])].sort();
+	expect(of("configured")).toEqual(["Settings"]);
+	expect(of("kept")).toEqual(["Renamed"]);
+	expect(of("made")).toEqual(["Whole"]);
+	expect(of("store")).toEqual(["Store"]);
+	expect(of("Whole")).toEqual(["Part"]);
+	expect(of("Store")).toEqual(["Part"]);
+	expect(of("limit")).toEqual([]);
+	// A type the entry does not export is the same walk's other side: hidden, and the walk stops there.
+	expect(of("opened")).toEqual([]);
+	expect(hidden).toContain("Options (opened)");
+});
+
+it("ends a walk through an inferred type that refers back to itself, and carries what it names", () => {
+	const { carries } = surface(
+		"@mod/sig-loop",
+		`
+export interface Part { readonly size: number }
+export const loop = { part: { size: 1 } as Part, again() { return this; } };
+`,
+	);
+	expect([...(carries.get("loop") ?? [])]).toEqual(["Part"]);
+});
