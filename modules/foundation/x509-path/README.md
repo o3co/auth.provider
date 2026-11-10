@@ -14,8 +14,10 @@
 - `pathOf` (the leaf, what the peer sent, a `Trust`, `PathRules`, a time) → the path, or a `PathRefusal`: the one chain `choice` picks within its bounds, validated by the engine and held to the rules.
   - `PathRules`: the most intermediates (0 to 14; any other is a TypeError), the signature algorithms, the fewest RSA bits, the EC curves taken (any where none are given), the purposes and whether the leaf's or every certificate's extended key usage is held to them, and the key usage bits the leaf's must allow one of.
 - `signatureAlgorithms` and `SignatureAlgorithm`, as `signatures` names them.
-- CRL, OCSP: `revocation`'s, as its card says.
-- `./testing`: a test authority for its own and its callers' tests: certificates, CRLs and OCSP answers.
+- CRL, OCSP: `revocation`'s `distributionPointsOf`, `verifyCrl`, `crlSays`, `ocspUrlsOf`, `ocspRequestOf` and `judgeOcsp`, as its card says.
+- `./testing`: a test authority for its own and its callers' tests.
+  - Keys: `ecKeys`, `rsaKeys`, `pssKeys`. Certificates: `issue`, `hierarchy` (a root, an intermediate and a client leaf), `pemOf`, and `restated` (another algorithm stated beside the signature).
+  - Revocation (CRLs and OCSP answers): `crlOf`, `ocspOf`, and `pointAt`, a distribution point. Names for constraints: `dns`, `ip`, `subtree`.
 
 ## Invariants
 - The path is chosen by the internal module `choice`, bounded and every edge checked, and the engine validates that chain alone, each certificate's issuer the next on it.

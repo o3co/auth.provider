@@ -11,11 +11,11 @@
 ## Offers
 - `audit`: record an event (kind, subject, attributes as names and string values), returning at once.
 - `audit`: the losses since boot, per named receiver, for a health check to read; the same as the metric `auth_audit_events_lost_total`, by `receiver`.
-- Extension point: receivers, keyed by name, each taking an event.
+- Extension point `auditReceivers`: receivers, keyed by name, each taking an event.
 - `auditEvents`: a module's declaration of its events (each kind's attributes, and when it is recorded), which it exports as `./audit-events` for the audit event reference; `declaredAudit` records only the kinds declared, with their attributes, and throws on another.
 - The built-in receiver `log`: the kind, the event's time (`occurred`, epoch ms), the subject and the attributes' names, never their values.
 - Operator section: `receivers`, their names or `none` (no default); `max-pending` (default 1000), each receiver's deliveries under way at once.
-- Test configuration builders, and a stand-in that keeps every event (`./testing`).
+- `./testing`: `auditConfig`, a test configuration builder, and `auditStandIn`, a stand-in that keeps every event.
 
 ## Invariants
 - A receiver gets the event frozen, with its time (`at`, epoch ms) from `kernel`'s clock, whatever the emitter wrote.

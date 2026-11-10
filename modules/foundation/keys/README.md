@@ -19,7 +19,7 @@
 - `isCanonicalJws`: whether a compact JWS is written in its one form; `verify` answers any other as `malformed`. `secretBytes` (exactly or at least n): the setting of a secret's bytes every module takes, strict base64 of at least 8 byte values, never a `REPLACE-` sample; a refusal never names the value.
 - `bearerToken` (at least n): the setting of a bearer token sent to an outside party, an RFC 6750 b64token of at least n bytes and 8 byte values of key material however read (as written, hex or base64), never a `REPLACE-` sample; a refusal never names the value.
 - Operator section: `signing` (`kid`, `alg`, and a PKCS8 PEM `private-key`, or for HS256 a `secret`, its bytes the HMAC key as `secret-encoding` reads them: `hex`, `base64` or `utf8`, the text's own; unset, hex where the value is whole bytes of hex, else base64), `next` (`kid`, `alg`, `public-key`), `previous` (`kid`, `alg`, `public-key`, `expires-at`), `jwks-cache` (1m–1d, default `5m`: how long verifiers may cache the set).
-- Test configuration builders (`./testing`), with an RS256 signing key, one RSA key a process makes once, unless a test sets one.
+- `./testing`: `keysConfig`, a test configuration builder, with an RS256 signing key, one RSA key a process makes once, unless a test sets one.
 
 ## Invariants
 - Key material has no default; a missing or unreadable key, or one not of its `alg`'s kind, refuses boot.

@@ -16,8 +16,8 @@
 - `algorithmsSetting(asymmetric, byDefault)`: the setting a caller's section names its algorithms by, a list, not empty, of the asymmetric ones given, `byDefault` where unwritten (a default outside them refused); `knownAlgorithms`, the ones a verifier knows, for a section declared before a verifier is had.
 - `boundAlgorithm` (a JWK, the allowed algorithms) → the one algorithm a verifier reads the key under, as the invariants below say, or none: for a caller to tell, before it is asked, a written key no allowed algorithm reads.
 - `typOf` (a header) → its `typ` read as a policy's `typ` is compared, as a media type: its type alone, without parameters, the space around it, case or `application/`; none where it is no string. For a caller to sort tokens by before verifying; whether the header is verified is the caller's to know.
-- Composition definition, with the operator section `key-set-max-age` (written with its unit, `1h` to `30d`, default `1d`), how long after its fetch a key set is used while no new one can be had, and `key-set-refresh` (`1m` to `30d`, default `1h`, never past `key-set-max-age`, which boot refuses), how long it is used before it is fetched again.
-- A test signer (`./testing`): a key pair as a JWK and PEM, signing claims or exact bytes with any header, as a sender might.
+- Composition definition, with the operator section (`section`, `./module`) `key-set-max-age` (written with its unit, `1h` to `30d`, default `1d`), how long after its fetch a key set is used while no new one can be had, and `key-set-refresh` (`1m` to `30d`, default `1h`, never past `key-set-max-age`, which boot refuses), how long it is used before it is fetched again.
+- A test signer, `testSigner` (`./testing`): a key pair as a JWK and PEM, signing claims or exact bytes with any header, as a sender might.
 
 ## Invariants
 - A token not written in its one form (`keys`' rule for a JWS) is malformed, so one token has one string.
