@@ -2,6 +2,7 @@
 
 ## Responsibilities
 - Owns the conformance scenes of the mTLS area: tokens bound to the client's certificate as a trusted proxy forwards it (one PEM block, or Envoy's XFCC), self-signed or under PKI with revocation by CRL, OCSP or both.
+- Builds its own scenes' key, OAuth and mTLS parts from the form written in a scene.
 - Sets up the mTLS part (the header and its form, the trusted proxies, the anchors, the revocation mode and its sources) on each target.
 - Issues the scenes' certificates, CRLs and OCSP answers.
 - Serves the scenes' certificates, CRLs and OCSP answers on the base's fake HTTP server, each client certificate at locations of its own.
@@ -12,8 +13,7 @@
 - Scene composition and drivers (`conformance`). Starting the legacy system (`conformance-legacy`). Key and client parts (their own areas).
 
 ## Offers
-- Area `mtls` and the shape of its part
-- Scene builder (builds the key, OAuth and mTLS parts from the form written in a scene)
+- Area `mtls` (`mtlsArea`) and the shape of its part
 - `issue` (a certificate, self-signed or under an issuer), `pemOf` and `thumbprintOf` (its `x5t#S256`), for other areas' scenes of a certificate-bound token
 
 ## Invariants
