@@ -30,9 +30,11 @@ What each module contains is described by that module's contract card (each modu
 | The readiness route (`GET /readyz`) and how long it waits | contract / setting | http-ops |
 | The liveness route (`GET /_healthcheck`), and timing each request | contract | http-ops |
 | Each request's end (`requestEnds`) | extension point | http |
-| Route policies (making one, a route's use of one, applying them before the handler) | extension point kind | http |
+| Route policies (making one, a route's use of one) | extension point kind | http |
+| Applying a route's policies before its handler (`policies`), and the guarantees they are marked to keep (`marks`) | extension point | http-server |
 | A route taking cross-origin requests (its declaration), and the origins allowed | contract / setting | http |
-| The security headers on every answer, and what a page declares it loads (the frames and scripts its policy allows) | contract | http |
+| What a page declares it loads (the frames and scripts its policy allows) | contract | http |
+| The security headers on every answer, a page's policy among them | contract implementation | http-server |
 | Trusted proxies | setting | http |
 | Request source | vocabulary | request-source |
 | The client's certificate a trusted proxy forwards, the forms it is read in, and whether the operator named where it is forwarded | vocabulary / contract | client-certificate |

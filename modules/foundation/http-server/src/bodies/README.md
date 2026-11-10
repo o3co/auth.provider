@@ -4,7 +4,7 @@ Internal module of `http-server`: the values a request is sent with, by name, fr
 
 ## Responsibilities
 - Tells a body's kind from its type, and reads a form or a JSON object up to the size limit.
-- Gives the received values by name as read-only maps.
+- Decodes a query's or a form's values by name into `http`'s `Values`.
 
 ## Not here
 - Which bodies a route takes (the route's declaration).
@@ -13,7 +13,7 @@ Internal module of `http-server`: the values a request is sent with, by name, fr
 
 ## Offers
 - A request's body as its route takes it: its form, its fields, the JSON object and its mistyped names, or the status that refuses it.
-- Values by name, read-only, from a map, a query, a form, or a JSON object's fields: `single` gives a name's value when it holds exactly one, and `repeated` the names that hold more.
+- A query's or a form's values by name (`paramsOf`), as `http`'s `Values`.
 
 ## Invariants
 - A form and a JSON body share one size limit of 64 KiB: a larger form is read as empty, and a larger JSON body is `413`. The limit is fixed: every value a route takes has its own bound far below it, so it only guards the server.
@@ -26,7 +26,6 @@ Internal module of `http-server`: the values a request is sent with, by name, fr
 - No type and nothing sent is no body.
 - A query's or a form's percent-escapes are read as UTF-8 and `+` as a space, a `%` without two hex digits kept as sent; escapes that are not well-formed UTF-8 give no values, and such a form, or one whose bytes are not UTF-8, is `400`.
 - The values of a name keep the order sent.
-- The maps, their value lists and the mistyped names cannot be written to, and a write to a map throws.
 
 ## Depends on
-- `http` (its contract: the body kinds), and `kernel` (freezing).
+- `http` (the body kinds, `Values` and its constructors), and `kernel` (freezing).

@@ -58,7 +58,7 @@ A feature that follows an Internet-Draft is preview until the draft is published
 What an outside party can reach, and what the provider reaches out to, grows only on purpose:
 
 - A new route, setting, outbound call or place a secret is kept opens only where the operator asks for it: by composing the module that brings it, or by writing the setting. A new default that opens one in a module already composed counts as opening it, and so needs the maintainers' agreement, as one that is on with no setting does.
-- What opens is declared: a route's marks and its reasons, which `http` checks at boot ([the route reference](routes.md)); a setting that weakens a guarantee is named `accept-*` and warns at each boot, or is named among the declared exceptions in [the security model](security-model.md).
+- What opens is declared: a route's marks and its reasons, which `http-server` checks at boot ([the route reference](routes.md)); a setting that weakens a guarantee is named `accept-*` and warns at each boot, or is named among the declared exceptions in [the security model](security-model.md).
 - What nothing uses any more is removed through [Deprecation](#deprecation).
 
 ### Upgrade notices

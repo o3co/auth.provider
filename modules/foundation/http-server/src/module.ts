@@ -19,7 +19,10 @@ export default defineModule(
 			const rules = await c.collect(policies);
 			const applied = withPolicies(declared, rules);
 			if (applied.kind === "twice") {
-				return c.refuse("http.policies", `more than one rule for a policy: ${applied.label}`);
+				return c.refuse(
+					"http-server.policies",
+					`more than one rule for a policy: ${applied.label}`,
+				);
 			}
 			if (applied.kind === "missing") {
 				return c.refuseAll(
