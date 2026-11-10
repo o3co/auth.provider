@@ -1,3 +1,5 @@
+// The area's set-ups register as its package's entry loads.
+import "../src/main.ts";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { areaTarget, type Started } from "@mod/conformance";
 import { browserAt } from "@mod/conformance-code/testing";
