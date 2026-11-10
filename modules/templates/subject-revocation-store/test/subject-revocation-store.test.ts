@@ -1,5 +1,13 @@
 import { erasureMarks } from "@mod/erasure-extensions";
-import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	defineModule,
+	isUnavailable,
+	kernelConfig,
+	type Module,
+	type Provision,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { type Store, store, storeControl } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
@@ -161,18 +169,19 @@ it("boots over a store that offers no control record, erasure unknown: it warns 
 /** The simulated store, its batch across partitions taken away: a store that writes none as one. */
 function storeWithin() {
 	const simulated = simulatedStore();
-	const module = {
+	const module: Module = {
 		...simulated.module,
-		provides: (simulated.module.provides ?? []).map((p) =>
-			p.contract === store
-				? {
-						...p,
-						create: async (c: never) => {
-							const { batchAcross: _, ...within } = (await p.create(c)) as Store;
-							return within;
-						},
-					}
-				: p,
+		provides: (simulated.module.provides ?? []).map(
+			(p): Provision<unknown> =>
+				p.contract === store
+					? {
+							...p,
+							create: async (c) => {
+								const { batchAcross: _, ...within } = (await p.create(c)) as Store;
+								return within;
+							},
+						}
+					: p,
 		),
 	};
 	return { simulated, module };
