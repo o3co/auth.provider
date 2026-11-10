@@ -224,7 +224,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/sender-binding` (feature, `modules/oauth/sender-binding`): Owns the sender binding of tokens: the extension point of binding kinds, reading which binding a request proves, and the shape of a binding a token carries.
 - `@mod/session-grant` (feature, `modules/oauth/session-grant`): Contributes the grant `session`: a client beside the user's browser (first-party, or a backend for its frontend) gets an access token for the user of the browser's session.
 - `@mod/session-tokens` (feature, `modules/oauth/session-tokens`): Ends a session's access tokens when the session closes; `tokens` knows nothing of sessions.
-- `@mod/subject-tokens` (feature, `modules/oauth/subject-tokens`): Fails an access token that stood before its subject's revocation.
+- `@mod/subject-tokens` (feature, `modules/oauth/subject-tokens`): Fails an access token that stood before its subject's revocation, and refuses a bundle of credentials for an erased subject.
 - `@mod/token-control` (feature, `modules/oauth/token-control`): Answers the introspection endpoint (RFC 7662) and the revocation endpoint (RFC 7009).
   - `introspection` (`src/introspection`): the handler of `POST /oauth/introspect` (RFC 7662).
   - `revocation` (`src/revocation`): the handler of `POST /oauth/revoke` (RFC 7009), for access tokens and the kinds contributed.
