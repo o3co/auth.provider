@@ -116,7 +116,7 @@ export type Records<T extends Json> = ReturnType<typeof recordsIn<T>>;
  * `changeTogether` reads or writes it.
  */
 export type Target =
-	| { readonly place: Place; readonly key: string }
+	| { readonly place: Place; readonly key: string; readonly set?: true }
 	| { readonly place: Place; readonly secret: string };
 
 /** What `changeTogether` does to one record: set it (with a lifetime, or keeping its own), or remove it; none keeps it. */
@@ -175,15 +175,17 @@ export function changesTogether(target: Store): boolean {
 /** A target's partition: its key, or the name its secret is kept by. */
 const partitionOf = (target: Target) =>
 	"secret" in target ? nameOf(target.place.space, target.secret) : target.key;
+/** Where a target is kept: a keyed set's record (`set`) as keyed sets keep it, any other as records do. */
 const recordKey = (target: Target) => ({
 	space: target.place.space,
 	partition: partitionOf(target),
-	name: "record",
+	name: "set" in target && target.set ? "set" : "record",
 });
 const sameTarget = (a: Target, b: Target) =>
 	a.place.space.name === b.place.space.name && partitionOf(a) === partitionOf(b);
-/** The kind of records a target reaches: under a secret, or plain. */
-const kindOf = (target: Target) => ("secret" in target ? "secret records" : "records");
+/** The kind of records a target reaches: under a secret, a keyed set, or plain. */
+const kindOf = (target: Target) =>
+	"secret" in target ? "secret records" : target.set ? "keyed sets" : "records";
 
 /** What one record held before a change of records as one, and holds after. */
 export interface ChangedRecord<T = Json> {
@@ -218,15 +220,16 @@ export async function changeRecords(p: {
 	const batchAcross = target.batchAcross?.bind(target);
 	if (!batchAcross) throw new Error("the store writes no records of two partitions as one");
 	// A space is named one way in one call: by key, or by secret.
-	const namedAs = new Map<string, "records" | "secret records">();
+	const namedAs = new Map<string, "records" | "secret records" | "keyed sets">();
 	const checked = (one: Target) => {
 		if (one.place.store !== target) throw new Error("records changed together share one store");
 		const kind = kindOf(one);
 		if ((namedAs.get(one.place.space.name) ?? kind) !== kind) {
-			throw new Error("records changed together name a space by key or by secret, not both");
+			throw new Error("records changed together name a space one way: by key, secret or set");
 		}
 		namedAs.set(one.place.space.name, kind);
-		claim(one.place, kind);
+		// Keyed sets hold their space to no kind, as keyedSetsIn does not.
+		if (kind !== "keyed sets") claim(one.place, kind);
 	};
 	p.targets.forEach((named, at) => {
 		checked(named);

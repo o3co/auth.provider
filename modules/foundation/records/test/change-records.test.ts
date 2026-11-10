@@ -6,6 +6,7 @@ import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import {
 	changeRecords,
+	keyedSetsIn,
 	type Place,
 	pairedRecordsAcross,
 	recordsIn,
@@ -358,7 +359,7 @@ it("reads and writes a record under a secret with a plain one as one, and refuse
 			],
 			decide: () => ({}),
 		}),
-	).rejects.toThrow(/by key or by secret, not both/);
+	).rejects.toThrow(/one way: by key, secret or set/);
 });
 
 it("hands the decision the deadline its attempt is written with, as a change is", async () => {
@@ -381,4 +382,30 @@ it("tells the store key a target's record is kept under, plain or under a secret
 	const key = changeRecords.keyOf({ place: listPlace, key: "known" });
 	expect((await s.get(key)).entry?.value).toEqual({ ids: ["a"] });
 	expect(changeRecords.keyOf({ place: listPlace, secret: "x" }).partition).toMatch(/^1\./);
+});
+
+it("reaches a keyed set as keyed sets keep it, and refuses a space named as a set and by key in one call", async () => {
+	const { s, listPlace } = await open();
+	const sets = keyedSetsIn({ ...listPlace, cap: 5, clock: { now: () => Date.now() } });
+	await sets.add("group", "one", 60_000);
+	const key = changeRecords.keyOf({ place: listPlace, key: "group", set: true });
+	expect((await s.get(key)).entry?.value).toMatchObject({ held: [["one", expect.any(Number)]] });
+	const codec = keyedSetsIn.codec({ cap: 5, clock: { now: () => Date.now() } });
+	await changeRecords({
+		targets: [{ place: listPlace, key: "group", set: true }],
+		decide: ([held]) => {
+			const added = codec.add(held, "two", Date.now() + 60_000);
+			return { targets: [added.next] };
+		},
+	});
+	expect((await sets.members("group")).map((m) => m.member)).toEqual(["one", "two"]);
+	await expect(
+		changeRecords({
+			targets: [
+				{ place: listPlace, key: "group", set: true },
+				{ place: listPlace, key: "other" },
+			],
+			decide: () => ({}),
+		}),
+	).rejects.toThrow(/one way: by key, secret or set/);
 });
