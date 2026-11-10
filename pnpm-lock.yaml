@@ -2652,6 +2652,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/passkey-witness':
         specifier: workspace:*
         version: link:../passkey-witness
