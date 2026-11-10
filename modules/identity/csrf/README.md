@@ -19,6 +19,9 @@
 - Test stand-in (`./testing`): the policy and the origin evidence, decided by the module's own code. It serves no route.
   - Without a public origin it boots and refuses every unsafe request.
 
+## Deprecated
+- `csrfRefused`: the answer the policy refuses with, which is the route's contract and not a value to import; match a 403 `{ "error": "csrf" }`. A later release removes it.
+
 ## Invariants
 - The policy needs same-origin evidence (Origin and Referer) or the double-submit token.
 - The token is 43 base64url characters, and it and its cookie last two hours, fixed: past them the page is shown again, and no deployment needs a longer life for a form. It comes in the cookie and the header, or else in the request's `csrf_token` field (as `http` reads fields), sent once.
