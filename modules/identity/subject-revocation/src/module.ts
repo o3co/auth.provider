@@ -11,14 +11,14 @@ import {
 	subjectRevocation,
 } from "./contract.ts";
 import { markedIn } from "./erasure/erasure.ts";
-import { erasureMark, fenceOver } from "./erasure/gate.ts";
+import { type Enablement, erasureMark, fenceOver } from "./erasure/gate.ts";
 import { followedBy } from "./followers.ts";
 import { boundaryStore } from "./store.ts";
 
 /** The boot gate's reading: whether the composition guards erasure, and the mark as read. */
 const erasureGate = contract<{
 	readonly guarded: boolean;
-	readonly enabled: () => Promise<boolean | undefined>;
+	readonly enabled: () => Promise<Enablement>;
 }>("subject-revocation.erasure-gate");
 
 export default defineModule(
@@ -32,7 +32,8 @@ export default defineModule(
 		m.provide(erasureGate).by(async (c) => {
 			const boundaries = await c.get(boundaryStore);
 			const guarded = boundaries.fence !== undefined && (await c.collect(erasureGuards)).length > 0;
-			if (!boundaries.erasureEnabled) {
+			const mark = erasureMark(boundaries);
+			if (mark.cannotTell) {
 				const why = !boundaries.fence
 					? "nor fences, so erasure reads as off"
 					: guarded
@@ -42,14 +43,13 @@ export default defineModule(
 					reason: `the boundary store does not tell whether erasure is enabled, ${why}; 0.22 refuses it`,
 				});
 			}
-			const enabled = erasureMark(boundaries);
-			if (!guarded && (await enabled()) === true) {
+			if (!guarded && (await mark.read()) === "on") {
 				return c.refuse(
 					"subject-revocation",
 					"erasure is enabled, yet no module guards it or the boundary store does not fence",
 				);
 			}
-			return { guarded, enabled };
+			return { guarded, enabled: mark.read };
 		}),
 		m.provide(revocations).by(async (c): Promise<Revocations> => {
 			const boundaries = await c.get(boundaryStore);
@@ -79,9 +79,10 @@ export default defineModule(
 				name: "subject-revocation.erasure",
 				check: async () => {
 					if (guarded) return;
-					const on = await enabled();
-					if (on === undefined) throw new Error("whether erasure is enabled cannot be read yet");
-					if (on) throw new Error("erasure is enabled, yet this composition does not guard it");
+					const state = await enabled();
+					if (state === "unread") throw new Error("whether erasure is enabled cannot be read yet");
+					if (state === "on")
+						throw new Error("erasure is enabled, yet this composition does not guard it");
 				},
 			};
 		}),

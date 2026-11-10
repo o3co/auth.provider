@@ -229,19 +229,27 @@ it("takes erasure as off, warning at every start, where the store can neither te
 	expect(await booted.ready()).toBe("ready");
 });
 
-it("fences every bundle where the store fences but cannot tell whether erasure is enabled, its start and readiness as off", async () => {
-	for (const guarded of [true, false]) {
-		const booted = await gated(guarded, () => {}, { erasureEnabled: false });
-		expect(booted.unknownWhy()).toEqual([
-			guarded
-				? expect.stringContaining("every bundle is fenced")
-				: expect.stringContaining("no module guards it"),
-		]);
-		expect(await booted.ready()).toBe("ready");
-		const fence = booted.app?.get(erasureFence);
-		expect(await fence?.fence("alice", "r0")).toBe("passed");
-		await booted.app?.get(subjectErasure).markErased("alice");
-		expect(await fence?.fence("alice", "r1")).toBe("erased");
-		expect([...booted.receipts.keys()]).toEqual(["r0"]);
-	}
+it("fences every bundle in a guarded composition where the store fences but cannot tell, its start and readiness as off", async () => {
+	const booted = await gated(true, () => {}, { erasureEnabled: false });
+	expect(booted.unknownWhy()).toEqual([expect.stringContaining("every bundle is fenced")]);
+	expect(await booted.ready()).toBe("ready");
+	const fence = booted.app?.get(erasureFence);
+	expect(await fence?.fence("alice", "r0")).toBe("passed");
+	await booted.app?.get(subjectErasure).markErased("alice");
+	expect(await fence?.fence("alice", "r1")).toBe("erased");
+	expect([...booted.receipts.keys()]).toEqual(["r0"]);
+});
+
+it("warns an unguarded composition over a store that cannot tell that no issuance is fenced, starting it ready", async () => {
+	// Nothing guards it, so no issuance fence asks this fence: the stated exclusion, named in the warning.
+	const booted = await gated(
+		false,
+		(s) => {
+			s.erasure.on = true;
+		},
+		{ erasureEnabled: false },
+	);
+	expect(booted.refused).toBeUndefined();
+	expect(booted.unknownWhy()).toEqual([expect.stringContaining("no module guards it")]);
+	expect(await booted.ready()).toBe("ready");
 });
