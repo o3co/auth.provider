@@ -19,6 +19,7 @@ How to run auth-provider 0.19: Redis, rotating keys, upgrading, and what to watc
 - [Filling the passkey witness's marks](#filling-the-passkey-witnesss-marks)
 - [Passkey logins into a session](#passkey-logins-into-a-session)
 - [Resetting a subject's passkeys](#resetting-a-subjects-passkeys)
+- [Checking outbound peers' revocation](#checking-outbound-peers-revocation)
 - [Name resolution](#name-resolution)
 - [Probes and alerts](#probes-and-alerts)
 - [Stopping](#stopping)
@@ -369,6 +370,21 @@ While the ledger cannot answer, every password login outside the exempt group an
 - **To recover from a leaked passkey**, stop the subject's work first: no new login, session or passkey registration for the subject, and wait for the running ones to finish. Then reset, check the subject with the backfill (`none`), and let the subject back in. Without that, someone holding the leaked passkey can sign in between the first boundary and the removal and register a passkey of their own that the reset leaves.
 - **While 0.18 instances still run**, which write a passkey's record and the list apart, these guarantees hold only once they and the requests they took are gone.
 - **A subject whose store lost its records**, the mark alone left, is mended by a reset, which makes the subject's holder anew: stop the subject's work first, as above.
+
+## Checking outbound peers' revocation
+
+`outbound` checks the revocation of each HTTPS peer's certificate by CRL before a request goes, where `outbound.revocation.hosts` lists the hosts its CRLs are fetched from. In 0.20 it warns and sends; from 0.22 it refuses a peer revoked or unconfirmed (`accept-unconfirmed` aside).
+
+- **Find a peer's CRL hosts:** `openssl s_client -connect idp.example.com:443 -showcerts </dev/null`, then for each certificate but the root, `openssl x509 -noout -ext crlDistributionPoints`. List each `http://` host in `outbound.revocation.hosts`; `outbound.allow` and `deny` hold for them too.
+- **Read the warnings:** `outbound.revocation_unconfirmed` gives a reason and a count, at most once a minute per reason; `outbound.revocation_revoked` a count. Neither names a host.
+  - `unlisted`: a CRL host is not in `outbound.revocation.hosts`. `https-only`: the CA publishes its CRL over https alone, which is not fetched. `unsupported`: no point for every reason, or one past 2 KiB.
+  - `proxy-refused`: the egress proxy refused the plain-http GET (403, 405 or 407), as one that takes CONNECT alone does. Let it take GET to the hosts in `outbound.revocation.hosts`, or list them in `outbound.direct-hosts`.
+  - `unreachable`, `refused`, `too-large` (past 1 MiB), `malformed`, `stale`, `signature`, `issuer`, `rollback` (an older CRL than one seen): the CRL host or the CRL itself; a failure is held `outbound.revocation.failure-lifetime` before it is fetched again.
+  - `path`: the peer's chain is outside the path rules (server authentication on every certificate, RSA of 2048 bits at least, EC on P-256/384/521, six intermediates), though TLS took it. `revocation-state-full`: more issuers or revocations than the bounds keep; a restart clears them.
+- **A private CA** cannot be confirmed: a CRL is fetched at public addresses alone. Under `--use-openssl-ca` the platform store's OpenSSL directory is not read, so those roots cannot be confirmed either.
+- **Large CRLs:** one past 1 MiB is not read. CRLs are read one at a time per process.
+- **Replay:** an older CRL not yet seen may be served until its next update, a CA's CRL period (up to ten days for a public TLS CA's subscribers). A restart forgets which CRLs were seen.
+- **Before 0.22:** clear every reason above, or set `outbound.revocation.accept-unconfirmed` where a peer cannot be confirmed (every start warns `outbound.revocation_unconfirmed_accepted`); with no `hosts` and no `accept-unconfirmed`, 0.22 refuses to boot.
 
 ## Name resolution
 
