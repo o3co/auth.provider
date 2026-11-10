@@ -472,6 +472,14 @@ export const coverage: Coverage = {
 			why: "only where the scrape route answers; keeping it from outside the deployment is the layer in front's, whatever the path, as the security model leaves it",
 		},
 		{
+			key: "outbound.revocation.hosts",
+			why: "the hosts a peer's CRLs are fetched from: listing them turns the check on, and with none listed nothing is checked, warned at every start",
+		},
+		{
+			key: "outbound.direct-hosts",
+			why: "only which hosts go without the proxy: outbound then resolves them and checks every address itself, within `outbound.allow`",
+		},
+		{
 			key: "outbound.direct-despite-proxy",
 			why: "only whether boot goes on while a proxy variable is set; the variables are never read",
 		},
