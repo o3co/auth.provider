@@ -14,7 +14,7 @@
 - `roundTrips.take` (the callback's request, the name, its `state`) → `taken` (what was carried, the verifier and nonce for the exchange, when it started, and the cookie cleared) or `none`.
 - `roundTrips.current` (a request, the name) → the browser's live round trip as its start made it (state, nonce, S256 challenge, what was carried), or none.
 - Composition definition (`./module`): provides `roundTrips` over the store interface the assembly wires and `cookies`.
-- Store interface for round trips, its needs (survives failover, names from the secret) and contract test (`./testing`).
+- Store interface for round trips `roundTripStore`, its needs `roundTripStoreNeeds` (survives failover, names from the secret) and contract test `roundTripStoreContract` (`./testing`).
 - The caller adds the cookie cleared to every answer after a take, and reads what it carried with its own schema.
 
 ## Invariants
