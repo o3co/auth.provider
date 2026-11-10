@@ -17,6 +17,7 @@ Internal module of `kernel`: the preflight of what modules take, before any fact
 - Refused: a contract no other module provides (one the module provides itself is never named), one whose `takenBy` does not name the module, and a point whose registered contributions are too few or too many for its rule (`one`, `some`; a contribution that will fail as it builds counts), each point once by its identity, never its label. Duplicate keys at a `keyed` point are found once the contributions are built, not here.
 - A `one` or `some` rule's `missing`, the words saying what to compose, follows its refusal when nothing is contributed, and only then.
 - A point's handle carries its rule, whatever its contributions are.
+- An optional take (`optional(contract)`) is held to its contract's `takenBy`, and refuses no boot where no module provides it. It is only for a contract whose absence the taker answers by failing closed (a feature read as off, a state as unknown, said at every start); a check, a fence, a guard, or any contract whose absence would weaken what the taker guarantees, is taken plainly, so its absence refuses the boot.
 
 ## Depends on
 - None; the package's handles, module definitions and refusals.

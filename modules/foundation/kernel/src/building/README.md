@@ -16,6 +16,8 @@ Internal module of `kernel`: building the provisions and contributions, each onc
 - `checkPoint`: freezes a point's contributions one level and checks its rule (count, and duplicate keys at a `keyed` point). `recordFailure`: records why a build failed, unless the refusal behind it is recorded already. `Buildable`, `TakesWatch`.
 
 ## Invariants
+- `find` answers a contract the module takes optionally, or none where no module provides it; `get` of one none provides refuses as any `get` does. A contract taken optionally is named by its optional take.
+- `takenBy` binds the modules of a trusted assembly, never hostile code in the same process; `Assembly.get`, the composition root's, is not bound.
 - An item is built once, by whichever request comes first; a request from a build that the item waits on, directly or across branches, is a cycle, refused before the cache is joined.
 - A point is checked once, however many modules collect it: one refusal for a break.
 - A factory's thrown value is read as a refusal only where it is one; any other error's text is never kept.

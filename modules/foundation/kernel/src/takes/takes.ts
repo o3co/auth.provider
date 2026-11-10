@@ -78,7 +78,11 @@ function checkHandle(
 	pointsChecked: Set<Handle>,
 	refusals: Refusal[],
 ): void {
-	if (handle.kind === "contract") {
+	if (handle.kind === "optional") {
+		// Its contract's takenBy holds as for any take; that none provides it refuses nothing.
+		const taken = takenByRefusal(handle.contract, module);
+		if (taken) refusals.push({ where: module.name, reason: taken });
+	} else if (handle.kind === "contract") {
 		const taken = takenByRefusal(handle, module);
 		if (taken) refusals.push({ where: module.name, reason: taken });
 		if (!own.has(handle) && !parts.providers.has(handle)) {

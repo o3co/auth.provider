@@ -153,8 +153,12 @@ export function buildingWith({
 	const mayName = (handle: Handle, item: Buildable) => {
 		// Every module is held once the preflight passed; one it could not ask holds nothing.
 		const held = heldTakes.get(item.module) ?? new Set<Handle>();
-		if (held.has(handle)) {
-			watch?.took(item.module.name, handle);
+		// A contract taken optionally is named by its optional take.
+		const named = held.has(handle)
+			? handle
+			: [...held].find((take) => take.kind === "optional" && take.contract === handle);
+		if (named) {
+			watch?.took(item.module.name, named);
 			return;
 		}
 		if (item.module.provides?.some((provision) => provision.contract === handle)) return;
@@ -185,6 +189,12 @@ export function buildingWith({
 					throw new DependencyFailed();
 				}
 				return (await build(provider, next)) as T;
+			},
+			find: async <T>(contract: Contract<T>) => {
+				mayName(contract as Contract<unknown>, item);
+				mayTake(contract as Contract<unknown>, item);
+				const provider = providers.get(contract as Contract<unknown>);
+				return provider ? ((await build(provider, next)) as T) : undefined;
 			},
 			collect: async <T>(point: ExtensionPoint<T>) => {
 				mayName(point, item);
