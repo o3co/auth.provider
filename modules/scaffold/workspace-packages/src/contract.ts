@@ -48,14 +48,22 @@ function readHere(root: string): WorkspacePackage[] | undefined {
 	const found: WorkspacePackage[] = [];
 	for (const dir of dirs) {
 		if (left.has(dir)) continue;
+		let text: string;
+		try {
+			text = readFileSync(join(dir, "package.json"), "utf8");
+		} catch (error) {
+			// No package.json: not a package, as pnpm reads it. Any other failure is pnpm's to report.
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+			return undefined;
+		}
 		let manifest: { name?: unknown };
 		try {
-			manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+			manifest = JSON.parse(text);
 		} catch {
-			continue;
+			return undefined;
 		}
-		// A package with no name is pnpm's to list as it does.
-		if (typeof manifest.name !== "string") return undefined;
+		// A package with no name, or a manifest pnpm cannot read, is pnpm's to list or refuse.
+		if (typeof manifest?.name !== "string") return undefined;
 		found.push({ name: manifest.name, dir: realpathSync(dir) });
 	}
 	return found;
@@ -99,9 +107,27 @@ function listedByPnpm(root: string): WorkspacePackage[] {
 		cwd: root,
 		encoding: "utf8",
 	});
-	const lists = JSON.parse(`[${out.trim().replaceAll(/\]\s*\[/g, "],[")}]`) as {
-		name: string;
-		path: string;
-	}[][];
-	return lists.flat().map((entry) => ({ name: entry.name, dir: entry.path }));
+	return (arraysIn(out) as { name: string; path: string }[][])
+		.flat()
+		.map((entry) => ({ name: entry.name, dir: entry.path }));
+}
+
+/** Each top-level JSON array written one after another in `text`, brackets in strings left alone. */
+function arraysIn(text: string): unknown[] {
+	const arrays: unknown[] = [];
+	let depth = 0;
+	let start = 0;
+	let inString = false;
+	let escaped = false;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (inString) {
+			if (escaped) escaped = false;
+			else if (c === "\\") escaped = true;
+			else if (c === '"') inString = false;
+		} else if (c === '"') inString = true;
+		else if (c === "[" && depth++ === 0) start = i;
+		else if (c === "]" && --depth === 0) arrays.push(JSON.parse(text.slice(start, i + 1)));
+	}
+	return arrays;
 }

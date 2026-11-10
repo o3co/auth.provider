@@ -78,6 +78,17 @@ describe("workspacePackages", () => {
 		expect(names(root)).toEqual(["y", "x"]);
 	}, 60_000);
 
+	it("leaves a package.json it cannot read to pnpm, never dropping the package", () => {
+		const root = workspace('packages:\n  - "a/*"\n', { "a/x": "x", "a/broken": "broken" });
+		writeFileSync(join(root, "a", "broken", "package.json"), "{ not json");
+		expect(() => workspacePackages(root)).toThrow();
+	}, 60_000);
+
+	it("reads pnpm's lists whole, a bracket in a path among them", () => {
+		const root = workspace('packages:\n  - "a/**"\n', { "a/x][y": "x", "a/z": "z" });
+		expect(names(root)).toEqual(["x", "z"]);
+	}, 60_000);
+
 	it("lists a workspace with no definition as pnpm does", () => {
 		const root = workspace(undefined, { "a/x": "x" });
 		expect(names(root)).toEqual(["x"]);
