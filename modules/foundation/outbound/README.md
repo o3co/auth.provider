@@ -19,7 +19,7 @@
 - Sends every request that leaves the deployment itself, as no other package does (`network`: `outbound`).
 - A request goes only to a URL the policy admits; a name is resolved once, as the URL writes it (a trailing dot kept), and the request connects only to the first of the addresses the policy checked, all it resolved to.
 - A credential goes only as a request's `credential`, under the internal module `credential`'s rules.
-- Internal module `transport` carries each request: direct or through the proxy's tunnel, under one deadline, as its card says.
+- Internal module `transport` carries each request: direct or through the proxy's tunnel, under one deadline, as its card says. Over TLS, a peer's check ends within the deadline by the kernel's monotonic time; a runtime that gives none (a test's) holds it by the deadline's timer alone, which work in hand may hold back.
 - Every TLS connection, direct or through the proxy's tunnel, takes `tls-options`' floor, as the internal module `tls` says.
 - Internal module `revocation` checks a TLS peer's revocation by CRL before a request goes, and warns of what is not good; 0.20 sends whatever it finds. With no `revocation.hosts`, none is checked, warned at every start (`outbound.revocation_unchecked`), as is `accept-unconfirmed` (`outbound.revocation_unconfirmed_accepted`).
 - A request past `max-concurrent` is unavailable at once, and each request gives its place back however it ends. Name lookups count apart: `max-lookups` at once (four unless set, never more than `max-concurrent`); one more is unavailable at once.

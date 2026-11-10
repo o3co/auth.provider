@@ -181,6 +181,8 @@ export interface Runtime {
 		debug(event: string, fields: Readonly<Record<string, string | number>>): void;
 	};
 	readonly now?: () => number;
+	/** The kernel's monotonic time, which holds a checked TLS connection to its deadline. */
+	readonly monotonic?: () => number;
 	readonly stopping?: AbortSignal;
 }
 
@@ -250,7 +252,18 @@ export function outboundOver(
 			takesIpv4(settings["plain-ipv4"], admitted) ? 4 : undefined,
 		);
 		return requestPlace(() =>
-			send(admitted, sent, limits, resolving, policy, route, checked, deadlineOf, check),
+			send(
+				admitted,
+				sent,
+				limits,
+				resolving,
+				policy,
+				route,
+				checked,
+				deadlineOf,
+				check,
+				runtime.monotonic,
+			),
 		);
 	};
 	return {
@@ -367,12 +380,14 @@ export default defineModule(
 			// What runs in the background, a CRL's refresh, ends as the app stops.
 			const stopping = new AbortController();
 			c.onStop(async () => stopping.abort());
+			const monotonic = c.clock.monotonic;
 			const runtime: Runtime = {
 				log: {
 					warn: (event, fields) => c.log.warn(event, fields),
 					debug: (event, fields) => c.log.debug(event, fields),
 				},
 				now: () => c.clock.now(),
+				...(monotonic ? { monotonic: () => monotonic.call(c.clock) } : {}),
 				stopping: stopping.signal,
 			};
 			/** The paths over these lookups, a floor not tls-options' own refusing boot as composed wrong. */
