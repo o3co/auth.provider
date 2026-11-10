@@ -236,6 +236,27 @@ it("offers a batch across partitions and spaces of one guarantee, so the contrac
 	expect(typeof app.get(store).batchAcross).toBe("function");
 });
 
+/**
+ * Promotes the replica the proxy can reach in place of the primary, the primary paused; the
+ * returned undo restores the old roles with replicas running.
+ */
+const failover = async () => {
+	const primaryPort = proxyTarget;
+	docker("pause", container);
+	if (replicaPaused) docker("unpause", replica);
+	replicaPaused = false;
+	cli(replica, "replicaof", "no", "one");
+	proxyTarget = replicaPort;
+	for (const socket of sockets) socket.destroy();
+	return async () => {
+		docker("unpause", container);
+		cli(replica, "replicaof", primaryName, "6379");
+		proxyTarget = primaryPort;
+		for (const socket of sockets) socket.destroy();
+		await waitFor(() => connectedReplicas() === 2 && writable(), 60_000);
+	};
+};
+
 storeContract("redis", {
 	open: async () => {
 		const app = await open([durable], undefined, proxyUrl);
@@ -251,22 +272,7 @@ storeContract("redis", {
 			await waitFor(() => connectedReplicas() === 2 && writable(), 60_000);
 		};
 	},
-	failover: async () => {
-		const primaryPort = proxyTarget;
-		docker("pause", container);
-		if (replicaPaused) docker("unpause", replica);
-		replicaPaused = false;
-		cli(replica, "replicaof", "no", "one");
-		proxyTarget = replicaPort;
-		for (const socket of sockets) socket.destroy();
-		return async () => {
-			docker("unpause", container);
-			cli(replica, "replicaof", primaryName, "6379");
-			proxyTarget = primaryPort;
-			for (const socket of sockets) socket.destroy();
-			await waitFor(() => connectedReplicas() === 2 && writable(), 60_000);
-		};
-	},
+	failover,
 	loseNextReply: async () => {
 		dropNext = true;
 	},
@@ -330,17 +336,59 @@ it("answers durable unmet once the server skips its fsyncs while it rewrites, an
 	});
 });
 
-it("leaves the ledger's entry, once a change has been made, on the replica a failover would promote", async () => {
+/** The first answer `attempt` gives without rejecting, trying for ten seconds, 200 ms apart. */
+async function eventually<T>(attempt: () => Promise<T>): Promise<T | undefined> {
+	for (let tries = 0; tries < 50; tries++) {
+		const answer = await attempt().catch(async () => {
+			await new Promise((r) => setTimeout(r, 200));
+			return undefined;
+		});
+		if (answer !== undefined) return answer;
+	}
+	return undefined;
+}
+
+it("changes nothing, unready, until a round covers the ledger's entry, and keeps it through the promotion of a replica that acknowledged it", async () => {
+	let context: BuildContext<unknown> | undefined;
+	// Safe: it keeps the build context for the test once, at build; no request writes it.
+	const asker = defineModule({ name: "asker", replicaSafe: true, takes: [] }, (m) => [
+		m.provide(contract<object>("asker")).by((c) => {
+			context = c;
+			return {};
+		}),
+	]);
 	const prefix = `l${Date.now()}x${++opened}`;
-	const app = await open([durable], prefix, proxyUrl);
-	stops.push(() => app.stop(1000));
+	// A space no round confirms writes in: only the ledger's own confirmation can hold them back.
 	const k = { space: contractSpaces[0] as Space, partition: "p", name: "k" };
-	expect((await app.get(store).putIfAbsent(k, 1, { expiry: { kind: "never" } })).kind).toBe(
-		"written",
-	);
-	const ledger = cli(replica, "get", keysUnder(prefix).ledgerKey);
-	expect(JSON.parse(ledger)).toMatchObject({ kept: { subjectDataEver: true } });
-});
+	const never = { expiry: { kind: "never" } } as const;
+	// One replica held back: the primary still takes writes, but no round covers both replicas.
+	docker("pause", secondReplica);
+	let held = true;
+	let undo: (() => Promise<void>) | undefined;
+	try {
+		const app = await open([durable, asker], prefix, proxyUrl);
+		stops.push(() => app.stop(1000));
+		await expect(app.get(store).putIfAbsent(k, 1, never)).rejects.toMatchObject({
+			name: "Unavailable",
+		});
+		expect((await context?.readinessReport(1000))?.answer).toBe("unready");
+		docker("unpause", secondReplica);
+		held = false;
+		await waitFor(() => connectedReplicas() === 2 && writable(), 60_000);
+		// Unavailable until a round covers the entry, as the replica catches up; then written.
+		expect((await eventually(() => app.get(store).putIfAbsent(k, 1, never)))?.kind).toBe("written");
+		undo = await failover();
+		// The promoted replica acknowledged the entry, so the data it holds comes with it.
+		expect(JSON.parse(cli(replica, "get", keysUnder(prefix).ledgerKey))).toMatchObject({
+			kept: { subjectDataEver: true },
+		});
+		// The failover cut every connection: read once the client is back.
+		expect((await eventually(() => app.get(store).get(k)))?.entry?.value).toBe(1);
+	} finally {
+		if (held) docker("unpause", secondReplica);
+		await undo?.();
+	}
+}, 180_000);
 
 describe("redis", () => {
 	it("refuses replicated spaces unless the operator states the replication, and checks the statement", async () => {
