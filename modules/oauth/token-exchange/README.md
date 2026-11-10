@@ -30,7 +30,7 @@
 - A revoked or expired token, or one a tie answers ended (its family, or its session closed or short of a requirement, each told apart in the description), is refused, as subject or actor: the subject's ties first, each token's in their names' order.
 - The issued token joins the subject token's ties in their names' order (family, then session), issued from the session one names, so `token-endpoint` records it there; at the first that ended meanwhile, it is revoked and the exchange refused. Ties naming two sessions are Unavailable. The actor token's ties only refuse.
 - It never outlives the subject token or the earliest end its ties give. It stands from the subject token's standing time; one not a finite number is 0, before any boundary.
-- The erasure fence covers its subject, not its actor: one erased between its check and the answer may be named in `act`: a known leak of its identifier.
+- The erasure fence covers its subject, not its actor: one erased between its check and the answer may be named in `act`, a known leak.
 - Revoking the subject token alone (by id), or its actor's subject, does not end it, nor does the actor's session closing or the actor token expiring: it lives to its own end, and introspection answers it active till then. Nothing it records (the audit's `token.issued` among it) names the token it came from, so it cannot be found from that token; revoking its subject ends it.
 - Its lifetime is the `o3co_expires_in` asked, or `tokens`' lifetime when none is asked, cut to `max-lifetime`; without that cap, `tokens`' lifetime cuts an asked one too. `expires_in` in the answer is that lifetime.
 - `o3co_expires_in` (RFC 6749 §8.2) left out or empty asks for nothing. Otherwise it is 1–10 ASCII digits, from 2 (as `max-lifetime`), or `invalid_request` before any token is checked. A request's `expires_in` is ignored.
@@ -39,7 +39,7 @@
 - It issues through `tokens`' issuance policies, from the subject token's session when it was recorded to one; their refusal is `token-endpoint`'s answer.
 - A verifier's answer is checked for shape once (each scope one RFC 6749 scope-token) and frozen; only that copy is read. An answer marked invalid, or a malformed one, is a failed validation, never a skipped tie.
 - Both tokens and their ties are checked again right before issuing, and the ties then answered are joined. A once-only token is used up last, once the token is issued and joined: a refusal or Unavailable before leaves it unused. Where `consume` answers `replayed` or cannot tell, the token issued is revoked, never handed out, and `replayed` is refused.
-- `requested_token_type` other than an access token is refused. Unavailable is `503`, never a refusal.
+- It issues an access token alone: any other `requested_token_type` is refused. Unavailable is `503`, never a refusal.
 
 ## Depends on
 - `kernel`, `grants`, `client-allowance`, `tokens`, `clients`, `issuer`, `sender-binding`, `resource-indicators`
