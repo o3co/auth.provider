@@ -18,6 +18,7 @@ Internal module of `guard-imports`: a package's public surface, read from its `.
 - A member keyed by a symbol is named as written (`[mark]`, `[Symbol.iterator]`), never by the id the checker gives it, so two programs over the same contract write the same signature.
 - A primitive, or a union of them, counts no members: the platform's own are not the contract's.
 - Only declarations inside the package count: none from `node_modules` or another package.
+- Every program parses through one host: a parsed file is reused only while its text is the same. Every program shares the same compiler options.
 
 ## Depends on
 - `typescript`.

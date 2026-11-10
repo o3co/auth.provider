@@ -1,5 +1,6 @@
 import { relative, resolve, sep } from "node:path";
 import ts from "typescript";
+import { host, options } from "./host.ts";
 
 export interface Surface {
 	readonly values: ReadonlySet<string>;
@@ -22,17 +23,6 @@ export interface Surface {
 	 */
 	readonly signatures: ReadonlyMap<string, string>;
 }
-
-const options: ts.CompilerOptions = {
-	target: ts.ScriptTarget.ES2022,
-	module: ts.ModuleKind.NodeNext,
-	moduleResolution: ts.ModuleResolutionKind.NodeNext,
-	allowImportingTsExtensions: true,
-	noEmit: true,
-	strict: true,
-	skipLibCheck: true,
-	types: [],
-};
 
 /** How a signature writes a type: whole, and a function as an arrow. */
 const written = ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.WriteArrowStyleSignature;
@@ -71,7 +61,7 @@ function signatureParts(node: ts.Node): ts.Node[] {
 }
 
 export function surfaceOf(entry: string, packageDir: string): Surface {
-	const program = ts.createProgram([entry], options);
+	const program = ts.createProgram([entry], options, host);
 	const checker = program.getTypeChecker();
 	const source = program.getSourceFile(entry);
 	const moduleSymbol = source && checker.getSymbolAtLocation(source);
