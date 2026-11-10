@@ -4,8 +4,9 @@ export interface Clock {
 	/** Epoch ms. */
 	now(): number;
 	/**
-	 * Milliseconds from an arbitrary origin, never going back; only differences mean anything, never
-	 * comparable to `now()`. A clock may give none.
+	 * Milliseconds from an origin this process picks, never going back; only differences taken in
+	 * this process mean anything: never comparable to `now()`, never kept or sent. A clock a test
+	 * writes may give `now()` alone.
 	 */
 	monotonic?(): number;
 }
