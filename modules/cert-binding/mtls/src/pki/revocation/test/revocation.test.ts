@@ -24,6 +24,7 @@ const policyOf = (more: Partial<Policy> = {}): Policy => ({
 	ocspFreshMs: 600_000,
 	crlTtlMs: 3_600_000,
 	failureMs: 30_000,
+	timeoutMs: 3000,
 	crlEntries: 256,
 	ocspEntries: 1024,
 	maxFetches: 4,

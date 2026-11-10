@@ -114,6 +114,7 @@ export const revocationPolicyOf = (r: RevocationSection): RevocationPolicy => ({
 	ocspFreshMs: r["ocsp-fresh"] * 1000,
 	crlTtlMs: r["crl-ttl"] * 1000,
 	failureMs: r["failure-lifetime"] * 1000,
+	timeoutMs: r.timeout,
 	crlEntries: r["crl-entries"],
 	ocspEntries: r["ocsp-entries"],
 	maxFetches: r["max-fetches"],

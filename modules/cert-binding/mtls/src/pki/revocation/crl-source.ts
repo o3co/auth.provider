@@ -15,6 +15,7 @@ import {
 	good,
 	isFailed,
 	limited,
+	outage,
 	refused,
 	type Said,
 	worse,
@@ -86,7 +87,11 @@ export function crlSource(
 			now,
 			policy.skewMs,
 			policy.signatureAlgorithms,
+			AbortSignal.timeout(policy.timeoutMs),
 		);
+		// No turn to read it within a fetch's time: an outage as a fetch past its time is, and nothing
+		// of the CRL is remembered, as it was never read.
+		if (verified.kind === "aborted") return outage("unreachable");
 		if (verified.kind === "unusable") {
 			crls.set(key, refused(verified.reason), now + policy.failureMs);
 			return refused(verified.reason);
