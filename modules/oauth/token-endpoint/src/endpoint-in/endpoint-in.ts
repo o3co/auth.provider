@@ -3,13 +3,14 @@ import { clients } from "@mod/clients";
 import { type Grant, sessionIssuances, targets } from "@mod/grants";
 import type { BuildContext } from "@mod/kernel";
 import { clientBindings, senderBinding } from "@mod/sender-binding";
-import { tokens } from "@mod/tokens";
+import { issuanceFencing, tokens } from "@mod/tokens";
 import { tokenEndpoint } from "../route/endpoint.ts";
 
 /** What `endpointIn` takes from the build context (its own `targets` aside, which the module provides). */
 export const endpointTakes = [
 	clients,
 	tokens,
+	issuanceFencing,
 	sessionIssuances,
 	senderBinding,
 	clientBindings,
@@ -21,6 +22,7 @@ export const endpointIn = async (c: BuildContext<unknown>, composed: readonly Gr
 	tokenEndpoint({
 		clients: await c.get(clients),
 		tokens: await c.get(tokens),
+		fencing: await c.get(issuanceFencing),
 		told: await c.collect(sessionIssuances),
 		bindings: await c.get(senderBinding),
 		required: await c.get(clientBindings),

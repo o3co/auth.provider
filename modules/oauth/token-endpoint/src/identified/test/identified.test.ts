@@ -13,7 +13,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import rateLimitModule from "@mod/rate-limit/module";
 import { simulatedStore } from "@mod/store/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import { basicOf, endpointConfig, endpointModules } from "../../../test/deployment.ts";
+import { answered, basicOf, endpointConfig, endpointModules } from "../../../test/deployment.ts";
 import declared from "../../audit-events.ts";
 import { identifierOf } from "../identified.ts";
 
@@ -114,15 +114,16 @@ describe("a request naming no client", () => {
 						return { kind: "error", error: "invalid_grant", description: "untrusted signer" };
 					return { kind: "client", client: assertion.slice(3), identified: { by: assertion } };
 				},
-				handle: async ({ client, identified }) => {
+				handle: async (input) => {
+					const { client, identified } = input;
 					seen.handled.push(identified);
-					return { kind: "issued", body: { client: client.id, identified: identified ?? "none" } };
+					return answered(input, { client: client.id, identified: identified ?? "none" });
 				},
 			})),
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
-				handle: async () => ({ kind: "issued", body: {} }),
+				handle: async (input) => answered(input, {}),
 			})),
 		]);
 	/** A method that reads a key header, so a public client may hold a key. */
