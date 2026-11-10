@@ -30,8 +30,9 @@ const sessions: Space = { name: "session-store.sessions", guarantees };
 const cookies: Space = {
 	name: "session-store.cookies",
 	guarantees: Object.values(cookieGuaranteeFor),
+	subjectData: "none",
 };
-const closings: Space = { name: "session-store.closings", guarantees };
+const closings: Space = { name: "session-store.closings", guarantees, subjectData: "none" };
 const { neverEvicted, survivesCrash, survivesFailover } = guaranteeFor;
 const listedGuaranteeFor: Record<keyof typeof subjectSessionsNeeds, Guarantee> = {
 	neverEvicted,
