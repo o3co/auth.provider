@@ -16,7 +16,7 @@
 - `noHandoff`, where no module receives upstream tokens.
 - Extension point `handoffSealing`: the seal a held login's tokens are kept under. Where some module receives upstream tokens, none or two refuse boot.
 - Composition definition (`./module`): provides `handoff` over the receivers in name order, taking the held login store and the sealing contributed in every assembly, used only where some module receives upstream tokens. `upstream-handoff-seal` contributes the composed `seal`.
-- Store interface for held logins `heldLoginStore`, its needs `heldLoginStoreNeeds` (survives failover, names from the secret) and contract test `heldLoginStoreContract` (`./testing`).
+- Store interface for held logins, its needs (survives failover, names from the secret) and contract test (`./testing`).
 
 ## Invariants
 - Only a login whose upstream gave tokens carries anything; any other keeps nothing.
