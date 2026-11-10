@@ -176,10 +176,7 @@ const walking = new Set([
 	"toSorted",
 ]);
 
-/**
- * Whether a call walks a collection: one of the walking names, but `find` only with a function to
- * call, an array's; the build context's `find` takes a contract and walks nothing.
- */
+/** A walking call: `find` only with a function, an array's, never the build context's. */
 const walks = (node: ts.Node, method: string) =>
 	walking.has(method) &&
 	(method !== "find" ||
