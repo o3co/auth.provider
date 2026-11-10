@@ -1605,6 +1605,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/issuer':
         specifier: workspace:*
         version: link:../issuer
