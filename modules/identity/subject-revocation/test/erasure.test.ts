@@ -154,6 +154,11 @@ async function gated(
 				.lines()
 				.filter((l) => l.level === "warn")
 				.map((l) => l.event),
+		unknownWhy: () =>
+			recorded
+				.lines()
+				.filter((l) => l.event === "subject-revocation.erasure_unknown")
+				.map((l) => String(l.fields.reason)),
 	};
 }
 
@@ -219,7 +224,7 @@ it("never passes a fence whose receipt id already holds a receipt, whatever the 
 
 it("takes erasure as off, warning at every start, where the store can neither tell whether it is enabled nor fence", async () => {
 	const booted = await gated(false, () => {}, { erasureEnabled: false, fence: false });
-	expect(booted.warned()).toContain("subject-revocation.erasure_unknown");
+	expect(booted.unknownWhy()).toEqual([expect.stringContaining("nor fences")]);
 	expect(await booted.app?.get(erasureFence).fence("alice", "r0")).toBe("passed");
 	expect(await booted.ready()).toBe("ready");
 });
@@ -227,7 +232,11 @@ it("takes erasure as off, warning at every start, where the store can neither te
 it("fences every bundle where the store fences but cannot tell whether erasure is enabled, its start and readiness as off", async () => {
 	for (const guarded of [true, false]) {
 		const booted = await gated(guarded, () => {}, { erasureEnabled: false });
-		expect(booted.warned()).toContain("subject-revocation.erasure_unknown");
+		expect(booted.unknownWhy()).toEqual([
+			guarded
+				? expect.stringContaining("every bundle is fenced")
+				: expect.stringContaining("no module guards it"),
+		]);
 		expect(await booted.ready()).toBe("ready");
 		const fence = booted.app?.get(erasureFence);
 		expect(await fence?.fence("alice", "r0")).toBe("passed");

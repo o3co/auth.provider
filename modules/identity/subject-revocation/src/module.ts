@@ -33,10 +33,13 @@ export default defineModule(
 			const boundaries = await c.get(boundaryStore);
 			const guarded = boundaries.fence !== undefined && (await c.collect(erasureGuards)).length > 0;
 			if (!boundaries.erasureEnabled) {
+				const why = !boundaries.fence
+					? "nor fences, so erasure reads as off"
+					: guarded
+						? "so every bundle is fenced"
+						: "and no module guards it, so no issuance is fenced and erasure reads as off";
 				c.log.warn("subject-revocation.erasure_unknown", {
-					reason: boundaries.fence
-						? "the boundary store does not tell whether erasure is enabled, so every bundle is fenced; 0.22 refuses it"
-						: "the boundary store does not tell whether erasure is enabled, nor fences, so erasure reads as off; 0.22 refuses it",
+					reason: `the boundary store does not tell whether erasure is enabled, ${why}; 0.22 refuses it`,
 				});
 			}
 			const enabled = erasureMark(boundaries);

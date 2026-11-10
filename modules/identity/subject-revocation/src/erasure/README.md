@@ -19,7 +19,7 @@ Internal module of `subject-revocation`: marking a subject erased, the fence a b
 - A receipt lives a minute, fixed: nothing reads it, and a minute outlives its write's resends (records' 10-second deadline and a second).
 - Guarded (the store fences, and a module contributes to `erasureGuards`) is known without the store: a guarded composition starts and is ready whatever the store answers. An unguarded one reads the mark at start: enabled refuses the boot; unread starts it unready (probe `subject-revocation.erasure`) until the mark reads off.
 - An unread mark never refuses the boot: a store's absence refuses none, or an erasure-off node would crash-loop on a store blip. An unguarded node serves without fences, so wherever erasure is enabled, traffic must reach only ready nodes.
-- A store that cannot tell whether erasure is enabled reads as off at start and for readiness, with a warning at every start (`subject-revocation.erasure_unknown`); one that fences all the same fences every bundle, as off cannot be known there, and one that cannot fence either passes them unwritten, the stated exclusion. 0.22 refuses both.
+- A store that cannot tell whether erasure is enabled reads as off at start and for readiness, with a warning at every start (`subject-revocation.erasure_unknown`); one that fences all the same fences every bundle in a guarded composition, as off cannot be known there. One that cannot fence either passes them unwritten, and an unguarded composition (no guard, as where `subject-check` is `none`) fences no issuance there: the stated exclusion, each named in the warning. 0.22 refuses both.
 - The process reads the mark once: enabling erasure restarts every node.
 
 ## Depends on
