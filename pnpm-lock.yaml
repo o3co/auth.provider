@@ -1525,6 +1525,9 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/kernel
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
