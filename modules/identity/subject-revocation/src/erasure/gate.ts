@@ -36,7 +36,8 @@ const receipt = (id: string) => ({
 
 /**
  * The fence over the store: no write where erasure is read as off; else the receipt, where the
- * subject's boundary holds no mark. A mark not yet read fences, the closed side.
+ * subject's boundary holds no mark. A mark not yet read fences, the closed side, as does a store
+ * that fences but cannot tell whether erasure is enabled.
  */
 export function fenceOver(
 	boundaries: BoundaryStore,
@@ -44,7 +45,9 @@ export function fenceOver(
 ): ErasureFence {
 	return {
 		fence: async (subject, receiptId) => {
-			if ((await enabled()) === false) return "passed";
+			// A store that fences but cannot tell whether erasure is enabled fences all the same.
+			const cannotTell = !boundaries.erasureEnabled && boundaries.fence !== undefined;
+			if (!cannotTell && (await enabled()) === false) return "passed";
 			if (!boundaries.fence) throw new Unavailable("subject-revocation");
 			const allowed = (record: StoredBoundary | undefined) => {
 				if (record === undefined) return receipt(receiptId);

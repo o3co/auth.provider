@@ -207,9 +207,22 @@ it("never passes a fence whose receipt id already holds a receipt, whatever the 
 	expect(await fence?.fence("alice", "r5")).toBe("erased");
 });
 
-it("takes erasure as off, warning at every start, where the store cannot tell whether it is enabled", async () => {
+it("takes erasure as off, warning at every start, where the store can neither tell whether it is enabled nor fence", async () => {
 	const booted = await gated(false, () => {}, { erasureEnabled: false, fence: false });
 	expect(booted.warned()).toContain("subject-revocation.erasure_unknown");
 	expect(await booted.app?.get(erasureFence).fence("alice", "r0")).toBe("passed");
 	expect(await booted.ready()).toBe("ready");
+});
+
+it("fences every bundle where the store fences but cannot tell whether erasure is enabled, its start and readiness as off", async () => {
+	for (const guarded of [true, false]) {
+		const booted = await gated(guarded, () => {}, { erasureEnabled: false });
+		expect(booted.warned()).toContain("subject-revocation.erasure_unknown");
+		expect(await booted.ready()).toBe("ready");
+		const fence = booted.app?.get(erasureFence);
+		expect(await fence?.fence("alice", "r0")).toBe("passed");
+		await booted.app?.get(subjectErasure).markErased("alice");
+		expect(await fence?.fence("alice", "r1")).toBe("erased");
+		expect([...booted.receipts.keys()]).toEqual(["r0"]);
+	}
 });

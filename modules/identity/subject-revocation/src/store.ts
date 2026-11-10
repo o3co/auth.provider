@@ -53,8 +53,8 @@ export interface BoundaryStore {
 	}>;
 	/**
 	 * Whether erasure is enabled for the store's data: read as the store keeps it, and once enabled
-	 * in any epoch, enabled. Where it is absent, erasure is taken as off, with a warning at every
-	 * start; 0.22 refuses such a store.
+	 * in any epoch, enabled. Where it is absent, erasure is taken as off at start and for readiness,
+	 * with a warning at every start, and a store with `fence` fences every bundle; 0.22 refuses it.
 	 */
 	erasureEnabled?(): Promise<boolean>;
 }
