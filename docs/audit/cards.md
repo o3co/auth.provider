@@ -313,6 +313,8 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `client` (`src/client`): the client's options, and what the URL and the environment say of its connection.
   - `probe` (`src/probe`): the readiness probe `redis`.
   - `round` (`src/round`): the confirmation round.
+  - `settings` (`src/settings`): what the server's settings give the declared spaces, read as the server shows them or as the operator declares them.
+  - `upkeep` (`src/upkeep`): `store`'s upkeep on Redis, the control record and the ledger of spaces.
 
 ## templates
 

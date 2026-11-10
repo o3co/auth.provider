@@ -29,6 +29,7 @@ function primary() {
 	const redis = fakeRedis();
 	redis.settings["min-replicas-to-write"] = "1";
 	redis.settings["min-replicas-max-lag"] = "10";
+	redis.replication.connected = 1;
 	return redis;
 }
 
@@ -149,6 +150,7 @@ describe("good replicas, with replicas", () => {
 	it("asks them only where replicas are declared", async () => {
 		const redis = primary();
 		redis.replication.goodReplicas = 0;
+		redis.replication.connected = 0;
 		const { ready } = await boot(await redis.listen(), "none");
 		expect(await ready()).toBe("ready");
 		redis.down();

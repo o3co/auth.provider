@@ -13,6 +13,7 @@ Internal module of `conformance`: the Redis adapter's wire, read in one place, s
 
 ## Invariants
 - An operation is told by the shape of its call (its keys and arguments), never by the script's text.
+- A script that changes data carries the epoch check's two arguments last, the control record's key (`…:{#control}`) then the epoch; they are read off by that key before the shape is told, so a change to where the adapter puts them changes this too.
 - A write matches on the keys it writes, each by its own prefix: a batch's written entries (removals among them), never a key it only checks.
 - A write took effect only where its answer's kind is `written`, `removed`, `taken`, `committed` or `counted`, as the adapter counts them.
 - A call without a mark is the resend of nothing.
