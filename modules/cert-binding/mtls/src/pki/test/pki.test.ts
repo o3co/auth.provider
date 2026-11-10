@@ -11,6 +11,7 @@ const revocation = (served: Record<string, Uint8Array | "down">) => ({
 		ocspFreshMs: 600_000,
 		crlTtlMs: 3_600_000,
 		failureMs: 30_000,
+		timeoutMs: 3000,
 		crlEntries: 8,
 		ocspEntries: 8,
 		maxFetches: 4,

@@ -21,6 +21,8 @@ export interface RevocationPolicy {
 	readonly crlTtlMs: number;
 	/** How long a source that failed is not asked again. */
 	readonly failureMs: number;
+	/** How long one fetch may take; a fetched CRL waits no longer for its turn to be read. */
+	readonly timeoutMs: number;
 	readonly crlEntries: number;
 	readonly ocspEntries: number;
 	/** How many sources one check may fetch from; past them, what is left is unconfirmed. */
