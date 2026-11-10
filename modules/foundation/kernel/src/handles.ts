@@ -3,6 +3,8 @@ export interface Contract<T> {
 	readonly label: string;
 	/** The modules that may take it, by name; when omitted, any module may, and an empty list lets none. */
 	readonly takenBy?: readonly string[];
+	/** Its owner lets it go unprovided: a module may take it optionally. Closed when omitted. */
+	readonly optional?: true;
 	readonly __type?: T;
 }
 
@@ -24,7 +26,7 @@ export interface ExtensionPoint<T> {
 
 /**
  * A contract a module takes where a module provides it: `find` answers its interface, or none where
- * none does, and no boot is refused for it. Only for what the taker does without by failing closed.
+ * none does, and no boot is refused for it. Only of a contract its owner lets go unprovided.
  */
 export interface OptionalTake<T> {
 	readonly kind: "optional";
@@ -52,13 +54,14 @@ export type Handle =
 
 export function contract<T>(
 	label: string,
-	options: { readonly takenBy?: readonly string[] } = {},
+	options: { readonly takenBy?: readonly string[]; readonly optional?: true } = {},
 ): Contract<T> {
-	const { takenBy } = options;
+	const { takenBy, optional } = options;
 	return Object.freeze({
 		kind: "contract",
 		label,
 		...(takenBy === undefined ? {} : { takenBy: Object.freeze([...takenBy]) }),
+		...(optional === true ? { optional } : {}),
 	});
 }
 

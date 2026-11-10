@@ -11,7 +11,7 @@
 
 ## Offers
 - `defineModule`: name, section schema (zod, the library that reads sections), multi-instance declaration (a boolean, or a function asked only with a section that passed), `takes` (the `Handle`s its factories take from other modules, `[]` for none: a list, or such a function), provisions and contributions.
-- Handles: `contract` (optionally `takenBy`, the names of the modules that may take it), `optional` (a take none need provide: `takes`' card) and `extensionPoint` (exactly one / at least one / any number / keyed). A take its contract's `takenBy` does not name refuses boot, by `get`, `find` or `late`, caught or not (`building`' card).
+- Handles: `contract` (optionally `takenBy`, the names of the modules that may take it, and `optional`, its owner letting it go unprovided), `optional` (a take of such a contract: `takes`' card) and `extensionPoint` (exactly one / at least one / any number / keyed). A take its contract's `takenBy` does not name refuses boot, by `get`, `find` or `late`, caught or not (`building`' card).
 - `assemble`: answers `get`, `start` and `stop(deadlineMs?)` (without one, `stop-deadline`), or rejects with `BootRefused` (one module may raise several refusals).
 - `stop`: after the periodic tasks, runs the stop hooks in reverse order, each given a signal that aborts at the deadline. A hook may also run without `start()`, on a refused assembly: it ends what its build started.
 - Build context: the runtime, `section`, `environment`, `get`, `find` (a contract taken optionally, or none), `collect`, `late` (a function giving a contract's interface once assembly succeeds), `readinessReport`, `onBuilt`, `onStart`, `onStop`, `every`, `refuse` and `refuseAll`.
