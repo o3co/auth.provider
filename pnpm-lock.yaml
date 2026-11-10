@@ -5107,6 +5107,9 @@ importers:
       '@mod/federation-link':
         specifier: workspace:*
         version: link:../federation-link
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records

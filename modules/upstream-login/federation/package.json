@@ -39,6 +39,7 @@
 	"devDependencies": {
 		"@mod/cookies": "workspace:*",
 		"@mod/federation-link": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
