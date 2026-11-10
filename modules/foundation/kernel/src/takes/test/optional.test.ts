@@ -75,3 +75,26 @@ it("counts an optional take found as used", async () => {
 	).toBeUndefined();
 	expect((await takesUnused({ modules: [finder], config: single })).finder).toBeUndefined();
 });
+
+it("refuses a find of a contract its takes name plainly, once, even where the taker catches it", async () => {
+	const refusals = await refusalsOf(
+		assemble({
+			modules: [
+				provider,
+				defineModule({ name: "taker", replicaSafe: true, takes: [control] }, (m) => [
+					m.provide(answer).by(async (c) => {
+						await c.find(control).catch(() => undefined);
+						return (await c.find(control).catch(() => undefined))?.read() ?? "none";
+					}),
+				]),
+			],
+			config: single,
+		}),
+	);
+	expect(refusals).toEqual([
+		{
+			where: "taker",
+			reason: "finds store.control, which its takes name plainly: take it optionally or get it",
+		},
+	]);
+});

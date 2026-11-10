@@ -172,6 +172,21 @@ export function buildingWith({
 		beyondTakes.set(item.module, refused.add(handle));
 		throw new DependencyFailed();
 	};
+	/** Each find of a contract a module takes plainly, refused once, even where the taker catches the throw. */
+	const plainFinds = new Map<Module, Set<Handle>>();
+	const mayFind = (contract: Contract<unknown>, item: Buildable) => {
+		const held = heldTakes.get(item.module) ?? new Set<Handle>();
+		if ([...held].some((take) => take.kind === "optional" && take.contract === contract)) return;
+		const refused = plainFinds.get(item.module) ?? new Set<Handle>();
+		if (!refused.has(contract)) {
+			refusals.push({
+				where: item.module.name,
+				reason: `finds ${contract.label}, which its takes name plainly: take it optionally or get it`,
+			});
+		}
+		plainFinds.set(item.module, refused.add(contract));
+		throw new DependencyFailed();
+	};
 	/** What a factory sees while `item` is built; `next` is the stack its requests extend. */
 	const contextFor = (item: Buildable, next: readonly Buildable[]): BuildContext<unknown> =>
 		withEnvironment({
@@ -192,6 +207,7 @@ export function buildingWith({
 			},
 			find: async <T>(contract: Contract<T>) => {
 				mayName(contract as Contract<unknown>, item);
+				mayFind(contract as Contract<unknown>, item);
 				mayTake(contract as Contract<unknown>, item);
 				const provider = providers.get(contract as Contract<unknown>);
 				return provider ? ((await build(provider, next)) as T) : undefined;
