@@ -153,3 +153,16 @@ it("holds a checked connection to its deadline by the monotonic time, whatever i
 	// Without a monotonic time, the timer alone holds it: here it never fires, so the request goes.
 	expect((await sending(undefined, 500, passing, never)).status).toBe(200);
 });
+
+it("ends a checked connection whose deadline passes by the time its request is first written, sending nothing", async () => {
+	const before = received;
+	const never = () => new AbortController().signal;
+	// In time when it is sent and when it is checked; past the deadline once the request is written.
+	let reads = 0;
+	const monotonic = () => (reads++ < 2 ? 0 : 10_000);
+	await expect(sending(undefined, 500, async () => {}, never, monotonic)).rejects.toMatchObject({
+		failure: "timeout",
+	});
+	await new Promise((later) => setTimeout(later, 50));
+	expect(received).toBe(before);
+});

@@ -204,6 +204,16 @@ async function secured(socket: TLSSocket, signal: AbortSignal, check?: PeerCheck
 		await new Promise((later) => setTimeout(later, 0));
 		if (lost !== undefined || socket.destroyed) throw lost ?? unavailable("unreachable");
 		if (signal.aborted || (until && until.monotonic() >= until.at)) throw unavailable("timeout");
+		if (until) {
+			// The request is asked again as it is first written: writing out its headers takes time too.
+			const write = socket.write;
+			socket.write = ((...args: Parameters<typeof write>) => {
+				socket.write = write;
+				if (until.monotonic() < until.at) return write.apply(socket, args);
+				socket.destroy(unavailable("timeout"));
+				return false;
+			}) as typeof write;
+		}
 		return socket;
 	} catch (error) {
 		socket.destroy();
