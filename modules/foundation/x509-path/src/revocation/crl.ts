@@ -75,6 +75,9 @@ export function distributionPointsOf(cert: pkijs.Certificate): DistributionPoint
 const withinOctets = (bytes: Uint8Array) =>
 	(bytes.length > 1 && bytes[0] === 0 ? bytes.length - 1 : bytes.length) <= 20;
 
+/** The most bytes of the issuer's name a CRL may write, as a verified CRL keeps it: 4 KiB. */
+const mostNameBytes = 4096;
+
 /** The most bytes of a CRL read; a dense one of 1 MiB lists some 45,000 serials. */
 const mostCrlBytes = 1 << 20;
 
@@ -180,6 +183,9 @@ async function readCrl(
 		nodesIn(der),
 	);
 	if (!crl) return unusable("malformed");
+	// The issuer's name, kept with the CRL: real names are well under 1 KiB.
+	const issuerName = new Uint8Array(crl.issuer.toSchema().toBER(false));
+	if (issuerName.byteLength > mostNameBytes) return unusable("malformed");
 	if (!isTaken(crl.signatureAlgorithm, taken)) return unusable("signature algorithm");
 	if (!sameAlgorithm(crl.signature, crl.signatureAlgorithm)) return unusable("signature algorithm");
 	if (!crl.issuer.isEqual(issuer.subject)) return unusable("issuer");
@@ -224,9 +230,7 @@ async function readCrl(
 		kind: "verified",
 		crl: Object.freeze({
 			// Its own bytes, not a view of the CRL's: kept long after, it must not hold the whole CRL.
-			issuer: new pkijs.RelativeDistinguishedNames({
-				schema: asn1js.fromBER(new Uint8Array(crl.issuer.toSchema().toBER(false))).result,
-			}),
+			issuer: new pkijs.RelativeDistinguishedNames({ schema: asn1js.fromBER(issuerName).result }),
 			thisUpdate,
 			nextUpdate: next,
 			...(bytes ? { number: BigInt(`0x${hex(bytes) || "0"}`) } : {}),
