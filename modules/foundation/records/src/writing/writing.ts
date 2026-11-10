@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { BuildRefused, isUnavailable, type Log, type Random, Unavailable } from "@mod/kernel";
 import type { Expiry, Json, Key, Space, Store, WriteOptions } from "@mod/store";
 
@@ -133,6 +134,10 @@ export function expiryOf(lifetimeMs: number | "endless" | undefined): Expiry {
 
 /** The kind each space was opened for, by store: a space's scan lists every record's key, so it holds one kind. */
 const openedFor = new WeakMap<Store, Map<string, "records" | "secret records">>();
+/** The name a record under a secret is kept by: `1.` and the base64url SHA-256 of its space's name, a line feed and the secret. */
+export const nameOf = (space: Space, secret: string) =>
+	`1.${createHash("sha256").update(`${space.name}\n${secret}`).digest("base64url")}`;
+
 export function claim(place: Place, kind: "records" | "secret records") {
 	const kinds = openedFor.get(place.store) ?? new Map<string, "records" | "secret records">();
 	openedFor.set(place.store, kinds);

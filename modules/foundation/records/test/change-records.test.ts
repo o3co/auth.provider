@@ -4,7 +4,13 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { type Json, type Space, type Store, spaces, store } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
-import { changeRecords, type Place, pairedRecordsAcross, recordsIn } from "../src/records.ts";
+import {
+	changeRecords,
+	type Place,
+	pairedRecordsAcross,
+	recordsIn,
+	secretRecordsIn,
+} from "../src/records.ts";
 import { memoryRecords } from "../src/testing.ts";
 
 const runtime = quietRuntime({
@@ -309,4 +315,48 @@ it("gives a record the stand-in changes a lifetime of 1 ms at least, as records 
 	});
 	// The clock stands still: the record lives its 1 ms, as the store keeps a write's least lifetime.
 	expect(await records.read("r")).toEqual({ n: 1 });
+});
+
+it("reads and writes a record under a secret with a plain one as one, and refuses a space named both ways", async () => {
+	const secrets: Space = { name: "many-secrets", guarantees: [...guarantees] };
+	const app = await assemble({
+		modules: [
+			simulatedStore().module,
+			defineModule({ name: "user", replicaSafe: true, takes: [store] }, (m) => [
+				m.contribute(spaces).by(() => lists),
+				m.contribute(spaces).by(() => secrets),
+				m.provide(opened).by((c) => c.get(store)),
+			]),
+		],
+		config: kernelConfig(),
+		runtime,
+	});
+	const random = { bytes: (n: number) => new Uint8Array(randomBytes(n)) };
+	const plain: Place = { store: app.get(opened), space: lists, random };
+	const kept: Place = { store: app.get(opened), space: secrets, random };
+	const secretRecords = secretRecordsIn<number>(kept);
+	await secretRecords.create("s3cret", 1, 60_000);
+	const changed = await changeRecords({
+		targets: [
+			{ place: plain, key: "list" },
+			{ place: kept, secret: "s3cret" },
+		],
+		decide: ([, held]) => ({
+			targets: [{ value: { ids: [] } }, { value: (held as number) + 1 }],
+		}),
+	});
+	expect(changed.targets).toEqual([
+		{ before: undefined, after: { ids: [] } },
+		{ before: 1, after: 2 },
+	]);
+	expect(await secretRecords.read("s3cret")).toBe(2);
+	await expect(
+		changeRecords({
+			targets: [
+				{ place: kept, secret: "s3cret" },
+				{ place: kept, key: secretRecords.nameOf("other") },
+			],
+			decide: () => ({}),
+		}),
+	).rejects.toThrow(/by key or by secret, not both/);
 });

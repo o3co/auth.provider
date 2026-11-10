@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { type Clock, Unavailable } from "@mod/kernel";
 import {
 	type BatchWrite,
@@ -16,6 +15,7 @@ import {
 	confirmedAsRead,
 	expiryOf,
 	markedAt,
+	nameOf,
 	type Place,
 	retried,
 	rewrite,
@@ -107,11 +107,13 @@ function recordsOf<T extends Json>(place: Place) {
 
 export type Records<T extends Json> = ReturnType<typeof recordsIn<T>>;
 
-/** A record by its place and key, where `changeTogether` reads or writes it. */
-export interface Target {
-	readonly place: Place;
-	readonly key: string;
-}
+/**
+ * A record by its place and key, or by its place and the secret it is kept under, where
+ * `changeTogether` reads or writes it.
+ */
+export type Target =
+	| { readonly place: Place; readonly key: string }
+	| { readonly place: Place; readonly secret: string };
 
 /** What `changeTogether` does to one record: set it (with a lifetime, or keeping its own), or remove it; none keeps it. */
 export type Next<T> = Changed<T> | { readonly remove: true } | undefined;
@@ -165,13 +167,18 @@ export function changesTogether(target: Store): boolean {
 	return typeof target.batchAcross === "function";
 }
 
+/** A target's partition: its key, or the name its secret is kept by. */
+const partitionOf = (target: Target) =>
+	"secret" in target ? nameOf(target.place.space, target.secret) : target.key;
 const recordKey = (target: Target) => ({
 	space: target.place.space,
-	partition: target.key,
+	partition: partitionOf(target),
 	name: "record",
 });
 const sameTarget = (a: Target, b: Target) =>
-	a.place.space.name === b.place.space.name && a.key === b.key;
+	a.place.space.name === b.place.space.name && partitionOf(a) === partitionOf(b);
+/** The kind of records a target reaches: under a secret, or plain. */
+const kindOf = (target: Target) => ("secret" in target ? "secret records" : "records");
 
 /** What one record held before a change of records as one, and holds after. */
 export interface ChangedRecord<T = Json> {
@@ -203,9 +210,16 @@ export async function changeRecords(p: {
 	const target = anchor.place.store;
 	const batchAcross = target.batchAcross?.bind(target);
 	if (!batchAcross) throw new Error("the store writes no records of two partitions as one");
-	const checked = (named: Target) => {
-		if (named.place.store !== target) throw new Error("records changed together share one store");
-		claim(named.place, "records");
+	// A space is named one way in one call: by key, or by secret.
+	const namedAs = new Map<string, "records" | "secret records">();
+	const checked = (one: Target) => {
+		if (one.place.store !== target) throw new Error("records changed together share one store");
+		const kind = kindOf(one);
+		if ((namedAs.get(one.place.space.name) ?? kind) !== kind) {
+			throw new Error("records changed together name a space by key or by secret, not both");
+		}
+		namedAs.set(one.place.space.name, kind);
+		claim(one.place, kind);
 	};
 	p.targets.forEach((named, at) => {
 		checked(named);
@@ -424,16 +438,15 @@ export function pairedRecordsAcross<A extends Json, B extends Json>(
 export function secretRecordsIn<T extends Json>(place: Place) {
 	claim(place, "secret records");
 	const named = recordsOf<T>(place);
-	const nameOf = (secret: string) =>
-		`1.${createHash("sha256").update(`${place.space.name}\n${secret}`).digest("base64url")}`;
+	const nameFor = (secret: string) => nameOf(place.space, secret);
 	return {
-		nameOf,
+		nameOf: nameFor,
 		create: (secret: string, value: T, lifetimeMs: number | "endless") =>
-			named.create(nameOf(secret), value, lifetimeMs),
-		read: (secret: string) => named.read(nameOf(secret)),
+			named.create(nameFor(secret), value, lifetimeMs),
+		read: (secret: string) => named.read(nameFor(secret)),
 		change: (secret: string, change: (current: T) => Changed<T> | undefined) =>
-			named.change(nameOf(secret), change),
-		remove: (secret: string) => named.remove(nameOf(secret)),
+			named.change(nameFor(secret), change),
+		remove: (secret: string) => named.remove(nameFor(secret)),
 		named,
 	};
 }
