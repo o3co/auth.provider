@@ -140,7 +140,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/subject-attributes` (feature, `modules/identity/subject-attributes`): Answers a subject's attributes from one source, bridging `users` and `session`, and whether `users` vouches for them: the one place for the rule of which source counts.
 - `@mod/subject-revocation` (feature, `modules/identity/subject-revocation`): Records two revocation boundaries per subject, `sessions` and `delegations`, and lets others compare against them.
   - `boundaries` (`src/boundaries`): a subject's boundaries, how they are written through the store interface, and how they are compared.
-  - `erasure` (`src/erasure`): marking a subject erased.
+  - `erasure` (`src/erasure`): marking a subject erased, the fence a bundle of credentials passes, and the boot gate.
 - `@mod/users` (feature, `modules/identity/users`): Owns who a user is and how they are known to be the same person: verification, links with upstream identities, and verified contacts.
   - `ledger` (`src/ledger`): Reads a contributed user ledger's answers into users' own: verification, a user by subject or unanswerable, and a user by upstream identity where the ledger looks users up so.
   - `links` (`src/links`): Answers by upstream identity, and links and unlinks, in one of two ways users chooses at boot: through users' link store, or as a ledger that looks users up by upstream identity holds them.
