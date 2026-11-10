@@ -14,7 +14,7 @@ Internal module of `revocation`: what outbound keeps of revocation, by issuer (i
 ## Invariants
 - A CRL is taken only at or past its issuer's mark: by CRLNumber, then this update; none without a number once one was seen. The same number keeps the one kept, or takes it again once evicted, its next update its own.
 - CRLs: at most `crl-entries`, and 2^19 listed serials together, the oldest going first; one listing more alone is not taken. Eviction only means a fetch again.
-- Their memory, measured, not a bound: some 46 to 60 MiB at the full budget (`x509-path` holds a serial to 20 octets and keeps copies alone); beside them, fetched bodies waiting to be read, up to `max-concurrent` × 1 MiB, and the one being read, a dense 1 MiB CRL near 165 MB (a measured case). With mtls's own, a process holds some 120 MiB of kept CRLs at worst.
+- Their serial maps, measured: some 46 to 60 MiB at the full budget (`x509-path` holds a serial to 20 octets and keeps copies alone); with mtls's, some 92 to 120 MiB a process. Apart from them: each body's issuer name, 4 KiB at most; fetched bodies waiting to be read, up to `max-concurrent` × 1 MiB; and the one being read, a dense 1 MiB CRL near 165 MB, a measured case. Their sum is no bound.
 - Marks of 4,096 issuers and 4,096 revocations other than a hold, of certificates checked here (never a CRL's listing): never evicted, as either would reopen a rollback or turn a revoked peer good. Past them, a new issuer's CRL is not taken, and an issuer whose revocation went unrecorded has its good refused.
 - All of it is lost at restart.
 
