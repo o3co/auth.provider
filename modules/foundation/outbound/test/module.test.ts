@@ -41,6 +41,13 @@ it("holds to the defaults: outbound-policy's for its keys, and outbound's own", 
 		"direct-hosts": [],
 		"plain-ipv4": [],
 		resolution: "helper",
+		revocation: {
+			hosts: [],
+			"accept-unconfirmed": false,
+			"crl-entries": 64,
+			"failure-lifetime": 30_000,
+			"crl-ttl": 3_600_000,
+		},
 	});
 });
 
@@ -169,7 +176,12 @@ it("boots with a proxy configured whatever the variables say, and warns what it 
 	const recorded = recordingLog();
 	const withProxy = (outboundSettings: Record<string, unknown>) =>
 		boot(outboundSettings, recorded.log);
-	const warned = () => recorded.lines().map((line) => line.event);
+	// Those of revocation aside, as their own test holds them.
+	const warned = () =>
+		recorded
+			.lines()
+			.map((line) => line.event)
+			.filter((event) => !event.startsWith("outbound.revocation"));
 	await withProxy({ proxy: "http://127.0.0.1:3128", "proxy-authorization": "Basic dGVzdA==" });
 	expect(warned()).toEqual(["outbound.proxy_checks_addresses"]);
 	await withProxy({
@@ -215,7 +227,10 @@ it("warns at each boot of each loosening set, by its entries' count or a reason,
 		const recorded = recordingLog();
 		await boot(outboundSettings, recorded.log);
 		expect(JSON.stringify(recorded.lines())).not.toMatch(/internal:|example|localhost/);
-		return recorded.lines().map((line) => [line.level, line.event, line.fields]);
+		return recorded
+			.lines()
+			.filter((line) => !line.event.startsWith("outbound.revocation"))
+			.map((line) => [line.level, line.event, line.fields]);
 	};
 	expect(await warned({})).toEqual([]);
 	const plain = { "plain-internal": ["ledger.internal:9092", "keys.internal:8080"] };
