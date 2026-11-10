@@ -1,5 +1,5 @@
 import { Unavailable } from "@mod/kernel";
-import type { BatchWrite, Json, Store, WriteOptions } from "@mod/store";
+import type { BatchWrite, Json, Key, Store, WriteOptions } from "@mod/store";
 import { type DeferredSize, shardOf } from "./shards.ts";
 import {
 	type Attempt,
@@ -303,6 +303,12 @@ export async function changeRecords(p: {
 		};
 	});
 }
+
+/**
+ * The store key a target's record is kept under, as `changeRecords` reads and writes it: for
+ * subject-records, which reads such records through the store, never writing to read.
+ */
+changeRecords.keyOf = (target: Target): Key => recordKey(target);
 
 /**
  * Changes two records as one, from what both hold and what `watch` names besides, as

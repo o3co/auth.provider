@@ -374,3 +374,11 @@ it("hands the decision the deadline its attempt is written with, as a change is"
 	});
 	expect(deadline).toBeGreaterThan(before);
 });
+
+it("tells the store key a target's record is kept under, plain or under a secret", async () => {
+	const { s, listPlace, listRecords } = await open();
+	await listRecords.create("known", { ids: ["a"] }, 60_000);
+	const key = changeRecords.keyOf({ place: listPlace, key: "known" });
+	expect((await s.get(key)).entry?.value).toEqual({ ids: ["a"] });
+	expect(changeRecords.keyOf({ place: listPlace, secret: "x" }).partition).toMatch(/^1\./);
+});
