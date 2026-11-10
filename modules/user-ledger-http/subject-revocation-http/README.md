@@ -14,7 +14,7 @@
 - `503` `temporarily_unavailable` with `Retry-After: 5`: `state` `unknown` (the boundary's write was not confirmed), `incomplete` (written, so everything reading it refuses, but a follower did not finish), or no `state` where a window could not count.
 - `429` `rate_limited` with the wait: a source past its failure window (counting `403` and `401` alike), or past its request window (counting authenticated requests).
 - Audit events in `./audit-events`: `subject.revocation.requested` (subject, `delegations`, `outcome` `complete`, `incomplete`, `unknown` or `failed`, `source`) and `subject.revocation.denied` (`reason` `forbidden_source`, `unauthenticated`, `rate_limit_unavailable` or `invalid_request`, `source`).
-- `./testing`: `subjectRevocationHttpConfig` and a test credential.
+- `./testing`: `subjectRevocationHttpConfig` and a test credential, `testCredential`.
 - Operator section: `credential` and `previous-credential` (bare bearer tokens of at least 32 bytes of key material), `sources` (IP addresses or CIDR blocks, at least one), `failures` (10) per `failure-window` (`1m`), `requests` (600) per `window` (`1m`).
 
 ## Invariants
