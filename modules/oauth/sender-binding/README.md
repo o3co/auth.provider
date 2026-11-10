@@ -9,11 +9,11 @@
 - When a binding is asked for, and how a client's requirement is answered: the issuing side. What a resource grants once admitted (scope, audience): the resource.
 
 ## Offers
-- Extension point: binding kinds. A kind declares the `cnf` member it writes, the name operators give it (`dpop`), its token type and whether its proof is explicit (sent on purpose, as DPoP's), reads `http`'s frozen request, the scene (issuance, or a resource with the token, the binding it holds and its subject) and `issuer`'s URL, and answers bound, none, or refused (its own code, unavailable, too many, or headers to add).
-- Reading a request's binding: bound, none, refused, or `multiple_bindings`. Operator section `dispatch`: `intent-explicit` (default, as 0.17), where an explicit kind's binding wins over ambient ones and two of one tier are refused; or `strict-mutual-exclusion`, where any two are.
-- The token type of the kind that writes a `cnf` member; none for a member no kind writes.
-- Whether two bindings are the same: the same kind and key, or both absent.
-- Carrying bindings to an issued token: the presented tokens' bindings and the proved one → carry (bound to the proved one, if any) or refused.
+- Extension point `senderBindings`: binding kinds. A kind declares the `cnf` member it writes, the name operators give it (`dpop`), its token type and whether its proof is explicit (sent on purpose, as DPoP's), reads `http`'s frozen request, the scene (issuance, or a resource with the token, the binding it holds and its subject) and `issuer`'s URL, and answers bound, none, or refused (its own code, unavailable, too many, or headers to add).
+- Contract `senderBinding`, reading a request's binding (`bindingOf`): bound, none, refused, or `multiple_bindings`. Operator section `dispatch`: `intent-explicit` (default, as 0.17), where an explicit kind's binding wins over ambient ones and two of one tier are refused; or `strict-mutual-exclusion`, where any two are.
+- `tokenTypeOf`: the token type of the kind that writes a `cnf` member; none for a member no kind writes.
+- `sameBinding`: whether two bindings are the same: the same kind and key, or both absent.
+- `carried`: carrying bindings to an issued token: the presented tokens' bindings and the proved one → carry (bound to the proved one, if any) or refused.
 - Admission at a resource, over the issuer's validity check (which `tokens` implements, a valid answer naming the token's subject) → admitted with the check's valid answer, or refused with a status and `WWW-Authenticate`:
   - no token in a known scheme, or a scheme with nothing after it: `401`, every scheme challenged, no error; a malformed `Authorization` (a token outside RFC 6750's b64token) or two bindings: `400` `invalid_request`;
   - a token not valid, presented in another scheme than its type, bound by a member no kind writes, or whose holder proves no binding or another: `401` `invalid_token`;
