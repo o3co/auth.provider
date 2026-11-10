@@ -1,92 +1,58 @@
-import { createHash } from "node:crypto";
-import {
-	type Attempt,
-	type Changed,
-	changeRecords,
-	changesTogether,
-	type Next,
-	type Place,
-	type Target,
-} from "@mod/records";
-import { codePointOrder, type Json, type Space } from "@mod/store";
+import { type Attempt, type Changed, changeRecords, type Next, type Target } from "@mod/records";
+import { codePointOrder, type Json } from "@mod/store";
 import { kept, opened, ownersValue } from "./envelope/envelope.ts";
+import { checkedSubjectPlace, indexOver, keysIn, type SubjectPlace } from "./index/index.ts";
 
-/** The space a space of subjects' records keeps its subjects' index in: `.index` after its name, its guarantees, records' own. */
-export function indexSpaceOf(space: Space): Space {
-	return { name: `${space.name}.index`, guarantees: space.guarantees, subjectData: "internal" };
-}
-
-/** Whether `index` is the index space of `space`: its name, its guarantees as a set, and internal. */
-const isIndexSpaceOf = (index: Space, space: Space) => {
-	const set = (s: Space) => JSON.stringify([...new Set(s.guarantees)].sort());
-	return (
-		index.name === indexSpaceOf(space).name &&
-		set(index) === set(space) &&
-		index.subjectData === "internal"
-	);
-};
-
-/** Whether records are only read as they were (`reader`) or kept indexed by their subject (`indexed`). */
-export type Phase = "reader" | "indexed";
-
-/** A place of a space holding subjects' data, with its index space and the phase records are in. */
-export interface SubjectPlace extends Place {
-	readonly index: Space;
-	readonly phase: Phase;
-}
-
-/** The keys of a subject's records, by bucket: a sorted list of strings, nothing else. */
-const keysIn = (value: Json | undefined): string[] =>
-	Array.isArray(value) ? value.filter((k): k is string => typeof k === "string") : [];
+export { indexSpaceOf, type Phase, type SubjectPlace } from "./index/index.ts";
+export { type SubjectKeyedSets, subjectKeyedSetsIn } from "./sets/sets.ts";
 
 /**
- * A subject's records in a space declaring `online-indexed` (its keys in its subject's index) or
- * `online-keyed` (its key made from its subject alone, the index keeping only the tombstone), kept
- * in an envelope with the subject once records are indexed, and none written past the subject's
- * tombstone. Every write goes through records' `changeRecords`; reads go to the store, writing
- * nothing. Where the store writes no records of two partitions as one, or `index` is not the
- * space's index space, or the space declares no such category, `refuse` (the builder's) is told.
+ * A subject's records in a space declaring `online-indexed` (its keys in its subject's index),
+ * `online-keyed` (its key made from its subject alone, the index keeping only the tombstone) or
+ * `bounded` (written raw, fenced at creation by its subject's tombstone, each gone by its fixed end,
+ * at most the space's `boundedMs`); kept in an envelope with the subject once records are indexed,
+ * `bounded` aside, and none created past the subject's tombstone. `secret` keys a `bounded` space's
+ * records by secrets, as records under a secret are. Every write goes through records'
+ * `changeRecords`; reads go to the store, writing nothing. Where the store writes no records of two
+ * partitions as one, `index` is not the space's index space, or the space declares no such category,
+ * `refuse` (the builder's) is told.
  */
 export function subjectRecordsIn<T extends Json>(
 	place: SubjectPlace,
 	where: string,
 	refuse: (where: string, reason: string) => never,
+	options: { readonly secret?: true } = {},
 ) {
-	const category = place.space.subjectData;
-	if (!changesTogether(place.store)) {
-		refuse(where, "its store writes no records of two partitions as one");
-	}
-	if (category !== "online-indexed" && category !== "online-keyed") {
-		refuse(where, `its space declares no category subject-records writes (${category ?? "none"})`);
-	}
-	if (!isIndexSpaceOf(place.index, place.space)) {
-		refuse(where, `its index is not ${indexSpaceOf(place.space).name}, of its guarantees`);
-	}
+	const category = checkedSubjectPlace(
+		place,
+		["online-indexed", "online-keyed", "bounded"],
+		where,
+		refuse,
+	);
+	const bounded = category === "bounded";
+	if (options.secret && !bounded) refuse(where, "only a bounded space keys its records by secrets");
 	const indexed = place.phase === "indexed";
-	const byKeys = category === "online-indexed";
-	const indexPlace: Place = {
-		store: place.store,
-		space: place.index,
-		random: place.random,
-		...(place.log ? { log: place.log } : {}),
+	// Bounded records are found by no subject, so they are kept raw and indexed by no bucket.
+	const enveloped = indexed && !bounded;
+	const byKeys = indexed && category === "online-indexed";
+	const { tombOf, bucketOf } = indexOver(place, place.space, place.index);
+	const recordOf = (key: string): Target =>
+		options.secret ? { place, secret: key } : { place, key };
+	/** A lifetime a bounded record may be created with: a number of ms, at most the space's ceiling. */
+	const boundedLifetime = (lifetimeMs: number | "endless") => {
+		const ceiling = place.space.boundedMs ?? 0;
+		if (lifetimeMs === "endless" || !(lifetimeMs >= 1 && lifetimeMs <= ceiling)) {
+			throw new TypeError(
+				`subject-records: a bounded record lives from 1 ms to ${ceiling} ms (${place.space.name})`,
+			);
+		}
+		return lifetimeMs;
 	};
-	/** A subject's part of the index, named by a digest of the space's name and the subject, so no key holds a subject. */
-	const subjects = (subject: string) =>
-		`1.${createHash("sha256").update(`${place.space.name}\n${subject}`).digest("base64url")}`;
-	const tombOf = (subject: string): Target => ({
-		place: indexPlace,
-		key: `${subjects(subject)}.tomb`,
-	});
-	/** The bucket of a key: one of 16, by the first hex digit of the key's digest. */
-	const bucketOf = (subject: string, key: string): Target => ({
-		place: indexPlace,
-		key: `${subjects(subject)}.m${createHash("sha256").update(key).digest("hex")[0]}`,
-	});
-	const recordOf = (key: string): Target => ({ place, key });
 	return {
 		/**
 		 * Places the record, unless the key holds one (`exists`) or, once indexed, its subject is
-		 * erased (`erased`): an owner takes that as refused, never as `exists`.
+		 * erased (`erased`): an owner takes that as refused, never as `exists`. Its value may be made
+		 * from the attempt's deadline, as subject-revocation makes a boundary.
 		 */
 		create: async (
 			key: string,
@@ -94,10 +60,10 @@ export function subjectRecordsIn<T extends Json>(
 			value: T | ((attempt: Attempt) => T),
 			lifetimeMs: number | "endless",
 		): Promise<"created" | "exists" | "erased"> => {
+			const lifetime = bounded ? boundedLifetime(lifetimeMs) : lifetimeMs;
 			let answer: "created" | "exists" | "erased" = "created";
-			const withBucket = indexed && byKeys;
 			await changeRecords({
-				targets: withBucket ? [recordOf(key), bucketOf(subject, key)] : [recordOf(key)],
+				targets: byKeys ? [recordOf(key), bucketOf(subject, key)] : [recordOf(key)],
 				watch: () => (indexed ? [tombOf(subject)] : []),
 				decide: ([held, bucket], [tomb], attempt) => {
 					if (tomb !== undefined) {
@@ -110,8 +76,11 @@ export function subjectRecordsIn<T extends Json>(
 					}
 					answer = "created";
 					const made = ownersValue(typeof value === "function" ? value(attempt) : value);
-					const record: Next<Json> = { value: indexed ? kept(made, subject) : made, lifetimeMs };
-					if (!withBucket) return { targets: [record] };
+					const record: Next<Json> = {
+						value: enveloped ? kept(made, subject) : made,
+						lifetimeMs: lifetime,
+					};
+					if (!byKeys) return { targets: [record] };
 					const keys = keysIn(bucket);
 					const listed: Next<Json> = keys.includes(key)
 						? undefined
@@ -126,11 +95,13 @@ export function subjectRecordsIn<T extends Json>(
 			return opened(entry?.value).value as T | undefined;
 		},
 		/**
-		 * Changes the record from what it holds, as records do, its subject's tombstone absent; its
-		 * index is left as it is. Nothing where there is no record, or its subject is erased. A record
-		 * kept raw, from before records were indexed, is changed raw: records turn indexed only under
-		 * the maintenance key, and the one migration indexes or removes every raw record before a
-		 * tombstone can be written (account erasure §3.3, §5.1).
+		 * Changes the record from what it holds, as records do, leaving its index as it is: its
+		 * subject's tombstone absent, where its envelope names one, and nothing where it stopped it.
+		 * A bounded record keeps its fixed end, whatever lifetime is given; its subject is not kept, so
+		 * no tombstone holds its change. A record kept raw, from before records were indexed, is
+		 * changed raw: records turn indexed only under the maintenance key, and the one migration
+		 * indexes or removes every raw record before a tombstone can be written (account erasure
+		 * §3.3, §5.1).
 		 */
 		change: async (
 			key: string,
@@ -141,7 +112,7 @@ export function subjectRecordsIn<T extends Json>(
 				targets: [recordOf(key)],
 				watch: ([held]) => {
 					const { subject } = opened(held);
-					return indexed && subject !== undefined ? [tombOf(subject)] : [];
+					return enveloped && subject !== undefined ? [tombOf(subject)] : [];
 				},
 				decide: ([held], [tomb], attempt) => {
 					const found = opened(held);
@@ -154,9 +125,8 @@ export function subjectRecordsIn<T extends Json>(
 					answer = { before, after: changed ? changed.value : before };
 					if (!changed) return {};
 					const value = kept(ownersValue(changed.value), found.subject);
-					const lifetime =
-						changed.lifetimeMs === undefined ? {} : { lifetimeMs: changed.lifetimeMs };
-					return { targets: [{ value, ...lifetime }] };
+					const keepsEnd = bounded || changed.lifetimeMs === undefined;
+					return { targets: [keepsEnd ? { value } : { value, lifetimeMs: changed.lifetimeMs }] };
 				},
 			});
 			return answer;
@@ -182,11 +152,50 @@ export function subjectRecordsIn<T extends Json>(
 				},
 			});
 		},
-		/** A page of the keys of the space's living records, as `store` walks. */
+		/**
+		 * Moves the record from one subject to another as one (account erasure §3.5): its envelope's
+		 * subject rewritten, its key out of `from`'s bucket and into `to`'s, held by both subjects'
+		 * tombstones absent. `missing` where there is no record, `not-from` where its subject is
+		 * another, `erased` where either tombstone stopped it. Only an indexed `online-indexed` space.
+		 */
+		move: async (
+			key: string,
+			from: string,
+			to: string,
+		): Promise<"moved" | "missing" | "not-from" | "erased"> => {
+			if (!byKeys)
+				throw new Error("subject-records: a record moves in an indexed online-indexed space");
+			let answer: "moved" | "missing" | "not-from" | "erased" = "moved";
+			await changeRecords({
+				targets: [recordOf(key), bucketOf(from, key), bucketOf(to, key)],
+				watch: () => [tombOf(from), tombOf(to)],
+				decide: ([held, fromBucket, toBucket], [fromTomb, toTomb]) => {
+					const found = opened(held);
+					if (held === undefined) answer = "missing";
+					else if (found.subject !== from) answer = "not-from";
+					else if (fromTomb !== undefined || toTomb !== undefined) answer = "erased";
+					else answer = "moved";
+					if (answer !== "moved") return {};
+					const left = keysIn(fromBucket).filter((k) => k !== key);
+					const joined = keysIn(toBucket);
+					return {
+						targets: [
+							{ value: kept(found.value as Json, to) },
+							left.length > 0 ? { value: left, lifetimeMs: "endless" } : { remove: true },
+							joined.includes(key)
+								? undefined
+								: { value: [...joined, key].sort(codePointOrder), lifetimeMs: "endless" },
+						],
+					};
+				},
+			});
+			return answer;
+		},
+		/** A page of the keys of the space's living records, as `store` walks: names, where keyed by secrets. */
 		scan: async (
 			cursor?: string,
 		): Promise<{ readonly keys: string[]; readonly cursor?: string }> => {
-			const name = changeRecords.keyOf(recordOf("")).name;
+			const name = changeRecords.keyOf({ place, key: "" }).name;
 			const page = await place.store.scan(place.space, cursor);
 			const keys = page.keys.filter((k) => k.name === name).map((k) => k.partition);
 			return page.cursor === undefined ? { keys } : { keys, cursor: page.cursor };
