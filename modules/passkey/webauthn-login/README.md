@@ -17,7 +17,7 @@
 - Route `POST /oauth/webauthn/authentication/options`: takes JSON, a form or no body, and reads only `client_id`; declared to take requests from other sites.
   - It answers `passkeys`' options with `no-store`, their challenge made for that client.
   - A missing `client_id`, or one that is not one non-empty string, is `400 invalid_request`.
-- Audit event `passkey.login.refused`, with `client` and `reason`: a kind from a fixed list, one per refusal of `passkeys`, `authentication_revoked` and `unknown_user`.
+- Audit event `passkey.login.refused` (declared in `./audit-events`), with `client` and `reason`: a kind from a fixed list, one per refusal of `passkeys`, `authentication_revoked` and `unknown_user`.
 - Operator section: `requests` (1–100000, default 60) in `window` (1s–1d in whole seconds, written with its unit, default `1m`), for the options route.
 
 ## Invariants
