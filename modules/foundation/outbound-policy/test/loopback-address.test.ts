@@ -62,3 +62,31 @@ describe("a public address written in the URL", () => {
 		}
 	});
 });
+
+describe("a plain-loopback pair", () => {
+	const policy = policyOf(
+		policySettings.parse({ "allow-any-public": true, "plain-loopback": ["crl.example:80"] }),
+	);
+	const fetched = (narrower: { outsideChosen?: true }, signed: boolean) => {
+		try {
+			const admitted = policy.admit(
+				"http://crl.example/root.crl",
+				{ hosts: ["crl.example"], ...narrower },
+				signed,
+			);
+			policy.admitAddresses(["127.0.0.1"], admitted);
+			return "admitted";
+		} catch (error) {
+			if (DestinationRefused.is(error)) return error.reason;
+			throw error;
+		}
+	};
+
+	it("is never reached by a URL an outside party chose, signed material included, only by one the operator's caller names", () => {
+		expect(fetched({}, false)).toBe("admitted");
+		expect(fetched({}, true)).toBe("admitted");
+		// A URL a certificate chose, as for its CRL: public addresses alone.
+		expect(fetched({ outsideChosen: true }, true)).toBe("special-address");
+		expect(fetched({ outsideChosen: true }, false)).toBe("scheme");
+	});
+});
