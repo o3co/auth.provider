@@ -175,16 +175,16 @@ export function buildingWith({
 	/** `get` and `late` of a contract taken optionally are refused: its takes say it may be missing. */
 	const mayRequire = (handle: Handle, item: Buildable) => {
 		if (mayName(handle, item)?.kind === "optional") {
-			refuseTake(item, handle, `takes ${handle.label} optionally: find it`);
+			refuseTake(item, handle, `takes ${handle.label} optionally: ask getOptional for it`);
 		}
 	};
-	/** `find` answers only a contract taken optionally: a plain take is required at every call. */
-	const mayFind = (contract: Contract<unknown>, item: Buildable) => {
+	/** `getOptional` answers only a contract taken optionally: a plain take is required at every call. */
+	const mayGetOptional = (contract: Contract<unknown>, item: Buildable) => {
 		if (mayName(contract, item)?.kind !== "optional") {
 			refuseTake(
 				item,
 				contract,
-				`finds ${contract.label}, which its takes name plainly: take it optionally or get it`,
+				`asks getOptional for ${contract.label}, which its takes name plainly: take it optionally or get it`,
 			);
 		}
 	};
@@ -206,8 +206,8 @@ export function buildingWith({
 				}
 				return (await build(provider, next)) as T;
 			},
-			find: async <T>(contract: Contract<T>) => {
-				mayFind(contract as Contract<unknown>, item);
+			getOptional: async <T>(contract: Contract<T>) => {
+				mayGetOptional(contract as Contract<unknown>, item);
 				mayTake(contract as Contract<unknown>, item);
 				const provider = providers.get(contract as Contract<unknown>);
 				return provider ? ((await build(provider, next)) as T) : undefined;

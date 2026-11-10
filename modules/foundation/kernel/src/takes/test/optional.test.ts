@@ -8,10 +8,10 @@ const single = kernelConfig();
 const control = contract<{ readonly read: () => string }>("store.control", { optional: true });
 const answer = contract<string>("answer");
 
-/** A module taking `control` optionally, answering what `find` gives it. */
+/** A module taking `control` optionally, answering what `getOptional` gives it. */
 const finder = defineModule(
 	{ name: "finder", replicaSafe: true, takes: [optional(control)] },
-	(m) => [m.provide(answer).by(async (c) => (await c.find(control))?.read() ?? "none")],
+	(m) => [m.provide(answer).by(async (c) => (await c.getOptional(control))?.read() ?? "none")],
 );
 const provider = defineModule({ name: "store", replicaSafe: true, takes: [] }, (m) => [
 	m.provide(control).by(() => ({ read: () => "read" })),
@@ -30,7 +30,7 @@ it("lets a contract be taken optionally only where its owner lets it go unprovid
 		assemble({
 			modules: [
 				defineModule({ name: "taker", replicaSafe: true, takes: [optional(required)] }, (m) => [
-					m.provide(answer).by(async (c) => (await c.find(required)) ?? "none"),
+					m.provide(answer).by(async (c) => (await c.getOptional(required)) ?? "none"),
 				]),
 				defineModule({ name: "owner", replicaSafe: true, takes: [] }, (m) => [
 					m.provide(required).by(() => "x"),
@@ -48,7 +48,7 @@ it("holds an optional take to its contract's takenBy", async () => {
 		assemble({
 			modules: [
 				defineModule({ name: "taker", replicaSafe: true, takes: [optional(named)] }, (m) => [
-					m.provide(answer).by(async (c) => (await c.find(named)) ?? "none"),
+					m.provide(answer).by(async (c) => (await c.getOptional(named)) ?? "none"),
 				]),
 				defineModule({ name: "giver", replicaSafe: true, takes: [] }, (m) => [
 					m.provide(named).by(() => "x"),
@@ -60,13 +60,13 @@ it("holds an optional take to its contract's takenBy", async () => {
 	expect(refusals).toContainEqual({ where: "taker", reason: "named is taken by other alone" });
 });
 
-it("refuses a find its takes do not name, and a get or late of a contract taken optionally, provided or not", async () => {
+it("refuses a getOptional its takes do not name, and a get or late of a contract taken optionally, provided or not", async () => {
 	const unnamed = await refusalsOf(
 		assemble({
 			modules: [
 				provider,
 				defineModule({ name: "taker", replicaSafe: true, takes: [] }, (m) => [
-					m.provide(answer).by(async (c) => (await c.find(control))?.read() ?? "none"),
+					m.provide(answer).by(async (c) => (await c.getOptional(control))?.read() ?? "none"),
 				]),
 			],
 			config: single,
@@ -92,20 +92,20 @@ it("refuses a find its takes do not name, and a get or late of a contract taken 
 			}),
 		);
 		expect(required, how).toEqual([
-			{ where: "taker", reason: "takes store.control optionally: find it" },
+			{ where: "taker", reason: "takes store.control optionally: ask getOptional for it" },
 		]);
 	}
 });
 
-it("refuses a find of a contract its takes name plainly, once, even where the taker catches it", async () => {
+it("refuses a getOptional of a contract its takes name plainly, once, even where the taker catches it", async () => {
 	const refusals = await refusalsOf(
 		assemble({
 			modules: [
 				provider,
 				defineModule({ name: "taker", replicaSafe: true, takes: [control] }, (m) => [
 					m.provide(answer).by(async (c) => {
-						await c.find(control).catch(() => undefined);
-						return (await c.find(control).catch(() => undefined))?.read() ?? "none";
+						await c.getOptional(control).catch(() => undefined);
+						return (await c.getOptional(control).catch(() => undefined))?.read() ?? "none";
 					}),
 				]),
 			],
@@ -115,7 +115,8 @@ it("refuses a find of a contract its takes name plainly, once, even where the ta
 	expect(refusals).toEqual([
 		{
 			where: "taker",
-			reason: "finds store.control, which its takes name plainly: take it optionally or get it",
+			reason:
+				"asks getOptional for store.control, which its takes name plainly: take it optionally or get it",
 		},
 	]);
 });
