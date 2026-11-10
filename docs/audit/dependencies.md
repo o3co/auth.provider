@@ -290,7 +290,7 @@ flowchart LR
 | `@mod/rp-logout-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/rp-logout`, `@mod/store` |
 | `@mod/session-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-lifecycle`, `@mod/store` |
 | `@mod/session-tokens-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-tokens`, `@mod/store` |
-| `@mod/subject-revocation-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-revocation` |
+| `@mod/subject-revocation-store` | wiring | `@mod/erasure-extensions`, `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-revocation` |
 | `@mod/tokens-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/tokens` |
 | `@mod/upstream-handoff-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/upstream-handoff` |
 | `@mod/upstream-round-trip-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/upstream-round-trip` |
