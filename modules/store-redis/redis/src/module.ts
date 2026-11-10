@@ -338,12 +338,12 @@ export default defineModule(
 			try {
 				await upkeep.start();
 			} catch {
-				return c.refuse(
-					"redis",
-					"cannot take the control record's epoch, or add the declared spaces to the ledger, before the first write",
-				);
+				return c.refuse("redis", "cannot read the control record's epoch");
 			}
-			return { store: redisStore(client, confirmer, options, declared, taken), upkeep };
+			return {
+				store: redisStore(client, confirmer, options, declared, taken, upkeep.ready),
+				upkeep,
+			};
 		}),
 		m.provide(store).by(async (c) => (await c.get(opened)).store),
 		m.provide(storeControl).by(async (c) => (await c.get(opened)).upkeep.control),

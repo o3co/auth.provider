@@ -84,9 +84,9 @@ end
 `;
 
 /**
- * First in each script that changes data: a process under another epoch than the control record's
- * changes nothing, so it neither removes what expired nor replays a kept answer. ARGV's last two:
- * the control record's key, the epoch the process took ('' for none).
+ * First in each script that changes data: under another epoch than the control record's it changes
+ * nothing, neither removing what expired nor replaying an answer. ARGV's last two: the record's key
+ * (not in KEYS: one server, as boot refuses a cluster) and the epoch taken ('' for none).
  */
 const epochCheck = `
 local held_epoch = redis.call('HGET', ARGV[#ARGV - 1], 'epoch') or ''

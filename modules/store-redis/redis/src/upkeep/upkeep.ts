@@ -83,7 +83,9 @@ local reply = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3])
 local live = {}
 for _, key in ipairs(reply[2]) do
   local expires = redis.call('PEXPIRETIME', key)
-  if expires >= 0 and expires <= now then redis.call('DEL', key) else table.insert(live, key) end
+  -- -2: gone already; at or before now: expired, deleted here; else live.
+  if expires >= 0 and expires <= now then redis.call('DEL', key)
+  elseif expires ~= -2 then table.insert(live, key) end
 end
 return out(cjson.encode({cursor = reply[1], keys = live, n = #live}))
 `;
@@ -115,8 +117,34 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 		}
 		return answer;
 	};
-	const changed = async (op: string, ...args: string[]) =>
-		(await confirm(await run(change, both, fenced([op, ...args])))) as { kind: string };
+	const entries = JSON.stringify(
+		Object.fromEntries(declared.map((space) => [space.name, space.subjectData !== noSubjectData])),
+	);
+	let kept = false;
+	let keeping: Promise<void> | undefined;
+	/**
+	 * Adds each declared space to the ledger, unconfirmed: replication keeps order, so data that
+	 * outlives a failover was written after it, and any later confirmed write confirms it.
+	 */
+	const keep = async () => {
+		await run(change, both, fenced(["keep", entries]));
+		kept = true;
+	};
+	/**
+	 * Before each change: until the declared spaces are on the ledger, one attempt at a time to add
+	 * them, the change unavailable where it fails, so nothing changes before them.
+	 */
+	const ready = async () => {
+		if (kept) return;
+		keeping ??= keep().finally(() => {
+			keeping = undefined;
+		});
+		await keeping;
+	};
+	const changed = async (op: string, ...args: string[]) => {
+		await ready();
+		return (await confirm(await run(change, both, fenced([op, ...args])))) as { kind: string };
+	};
 	/** The record and the ledger, confirmed unless `confirmed` is false. */
 	const readAll = async (confirmed = true) => {
 		const answer = await run(read, both, []);
@@ -178,6 +206,7 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 			>,
 		honours: (guarantees) => parts.honours(guarantees),
 		sweep: async (space, cursor) => {
+			await ready();
 			const answer = await run(
 				sweep,
 				[],
@@ -193,31 +222,32 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 			return next === "0" ? { keys: found, server } : { keys: found, cursor: next, server };
 		},
 	};
-	const entries = JSON.stringify(
-		Object.fromEntries(declared.map((space) => [space.name, space.subjectData !== noSubjectData])),
-	);
-	/** Adds each declared space to the ledger, unconfirmed: any later confirmed write confirms it. */
-	const keep = () => run(change, both, fenced(["keep", entries]));
 	/**
-	 * As a process starts: takes the record's epoch, then adds each declared space to the ledger
-	 * before any other change, neither waiting for replicas, so a start with none yet still boots;
-	 * a start that cannot is refused by its caller.
+	 * As a process starts: takes the record's epoch, then tries to add the declared spaces to the
+	 * ledger; where writes are refused, as while too few replicas are good, it boots all the same,
+	 * changing nothing and unready until they are added.
 	 */
 	const start = async () => {
 		taken.epoch = (await readAll(false)).epoch;
-		await keep();
+		await ready().catch(() => {});
 	};
 	/**
 	 * What no longer holds of the process's start: the record's epoch moved from the one it took;
-	 * or the ledger lacks a declared space, as a failover can lose the unconfirmed entry, which is
-	 * then added again.
+	 * the declared spaces not yet on the ledger, tried again; or one lost from it, as a failover
+	 * can lose the unconfirmed entry, added again.
 	 */
 	const recheck = async (): Promise<string[]> => {
 		const held = await readAll(false);
 		if (held.epoch !== taken.epoch) return ["the store's epoch moved since this process started"];
-		if (declared.every((space) => Object.hasOwn(held.ledger, space.name))) return [];
-		await keep();
+		if (!kept) {
+			const added = await ready().then(
+				() => true,
+				() => false,
+			);
+			return added ? [] : ["the declared spaces are not yet on the ledger: no change is made"];
+		}
+		if (!declared.every((space) => Object.hasOwn(held.ledger, space.name))) await keep();
 		return [];
 	};
-	return { control, upkeep: checkedUpkeep(upkeep, declared), start, recheck };
+	return { control, upkeep: checkedUpkeep(upkeep, declared), start, recheck, ready };
 }

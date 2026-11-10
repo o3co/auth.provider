@@ -216,12 +216,16 @@ export function redisStore(
 	options: RedisStoreOptions,
 	declared: readonly Space[],
 	taken: Taken = { epoch: "" },
+	ready: () => Promise<void> = async () => {},
 ): Store {
 	const { prefix } = options;
 	const { slot, valueKey, counterKey, versionKey, markKey, spaceValues, keyAt, controlKey } =
 		keysUnder(prefix);
 	const run = scriptsOn(client);
-	const fenced = (args: (string | number)[]) => [...args, controlKey, taken.epoch];
+	const change = async (script: string, keys: string[], args: (string | number)[]) => {
+		await ready();
+		return run(script, keys, [...args, controlKey, taken.epoch]);
+	};
 	const confirmed = confirmationRounds(confirmer, options);
 	/**
 	 * Replicated spaces confirm what they wrote; spaces asking for confirmed reads confirm every
@@ -272,10 +276,10 @@ export function redisStore(
 		const [kind, arg] = expiryArgs(options.expiry);
 		const args: Json[] =
 			mode === "replaceIf" ? [expected, value, options.expiry] : [value, options.expiry];
-		const answer = await run(
+		const answer = await change(
 			scripts.write,
 			[valueKey(key), versionKey(key), markKey(key, options.idempotency)],
-			fenced([
+			[
 				mode,
 				canonicalJson(value),
 				expected,
@@ -284,7 +288,7 @@ export function redisStore(
 				options.deadline ?? "",
 				digest(idempotencyRequest(mode, [key], args)),
 				marked(options),
-			]),
+			],
 		);
 		return confirm(key, answer);
 	};
@@ -311,16 +315,16 @@ export function redisStore(
 			removeIf: async (key, expected, options) => {
 				const by = "version" in expected ? "version" : "value";
 				const target = "version" in expected ? expected.version : canonicalJson(expected.value);
-				const answer = await run(
+				const answer = await change(
 					scripts.removeIf,
 					[valueKey(key), markKey(key, options?.idempotency)],
-					fenced([
+					[
 						by,
 						target,
 						options?.deadline ?? "",
 						digest(idempotencyRequest("removeIf", [key], [expected])),
 						marked(options),
-					]),
+					],
 				);
 				await confirm(key, answer);
 				return answer.kind === "removed"
@@ -328,14 +332,10 @@ export function redisStore(
 					: answer;
 			},
 			take: async (key, options) => {
-				const answer = await run(
+				const answer = await change(
 					scripts.take,
 					[valueKey(key), markKey(key, options?.idempotency)],
-					fenced([
-						options?.deadline ?? "",
-						digest(idempotencyRequest("take", [key], [])),
-						marked(options),
-					]),
+					[options?.deadline ?? "", digest(idempotencyRequest("take", [key], [])), marked(options)],
 				);
 				await confirm(key, answer);
 				return answer.kind === "taken"
@@ -348,7 +348,7 @@ export function redisStore(
 				const [first] = keys;
 				if (!first) {
 					// The script answers its own shape; an empty batch committed names no versions.
-					const empty = await run(scripts.deadlineOnly, [], fenced([options?.deadline ?? ""]));
+					const empty = await change(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
 					return empty.kind === "committed" ? committed(empty, []) : empty;
 				}
 				const names = [...new Set(keys.map(valueKey))];
@@ -369,10 +369,10 @@ export function redisStore(
 					conditions.map((c) => ("absent" in c ? { absent: true } : { version: c.version })),
 					writes.map((w) => ("remove" in w ? null : [w.put, w.expiry])),
 				]);
-				const answer = await run(
+				const answer = await change(
 					scripts.batch,
 					[...names, versionKey(first), markKey(first, options?.idempotency)],
-					fenced([JSON.stringify(spec), options?.deadline ?? "", digest(request), marked(options)]),
+					[JSON.stringify(spec), options?.deadline ?? "", digest(request), marked(options)],
 				);
 				await confirm(first, answer);
 				return answer.kind === "committed"
@@ -383,7 +383,7 @@ export function redisStore(
 				const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
 				const [first] = keys;
 				if (!first) {
-					const empty = await run(scripts.deadlineOnly, [], fenced([options?.deadline ?? ""]));
+					const empty = await change(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
 					return empty.kind === "committed" ? committed(empty, []) : empty;
 				}
 				const names = [...new Set(keys.map(valueKey))];
@@ -409,10 +409,10 @@ export function redisStore(
 					conditions.map((c) => ("absent" in c ? { absent: true } : { version: c.version })),
 					writes.map((w) => ("remove" in w ? null : [w.put, w.expiry])),
 				]);
-				const answer = await run(
+				const answer = await change(
 					scripts.batchAcross,
 					[...names, ...versionKeys, ...markKeys],
-					fenced([JSON.stringify(spec), options?.deadline ?? "", digest(request), marked(options)]),
+					[JSON.stringify(spec), options?.deadline ?? "", digest(request), marked(options)],
 				);
 				// The spaces share their guarantees, so the first key's tells how to confirm.
 				await confirm(first, answer);
@@ -421,16 +421,16 @@ export function redisStore(
 					: answer;
 			},
 			count: async (key, window, options) => {
-				const answer = await run(
+				const answer = await change(
 					scripts.count,
 					[counterKey(key), markKey(key, options?.idempotency)],
-					fenced([
+					[
 						window.ms,
 						window.limit,
 						options?.deadline ?? "",
 						digest(idempotencyRequest("count", [key], [window.ms, window.limit])),
 						marked(options),
-					]),
+					],
 				);
 				return confirm(key, answer);
 			},
