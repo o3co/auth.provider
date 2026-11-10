@@ -1,14 +1,14 @@
 import type { Clock } from "@mod/kernel";
 import { changeRecords, keyedSetsIn, type Member, type Next, type Target } from "@mod/records";
-import { codePointOrder, type Json } from "@mod/store";
+import type { Json } from "@mod/store";
 import { kept, opened } from "../envelope/envelope.ts";
-import { checkedSubjectPlace, indexOver, keysIn, type SubjectPlace } from "../index/index.ts";
+import { checkedSubjectPlace, indexOver, listedWith, type SubjectPlace } from "../index/index.ts";
 
 /**
  * Keyed sets in a space holding subjects' data, in the format `records`' keyed sets keep
  * (`keyedSetsIn.codec`) and where they keep them, so processes that only read and the one migration
  * see the same sets: in a space declaring `online-indexed`, each set's key is in its subject's index;
- * in one declaring `online-keyed`, its key is made from its subject alone. Once records are indexed,
+ * in one declaring `online-keyed`, its key is its subject itself. Once records are indexed,
  * a set is kept in an envelope with its subject and no member is added past the subject's tombstone.
  * Where the store writes no records of two partitions as one, `index` is not the space's index
  * space, or the space declares no such category, `refuse` (the builder's) is told.
@@ -24,15 +24,16 @@ export function subjectKeyedSetsIn(
 	const byKeys = indexed && category === "online-indexed";
 	const { tombOf, bucketOf } = indexOver(place, place.space, place.index);
 	const setOf = (key: string): Target => ({ place, key, set: true });
+	const open = (held: Json | undefined) => opened(held, indexed);
 	const heldValue = async (key: string) =>
-		opened((await place.store.get(changeRecords.keyOf(setOf(key)))).entry?.value).value;
+		open((await place.store.get(changeRecords.keyOf(setOf(key)))).entry?.value).value;
 	/** Rewrites a set as the codec decides on what it holds, in the envelope it was read in. */
 	const rewritten = (key: string, decide: (current: Json | undefined) => Next<Json>) =>
 		changeRecords({
 			targets: [setOf(key)],
 			decide: ([held]) => {
 				if (held === undefined) return {};
-				const found = opened(held);
+				const found = open(held);
 				const next = decide(found.value);
 				if (next === undefined || "remove" in next) return { targets: [next] };
 				return { targets: [{ ...next, value: kept(next.value, found.subject) }] };
@@ -40,18 +41,26 @@ export function subjectKeyedSetsIn(
 		});
 	return {
 		/**
-		 * Adds `member` for `lifetimeMs`, answering those pushed out over the cap; `erased` where,
-		 * once indexed, the subject's tombstone stopped it, which an owner takes as refused.
+		 * Adds `member` for `lifetimeMs`, answering those pushed out over the cap. Once indexed,
+		 * `erased` where the subject's tombstone stopped it, and `another-subject` where the set is
+		 * another subject's, or kept raw in an `online-indexed` space, whose subject none can tell:
+		 * an owner takes either as refused. A set never changes subject.
 		 */
 		add: async (
 			key: string,
 			subject: string,
 			member: string,
 			lifetimeMs: number,
-		): Promise<{ readonly pushedOut: readonly string[] } | "erased"> => {
+		): Promise<{ readonly pushedOut: readonly string[] } | "erased" | "another-subject"> => {
+			if (category === "online-keyed" && key !== subject) {
+				throw new TypeError("subject-records: an online-keyed set is keyed by its subject");
+			}
 			// The end is fixed at the add, so a write that lands late never shortens it.
 			const ends = place.clock.now() + lifetimeMs;
-			let answer = { pushedOut: [] } as { readonly pushedOut: readonly string[] } | "erased";
+			let answer = { pushedOut: [] } as
+				| { readonly pushedOut: readonly string[] }
+				| "erased"
+				| "another-subject";
 			await changeRecords({
 				targets: byKeys ? [setOf(key), bucketOf(subject, key)] : [setOf(key)],
 				watch: () => (indexed ? [tombOf(subject)] : []),
@@ -60,7 +69,12 @@ export function subjectKeyedSetsIn(
 						answer = "erased";
 						return {};
 					}
-					const found = opened(held);
+					const found = open(held);
+					const claimed = held !== undefined && indexed && found.subject !== subject;
+					if (claimed && (found.subject !== undefined || category === "online-indexed")) {
+						answer = "another-subject";
+						return {};
+					}
 					const added = codec.add(found.value, member, ends);
 					answer = { pushedOut: added.pushedOut };
 					const set: Next<Json> = {
@@ -68,14 +82,10 @@ export function subjectKeyedSetsIn(
 						lifetimeMs: added.next.lifetimeMs,
 					};
 					if (!byKeys) return { targets: [set] };
-					const keys = keysIn(bucket);
-					const listed: Next<Json> = keys.includes(key)
-						? undefined
-						: { value: [...keys, key].sort(codePointOrder), lifetimeMs: "endless" };
-					return { targets: [set, listed] };
+					return { targets: [set, listedWith(bucket, { key, name: "set" })] };
 				},
 			});
-			if (answer !== "erased" && answer.pushedOut.length > 0) {
+			if (typeof answer === "object" && answer.pushedOut.length > 0) {
 				place.log?.warn("records.pushed_out", {
 					space: place.space.name,
 					count: answer.pushedOut.length,

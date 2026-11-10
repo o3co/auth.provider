@@ -1,7 +1,13 @@
 import { type Attempt, type Changed, changeRecords, type Next, type Target } from "@mod/records";
-import { codePointOrder, type Json } from "@mod/store";
+import type { Json } from "@mod/store";
 import { kept, opened, ownersValue } from "./envelope/envelope.ts";
-import { checkedSubjectPlace, indexOver, keysIn, type SubjectPlace } from "./index/index.ts";
+import {
+	checkedSubjectPlace,
+	indexOver,
+	listedWith,
+	listedWithout,
+	type SubjectPlace,
+} from "./index/index.ts";
 
 export { eraseSubject, sweepIndex } from "./erase/erase.ts";
 export { indexSpaceOf, type Phase, type SubjectPlace } from "./index/index.ts";
@@ -10,9 +16,9 @@ export { type SubjectKeyedSets, subjectKeyedSetsIn } from "./sets/sets.ts";
 
 /**
  * A subject's records in a space declaring `online-indexed` (its keys in its subject's index),
- * `online-keyed` (its key made from its subject alone, the index keeping only the tombstone) or
- * `bounded` (written raw, fenced at creation by its subject's tombstone, each gone by its fixed end,
- * at most the space's `boundedMs`); kept in an envelope with the subject once records are indexed,
+ * `online-keyed` (its key its subject itself, the index keeping only the tombstone) or `bounded`
+ * (written raw, fenced at creation by its subject's tombstone, each gone by its fixed end, at most
+ * the space's `boundedMs`); kept in an envelope with the subject once records are indexed,
  * `bounded` aside, and none created past the subject's tombstone. `secret` keys a `bounded` space's
  * records by secrets, as records under a secret are. Every write goes through records'
  * `changeRecords`; reads go to the store, writing nothing. Where the store writes no records of two
@@ -40,6 +46,9 @@ export function subjectRecordsIn<T extends Json>(
 	const { tombOf, bucketOf } = indexOver(place, place.space, place.index);
 	const recordOf = (key: string): Target =>
 		options.secret ? { place, secret: key } : { place, key };
+	const open = (held: Json | undefined) => opened(held, enveloped);
+	const isRecord = (key: string) => (e: { key: string; name: string }) =>
+		e.key === key && e.name === "record";
 	/** A lifetime a bounded record may be created with: a number of ms, at most the space's ceiling. */
 	const boundedLifetime = (lifetimeMs: number | "endless") => {
 		const ceiling = place.space.boundedMs ?? 0;
@@ -63,6 +72,9 @@ export function subjectRecordsIn<T extends Json>(
 			lifetimeMs: number | "endless",
 		): Promise<"created" | "exists" | "erased"> => {
 			const lifetime = bounded ? boundedLifetime(lifetimeMs) : lifetimeMs;
+			if (category === "online-keyed" && key !== subject) {
+				throw new TypeError("subject-records: an online-keyed record is keyed by its subject");
+			}
 			let answer: "created" | "exists" | "erased" = "created";
 			await changeRecords({
 				targets: byKeys ? [recordOf(key), bucketOf(subject, key)] : [recordOf(key)],
@@ -83,18 +95,14 @@ export function subjectRecordsIn<T extends Json>(
 						lifetimeMs: lifetime,
 					};
 					if (!byKeys) return { targets: [record] };
-					const keys = keysIn(bucket);
-					const listed: Next<Json> = keys.includes(key)
-						? undefined
-						: { value: [...keys, key].sort(codePointOrder), lifetimeMs: "endless" };
-					return { targets: [record, listed] };
+					return { targets: [record, listedWith(bucket, { key, name: "record" })] };
 				},
 			});
 			return answer;
 		},
 		read: async (key: string): Promise<T | undefined> => {
 			const { entry } = await place.store.get(changeRecords.keyOf(recordOf(key)));
-			return opened(entry?.value).value as T | undefined;
+			return open(entry?.value).value as T | undefined;
 		},
 		/**
 		 * Changes the record from what it holds, as records do, leaving its index as it is: its
@@ -113,11 +121,11 @@ export function subjectRecordsIn<T extends Json>(
 			await changeRecords({
 				targets: [recordOf(key)],
 				watch: ([held]) => {
-					const { subject } = opened(held);
-					return enveloped && subject !== undefined ? [tombOf(subject)] : [];
+					const { subject } = open(held);
+					return subject !== undefined ? [tombOf(subject)] : [];
 				},
 				decide: ([held], [tomb], attempt) => {
-					const found = opened(held);
+					const found = open(held);
 					if (held === undefined || tomb !== undefined) {
 						answer = undefined;
 						return {};
@@ -133,32 +141,34 @@ export function subjectRecordsIn<T extends Json>(
 			});
 			return answer;
 		},
-		/** Removes the record, and its key from its subject's bucket as one; no tombstone stops it. */
+		/**
+		 * Removes the record, and its entry from its subject's bucket as one; a set under the key
+		 * keeps its own. No tombstone stops it.
+		 */
 		remove: async (key: string): Promise<void> => {
 			await changeRecords({
 				targets: [recordOf(key)],
 				watch: ([held]) => {
-					const { subject } = opened(held);
+					const { subject } = open(held);
 					return subject !== undefined && byKeys ? [bucketOf(subject, key)] : [];
 				},
 				decide: ([held], [bucket]) => {
 					if (held === undefined) return {};
-					const { subject } = opened(held);
-					if (subject === undefined || !byKeys || bucket === undefined) {
-						return { targets: [{ remove: true }] };
-					}
-					const keys = keysIn(bucket).filter((k) => k !== key);
-					const listed: Next<Json> =
-						keys.length > 0 ? { value: keys, lifetimeMs: "endless" } : { remove: true };
-					return { targets: [{ remove: true }], watched: [listed] };
+					const { subject } = open(held);
+					if (subject === undefined || !byKeys) return { targets: [{ remove: true }] };
+					return {
+						targets: [{ remove: true }],
+						watched: [listedWithout(bucket, isRecord(key))],
+					};
 				},
 			});
 		},
 		/**
 		 * Moves the record from one subject to another as one (account erasure §3.5): its envelope's
-		 * subject rewritten, its key out of `from`'s bucket and into `to`'s, held by both subjects'
-		 * tombstones absent. `missing` where there is no record, `not-from` where its subject is
-		 * another, `erased` where either tombstone stopped it. Only an indexed `online-indexed` space.
+		 * subject rewritten, its entry out of `from`'s bucket and into `to`'s, held by both subjects'
+		 * tombstones absent; a set under the key stays its own subject's. `missing` where there is no
+		 * record, `not-from` where its subject is another, `erased` where either tombstone stopped it.
+		 * Only an indexed `online-indexed` space.
 		 */
 		move: async (
 			key: string,
@@ -172,21 +182,17 @@ export function subjectRecordsIn<T extends Json>(
 				targets: [recordOf(key), bucketOf(from, key), bucketOf(to, key)],
 				watch: () => [tombOf(from), tombOf(to)],
 				decide: ([held, fromBucket, toBucket], [fromTomb, toTomb]) => {
-					const found = opened(held);
+					const found = open(held);
 					if (held === undefined) answer = "missing";
 					else if (found.subject !== from) answer = "not-from";
 					else if (fromTomb !== undefined || toTomb !== undefined) answer = "erased";
 					else answer = "moved";
 					if (answer !== "moved") return {};
-					const left = keysIn(fromBucket).filter((k) => k !== key);
-					const joined = keysIn(toBucket);
 					return {
 						targets: [
 							{ value: kept(found.value as Json, to) },
-							left.length > 0 ? { value: left, lifetimeMs: "endless" } : { remove: true },
-							joined.includes(key)
-								? undefined
-								: { value: [...joined, key].sort(codePointOrder), lifetimeMs: "endless" },
+							listedWithout(fromBucket, isRecord(key)),
+							listedWith(toBucket, { key, name: "record" }),
 						],
 					};
 				},

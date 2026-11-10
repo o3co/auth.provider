@@ -4,14 +4,19 @@ import type { Json } from "@mod/store";
 const mark = "records:v";
 
 /**
- * What a stored value holds: an envelope's value and subject, told by its exact shape alone (these
- * three members, the mark 1 and the subject a string), or any other value as it is, with none.
+ * What a stored value holds. Where records are `enveloped` (indexed, in a space of `online-*`), an
+ * envelope's value and subject, told by its exact shape (these three members, the mark 1 and the
+ * subject a string), or any other value as it is, with none; elsewhere every value as it is, raw by
+ * the phase, whatever its shape.
  */
-export function opened(stored: Json | undefined): {
+export function opened(
+	stored: Json | undefined,
+	enveloped: boolean,
+): {
 	readonly value: Json | undefined;
 	readonly subject?: string;
 } {
-	if (stored !== null && typeof stored === "object" && !Array.isArray(stored)) {
+	if (enveloped && stored !== null && typeof stored === "object" && !Array.isArray(stored)) {
 		const held = stored as Readonly<Record<string, Json>>;
 		const names = Object.keys(held);
 		if (

@@ -84,7 +84,8 @@ const bucketOf = (key: string) => `m${createHash("sha256").update(key).digest("h
 const envelope = (subject: string, value: Json) => ({ "records:v": 1, subject, value });
 
 it("opens an envelope by its exact shape alone, and refuses an owner's value holding its mark at the top", () => {
-	expect(opened(envelope("alice", { a: 1 }))).toEqual({ value: { a: 1 }, subject: "alice" });
+	expect(opened(envelope("alice", { a: 1 }), true)).toEqual({ value: { a: 1 }, subject: "alice" });
+	expect(opened(envelope("bob", 1), false)).toEqual({ value: envelope("bob", 1) });
 	for (const raw of [
 		{ "records:v": 1, subject: "alice", value: 1, more: true },
 		{ "records:v": 2, subject: "alice", value: 1 },
@@ -94,7 +95,7 @@ it("opens an envelope by its exact shape alone, and refuses an owner's value hol
 		"text",
 		null,
 	] as Json[]) {
-		expect(opened(raw)).toEqual({ value: raw });
+		expect(opened(raw, true)).toEqual({ value: raw });
 	}
 	expect(kept(1, undefined)).toBe(1);
 	expect(() => ownersValue({ "records:v": 1 })).toThrow(TypeError);
@@ -116,7 +117,7 @@ it("keeps a record in its subject's envelope and its key in the subject's bucket
 	expect(await records.create("a", "alice", { n: 2 }, 60_000)).toBe("exists");
 	expect(await raw("a")).toEqual(envelope("alice", { n: 1 }));
 	expect(await records.read("a")).toEqual({ n: 1 });
-	expect(await indexOf("alice")).toEqual({ [bucketOf("a")]: ["a"] });
+	expect(await indexOf("alice")).toEqual({ [bucketOf("a")]: [["a", "record"]] });
 	expect((await records.scan()).keys).toEqual(["a"]);
 });
 
@@ -127,7 +128,7 @@ it("puts every key a subject's racing creates make into its index", async () => 
 	expect(await Promise.all(keys.map((k) => records.create(k, "alice", 1, 60_000)))).toEqual(
 		keys.map(() => "created"),
 	);
-	const listed = Object.values(await indexOf("alice")).flat() as string[];
+	const listed = (Object.values(await indexOf("alice")).flat() as string[][]).map(([key]) => key);
 	expect([...listed].sort()).toEqual([...keys].sort());
 });
 
@@ -168,7 +169,7 @@ it("removes a key from its bucket with its record, and the bucket with its last 
 	await records.create("a", "alice", 1, 60_000);
 	await records.create("b", "alice", 1, 60_000);
 	await records.remove("a");
-	expect(Object.values(await indexOf("alice")).flat()).toEqual(["b"]);
+	expect(Object.values(await indexOf("alice")).flat()).toEqual([["b", "record"]]);
 	await records.remove("b");
 	expect(await indexOf("alice")).toEqual({});
 });
@@ -183,13 +184,15 @@ it("changes a record kept raw, from before records were indexed, raw", async () 
 	expect(await raw("old")).toBe(2);
 });
 
-it("keeps only the tombstone for records keyed by their subject: no bucket, and nothing past it", async () => {
+it("keeps only the tombstone for records keyed by their subject itself: no bucket, no other key, and nothing past it", async () => {
 	const { build, indexOf, erase } = await opened_();
 	const records = build<number>("indexed", keyedSpace);
-	expect(await records.create("s-alice", "alice", 1, "endless")).toBe("created");
+	expect(await records.create("alice", "alice", 1, "endless")).toBe("created");
+	await expect(records.create("s-bob", "bob", 1, "endless")).rejects.toThrow(TypeError);
 	expect(await indexOf("alice", keyedSpace)).toEqual({});
 	await erase("alice", keyedSpace);
-	expect(await records.create("s-alice-2", "alice", 1, "endless")).toBe("erased");
+	await records.remove("alice");
+	expect(await records.create("alice", "alice", 1, "endless")).toBe("erased");
 });
 
 it("refuses to build without a batch across, over an index not the space's, or a space of another category", async () => {

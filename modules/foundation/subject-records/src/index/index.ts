@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { changesTogether, type Place, type Target } from "@mod/records";
-import type { Json, Space } from "@mod/store";
+import { changesTogether, type Next, type Place, type Target } from "@mod/records";
+import { codePointOrder, type Json, type Space } from "@mod/store";
 
 /** The space a space of subjects' records keeps its subjects' index in: `.index` after its name, its guarantees, records' own. */
 export function indexSpaceOf(space: Space): Space {
@@ -17,9 +17,52 @@ export const isIndexSpaceOf = (index: Space, space: Space) => {
 	);
 };
 
-/** The keys of a subject's records, by bucket: a sorted list of strings, nothing else. */
-export const keysIn = (value: Json | undefined): string[] =>
-	Array.isArray(value) ? value.filter((k): k is string => typeof k === "string") : [];
+/** One entry of a bucket: a key, and which of its names it lists, the record or the keyed set. */
+export interface Entry {
+	readonly key: string;
+	readonly name: "record" | "set";
+}
+
+/** A bucket's entries: `[key, name]` pairs, sorted; anything else is no entry. */
+export const entriesIn = (value: Json | undefined): Entry[] =>
+	Array.isArray(value)
+		? value.flatMap((e): Entry[] =>
+				Array.isArray(e) &&
+				e.length === 2 &&
+				typeof e[0] === "string" &&
+				(e[1] === "record" || e[1] === "set")
+					? [{ key: e[0], name: e[1] }]
+					: [],
+			)
+		: [];
+
+const order = (a: Entry, b: Entry) =>
+	codePointOrder(a.key, b.key) || codePointOrder(a.name, b.name);
+const stored = (entries: readonly Entry[]): Next<Json> =>
+	entries.length === 0
+		? { remove: true }
+		: { value: [...entries].sort(order).map((e) => [e.key, e.name]), lifetimeMs: "endless" };
+
+/** A bucket's next, `entry` listed in it; nothing where it is listed already. */
+export const listedWith = (bucket: Json | undefined, entry: Entry): Next<Json> => {
+	const entries = entriesIn(bucket);
+	const listed = entries.some((e) => e.key === entry.key && e.name === entry.name);
+	return listed ? undefined : stored([...entries, entry]);
+};
+
+/** A bucket's next without the entries `leaving` picks: nothing where none leaves, removed with its last. */
+export const listedWithout = (
+	bucket: Json | undefined,
+	leaving: (e: Entry) => boolean,
+): Next<Json> => {
+	const entries = entriesIn(bucket);
+	const rest = entries.filter((e) => !leaving(e));
+	return rest.length === entries.length ? undefined : stored(rest);
+};
+
+/** The target an entry lists, in the space of `place`. */
+export const targetOf = (place: Place, entry: Entry): Target =>
+	entry.name === "set" ? { place, key: entry.key, set: true } : { place, key: entry.key };
 
 /** The 16 buckets a subject's keys are split over, by the first hex digit of each key's digest. */
 export const bucketNames = Array.from({ length: 16 }, (_, i) => `m${i.toString(16)}`);

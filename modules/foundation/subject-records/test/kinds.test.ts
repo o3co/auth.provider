@@ -113,7 +113,7 @@ it("keeps a set in its subject's envelope, as keyed sets keep it, its key indexe
 		"records:v": 1,
 		subject: "alice",
 	});
-	expect(await indexEntry(indexed, "alice", bucketOf("grp"))).toEqual(["grp"]);
+	expect(await indexEntry(indexed, "alice", bucketOf("grp"))).toEqual([["grp", "set"]]);
 	await sets.remove("grp", "one");
 	expect((await sets.members("grp")).map((m) => m.member)).toEqual(["two"]);
 	await erase(indexed, "alice");
@@ -143,7 +143,7 @@ it("moves a record from one subject to another as one, and answers missing, not-
 	expect(await records.move("rec", "alice", "bob")).toBe("moved");
 	expect((await raw(indexed, "rec"))?.value).toEqual({ "records:v": 1, subject: "bob", value: 1 });
 	expect(await indexEntry(indexed, "alice", bucketOf("rec"))).toBeUndefined();
-	expect(await indexEntry(indexed, "bob", bucketOf("rec"))).toEqual(["rec"]);
+	expect(await indexEntry(indexed, "bob", bucketOf("rec"))).toEqual([["rec", "record"]]);
 	await erase(indexed, "carol");
 	expect(await records.move("rec", "bob", "carol")).toBe("erased");
 	expect((await raw(indexed, "rec"))?.value).toMatchObject({ subject: "bob" });

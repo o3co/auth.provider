@@ -4,6 +4,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { type Control, type Json, type Space, type Store, spaces, store } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
+import { clockAllowanceMs } from "../src/erase/erase.ts";
 import {
 	eraseSubject,
 	indexSpaceOf,
@@ -33,9 +34,10 @@ const part = (space: Space, subject: string) =>
 const bucketOf = (key: string) => `m${createHash("sha256").update(key).digest("hex")[0]}`;
 
 async function opened() {
+	const simulated = simulatedStore();
 	const app = await assemble({
 		modules: [
-			simulatedStore().module,
+			simulated.module,
 			defineModule({ name: "user", replicaSafe: false, takes: [store] }, (m) => [
 				...[indexed, keyed, bounded].flatMap((space) => [
 					m.contribute(spaces).by(() => space),
@@ -79,14 +81,21 @@ async function opened() {
 				partition: `${part(space, subject)}.${bucket}`,
 				name: "record",
 			};
-			await s.putIfAbsent(key, keys.filter((k) => bucketOf(k) === bucket).sort(), {
-				expiry: { kind: "never" },
-			});
+			await s.putIfAbsent(
+				key,
+				keys
+					.filter((k) => bucketOf(k) === bucket)
+					.sort()
+					.map((k) => [k, "record"]),
+				{
+					expiry: { kind: "never" },
+				},
+			);
 		}
 	};
 	const raw = async (space: Space, partition: string, name = "record") =>
 		(await s.get({ space, partition, name })).entry?.value;
-	return { s, at, indexOf, listed, raw };
+	return { s, simulated, at, indexOf, listed, raw };
 }
 
 const control = (maintenance: boolean, phase?: string): Control => ({
@@ -96,21 +105,17 @@ const control = (maintenance: boolean, phase?: string): Control => ({
 	marks: phase === undefined ? {} : { "subject-records.phase": { value: phase, epoch: "e1" } },
 });
 
-it("reads the phase from its mark in any epoch, and tells the mark to write only under maintenance, never back to reader", async () => {
+it("reads the phase from its mark in any epoch, and writes only indexed, only under maintenance", async () => {
 	const read = (c: Control) => subjectRecordsPhase.read({ control: async () => c });
 	expect(await read(control(false))).toBe("reader");
 	expect(await read(control(false, "indexed"))).toBe("indexed");
 	expect(await read(control(false, "other"))).toBe("reader");
-	expect(subjectRecordsPhase.write(control(false), "indexed")).toEqual({
-		kind: "not-in-maintenance",
-	});
-	expect(subjectRecordsPhase.write(control(true), "indexed")).toEqual({
+	expect(subjectRecordsPhase.write(control(false))).toEqual({ kind: "not-in-maintenance" });
+	// Two writers under maintenance can only both write indexed: no write turns records back.
+	expect(subjectRecordsPhase.write(control(true))).toEqual({
 		kind: "write",
 		name: "subject-records.phase",
 		value: "indexed",
-	});
-	expect(subjectRecordsPhase.write(control(true, "indexed"), "reader")).toEqual({
-		kind: "stays-indexed",
 	});
 });
 
@@ -163,23 +168,20 @@ it("leaves another subject's record created at a listed key between the erase's 
 	expect(raced).toBe(true);
 	expect(await raw(indexed, "k")).toEqual({ "records:v": 1, subject: "bob", value: 7 });
 	expect(Object.keys(await indexOf(indexed, "alice"))).toEqual(["tomb"]);
-	expect(await indexOf(indexed, "bob")).toEqual({ [bucketOf("k")]: ["k"] });
+	expect(await indexOf(indexed, "bob")).toEqual({ [bucketOf("k")]: [["k", "record"]] });
 });
 
-it("erases a subject keyed by its subject under the keys its owner makes, and takes keys there alone", async () => {
+it("erases the record and the set keyed by the subject itself, no keys asked", async () => {
 	const { at, raw } = await opened();
 	const records = subjectRecordsIn<number>(at(keyed), "w", refuse);
 	const sets = subjectKeyedSetsIn({ ...at(keyed), cap: 5, clock }, "w", refuse);
-	await records.create("u:alice", "alice", 1, "endless");
-	await sets.add("u:alice", "alice", "m", 60_000);
-	expect(await eraseSubject(at(keyed), "alice", { keys: ["u:alice"] })).toMatchObject({
-		kind: "erased",
-		removed: 2,
-	});
-	expect(await raw(keyed, "u:alice")).toBeUndefined();
-	expect(await records.create("u:alice", "alice", 1, "endless")).toBe("erased");
-	await expect(eraseSubject(at(keyed), "alice")).rejects.toThrow(TypeError);
-	await expect(eraseSubject(at(indexed), "alice", { keys: [] })).rejects.toThrow(TypeError);
+	await records.create("alice", "alice", 1, "endless");
+	await sets.add("alice", "alice", "m", 60_000);
+	await expect(sets.add("u:alice", "alice", "m", 60_000)).rejects.toThrow(TypeError);
+	expect(await eraseSubject(at(keyed), "alice")).toMatchObject({ kind: "erased", removed: 2 });
+	expect(await raw(keyed, "alice")).toBeUndefined();
+	expect(await raw(keyed, "alice", "set")).toBeUndefined();
+	expect(await sets.add("alice", "alice", "m", 60_000)).toBe("erased");
 });
 
 it("fences a bounded space until its tombstone's deadline and the space's ceiling, the same on every run", async () => {
@@ -188,8 +190,8 @@ it("fences a bounded space until its tombstone's deadline and the space's ceilin
 	const first = await eraseSubject(at(bounded), "alice");
 	expect(first.kind).toBe("fenced");
 	const until = (first as { until: number }).until;
-	expect(until).toBeGreaterThanOrEqual(before + 60_000);
-	expect(until).toBeLessThanOrEqual(Date.now() + 60_000 + 60_000);
+	expect(until).toBeGreaterThanOrEqual(before + 60_000 + clockAllowanceMs);
+	expect(until).toBeLessThanOrEqual(Date.now() + 60_000 + 60_000 + clockAllowanceMs);
 	expect(await eraseSubject(at(bounded), "alice")).toEqual(first);
 	const records = subjectRecordsIn<number>(at(bounded), "w", refuse);
 	expect(await records.create("k", "alice", 1, 1_000)).toBe("erased");
@@ -236,7 +238,7 @@ it("stops where records are not indexed, where it is aborted with its tombstone 
 	});
 });
 
-it("sweeps from its subject's bucket a key whose record and set read absent, keeping one that lives", async () => {
+it("sweeps from its subject's bucket an entry whose record or set reads absent, keeping one that lives", async () => {
 	const { at, listed, indexOf } = await opened();
 	const records = subjectRecordsIn<number>(at(indexed), "w", refuse);
 	await listed(indexed, "alice", ["gone"]);
@@ -249,5 +251,67 @@ it("sweeps from its subject's bucket a key whose record and set read absent, kee
 		cursor = page.cursor;
 	} while (cursor !== undefined);
 	expect(swept).toBe(1);
-	expect(Object.values(await indexOf(indexed, "alice")).flat()).toEqual(["live"]);
+	expect(Object.values(await indexOf(indexed, "alice")).flat()).toEqual([["live", "record"]]);
+});
+
+it("fences past every bounded record made before the tombstone, its store clock stepped back within the allowance", async () => {
+	const { s, simulated, at } = await opened();
+	const records = subjectRecordsIn<number>(at(bounded), "w", refuse);
+	simulated.shiftClock(4 * 60_000);
+	await records.create("k", "alice", 1, 60_000);
+	const ends = (await s.get({ space: bounded, partition: "k", name: "record" })).entry?.expiresAt;
+	simulated.shiftClock(-4 * 60_000);
+	const fenced = await eraseSubject(at(bounded), "alice");
+	expect(fenced.kind).toBe("fenced");
+	expect((fenced as { until: number }).until).toBeGreaterThanOrEqual(
+		ends ?? Number.POSITIVE_INFINITY,
+	);
+});
+
+it("keeps a set's entry when the record under its key is removed or moved, so erasing finds the set", async () => {
+	const { at, raw, indexOf } = await opened();
+	const records = subjectRecordsIn<number>(at(indexed), "w", refuse);
+	const sets = subjectKeyedSetsIn({ ...at(indexed), cap: 5, clock }, "w", refuse);
+	await records.create("k", "alice", 1, 60_000);
+	await sets.add("k", "alice", "m", 60_000);
+	await records.remove("k");
+	expect(await indexOf(indexed, "alice")).toEqual({ [bucketOf("k")]: [["k", "set"]] });
+	await records.create("j", "alice", 1, 60_000);
+	await sets.add("j", "alice", "m", 60_000);
+	expect(await records.move("j", "alice", "bob")).toBe("moved");
+	expect(await eraseSubject(at(indexed), "alice")).toMatchObject({ kind: "erased", removed: 2 });
+	expect(await raw(indexed, "k", "set")).toBeUndefined();
+	expect(await raw(indexed, "j", "set")).toBeUndefined();
+	expect(await records.read("j")).toBe(1);
+});
+
+it("refuses to add to another subject's set, so erasing removes the set it listed", async () => {
+	const { at, raw } = await opened();
+	const sets = subjectKeyedSetsIn({ ...at(indexed), cap: 5, clock }, "w", refuse);
+	await sets.add("grp", "alice", "a", 60_000);
+	expect(await sets.add("grp", "bob", "b", 60_000)).toBe("another-subject");
+	expect((await sets.members("grp")).map((m) => m.member)).toEqual(["a"]);
+	expect(await eraseSubject(at(indexed), "alice")).toMatchObject({ kind: "erased", removed: 1 });
+	expect(await raw(indexed, "grp", "set")).toBeUndefined();
+});
+
+it("refuses to erase over an index not the space's, as the builders refuse it", async () => {
+	const { at } = await opened();
+	await expect(eraseSubject({ ...at(indexed), index: indexed }, "alice")).rejects.toThrow(
+		TypeError,
+	);
+});
+
+it("reads every value raw while records are only read, whatever its shape, and changes it raw", async () => {
+	const { s, at, raw } = await opened();
+	const lookalike = { "records:v": 1, subject: "bob", value: { pii: "alice" } };
+	await s.putIfAbsent({ space: indexed, partition: "old", name: "record" }, lookalike, {
+		expiry: { kind: "never" },
+	});
+	const reading = subjectRecordsIn<Json>(at(indexed, s, "reader"), "w", refuse);
+	expect(await reading.read("old")).toEqual(lookalike);
+	expect(await reading.change("old", () => ({ value: { pii: "none" } }))).toMatchObject({
+		after: { pii: "none" },
+	});
+	expect(await raw(indexed, "old")).toEqual({ pii: "none" });
 });
