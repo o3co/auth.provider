@@ -46,7 +46,10 @@ function callOf(command: Command): Call | undefined {
 	const [, numkeys, ...rest] = command.args.map((a) => a.toString());
 	const n = Number(numkeys);
 	const keys = rest.slice(0, n);
-	const argv = rest.slice(n);
+	// A script that changes data ends its arguments with the epoch check's: the control record's
+	// key and the epoch the process took. The call is told by what comes before them.
+	const fenced = rest.at(-2)?.endsWith(":{#control}") ?? false;
+	const argv = rest.slice(n, fenced ? -2 : undefined);
 	const [first, second] = keys;
 	const marks = keys.at(-1)?.includes(":#mark:") ?? false;
 	if (n === 1 && first?.includes(":v:") && argv.length === 0)

@@ -1,3 +1,5 @@
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import { describe, expect, it } from "vitest";
@@ -515,5 +517,38 @@ describe("a certificate's distribution points", () => {
 			urls: ["http://ca.example/crl"],
 			unusable: 2,
 		});
+	});
+});
+
+describe("what a verified CRL keeps", () => {
+	it("is its own: none of the CRL's bytes stay reachable through it once the CRL is let go", async () => {
+		setFlagsFromString("--expose_gc");
+		const gc = runInNewContext("gc") as () => void;
+		const { intermediate } = await hierarchy();
+		// Most of a megabyte, none of it serials: an extension of no meaning.
+		const padding = new pkijs.Extension({
+			extnID: "1.3.6.1.4.1.99999.3",
+			extnValue: new asn1js.OctetString({ valueHex: new Uint8Array(900_000).buffer }).toBER(false),
+		});
+		let der: Uint8Array | undefined = await crlOf({ by: intermediate, extensions: [padding] });
+		const bytes = new WeakRef(der.buffer);
+		const verified = await verifyCrl(
+			der,
+			intermediate.certificate,
+			Date.now(),
+			skewMs,
+			signatureAlgorithms,
+		);
+		expect(verified.kind).toBe("verified");
+		der = undefined;
+		for (let round = 0; round < 3; round++) {
+			await new Promise((later) => setTimeout(later, 0));
+			gc();
+		}
+		expect(bytes.deref()).toBeUndefined();
+		// What it keeps still reads.
+		expect(
+			verified.kind === "verified" && verified.crl.issuer.isEqual(intermediate.certificate.subject),
+		).toBe(true);
 	});
 });

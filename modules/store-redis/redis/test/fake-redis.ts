@@ -47,7 +47,11 @@ export function fakeRedis() {
 	};
 	const writes = { noReplicas: false, keysRefused: false };
 	/** The good replicas `INFO` counts (`min_slaves_good_slaves`), shown only when set. */
-	const replication = { goodReplicas: undefined as number | undefined };
+	const replication = {
+		goodReplicas: undefined as number | undefined,
+		/** The replicas `ROLE` lists and a `WAIT` counts as acknowledging. */
+		connected: 0,
+	};
 	const cluster = { keysAnswer: undefined as string | undefined };
 	/** The run id each connection's server answers, by the order the connections came: the last for any after. */
 	const servers = {
@@ -108,6 +112,14 @@ export function fakeRedis() {
 		if (name === "EVAL" && failing) {
 			return "-ERR user_script:1: Script attempted to access nonexistent global variable 'cjson'\r\n";
 		}
+		// The upkeep's read of the control record and the ledger: as a store that never had either.
+		if (
+			name === "EVAL" &&
+			(args[1] ?? "").includes("'epoch', 'maintenance', 'requires', 'marks'")
+		) {
+			const none = `{"epoch":"","maintenance":false,"requires":"[]","marks":"{}","ledger":"{}"}`;
+			return bulk(`${runIdOf(connection)}\n${none}`);
+		}
 		if (name === "EVAL") return bulk(`${runIdOf(connection)}\n{"now":"0","entries":[],"n":1}`);
 		if (name === "SET" && writes.keysRefused) return "-NOPERM No permissions to access a key\r\n";
 		if (name === "SET" && writes.noReplicas)
@@ -126,7 +138,13 @@ export function fakeRedis() {
 						: `min_slaves_good_slaves:${replication.goodReplicas}\r\n`
 				}`,
 			);
-		if (name === "ROLE") return `*3\r\n${bulk(settings.role ?? "")}:0\r\n*0\r\n`;
+		if (name === "ROLE") {
+			const listed = `*3\r\n${bulk("10.0.0.2")}${bulk("6379")}${bulk("0")}`.repeat(
+				replication.connected,
+			);
+			return `*3\r\n${bulk(settings.role ?? "")}:0\r\n*${replication.connected}\r\n${listed}`;
+		}
+		if (name === "WAIT") return `:${replication.connected}\r\n`;
 		const setting = args[2] ?? "";
 		if (name === "CONFIG") {
 			const shown = settings[setting];

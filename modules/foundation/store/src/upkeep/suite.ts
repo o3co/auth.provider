@@ -187,7 +187,10 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 		describe("honours", () => {
 			it("verifies a want of no guarantee", async () => {
 				const p = await harness.start(upkeepSpaces);
-				expect(await p.upkeep.honours([])).toEqual({ kind: "verified" });
+				expect(await p.upkeep.honours([])).toEqual({
+					kind: "verified",
+					witness: expect.any(String),
+				});
 			});
 
 			it("refuses a guarantee it does not know", async () => {

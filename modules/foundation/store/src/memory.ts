@@ -315,7 +315,11 @@ export function memoryProcess(
 		},
 		honours: async (guarantees) => {
 			const reasons = guarantees.flatMap((g) => (unmet[g] ? [unmet[g]] : []));
-			return deepFreeze(reasons.length > 0 ? { kind: "unmet", reasons } : { kind: "verified" });
+			return deepFreeze(
+				reasons.length > 0
+					? { kind: "unmet", reasons }
+					: { kind: "verified", witness: data.server },
+			);
 		},
 		sweep: async (space, cursor) => {
 			refuseStale();

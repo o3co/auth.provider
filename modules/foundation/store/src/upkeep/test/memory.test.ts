@@ -28,7 +28,10 @@ upkeepContract("memory", {
 
 it("answers durable and replicated unmet, and the rest verified, as one process holds them", async () => {
 	const { upkeep } = memoryProcess(memoryData(clock), contractSpaces);
-	expect(await upkeep.honours(["no-eviction", "confirmed-reads"])).toEqual({ kind: "verified" });
+	expect(await upkeep.honours(["no-eviction", "confirmed-reads"])).toEqual({
+		kind: "verified",
+		witness: expect.any(String),
+	});
 	expect(await upkeep.honours(["no-eviction", "durable", "replicated"])).toEqual({
 		kind: "unmet",
 		reasons: ["memory loses everything on restart", "memory has no replica"],
