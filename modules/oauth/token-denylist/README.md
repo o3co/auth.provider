@@ -11,7 +11,7 @@
 - `revokedTokens`, the store interface (id, lifetime → created / exists; id → kept), with its needs `revokedTokensNeeds`: never evicted, survives a crash, does not come back on failover. A wiring provides it.
 - `denylistOver` (the store, or none when the configuration does not handle revocation; the clock) → whether revocation is handled; revoke (id, expiry → revoked / invalid when past the allowance / unsupported without a store); holds (id → whether kept; false without a store).
 - `denylistAllowanceMs`: how long past its expiry a token is still revoked and held, 60 s.
-- `./testing`: the store interface's contract test, every implementation's.
+- `./testing`: `revokedTokensContract`, the store interface's contract test, every implementation's.
 
 ## Invariants
 - Answers revoked only when the write is confirmed. Revokes a token past its expiry while it is still within the allowance (a host with a slow clock still sees it as valid).
