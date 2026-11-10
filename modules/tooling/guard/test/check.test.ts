@@ -489,8 +489,7 @@ describe("guard", () => {
 	});
 
 	it("G15 refuses branches, loops, choosing operators and walking calls in a wiring module's source", () => {
-		const branchy =
-			"export const a = (x: number) => (x > 0 ? 1 : 2);\nexport function b(xs: number[]) {\n\tfor (const x of xs) if (x) return x;\n\twhile (xs.length) xs.pop();\n\tswitch (xs.length) {\n\t\tdefault:\n\t}\n\tdo {} while (false);\n\txs.map((x) => x).filter(Boolean);\n\txs.find((x) => x);\n\tc.find(control);\n\treturn (xs[0] ?? xs[1]) || (xs[2] && xs[3]);\n}\n";
+		const branchy = `import { control } from "@t/contracts";\nexport const a = (x: number) => (x > 0 ? 1 : 2);\nexport function b(xs: number[]) {\n\tfor (const x of xs) if (x) return x;\n\twhile (xs.length) xs.pop();\n\tswitch (xs.length) {\n\t\tdefault:\n\t}\n\tdo {} while (false);\n\txs.map((x) => x).filter(Boolean);\n\txs.find((x) => x);\n\tc.find(control);\n\treturn (xs[0] ?? xs[1]) || (xs[2] && xs[3]);\n}\n`;
 		const wiring = pkg(
 			"@t/wiring",
 			{ "src/contract.ts": branchy, "test/x.test.ts": branchy },
@@ -518,6 +517,34 @@ describe("guard", () => {
 		]);
 		const plain = pkg("@t/plain", { "src/contract.ts": branchy });
 		expect(rules([plain])).not.toContain("G15");
+	});
+
+	it("G15 counts a find but one handed an imported name alone, as the build context's is", () => {
+		const finding = [
+			'import { control, type Shape } from "@t/contracts";',
+			'import ns, * as all from "@t/all";',
+			"const local = (x: number) => x > 0;",
+			"export function b(xs: number[], c: { find(x: unknown): unknown }) {",
+			"\tc.find(control);",
+			"\tc.find(ns);",
+			"\txs.find(control);",
+			"\txs.find(Boolean);",
+			"\txs.find(local);",
+			"\txs.find(by(xs));",
+			"\txs.find(all.control);",
+			"\txs.find(local.bind(xs));",
+			"\txs.find((x) => x > 0);",
+			"\txs.find(function (x) {\n\t\treturn x > 0;\n\t});",
+			"\tc.find(all);",
+			"\tc.find(Shape);",
+			"\tc.find(control, xs);",
+			"}\n",
+		].join("\n");
+		const wiring = pkg("@t/wiring", { "src/contract.ts": finding }, undefined, "wiring");
+		const found = check([wiring], budget).filter((v) => v.rule.startsWith("G15"));
+		// Counted: a global, a local, a call, a property, a bind, both inline functions, a namespace,
+		// a type alone and a second argument. An imported name alone is not, on any receiver.
+		expect(found.map((v) => v.detail)).toEqual(Array(10).fill(".find()"));
 	});
 
 	it("G17 refuses a card that writes a plan or a move in progress", () => {

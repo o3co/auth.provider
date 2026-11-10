@@ -10,7 +10,7 @@
   - G11: no line numbers in comments and documents.
   - G12: no document points at a file in another directory.
   - G13, G23: the clock and randomness come from `kernel`, in the kinds the configuration lists.
-  - G15: wiring neither branches nor loops; `&&`, `||`, `??` and calls that walk a collection with a function, such as `map` or `filter`, count too (`find` only with one to call: the build context's `find` takes a contract).
+  - G15: wiring neither branches nor loops; `&&`, `||`, `??` and calls that walk a collection with a function, such as `map` or `filter`, count too (`find` unless handed an imported name alone: the build context's `find` takes a contract).
   - G17: a card holds only the current contract; plans, moves and removals in progress, by their phrases as written, go to the plan list outside the repo.
   - G21: no document copies a list of the configuration.
   - G26: product code reaches the network through `outbound`, or as the words its manifest declares let it (the `network` internal module).

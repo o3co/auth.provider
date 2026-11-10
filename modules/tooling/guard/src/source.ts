@@ -176,13 +176,28 @@ const walking = new Set([
 	"toSorted",
 ]);
 
-/** A walking call: `find` only with a function, an array's, never the build context's. */
-const walks = (node: ts.Node, method: string) =>
-	walking.has(method) &&
-	(method !== "find" ||
-		(ts.isCallExpression(node) &&
-			node.arguments[0] !== undefined &&
-			(ts.isArrowFunction(node.arguments[0]) || ts.isFunctionExpression(node.arguments[0]))));
+/** The value names a file's imports bind: default and named, never a namespace or a type alone. */
+const importedNames = (file: ts.SourceFile) =>
+	new Set(
+		file.statements.flatMap((statement) => {
+			const clause = ts.isImportDeclaration(statement) ? statement.importClause : undefined;
+			if (clause === undefined || clause.isTypeOnly) return [];
+			const named = clause.namedBindings;
+			const specifiers = named !== undefined && ts.isNamedImports(named) ? named.elements : [];
+			return [
+				...(clause.name ? [clause.name.text] : []),
+				...specifiers.filter((s) => !s.isTypeOnly).map((s) => s.name.text),
+			];
+		}),
+	);
+
+/** A walking call: `find` but handed an imported name alone, as the build context's is. */
+const walks = (node: ts.Node, method: string, imported: ReadonlySet<string>) => {
+	if (!walking.has(method)) return false;
+	if (method !== "find" || !ts.isCallExpression(node) || node.arguments.length !== 1) return true;
+	const [handed] = node.arguments;
+	return !(handed !== undefined && ts.isIdentifier(handed) && imported.has(handed.text));
+};
 
 /** The method a call names, when it is a call on a property. */
 const calledMethod = (node: ts.Node) =>
@@ -196,16 +211,18 @@ const calledMethod = (node: ts.Node) =>
  */
 export function branchesOf(path: string): string[] {
 	const found: string[] = [];
+	const file = parse(path);
+	const imported = importedNames(file);
 	const visit = (node: ts.Node): void => {
 		const method = calledMethod(node);
 		const word = ts.isBinaryExpression(node)
 			? choosing[node.operatorToken.kind]
-			: method !== undefined && walks(node, method)
+			: method !== undefined && walks(node, method, imported)
 				? `.${method}()`
 				: branching[node.kind];
 		if (word) found.push(word);
 		ts.forEachChild(node, visit);
 	};
-	visit(parse(path));
+	visit(file);
 	return found;
 }
