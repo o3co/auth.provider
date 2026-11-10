@@ -15,7 +15,7 @@ export interface BuildContext<S> extends Runtime {
 	readonly environment: "production" | "development";
 	get<T>(contract: Contract<T>): Promise<T>;
 	/** The interface of a contract the module takes optionally, or none where no module provides it. */
-	find<T>(contract: Contract<T>): Promise<T | undefined>;
+	getOptional<T>(contract: Contract<T>): Promise<T | undefined>;
 	collect<T>(point: ExtensionPoint<T>): Promise<readonly T[]>;
 	/**
 	 * The interface a contract names, for use once assembly is done; it builds nothing now, so a
