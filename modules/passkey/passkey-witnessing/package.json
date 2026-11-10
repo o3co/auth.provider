@@ -24,6 +24,6 @@
 		"@mod/store": "workspace:*",
 		"@mod/webauthn": "workspace:*",
 		"@mod/webauthn-store": "workspace:*",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	}
 }

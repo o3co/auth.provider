@@ -25,6 +25,6 @@
 	"devDependencies": {
 		"asn1js": "4.0.0",
 		"pkijs": "4.0.1",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	}
 }
