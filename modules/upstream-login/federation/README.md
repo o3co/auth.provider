@@ -16,13 +16,12 @@
 - Provides `upstreams`, as its default adapter.
 - Declares to `users` (`upstreamNames`) each IdP's name with its upstream's `subjectsFrom` where it says one, else its issuer.
 - The operator section (its keys in the settings list).
-- Test configuration builders and an IdP type for tests (`./testing`)
+- `./testing`: `federationConfig` and `testIdpType`, test builders.
 - Audit events for a callback that took its round trip, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`, or `refused` for a login a gate refused, or `revoked` for one `session` refused, its subject revoked since the round trip began, each answered as `unknown_user`)
-- No audit event comes before the take or records an unavailable answer, and none holds the upstream subject, tokens or text.
+- No audit event (`./audit-events`) comes before the take or records an unavailable answer, and none holds the upstream subject, tokens or text.
 - Answer codes: `not_found` (404), `repeated_parameter`, `invalid_redirect`, `invalid_request`, `invalid_state`, `upstream_refused`, `continuation_unavailable` (400), `unknown_user`, `login_required` (401), a gate's answer (403), a continuation's own answers, `method_not_allowed` (405, with `allow`), `exchange_failed` (502), `temporarily_unavailable` (503)
 - Success is a 303 to the return target or the landing.
-- A held login carries that same return to its gates.
-- A held login is a 303 to `held-page`, with no query, and the cookies; without one, a 403 with the gate's answer and cookies.
+- A held login carries that same return to its gates, and is a 303 to `held-page`, with no query, and the cookies; without one, a 403 with the gate's answer and cookies.
 
 ## Invariants
 - A start begins an `upstream-round-trip` round trip named `federation.<idp>`, kept for `transaction-lifetime`, cross-site for an IdP that answers in a posted form, taken by its callback before the code is exchanged; one not from this deployment's own page (`csrf`'s origin evidence) goes on with the browser's live one instead: its first request whole, its return target and `prompt` too, no cookie set.
