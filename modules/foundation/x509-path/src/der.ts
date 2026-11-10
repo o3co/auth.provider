@@ -44,10 +44,24 @@ export function keyUsageAllows(cert: pkijs.Certificate, bits: number): boolean {
 export const same = (a: Uint8Array, b: Uint8Array) =>
 	a.length === b.length && a.every((byte, at) => byte === b[at]);
 
-/** `make` over DER holding exactly one value; undefined if it does not, or `make` refuses it. */
-export function decoded<T>(der: Uint8Array, make: (schema: asn1js.AsnType) => T): T | undefined {
+/**
+ * As many nodes as the bytes could hold (a node takes two at least): what a CRL is read with, as
+ * asn1js's own cap of 10,000 would refuse one of some 3,300 entries. It still bounds the work by the
+ * bytes, which the caller caps; anything else keeps asn1js's cap.
+ */
+export const nodesIn = (bytes: Uint8Array) => Math.ceil(bytes.byteLength / 2);
+
+/**
+ * `make` over DER holding exactly one value; undefined if it does not, or `make` refuses it. Read
+ * with asn1js's cap of nodes, or `maxNodes`.
+ */
+export function decoded<T>(
+	der: Uint8Array,
+	make: (schema: asn1js.AsnType) => T,
+	maxNodes?: number,
+): T | undefined {
 	try {
-		const parsed = asn1js.fromBER(der);
+		const parsed = asn1js.fromBER(der, maxNodes === undefined ? {} : { maxNodes });
 		if (parsed.offset === -1 || parsed.offset !== der.byteLength) return undefined;
 		return make(parsed.result);
 	} catch {

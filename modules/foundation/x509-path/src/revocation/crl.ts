@@ -1,6 +1,6 @@
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
-import { decoded, generalName, isHold, keyUsageAllows, oid, usage } from "../der.ts";
+import { decoded, generalName, isHold, keyUsageAllows, nodesIn, oid, usage } from "../der.ts";
 import {
 	isTaken,
 	type SignatureAlgorithm,
@@ -40,6 +40,9 @@ export type DistributionPoints =
 	  };
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+/** What a CRL says of a serial it lists, one object for every entry alike: a large CRL holds many. */
+const held = Object.freeze({ held: true });
+const revoked = Object.freeze({ held: false });
 
 /** A certificate's CRL distribution points, told by the extension's identifier and its value. */
 export function distributionPointsOf(cert: pkijs.Certificate): DistributionPoints {
@@ -65,12 +68,95 @@ export function distributionPointsOf(cert: pkijs.Certificate): DistributionPoint
 	};
 }
 
+/** The most bytes of a CRL read; a dense one of 1 MiB lists some 45,000 serials. */
+const mostCrlBytes = 1 << 20;
+
+/**
+ * Turns at reading a CRL, one at a time in this process: one of 1 MiB peaks near 165 MB while it is
+ * read. A waiter leaves on its signal, given no turn.
+ */
+function turns() {
+	const waiting: (() => void)[] = [];
+	let taken = false;
+	return {
+		take: (signal?: AbortSignal) =>
+			new Promise<boolean>((given) => {
+				if (signal?.aborted) return given(false);
+				if (!taken) {
+					taken = true;
+					return given(true);
+				}
+				const go = () => {
+					signal?.removeEventListener("abort", leave);
+					given(true);
+				};
+				const leave = () => {
+					waiting.splice(waiting.indexOf(go), 1);
+					given(false);
+				};
+				waiting.push(go);
+				signal?.addEventListener("abort", leave, { once: true });
+			}),
+		give: () => {
+			const next = waiting.shift();
+			if (next) next();
+			else taken = false;
+		},
+	};
+}
+const reading = turns();
+
 /**
  * The CRL `issuer` signed, read as of `now`. Nothing in it is used before its signature is checked
  * with the issuer's key, by an algorithm `taken`; a this update past `now` by more than `skewMs` is
  * not yet in force; a delta, scoped or indirect CRL, or any critical extension, is unsupported.
+ * Past 1 MiB, it is malformed, unread. CRLs are read one at a time; one whose `signal` ends while it
+ * waits its turn is `aborted`, unread: that says nothing of the CRL, so a caller tells it apart.
  */
+export function verifyCrl(
+	der: Uint8Array,
+	issuer: pkijs.Certificate,
+	now: number,
+	skewMs: number,
+	taken: readonly SignatureAlgorithm[],
+): Promise<
+	| { readonly kind: "verified"; readonly crl: VerifiedCrl }
+	| { readonly kind: "unusable"; readonly reason: string }
+>;
+export function verifyCrl(
+	der: Uint8Array,
+	issuer: pkijs.Certificate,
+	now: number,
+	skewMs: number,
+	taken: readonly SignatureAlgorithm[],
+	signal: AbortSignal,
+): Promise<
+	| { readonly kind: "verified"; readonly crl: VerifiedCrl }
+	| { readonly kind: "unusable"; readonly reason: string }
+	| { readonly kind: "aborted" }
+>;
 export async function verifyCrl(
+	der: Uint8Array,
+	issuer: pkijs.Certificate,
+	now: number,
+	skewMs: number,
+	taken: readonly SignatureAlgorithm[],
+	signal?: AbortSignal,
+): Promise<
+	| { readonly kind: "verified"; readonly crl: VerifiedCrl }
+	| { readonly kind: "unusable"; readonly reason: string }
+	| { readonly kind: "aborted" }
+> {
+	if (der.byteLength > mostCrlBytes) return { kind: "unusable", reason: "malformed" };
+	if (!(await reading.take(signal))) return { kind: "aborted" };
+	try {
+		return await readCrl(der, issuer, now, skewMs, taken);
+	} finally {
+		reading.give();
+	}
+}
+
+async function readCrl(
 	der: Uint8Array,
 	issuer: pkijs.Certificate,
 	now: number,
@@ -81,7 +167,11 @@ export async function verifyCrl(
 	| { readonly kind: "unusable"; readonly reason: string }
 > {
 	const unusable = (reason: string) => ({ kind: "unusable" as const, reason });
-	const crl = decoded(der, (schema) => new pkijs.CertificateRevocationList({ schema }));
+	const crl = decoded(
+		der,
+		(schema) => new pkijs.CertificateRevocationList({ schema }),
+		nodesIn(der),
+	);
 	if (!crl) return unusable("malformed");
 	if (!isTaken(crl.signatureAlgorithm, taken)) return unusable("signature algorithm");
 	if (!sameAlgorithm(crl.signature, crl.signatureAlgorithm)) return unusable("signature algorithm");
@@ -114,10 +204,7 @@ export async function verifyCrl(
 	for (const entry of entries) {
 		const reason = entry.crlEntryExtensions?.extensions.find((e) => e.extnID === oid.reasonCode);
 		const read = reason && decoded(reason.extnValue.valueBlock.valueHexView, (schema) => schema);
-		listed.set(
-			hex(entry.userCertificate.valueBlock.valueHexView),
-			Object.freeze({ held: isHold(read) }),
-		);
+		listed.set(hex(entry.userCertificate.valueBlock.valueHexView), isHold(read) ? held : revoked);
 	}
 	const number = crl.crlExtensions?.extensions.find((e) => e.extnID === oid.crlNumber);
 	const read = number && decoded(number.extnValue.valueBlock.valueHexView, (schema) => schema);
