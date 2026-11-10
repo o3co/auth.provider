@@ -47,11 +47,11 @@ export interface Violation {
 	readonly detail: string;
 }
 
-/** Each package's public surface, by name, read from its `.` entry. */
-export function surfacesOf(packages: readonly Pkg[]): Map<string, Surface> {
+/** Each package's public surface at an entry point (`.` unless named), by name, for the packages exporting it. */
+export function surfacesOf(packages: readonly Pkg[], at = "."): Map<string, Surface> {
 	const surfaces = new Map<string, Surface>();
 	for (const p of packages) {
-		const entry = p.manifest.exports?.["."];
+		const entry = p.manifest.exports?.[at];
 		if (entry) surfaces.set(p.name, surfaceOf(join(p.dir, entry), p.dir));
 	}
 	return surfaces;

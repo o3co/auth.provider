@@ -1,5 +1,6 @@
 import { relative, resolve, sep } from "node:path";
 import ts from "typescript";
+import { host, options } from "./host.ts";
 
 export interface Surface {
 	readonly values: ReadonlySet<string>;
@@ -21,18 +22,12 @@ export interface Surface {
 	 * whatever file a declaration lies in; a type a signature names by name has its own signature.
 	 */
 	readonly signatures: ReadonlyMap<string, string>;
+	/**
+	 * Each export's carried types: the types the entry exports that its signature names by symbol,
+	 * as written or, for a value, as inferred; the rest of its named references are `hidden`.
+	 */
+	readonly carries: ReadonlyMap<string, ReadonlySet<string>>;
 }
-
-const options: ts.CompilerOptions = {
-	target: ts.ScriptTarget.ES2022,
-	module: ts.ModuleKind.NodeNext,
-	moduleResolution: ts.ModuleResolutionKind.NodeNext,
-	allowImportingTsExtensions: true,
-	noEmit: true,
-	strict: true,
-	skipLibCheck: true,
-	types: [],
-};
 
 /** How a signature writes a type: whole, and a function as an arrow. */
 const written = ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.WriteArrowStyleSignature;
@@ -71,7 +66,7 @@ function signatureParts(node: ts.Node): ts.Node[] {
 }
 
 export function surfaceOf(entry: string, packageDir: string): Surface {
-	const program = ts.createProgram([entry], options);
+	const program = ts.createProgram([entry], options, host);
 	const checker = program.getTypeChecker();
 	const source = program.getSourceFile(entry);
 	const moduleSymbol = source && checker.getSymbolAtLocation(source);
@@ -82,8 +77,9 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 	const hidden = new Set<string>();
 	const docs = new Map<string, Set<number>>();
 	const signatures = new Map<string, string>();
+	const carries = new Map<string, ReadonlySet<string>>();
 	if (!moduleSymbol) {
-		return { values, types, hidden: [], members: 0, tokens, points, docs, signatures };
+		return { values, types, hidden: [], members: 0, tokens, points, docs, signatures, carries };
 	}
 	let members = 0;
 	// A primitive, or a union of them, has no members of its own: the platform's own are not the contract's.
@@ -191,35 +187,79 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 		}
 		return lines.join("\n");
 	};
-	/** The package's named types a declaration's signature refers to and the entry does not export, each as `name (export)`. */
-	const hiddenReferencesIn = (
-		declaration: ts.Declaration,
-		symbol: ts.Symbol,
-		exportedDeclarations: ReadonlySet<ts.Node>,
-	): string[] => {
-		const found: string[] = [];
+	const exported = checker.getExportsOfModule(moduleSymbol);
+	/** The exported declarations, a type's by the name the entry exports it as. */
+	const exportedDeclarations = new Set<ts.Node>();
+	const exportedTypes = new Map<ts.Node, string>();
+	/** The package's named types a symbol names: each exported one by its exported name, each other as `hidden`. */
+	const sort = (referenced: ts.Symbol | undefined, symbol: ts.Symbol, carried: Set<string>) => {
+		for (const d of referenced ? (resolveAlias(referenced).declarations ?? []) : []) {
+			const name = exportedTypes.get(d);
+			if (name !== undefined) carried.add(name);
+			else if (named(d) && inside(d) && !exportedDeclarations.has(d)) {
+				hidden.add(`${(d as ts.NamedDeclaration).name?.getText() ?? "?"} (${symbol.name})`);
+			}
+		}
+	};
+	/** A declaration's signature as written: each named type it refers to, sorted. */
+	const referencesIn = (declaration: ts.Declaration, symbol: ts.Symbol, carried: Set<string>) => {
 		const visit = (node: ts.Node): void => {
-			if (ts.isTypeReferenceNode(node) || ts.isExpressionWithTypeArguments(node)) {
-				const name = ts.isTypeReferenceNode(node) ? node.typeName : node.expression;
-				const referenced = checker.getSymbolAtLocation(name);
-				for (const d of referenced ? (resolveAlias(referenced).declarations ?? []) : []) {
-					if (named(d) && inside(d) && !exportedDeclarations.has(d)) {
-						found.push(`${(d as ts.NamedDeclaration).name?.getText() ?? "?"} (${symbol.name})`);
-					}
-				}
+			if (ts.isTypeReferenceNode(node))
+				sort(checker.getSymbolAtLocation(node.typeName), symbol, carried);
+			if (ts.isExpressionWithTypeArguments(node)) {
+				sort(checker.getSymbolAtLocation(node.expression), symbol, carried);
 			}
 			ts.forEachChild(node, visit);
 		};
 		for (const part of signatureParts(declaration)) visit(part);
-		return found;
 	};
-	const exported = checker.getExportsOfModule(moduleSymbol);
-	const exportedDeclarations = new Set<ts.Node>();
+	const nameable =
+		ts.SymbolFlags.Interface |
+		ts.SymbolFlags.TypeAlias |
+		ts.SymbolFlags.Class |
+		ts.SymbolFlags.Enum;
+	/** A value's type as inferred: the exported types it names, stopping at a named type's members but reading its type arguments. */
+	const inferredIn = (type: ts.Type, carried: Set<string>, seen = new Set<ts.Type>()): void => {
+		if (seen.has(type)) return;
+		seen.add(type);
+		const next = (t: ts.Type) => inferredIn(t, carried, seen);
+		const name = (s: ts.Symbol) =>
+			(s.declarations ?? []).map((d) => exportedTypes.get(d)).find(Boolean);
+		if (type.aliasSymbol) {
+			const own = name(resolveAlias(type.aliasSymbol));
+			if (own) carried.add(own);
+			(type.aliasTypeArguments ?? []).forEach(next);
+			return;
+		}
+		if (type.isUnionOrIntersection()) {
+			type.types.forEach(next);
+			return;
+		}
+		if (!(type.flags & ts.TypeFlags.Object)) return;
+		const symbol = type.getSymbol();
+		if (symbol && symbol.flags & nameable) {
+			const own = name(symbol);
+			if (own) carried.add(own);
+			if ((type as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) {
+				checker.getTypeArguments(type as ts.TypeReference).forEach(next);
+			}
+			return;
+		}
+		for (const s of [...type.getCallSignatures(), ...type.getConstructSignatures()]) {
+			for (const p of s.getParameters()) next(checker.getTypeOfSymbol(p));
+			next(s.getReturnType());
+		}
+		for (const member of type.getProperties()) next(checker.getTypeOfSymbol(member));
+	};
 	for (const symbol of exported) {
 		const target = resolveAlias(symbol);
 		for (const declaration of target.declarations ?? []) exportedDeclarations.add(declaration);
 		documented(target);
 		(target.flags & ts.SymbolFlags.Value ? values : types).add(symbol.name);
+		if (!(target.flags & ts.SymbolFlags.Value)) {
+			for (const declaration of target.declarations ?? [])
+				exportedTypes.set(declaration, symbol.name);
+		}
 		signatures.set(symbol.name, signatureOf(symbol.name, target));
 		if ((target.declarations ?? []).some(madeAsToken)) tokens.add(symbol.name);
 		if ((target.declarations ?? []).some(madeAsPoint)) points.add(symbol.name);
@@ -231,12 +271,24 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 		}
 	}
 	for (const symbol of exported) {
-		for (const declaration of resolveAlias(symbol).declarations ?? []) {
-			if (!inside(declaration)) continue;
-			for (const found of hiddenReferencesIn(declaration, symbol, exportedDeclarations)) {
-				hidden.add(found);
-			}
+		const target = resolveAlias(symbol);
+		const carried = new Set<string>();
+		for (const declaration of (target.declarations ?? []).filter(inside)) {
+			referencesIn(declaration, symbol, carried);
 		}
+		if (target.flags & ts.SymbolFlags.Value) inferredIn(checker.getTypeOfSymbol(target), carried);
+		carried.delete(symbol.name);
+		carries.set(symbol.name, carried);
 	}
-	return { values, types, hidden: [...hidden].sort(), members, tokens, points, docs, signatures };
+	return {
+		values,
+		types,
+		hidden: [...hidden].sort(),
+		members,
+		tokens,
+		points,
+		docs,
+		signatures,
+		carries,
+	};
 }
