@@ -1,5 +1,6 @@
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { kernelConfig } from "@mod/kernel";
@@ -10,7 +11,14 @@ import type { AccessGrant, IssueLimits, Tokens } from "../src/contract.ts";
 import tokensModule from "../src/module.ts";
 
 /** What a test's composition of tokens holds at least: http, keys, issuer, sender-binding and tokens. */
-export const composedModules = [http, keysModule, issuerModule, senderBindingModule, tokensModule];
+export const composedModules = [
+	http,
+	httpServer,
+	keysModule,
+	issuerModule,
+	senderBindingModule,
+	tokensModule,
+];
 
 /** Their sections, tokens' own left to each test. */
 export const composedConfig = () => ({
