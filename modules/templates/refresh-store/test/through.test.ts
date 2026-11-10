@@ -8,6 +8,7 @@ import { clientsConfig, confidentialClient } from "@mod/clients/testing";
 import { type Addition, additions, type RedemptionHook, redemptionHooks } from "@mod/code-grant";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
@@ -50,6 +51,7 @@ async function boot() {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			tokensStandIn(),
 			issuerModule,
 			clientsModule,
