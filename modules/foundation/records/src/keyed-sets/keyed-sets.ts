@@ -7,9 +7,7 @@ export interface Member {
 	readonly remainingMs: number;
 }
 
-const clearingMs = 10 * 60_000;
-
-export function overCap<T extends readonly [string, number]>(
+function pushedOutOver<T extends readonly [string, number]>(
 	byEnd: readonly T[],
 	added: string,
 	cap: number,
@@ -24,11 +22,29 @@ export function overCap<T extends readonly [string, number]>(
 	return { held: byEnd.filter(([name]) => !out.has(name)), out: [...out] };
 }
 
-export function checkedCap(cap: number): number {
+function wholeCap(cap: number): number {
 	if (!Number.isInteger(cap) || cap < 1)
 		throw new TypeError("records: a set's cap is a whole number from 1");
 	return cap;
 }
+
+/**
+ * The members kept and those pushed out over `cap`, by end.
+ * @deprecated Unused outside records; the set's format is `keyedSetsIn.codec`. Removed in 0.22.
+ */
+export const overCap = <T extends readonly [string, number]>(
+	byEnd: readonly T[],
+	added: string,
+	cap: number,
+) => pushedOutOver(byEnd, added, cap);
+
+/**
+ * `cap` where it is a whole number from 1; throws TypeError otherwise.
+ * @deprecated Unused outside records; the set's format is `keyedSetsIn.codec`. Removed in 0.22.
+ */
+export const checkedCap = (cap: number): number => wholeCap(cap);
+
+const clearingMs = 10 * 60_000;
 
 /** Sets of members by key, at most `cap` to a key, ending on the kernel's clock; what an add pushes out awaits in the same write. */
 export function keyedSetsIn(place: Place & { readonly cap: number; readonly clock: Clock }) {
@@ -93,7 +109,7 @@ export interface KeyedSetWrite {
  * inside `changeRecords`.
  */
 keyedSetsIn.codec = (p: { readonly cap: number; readonly clock: Clock }) => {
-	const cap = checkedCap(p.cap);
+	const cap = wholeCap(p.cap);
 	type Pair = readonly [string, number];
 	const isPair = (item: Json): item is Pair =>
 		Array.isArray(item) && typeof item[0] === "string" && typeof item[1] === "number";
@@ -130,7 +146,7 @@ keyedSetsIn.codec = (p: { readonly cap: number; readonly clock: Clock }) => {
 			const kept = new Map(live(content.held, now));
 			kept.set(member, Math.max(kept.get(member) ?? 0, ends));
 			const byEnd = [...kept].sort((a, b) => a[1] - b[1] || codePointOrder(a[0], b[0]));
-			const { held, out } = overCap(byEnd, member, cap);
+			const { held, out } = pushedOutOver(byEnd, member, cap);
 			const awaiting = new Map(live(content.awaiting, now));
 			for (const name of out) awaiting.set(name, kept.get(name) ?? now);
 			return { next: written(held, [...awaiting], now), pushedOut: out };

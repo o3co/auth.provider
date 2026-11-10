@@ -17,6 +17,9 @@
 - No contract of its own: the wiring builds each over a place, with the cap and `kernel`'s clock for keyed sets.
 - Test stand-ins (`./testing`): records (several of them changed together too), deferred work and keyed sets in memory, a race on demand, and jobs that crowd one shard.
 
+## Deprecated
+- `overCap` and `checkedCap`: exported, unused outside records; the set's format is `keyedSetsIn.codec`. A later release (0.22) removes them.
+
 ## Invariants
 - A change runs again on what is there after a lost race, so it must be pure; after 8 lost races it is unavailable, a fixed margin against contention.
 - A write whose answer was lost is resent under the same unguessable mark, so it takes effect once, for up to 10 seconds of pauses (from 50 ms, doubling to 1 second), fixed to stay within the store's idempotency window, where a resend still gets its first answer; a send past its deadline is refused, and any error but unavailable is thrown at once.
