@@ -53,6 +53,7 @@ const grants: Space = {
 const steps: Space = {
 	name: "federation-grants-store.steps",
 	guarantees: Object.values(stepsGuaranteeFor),
+	subjectData: "none",
 };
 const pending: Space = {
 	name: "federation-grants-store.pending",
@@ -65,6 +66,7 @@ const listed: Space = {
 const locks: Space = {
 	name: "federation-grants-store.locks",
 	guarantees: Object.values(locksGuaranteeFor),
+	subjectData: "none",
 };
 
 /** A space's place: the composition's store, with its log and randomness. */
