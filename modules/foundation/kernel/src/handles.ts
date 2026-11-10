@@ -25,7 +25,7 @@ export interface ExtensionPoint<T> {
 }
 
 /**
- * A contract a module takes where a module provides it: `find` answers its interface, or none where
+ * A contract a module takes where a module provides it: `getOptional` answers its interface, or none where
  * none does, and no boot is refused for it. Only of a contract its owner lets go unprovided.
  */
 export interface OptionalTake<T> {
