@@ -944,3 +944,20 @@ it("refuses a space opened for records and for secret records on one store, in e
 	secretRecordsIn<Counted>((await open()).place);
 	recordsIn<Counted>({ ...second.place, space: { ...space, name: "records-test.other" } });
 });
+
+it("holds the keyed set's format in its codec: the cap, those pushed out awaiting, and ten minutes past the last end", () => {
+	let now = 1_000;
+	const codec = keyedSetsIn.codec({ cap: 2, clock: { now: () => now } });
+	const first = codec.add(undefined, "a", 5_000);
+	const second = codec.add(first.next.value, "b", 6_000);
+	const third = codec.add(second.next.value, "c", 7_000);
+	expect(third.pushedOut).toEqual(["a"]);
+	expect(codec.members(third.next.value).map((m) => m.member)).toEqual(["b", "c"]);
+	expect(codec.awaiting(third.next.value)).toEqual(["a"]);
+	expect(third.next.lifetimeMs).toBe(7_000 - now + 600_000);
+	const settled = codec.settled(third.next.value, "a");
+	expect(settled && codec.awaiting(settled.value)).toEqual([]);
+	expect(codec.remove(undefined, "a")).toBeUndefined();
+	now = 6_500;
+	expect(codec.members(third.next.value)).toEqual([{ member: "c", remainingMs: 500 }]);
+});

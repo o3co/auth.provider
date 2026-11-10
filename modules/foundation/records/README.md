@@ -13,7 +13,7 @@
 - `pairedRecordsIn` pairs a place's records so, and `pairedRecordsAcross` the records of two places, each refusing through the builder's `refuse` where its store cannot; `pairedRecordsAcross` also where its places are on two stores or their spaces declare other guarantees.
 - Records under a secret: the same but the scan (which their `named` records, reached by name, keep), kept under a name made from the secret, reached by secret or by name. They hold short-lived values only, so a rotation waits them out and they need no scan.
 - Deferred work: add, done, and each, which hands the work over; work that fails stays and is counted.
-- Keyed sets: add a member for a lifetime (answering those pushed out over the cap), the members with their time left, remove a member; the members pushed out and awaiting, and settling one.
+- Keyed sets: add a member for a lifetime (answering those pushed out over the cap), the members with their time left, remove a member; the members pushed out and awaiting, and settling one. `keyedSetsIn.codec` (a cap and a clock) is the set's format at rest, its only definition: `keyedSetsIn` writes with it, and subject-records composes it inside `changeRecords`.
 - No contract of its own: the wiring builds each over a place, with the cap and `kernel`'s clock for keyed sets.
 - Test stand-ins (`./testing`): records (several of them changed together too), deferred work and keyed sets in memory, a race on demand, and jobs that crowd one shard.
 
