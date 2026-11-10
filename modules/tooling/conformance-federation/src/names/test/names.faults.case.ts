@@ -13,8 +13,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { browser as openBrowser, probeClient } from "../../../test/browser.ts";
 import { fakeGithub } from "../../../test/github.ts";
 import { fakeUpstream } from "../../../test/upstream.ts";
+import { federationArea } from "../../area.ts";
 import { back, grantsAt, grantsScene, scopes, upstreamClient } from "../../grants/test/grants.ts";
-import { type FederationScene, federationArea, federationScene, landedStatus } from "../../main.ts";
+import { type FederationScene, federationScene, landedStatus } from "../../main.ts";
 
 const origin = "https://issuer.example";
 const landing = "https://app.example/home";
