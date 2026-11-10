@@ -61,7 +61,11 @@ export function decoded<T>(
 	maxNodes?: number,
 ): T | undefined {
 	try {
-		const parsed = asn1js.fromBER(der, maxNodes === undefined ? {} : { maxNodes });
+		// Read in place, not copied whole: what a caller keeps of it, it copies out itself.
+		const parsed = asn1js.fromBER(der, {
+			copyInput: false,
+			...(maxNodes === undefined ? {} : { maxNodes }),
+		});
 		if (parsed.offset === -1 || parsed.offset !== der.byteLength) return undefined;
 		return make(parsed.result);
 	} catch {

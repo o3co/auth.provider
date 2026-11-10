@@ -223,7 +223,10 @@ async function readCrl(
 	return {
 		kind: "verified",
 		crl: Object.freeze({
-			issuer: crl.issuer,
+			// Its own bytes, not a view of the CRL's: kept long after, it must not hold the whole CRL.
+			issuer: new pkijs.RelativeDistinguishedNames({
+				schema: asn1js.fromBER(new Uint8Array(crl.issuer.toSchema().toBER(false))).result,
+			}),
 			thisUpdate,
 			nextUpdate: next,
 			...(bytes ? { number: BigInt(`0x${hex(bytes) || "0"}`) } : {}),
