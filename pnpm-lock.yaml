@@ -2248,6 +2248,9 @@ importers:
         specifier: workspace:*
         version: link:../tokens
     devDependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
