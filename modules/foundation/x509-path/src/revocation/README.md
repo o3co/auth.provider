@@ -18,6 +18,7 @@ Internal module of `x509-path`: reading a certificate's revocation material, CRL
 - CRL: read from http and https full-name points covering every reason and naming no other issuer.
 - CRL: the issuer's key usage, where given, signs CRLs, and the issuer is in date; no next update is stale, as of each time it is judged.
 - CRL: a delta or scoped CRL, an indirect entry, or any other critical extension is unsupported.
+- CRL: one whose issuer's name is written past 4 KiB is malformed, though it compares equal to the issuer's (real names are well under 1 KiB): a verified CRL keeps that name.
 - CRL: its CRLNumber is read whole, up to the 20 octets of value RFC 5280 allows it and a listed serial (§5.2.3, §4.1.2.2), a 0x00 that only marks it positive aside; one longer, or a CRLNumber that is not a non-negative INTEGER, makes the CRL malformed.
 - CRL: one past 1 MiB is malformed, unread. One is read allowing as many ASN.1 nodes as its bytes could hold (asn1js's own 10,000 would refuse some 3,300 entries); OCSP answers and certificates keep asn1js's cap.
 - CRL: read one at a time in the process, mtls's and outbound's alike, as each peaks while it is read. Measured, not a bound: a dense one of 1 MiB (some 45,000 serials) near 165 MB and 1 s, one of 20-byte serials near 98 MB. A waiter whose signal ends leaves unread, answered `aborted`, a kind apart from unusable as it says nothing of the CRL. The queue of reads has no cap of its own: its callers bound it (each read is a fetch in a caller's place).
