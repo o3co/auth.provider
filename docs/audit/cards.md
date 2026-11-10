@@ -57,6 +57,14 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `serving` (`src/serving`): the server that answers each request with the route it reaches.
   - `settings` (`src/settings`): the schema of `http`'s operator section.
 - `@mod/http-ops` (feature, `modules/foundation/http-ops`): Answers the liveness and readiness routes, and times each request for `metrics`.
+- `@mod/http-server` (foundation, `modules/foundation/http-server`): Serves the routes `http` declares, as the server `http` takes through `httpServers`: reads each request, applies the policies its route uses, and writes the answer.
+  - `bodies` (`src/bodies`): the values a request is sent with, by name, from its body as its route takes it and from its query alike.
+  - `cors` (`src/cors`): the answers to cross-origin requests, for the routes that declare them.
+  - `ending` (`src/ending`): tells the observers of `requestEnds` each request's end.
+  - `guarantees` (`src/guarantees`): whether each route keeps what it declares about the requests it lets through.
+  - `guards` (`src/guards`): the policies each route uses, matched to the rules modules contribute.
+  - `security-headers` (`src/security-headers`): the security headers every answer carries, and a page's policy.
+  - `serving` (`src/serving`): the server that answers each request with the route it reaches.
 - `@mod/kernel` (common, `modules/foundation/kernel`): Assembles modules: checks what they take, builds every provision and contribution (internal module `building`), resolving contracts at once. Owns the generic rules of extension points, collecting contributions in module order.
   - `building` (`src/building`): building the provisions and contributions, each once, and the build context each factory sees.
   - `config` (`src/config`): reading each module's section, and the kernel's own, from the configuration given.

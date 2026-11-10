@@ -32,4 +32,4 @@
 - The route URL `/session/csrf` is an external contract. Outside users get the token there, so it keeps "session" in its name.
 
 ## Depends on
-- `kernel`, `http`, `cookies`
+- `kernel`, `http`, `http-server` (the policies' rules and marks), `cookies`

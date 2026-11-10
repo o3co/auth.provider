@@ -26,6 +26,7 @@ What each module contains is described by that module's contract card (each modu
 | Each module's settings | setting | that module |
 | Explicit acknowledgment of using something despite the risk | setting | the module that requires it |
 | HTTP routes | plug-in point | http |
+| The server serving the routes (`httpServers`): reading each request, applying its route's policies, and checking the rules and marks at boot | contract implementation | http-server |
 | The readiness route (`GET /readyz`) and how long it waits | contract / setting | http-ops |
 | The liveness route (`GET /_healthcheck`), and timing each request | contract | http-ops |
 | Each request's end (`requestEnds`) | extension point | http |

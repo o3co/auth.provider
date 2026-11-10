@@ -1,5 +1,6 @@
 import { cookies } from "@mod/cookies";
-import { applying, marks, policies, type Site, site } from "@mod/http";
+import { type Site, site } from "@mod/http";
+import { applying, marks, policies } from "@mod/http-server";
 import { contract, type Parts } from "@mod/kernel";
 import { carried, checking, issuing, sameOriginOf } from "./check.ts";
 import { csrfChecked, csrfRefused, formTokens, originEvidence } from "./contract.ts";

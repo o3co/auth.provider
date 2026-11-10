@@ -113,6 +113,7 @@ flowchart LR
 | `@mod/host-entries` | foundation | `@mod/address-reach` |
 | `@mod/http` | foundation | `@mod/client-certificate`, `@mod/kernel`, `@mod/request-source`, `@mod/url-setting` |
 | `@mod/http-ops` | feature | `@mod/http`, `@mod/kernel`, `@mod/metrics` |
+| `@mod/http-server` | foundation | `@mod/client-certificate`, `@mod/http`, `@mod/kernel`, `@mod/request-source` |
 | `@mod/kernel` | common | none |
 | `@mod/keys` | foundation | `@mod/http`, `@mod/kernel` |
 | `@mod/labels` | foundation | none |
@@ -121,7 +122,7 @@ flowchart LR
 | `@mod/metrics` | foundation | `@mod/kernel` |
 | `@mod/outbound` | foundation | `@mod/address-reach`, `@mod/host-entries`, `@mod/kernel`, `@mod/outbound-policy`, `@mod/tls-options`, `@mod/url-setting`, `@mod/x509-path` |
 | `@mod/outbound-policy` | foundation | `@mod/address-reach`, `@mod/host-entries`, `@mod/kernel`, `@mod/url-setting` |
-| `@mod/rate-limit` | foundation | `@mod/audit`, `@mod/http`, `@mod/kernel`, `@mod/metrics`, `@mod/request-source`, `@mod/store` |
+| `@mod/rate-limit` | foundation | `@mod/audit`, `@mod/http`, `@mod/http-server`, `@mod/kernel`, `@mod/metrics`, `@mod/request-source`, `@mod/store` |
 | `@mod/records` | capability | `@mod/kernel`, `@mod/store` |
 | `@mod/request-source` | foundation | `@mod/address-reach`, `@mod/client-certificate`, `@mod/kernel` |
 | `@mod/seal` | foundation | `@mod/kernel`, `@mod/keys` |
@@ -137,7 +138,7 @@ flowchart LR
 |---|---|---|
 | `@mod/client-documents` | feature | `@mod/clients`, `@mod/kernel` |
 | `@mod/clients` | feature | `@mod/audit`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/secret-hash` |
-| `@mod/csrf` | feature | `@mod/cookies`, `@mod/http`, `@mod/kernel` |
+| `@mod/csrf` | feature | `@mod/cookies`, `@mod/http`, `@mod/http-server`, `@mod/kernel` |
 | `@mod/login-attributes` | feature | `@mod/kernel`, `@mod/users` |
 | `@mod/login-gates` | feature | `@mod/http`, `@mod/kernel`, `@mod/session`, `@mod/url-setting` |
 | `@mod/login-password` | feature | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/login-gates`, `@mod/rate-limit`, `@mod/request-source`, `@mod/users` |

@@ -1,0 +1,21 @@
+{
+	"name": "@mod/http-server",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "foundation",
+	"joins": [
+		"@mod/http"
+	],
+	"network": "serves-http",
+	"exports": {
+		".": "./src/policies.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/client-certificate": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/request-source": "workspace:*"
+	}
+}

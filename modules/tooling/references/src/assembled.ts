@@ -111,6 +111,7 @@ async function collectedIn(root: string, packages: readonly Pkg[]): Promise<Asse
 		read: ({ type, settings }) => ({ name: type, schema: settings }),
 	};
 	const http = await entryOf("@mod/http", ".");
+	const server = await entryOf("@mod/http-server", ".");
 	const marked: Mark[] = [];
 	const routes: Point<Route, Omit<RouteSeen, "owner">> = {
 		point: http.routes,
@@ -121,7 +122,7 @@ async function collectedIn(root: string, packages: readonly Pkg[]): Promise<Asse
 		{
 			name: "references-probe",
 			replicaSafe: true,
-			takes: [clients.point, types.point, routes.point, http.marks],
+			takes: [clients.point, types.point, routes.point, server.marks],
 		},
 		(m) => [
 			m
@@ -131,7 +132,7 @@ async function collectedIn(root: string, packages: readonly Pkg[]): Promise<Asse
 						c.collect(clients.point),
 						c.collect(types.point),
 						c.collect(routes.point),
-						c.collect(http.marks),
+						c.collect(server.marks),
 					]),
 				),
 		],

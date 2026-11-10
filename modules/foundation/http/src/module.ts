@@ -3,7 +3,17 @@ import type { AddressInfo } from "node:net";
 import { certificateForwarding } from "@mod/client-certificate";
 import { defineModule } from "@mod/kernel";
 import { proxiesOf } from "@mod/request-source";
-import { listening, marks, policies, requestEnds, routes, site } from "./contract.ts";
+import {
+	httpServers,
+	listening,
+	marks,
+	policies,
+	type RunningServer,
+	requestEnds,
+	routes,
+	type ServerSettings,
+	site,
+} from "./contract.ts";
 import { brokenGuarantees } from "./guarantees/guarantees.ts";
 import { withPolicies } from "./guards/guards.ts";
 import { drain, serve } from "./serving/server.ts";
@@ -27,7 +37,7 @@ export default defineModule(
 						},
 					]
 				: [],
-		takes: [marks, policies, requestEnds, routes],
+		takes: [httpServers, marks, policies, requestEnds, routes],
 	},
 	(m) => [
 		m.provide(site).by((c) => {
@@ -42,7 +52,45 @@ export default defineModule(
 			.provide(certificateForwarding)
 			.by((c) => Object.freeze({ configured: c.section["client-certificate"] !== undefined })),
 		m.provide(listening).by(async (c) => {
+			const servers = await c.collect(httpServers);
+			if (servers.length > 1) {
+				return c.refuse("http.servers", "more than one server serves the routes: compose one");
+			}
 			const declared = await c.collect(routes);
+			const certificate = c.section["client-certificate"];
+			const settings: ServerSettings = {
+				host: c.section.host,
+				port: c.section.port,
+				proxies: proxiesOf(c.section, certificate),
+				origins: new Set(c.section["cors-origins"]),
+				limits: {
+					headersMs: c.section["headers-timeout"] * 1000,
+					requestMs: c.section["request-timeout"] * 1000,
+					connections: c.section["max-connections"],
+				},
+			};
+			const ends = await c.collect(requestEnds);
+			const [contributed] = servers;
+			if (contributed) {
+				let running: RunningServer | undefined;
+				c.onStart(async () => {
+					running = await contributed.serve({
+						routes: declared,
+						settings,
+						ends,
+						log: c.log,
+						clock: c.clock,
+					});
+					c.log.info("http.listening", { port: running.port });
+				});
+				c.onStop(async (signal) => running?.drain(signal));
+				return {
+					port: () => {
+						if (!running) throw new Error("http is not listening yet");
+						return running.port;
+					},
+				};
+			}
 			const applied = withPolicies(declared, await c.collect(policies));
 			if (applied.kind === "twice") {
 				return c.refuse("http.policies", `more than one rule for a policy: ${applied.label}`);
@@ -64,23 +112,18 @@ export default defineModule(
 					})),
 				);
 			}
-			const certificate = c.section["client-certificate"];
 			const server = serve({
 				routes: applied.routes,
-				proxies: proxiesOf(c.section, certificate),
-				origins: new Set(c.section["cors-origins"]),
-				ends: await c.collect(requestEnds),
+				proxies: settings.proxies,
+				origins: settings.origins,
+				ends,
 				log: c.log,
 				clock: c.clock,
-				limits: {
-					headersMs: c.section["headers-timeout"] * 1000,
-					requestMs: c.section["request-timeout"] * 1000,
-					connections: c.section["max-connections"],
-				},
+				limits: settings.limits,
 			});
 			const port = () => (server.address() as AddressInfo).port;
 			c.onStart(async () => {
-				server.listen(c.section.port, c.section.host);
+				server.listen(settings.port, settings.host);
 				await once(server, "listening");
 				c.log.info("http.listening", { port: port() });
 			});

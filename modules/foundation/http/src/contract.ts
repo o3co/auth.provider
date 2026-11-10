@@ -1,5 +1,5 @@
-import { contract, extensionPoint, type Unavailable } from "@mod/kernel";
-import type { Source } from "@mod/request-source";
+import { type Clock, contract, extensionPoint, type Log, type Unavailable } from "@mod/kernel";
+import type { Source, TrustedProxies } from "@mod/request-source";
 import type { Values } from "./bodies/values.ts";
 
 export type { Values } from "./bodies/values.ts";
@@ -116,6 +116,19 @@ export interface CorsRule {
 	readonly exposes?: readonly string[];
 }
 
+/**
+ * A method, a path and a handler, with what the route declares.
+ *
+ * - A GET route also answers HEAD, with the same headers and no body, unless it changes state.
+ * - Paths: a middle `*` segment takes exactly one non-empty segment, and a last `/*` everything under it.
+ * - Of the declared paths reaching a path, the one with a literal at the first segment they differ comes first,
+ *   and a middle `*` before a last (so an exact path first).
+ * - The handler reads the URL parser's path (dot segments resolved, percent-encoding kept as sent, so an
+ *   escaped `/` stays in its segment); a `*` handler checks the segments it takes by its own rules.
+ * - `unavailable` is its answer to Unavailable. Its `noted` is called first, and its fields join http's one
+ *   warning, `http.unavailable`, with what was unavailable and the route's declared path; a `noted` that
+ *   throws is logged `http.failed` by kind and the answer stands.
+ */
 export interface Route {
 	readonly method: Method;
 	readonly path: string;
@@ -204,3 +217,40 @@ export const jsonAnswer = (
 	body: { json },
 	...(extra.cookies?.length ? { cookies: extra.cookies } : {}),
 });
+
+/** The section's values a server serves by: where it listens, whose forwarded addresses it believes, the origins it answers across origins, and its limits. */
+export interface ServerSettings {
+	readonly host: string;
+	readonly port: number;
+	readonly proxies: TrustedProxies;
+	readonly origins: ReadonlySet<string>;
+	/** How long a request's headers, and the whole request, may take to arrive; and the connections held at once. */
+	readonly limits: {
+		readonly headersMs: number;
+		readonly requestMs: number;
+		readonly connections: number;
+	};
+}
+
+/** What http hands a server at start: the routes declared, one a method and path, its settings, those who hear each request's end, the log and the clock. */
+export interface ServerInput {
+	readonly routes: readonly Route[];
+	readonly settings: ServerSettings;
+	readonly ends: readonly RequestEndObserver[];
+	readonly log: Log;
+	readonly clock: Clock;
+}
+
+/** A server serving: the port it took, and its drain, cut short as the signal ends. */
+export interface RunningServer {
+	readonly port: number;
+	drain(signal: AbortSignal): Promise<void>;
+}
+
+/** What serves a deployment's routes: http calls `serve` at start and the drain at stop; applying policies and checking marks is the server's own. */
+export interface HttpServer {
+	serve(input: ServerInput): Promise<RunningServer>;
+}
+
+/** The server that serves the routes: none, http's own; one, it; more, boot is refused. */
+export const httpServers = extensionPoint<HttpServer>("http.servers", { multiplicity: "many" });

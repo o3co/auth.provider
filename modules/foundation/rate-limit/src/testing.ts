@@ -1,4 +1,4 @@
-import { marks, policies } from "@mod/http";
+import { marks, policies } from "@mod/http-server";
 import { contract, defineModule } from "@mod/kernel";
 import type { Json } from "@mod/store";
 import { attemptLimit, lockouts, type RateLimit, rateLimit } from "./contract.ts";
