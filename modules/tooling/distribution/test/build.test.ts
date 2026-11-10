@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { buildBundles } from "../src/build.ts";
-import type { Bundle } from "../src/contract.ts";
+import type { Bundle } from "../src/workspace.ts";
 
 // Each test compiles bundles with TypeScript, which takes seconds when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
