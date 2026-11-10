@@ -6,7 +6,6 @@ export {
 	type IdentityPart,
 	identityArea,
 	type LedgerScene,
-	ledgerBesideUsers,
 	ledgerRevocation,
 	type RevocationScene,
 	recentAuthenticationWindow,
