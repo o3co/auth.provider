@@ -8,7 +8,7 @@ import {
 import { Agent as TlsAgent, request as tlsRequest } from "node:https";
 import type { LookupFunction, Socket } from "node:net";
 import { isIP, connect as plainConnect } from "node:net";
-import { connect as tlsConnect } from "node:tls";
+import { type TLSSocket, connect as tlsConnect } from "node:tls";
 import { type Admitted, DestinationRefused, type Limits, type Policy } from "@mod/outbound-policy";
 import {
 	isOutboundUnavailable,
@@ -165,6 +165,42 @@ async function tunnel(route: Route, admitted: Admitted, signal: AbortSignal) {
 	});
 }
 
+/** A check of the peer a TLS connection reached, waited on before any byte of a request goes on it. */
+export type PeerCheck = (socket: TLSSocket, signal: AbortSignal) => Promise<void>;
+
+/**
+ * A TLS connection once its handshake is done and its peer checked, the deadline asked again after;
+ * else it is ended, and the failure thrown is the connection's. A socket lost meanwhile ends it too.
+ */
+async function secured(socket: TLSSocket, signal: AbortSignal, check?: PeerCheck) {
+	let lost: unknown;
+	// Kept for the socket's life: an error while the peer is checked must not go unheard.
+	socket.on("error", (error) => {
+		lost ??= error;
+	});
+	try {
+		await new Promise<void>((done, failed) => {
+			const aborted = () => failed(unavailable("timeout"));
+			const closed = () => failed(lost ?? unavailable("unreachable"));
+			signal.addEventListener("abort", aborted, { once: true });
+			socket.once("close", closed);
+			socket.once("secureConnect", () => {
+				signal.removeEventListener("abort", aborted);
+				socket.off("close", closed);
+				done();
+			});
+			if (signal.aborted) aborted();
+		});
+		await check?.(socket, signal);
+		if (lost !== undefined || socket.destroyed) throw lost ?? unavailable("unreachable");
+		if (signal.aborted) throw unavailable("timeout");
+		return socket;
+	} catch (error) {
+		socket.destroy();
+		throw failedAs(error, signal);
+	}
+}
+
 /** How a request reaches its destination, and what to let go if it is never made. */
 interface Way {
 	readonly carry: { readonly agent: PlainAgent };
@@ -178,19 +214,24 @@ async function viaProxy(
 	policy: Pick<Policy, "admitAddresses">,
 	signal: AbortSignal,
 	tls: Tls,
+	check?: PeerCheck,
 ): Promise<Way> {
 	const written = writtenAddress(admitted);
 	const literal = written !== undefined;
 	if (written !== undefined) policy.admitAddresses([written], admitted);
-	const socket = await tunnel(route, admitted, signal);
-	const agent = new TlsAgent({ keepAlive: false });
-	agent.createConnection = () =>
+	const tunnelled = await tunnel(route, admitted, signal);
+	const socket = await secured(
 		tlsConnect({
-			socket,
+			socket: tunnelled,
 			host: admitted.host,
 			...(literal ? {} : { servername: admitted.host }),
 			...tlsOf(tls),
-		});
+		}),
+		signal,
+		check,
+	);
+	const agent = new TlsAgent({ keepAlive: false });
+	agent.createConnection = () => socket;
 	return { carry: { agent }, release: () => socket.destroy() };
 }
 
@@ -201,6 +242,7 @@ async function atCheckedAddress(
 	policy: Pick<Policy, "admitAddresses">,
 	signal: AbortSignal,
 	tls: Tls,
+	check?: PeerCheck,
 ): Promise<Way> {
 	const checked = policy.admitAddresses(await addressesOf(admitted, resolve, signal), admitted);
 	const [address = ""] = checked;
@@ -211,17 +253,20 @@ async function atCheckedAddress(
 		return { carry: { agent }, release: () => {} };
 	}
 	const literal = isIP(admitted.host) !== 0;
+	const socket = await secured(
+		tlsConnect({ ...at, ...(literal ? {} : { servername: admitted.host }), ...tlsOf(tls) }),
+		signal,
+		check,
+	);
 	const agent = new TlsAgent({ keepAlive: false });
-	agent.createConnection = () =>
-		tlsConnect({
-			...at,
-			...(literal ? {} : { servername: admitted.host }),
-			...tlsOf(tls),
-		});
-	return { carry: { agent }, release: () => {} };
+	agent.createConnection = () => socket;
+	return { carry: { agent }, release: () => socket.destroy() };
 }
 
-/** Resolves once and connects only to a checked address, or through the route's proxy; one deadline covers it all, body included. */
+/**
+ * Resolves once and connects only to a checked address, or through the route's proxy; one deadline
+ * covers it all, body included. Over TLS, `check` is waited on before the request goes.
+ */
 export async function send(
 	admitted: Admitted,
 	request: OutboundRequest,
@@ -231,12 +276,13 @@ export async function send(
 	route: Route | undefined,
 	tls: Tls,
 	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
+	check?: PeerCheck,
 ): Promise<OutboundResponse> {
 	const signal = deadlineOf(limits.timeoutMs);
 	const proxied = route !== undefined && !admitted.plain && !route.direct(admitted.host);
 	const way = proxied
-		? await viaProxy(route, admitted, policy, signal, tls)
-		: await atCheckedAddress(admitted, resolve, policy, signal, tls);
+		? await viaProxy(route, admitted, policy, signal, tls, check)
+		: await atCheckedAddress(admitted, resolve, policy, signal, tls, check);
 	const answer = await new Promise<IncomingMessage>((answered, failed) => {
 		let outgoing: ClientRequest;
 		try {
