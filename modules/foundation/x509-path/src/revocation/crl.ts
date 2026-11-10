@@ -40,6 +40,8 @@ export type DistributionPoints =
 	  };
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+/** The longest URL of a distribution point taken: a longer one is a point unusable, not none. */
+const mostUrlLength = 2048;
 /** What a CRL says of a serial it lists, one object for every entry alike: a large CRL holds many. */
 const held = Object.freeze({ held: true });
 const revoked = Object.freeze({ held: false });
@@ -58,7 +60,12 @@ export function distributionPointsOf(cert: pkijs.Certificate): DistributionPoint
 			? []
 			: // A name relative to the issuer holds no URI.
 				(Array.isArray(point.distributionPoint) ? point.distributionPoint : [])
-					.filter((name) => name.type === generalName.uri && /^https?:\/\//i.test(name.value))
+					.filter(
+						(name) =>
+							name.type === generalName.uri &&
+							/^https?:\/\//i.test(name.value) &&
+							(name.value as string).length <= mostUrlLength,
+					)
 					.map((name) => name.value as string);
 	const each = value.distributionPoints.map(urlsOf);
 	return {

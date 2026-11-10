@@ -77,9 +77,13 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/metrics` (foundation, `modules/foundation/metrics`): Owns the contract of counters, histograms and gauges: a name, help, every value each label can take, and a histogram's buckets.
 - `@mod/outbound` (foundation, `modules/foundation/outbound`): Sends every outbound HTTP request, applying `outbound-policy`'s destination policy to its URL before sending and its addresses before connecting.
   - `credential` (`src/credential`): how a request's credential is sent, and the headers a caller may not write.
+  - `crl-fetch` (`src/crl-fetch`): Fetches a CRL for a peer's revocation check, as signed material, within the request it is for.
   - `json` (`src/json`): a JSON call, as a caller speaking a JSON wire makes it through `outbound`.
   - `lookups` (`src/lookups`): name lookups shared among those asking a name at once, each waiting until its own deadline, and how many run at once.
   - `resolver-process` (`src/resolver-process`): name lookups run as the system runs them, in a helper process of their own, ended where no one waits on them.
+  - `revocation` (`src/revocation`): Checks the revocation of the certificates a TLS peer of an outbound request presents, by CRL, before the request goes: good, revoked, or unconfirmed with a reason.
+  - `fetching` (`src/revocation/fetching`): an issuer's CRL for the checks waiting on it.
+  - `kept` (`src/revocation/kept`): what outbound keeps of revocation, by issuer (its name's DER and key's SHA-256), in this process alone.
   - `tls` (`src/tls`): the options each TLS connection outbound makes takes.
   - `transport` (`src/transport`): carrying one request, admitted by the policy, to its destination and its answer back: direct, or through the proxy's tunnel.
 - `@mod/outbound-policy` (foundation, `modules/foundation/outbound-policy`): Owns the destination policy: where an outbound request may go, at which addresses, with what credential, and how far it may run, judged from the operator's settings without sending anything.

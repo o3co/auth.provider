@@ -24,13 +24,15 @@ import {
 /** A CRL verified once, as it was fetched, by its issuer's key; judged again for each certificate. */
 export type KeptCrl = VerifiedCrl | Failed;
 
-/** The serials kept CRLs list at most, together: some 47 B each as x509-path keeps them. */
-export const mostKeptSerials = 1 << 20;
+/** The serials kept CRLs list at most, together: measured some 46 to 60 MiB at the full budget. */
+export const mostKeptSerials = 1 << 19;
 
 /** How much a kept CRL weighs against `mostKeptSerials`: the serials it lists. */
 export const serialsIn = (kept: KeptCrl) => ("listed" in kept ? kept.listed.size : 0);
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+/** The most bytes an issuer's name may take, keyed by: a CRL naming a longer one is refused anyway. */
+const mostNameBytes = 4096;
 
 /** A CRL kept by where it came from and the issuer whose key verified it: another's is never taken for it. */
 const keptAs = (url: string, issuer: pkijs.Certificate) =>
@@ -110,6 +112,10 @@ export function crlSource(
 		issuer: pkijs.Certificate,
 		fetch: Fetch,
 	): Promise<Said> {
+		// The issuer's name keys what is kept: one past the bound is refused, never kept.
+		if (issuer.subject.toSchema().toBER(false).byteLength > mostNameBytes) {
+			return refused("malformed");
+		}
 		const urls = crlUrlsOf(cert);
 		if (urls.length === 0) return refused("no source");
 		let failed: Failed | undefined;

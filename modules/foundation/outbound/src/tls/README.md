@@ -10,6 +10,7 @@ Internal module of `outbound`: the options each TLS connection outbound makes ta
 
 ## Offers
 - `noteHandshake` (a failure, the error behind it) and `handshakeCodeOf` (a failure): what refused the handshake (its TLS alert, RFC 8446 §6, or an `ERR_SSL_*` code), kept beside the failure, never on it; callers see the failure alone.
+- `peerChainOf` (a TLS connection) → the peer's certificate and the rest of the chain TLS has for it, by DER, each once: the chain TLS rebuilt, which may hold issuers from the store and leave out others the peer sent, not exactly what it sent.
 - `Tls` (`floor`, required, the `tlsOptions` outbound takes; `ca`, a test's authorities) and `tlsOf` (a `Tls`) → the options a connection takes: the test's authorities, held to the floor by `tls-options`' `heldToFloor`.
 
 ## Invariants

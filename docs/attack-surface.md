@@ -129,6 +129,7 @@ Settings that name where it reaches:
 | `mtls.revocation.hosts` | `@mod/mtls` |  | by its name |
 | `outbound.direct-hosts` | `@mod/outbound` | `[]` | by its name |
 | `outbound.internal-hosts` | `@mod/outbound` | `[]` | by its name |
+| `outbound.revocation.hosts` | `@mod/outbound` | `[]` | by its name |
 | `passkey-witness-http.enroll-url` | `@mod/passkey-witness-http` |  | by its name |
 | `passkey-witness-http.read-url` | `@mod/passkey-witness-http` |  | by its name |
 | `passkey-witness-http.withdraw-url` | `@mod/passkey-witness-http` |  | by its name |
@@ -240,6 +241,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `outbound.plain-loopback` | `@mod/outbound` | `[]` | plain http to these loopback pairs |
 | `outbound.proxy` | `@mod/outbound` |  | the proxy, not `outbound`, resolves names and checks where they lead |
 | `outbound.resolution` | `@mod/outbound` | `"helper"` | `in-process`: names resolve in the app's own process, not in helpers that take none of its environment |
+| `outbound.revocation.accept-unconfirmed` | `@mod/outbound` | `false` | named so (`accept-*` and the like) |
 | `passkeys.user-verification` | `@mod/passkeys` | `"preferred"` | `discouraged`: the authenticator is not asked to verify its user, so whoever holds it passes |
 | `rate-limit.fail-mode` | `@mod/rate-limit` | `"closed"` | `open`: while the store cannot count, a route's request limit lets every request through |
 | `redis.accept-plaintext` | `@mod/redis` | `false` | `true`: `redis://` off this host is taken in production too, the store's traffic and the URL's password readable and changeable on the way; warned at every boot |

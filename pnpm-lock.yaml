@@ -485,10 +485,19 @@ importers:
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../url-setting
+      '@mod/x509-path':
+        specifier: workspace:*
+        version: link:../x509-path
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      asn1js:
+        specifier: 4.0.0
+        version: 4.0.0
+      pkijs:
+        specifier: 4.0.1
+        version: 4.0.1(asn1js@4.0.0)
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))

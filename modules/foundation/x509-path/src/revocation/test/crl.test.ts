@@ -466,6 +466,15 @@ describe("a verified CRL, apart from the certificate it is asked of", () => {
 		});
 	});
 
+	it("takes a distribution point's URL of 2 KiB at most, a longer one leaving its point unusable, never absent", async () => {
+		const { root } = await hierarchy();
+		const at = (length: number) => `http://crl.example/${"a".repeat(length - 19)}`;
+		const pointsOf = async (url: string) =>
+			distributionPointsOf((await issue({ cn: "client", by: root, crl: url })).certificate);
+		expect(await pointsOf(at(2048))).toEqual({ kind: "points", urls: [at(2048)], unusable: 0 });
+		expect(await pointsOf(at(2049))).toEqual({ kind: "points", urls: [], unusable: 1 });
+	});
+
 	it("takes a CRL whose number is not a non-negative INTEGER as malformed", async () => {
 		const { intermediate } = await hierarchy();
 		const numbered = (value: asn1js.BaseBlock) =>
