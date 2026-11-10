@@ -222,6 +222,25 @@ describe("a module's takes, checked before anything is built", () => {
 		expect(failing).toEqual([{ where: "broken", reason: "failed during assembly" }]);
 	});
 
+	it("tells what a point's rule says to compose after its refusal at zero, and only there", async () => {
+		const missing = "compose @x/server";
+		const one = extensionPoint<string>("one", { multiplicity: "one", missing });
+		const some = extensionPoint<string>("some", { multiplicity: "some", missing });
+		const owner = defineModule({ name: "owner", replicaSafe: true, takes: [one, some] });
+		expect(await refusalsOf(assemble({ modules: [owner], config: single }))).toEqual([
+			{ where: "one", reason: "needs exactly one contribution (0): compose @x/server" },
+			{ where: "some", reason: "needs at least one contribution: compose @x/server" },
+		]);
+		const two = defineModule({ name: "two", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(one).by(() => "a"),
+			m.contribute(one).by(() => "b"),
+			m.contribute(some).by(() => "c"),
+		]);
+		expect(await refusalsOf(assemble({ modules: [owner, two], config: single }))).toEqual([
+			{ where: "one", reason: "needs exactly one contribution (2)" },
+		]);
+	});
+
 	it("checks a point by its identity: two of one label each, one point named by two modules once", async () => {
 		const first = extensionPoint<string>("steps", { multiplicity: "some" });
 		const second = extensionPoint<string>("steps", { multiplicity: "some" });

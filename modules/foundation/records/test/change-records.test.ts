@@ -4,7 +4,14 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { type Json, type Space, type Store, spaces, store } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
-import { changeRecords, type Place, pairedRecordsAcross, recordsIn } from "../src/records.ts";
+import {
+	changeRecords,
+	keyedSetsIn,
+	type Place,
+	pairedRecordsAcross,
+	recordsIn,
+	secretRecordsIn,
+} from "../src/records.ts";
 import { memoryRecords } from "../src/testing.ts";
 
 const runtime = quietRuntime({
@@ -309,4 +316,99 @@ it("gives a record the stand-in changes a lifetime of 1 ms at least, as records 
 	});
 	// The clock stands still: the record lives its 1 ms, as the store keeps a write's least lifetime.
 	expect(await records.read("r")).toEqual({ n: 1 });
+});
+
+it("reads and writes a record under a secret with a plain one as one, and refuses a space named both ways", async () => {
+	const secrets: Space = { name: "many-secrets", guarantees: [...guarantees] };
+	const app = await assemble({
+		modules: [
+			simulatedStore().module,
+			defineModule({ name: "user", replicaSafe: true, takes: [store] }, (m) => [
+				m.contribute(spaces).by(() => lists),
+				m.contribute(spaces).by(() => secrets),
+				m.provide(opened).by((c) => c.get(store)),
+			]),
+		],
+		config: kernelConfig(),
+		runtime,
+	});
+	const random = { bytes: (n: number) => new Uint8Array(randomBytes(n)) };
+	const plain: Place = { store: app.get(opened), space: lists, random };
+	const kept: Place = { store: app.get(opened), space: secrets, random };
+	const secretRecords = secretRecordsIn<number>(kept);
+	await secretRecords.create("s3cret", 1, 60_000);
+	const changed = await changeRecords({
+		targets: [
+			{ place: plain, key: "list" },
+			{ place: kept, secret: "s3cret" },
+		],
+		decide: ([, held]) => ({
+			targets: [{ value: { ids: [] } }, { value: (held as number) + 1 }],
+		}),
+	});
+	expect(changed.targets).toEqual([
+		{ before: undefined, after: { ids: [] } },
+		{ before: 1, after: 2 },
+	]);
+	expect(await secretRecords.read("s3cret")).toBe(2);
+	await expect(
+		changeRecords({
+			targets: [
+				{ place: kept, secret: "s3cret" },
+				{ place: kept, key: secretRecords.nameOf("other") },
+			],
+			decide: () => ({}),
+		}),
+	).rejects.toThrow(/one way: plainly or by secret/);
+	await expect(
+		changeRecords({ targets: [{ place: kept, key: "group", set: true }], decide: () => ({}) }),
+	).rejects.toThrow(/records or secret records, not both/);
+});
+
+it("hands the decision the deadline its attempt is written with, as a change is", async () => {
+	const { s, listPlace } = await open();
+	const before = await s.now();
+	let deadline = 0;
+	await changeRecords({
+		targets: [{ place: listPlace, key: "timed" }],
+		decide: (_read, _watched, attempt) => {
+			deadline = attempt.deadline;
+			return { targets: [{ value: { ids: [] } }] };
+		},
+	});
+	expect(deadline).toBeGreaterThan(before);
+});
+
+it("tells the store key a target's record is kept under, plain or under a secret", async () => {
+	const { s, listPlace, listRecords } = await open();
+	await listRecords.create("known", { ids: ["a"] }, 60_000);
+	const key = changeRecords.keyOf({ place: listPlace, key: "known" });
+	expect((await s.get(key)).entry?.value).toEqual({ ids: ["a"] });
+	expect(changeRecords.keyOf({ place: listPlace, secret: "x" }).partition).toMatch(/^1\./);
+});
+
+it("reaches a keyed set as keyed sets keep it, and a set and a record of one space as one", async () => {
+	const { s, listPlace, listRecords } = await open();
+	const sets = keyedSetsIn({ ...listPlace, cap: 5, clock: { now: () => Date.now() } });
+	await sets.add("group", "one", 60_000);
+	const key = changeRecords.keyOf({ place: listPlace, key: "group", set: true });
+	expect((await s.get(key)).entry?.value).toMatchObject({ held: [["one", expect.any(Number)]] });
+	const codec = keyedSetsIn.codec({ cap: 5, clock: { now: () => Date.now() } });
+	await changeRecords({
+		targets: [{ place: listPlace, key: "group", set: true }],
+		decide: ([held]) => {
+			const added = codec.add(held, "two", Date.now() + 60_000);
+			return { targets: [added.next] };
+		},
+	});
+	expect((await sets.members("group")).map((m) => m.member)).toEqual(["one", "two"]);
+	await changeRecords({
+		targets: [
+			{ place: listPlace, key: "group", set: true },
+			{ place: listPlace, key: "group" },
+		],
+		decide: () => ({ targets: [{ remove: true }, { value: { ids: ["b"] }, lifetimeMs: 60_000 }] }),
+	});
+	expect(await sets.members("group")).toEqual([]);
+	expect(await listRecords.read("group")).toEqual({ ids: ["b"] });
 });

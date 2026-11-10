@@ -1,15 +1,15 @@
 import { extensionPoint } from "@mod/kernel";
 
 declare const made: unique symbol;
-/** Made by `records` alone, which erases and so can tell; an eraser passes it on, never writes one. */
-export type MadeByRecords = { readonly [made]: true };
+/** Made by `subject-records` alone, which erases; an eraser passes it on, never writes one. */
+export type ReportMade = { readonly [made]: true };
 
 /**
  * What erasing a subject did in one space, by the space's declared name: its records removed
  * under its tombstone (`erased`); new ones fenced by the tombstone, those kept ending by `until`,
  * a store-clock time (`fenced`); or not finished, with why (`stopped`).
  */
-export type SpaceReport = MadeByRecords &
+export type SpaceReport = ReportMade &
 	(
 		| { readonly kind: "erased"; readonly space: string; readonly removed: number }
 		| { readonly kind: "fenced"; readonly space: string; readonly until: number }
@@ -20,7 +20,7 @@ export type SpaceReport = MadeByRecords &
  * What putting one space's records written before indexing into the index did: indexed, or
  * removed as orphans proven to have no owner; or not finished, with why.
  */
-export type MigrationReport = MadeByRecords &
+export type MigrationReport = ReportMade &
 	(
 		| {
 				readonly kind: "migrated";

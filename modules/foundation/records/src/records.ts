@@ -1,171 +1,36 @@
-import { createHash } from "node:crypto";
-import {
-	BuildRefused,
-	type Clock,
-	isUnavailable,
-	type Log,
-	type Random,
-	Unavailable,
-} from "@mod/kernel";
-import {
-	type BatchWrite,
-	codePointOrder,
-	type Expiry,
-	type Json,
-	type Key,
-	type Space,
-	type Store,
-	type WriteOptions,
-} from "@mod/store";
+import { Unavailable } from "@mod/kernel";
+import type { BatchWrite, Json, Key, Store, WriteOptions } from "@mod/store";
 import { type DeferredSize, shardOf } from "./shards.ts";
+import {
+	type Attempt,
+	again,
+	type Changed,
+	claim,
+	confirmedAsRead,
+	expiryOf,
+	markedAt,
+	nameOf,
+	type Place,
+	plainDoor,
+	retried,
+	rewrite,
+	untilAnswered,
+} from "./writing/writing.ts";
 
+export {
+	checkedCap,
+	type KeyedSets,
+	type KeyedSetWrite,
+	keyedSetsIn,
+	type Member,
+	overCap,
+} from "./keyed-sets/keyed-sets.ts";
+export { type Attempt, type Changed, type Place, writeDeadline } from "./writing/writing.ts";
 export type { DeferredSize };
-
-export interface Place {
-	readonly store: Store;
-	readonly space: Space;
-	/** Where a refusal the caller cannot tell apart is told, with the space it came from. */
-	readonly log?: Log;
-	/** Where the unguessable marks that settle a resent write come from: the kernel's randomness. */
-	readonly random: Random;
-}
-
-/** What a write hands the caller deciding it: the store-clock time past which that attempt is refused. */
-export interface Attempt {
-	readonly deadline: number;
-}
-
-/** A changed value, and its new lifetime from the write, or none to end it; without one, the lifetime stays. */
-export interface Changed<T> {
-	readonly value: T;
-	readonly lifetimeMs?: number | "endless";
-}
-
-/** A write is no longer resent once the pauses between its sends add up to this. */
-const patienceMs = 10_000;
-/** How many times a write is tried again after losing a race, before it answers unavailable. */
-const attempts = 8;
-/** The first pause before a resend, doubled after each, up to the longest. */
-const firstPauseMs = 50;
-const longestPauseMs = 1000;
-const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Sends one write until the store answers. Each resend is the same request under the same mark,
- * so a write whose answer was lost gets the answer it first had and never takes effect twice.
- * Patience is counted in pauses, so no clock is read.
- */
-async function untilAnswered<A>(send: () => Promise<A>): Promise<A> {
-	let waited = 0;
-	let wait = firstPauseMs;
-	for (;;) {
-		try {
-			return await send();
-		} catch (error) {
-			if (!isUnavailable(error) || waited + wait > patienceMs) throw error;
-		}
-		await pause(wait);
-		waited += wait;
-		wait = Math.min(wait * 2, longestPauseMs);
-	}
-}
-
-/** What an attempt answers where it lost a race, or found nothing it could confirm: try again. */
-const again = Symbol("again");
-
-/** Runs `attempt` until it answers anything but `again`, at most `attempts` times; past them, unavailable. */
-async function retried<A>(attempt: () => Promise<A | typeof again>): Promise<A> {
-	for (let tried = 0; tried < attempts; tried++) {
-		const answered = await attempt();
-		if (answered !== again) return answered;
-	}
-	throw new Unavailable("records");
-}
-
-// A mark is random, not a hash of the write: two writers putting the same value on the same
-// version would share a hashed mark, and the store would answer both as the one that wrote.
-const markFrom = (place: Place) => Buffer.from(place.random.bytes(16)).toString("base64url");
-/** Writes that land after this store-clock time are refused, so a lost send cannot act later. */
-export const writeDeadline = (now: number) => now + patienceMs;
-const markedAt = (place: Place, now: number) => ({
-	idempotency: markFrom(place),
-	deadline: writeDeadline(now),
-});
-
-/** Writes a mark of its own only while the key holds what was read, at that version or none. */
-async function confirmedAsRead(
-	place: Place,
-	key: Key,
-	version: string | undefined,
-	deadline: number,
-) {
-	const markKey = { space: key.space, partition: key.partition, name: "settled" };
-	const marked = { idempotency: markFrom(place), deadline };
-	const confirmed = await untilAnswered(() =>
-		place.store.batch(
-			[version === undefined ? { key, absent: true } : { key, version }],
-			[{ key: markKey, put: true, expiry: { kind: "after", ms: 1 } }],
-			marked,
-		),
-	);
-	return confirmed.kind === "committed";
-}
-
-/**
- * Reads the key, decides on what it holds, and writes on exactly what was read, under a mark;
- * losing a race decides again on what is there now. Answers what the key held and holds now.
- */
-async function rewrite(
-	place: Place,
-	key: Key,
-	decide: (
-		current: Json | undefined,
-		attempt: Attempt,
-	) => { readonly value: Json; readonly expiry: Expiry } | undefined,
-): Promise<{ readonly before: Json | undefined; readonly after: Json | undefined }> {
-	return retried(async () => {
-		const { entry, now } = await place.store.get(key);
-		const before = entry?.value;
-		// Decided knowing the deadline this attempt is written with, a retry deciding again with its own.
-		const marked = markedAt(place, now);
-		const decided = decide(before, { deadline: marked.deadline });
-		if (!decided) {
-			if (await confirmedAsRead(place, key, entry?.version, marked.deadline)) {
-				return { before, after: before };
-			}
-			return again;
-		}
-		const options: WriteOptions = { expiry: decided.expiry, ...marked };
-		const written = entry
-			? await untilAnswered(() => place.store.replaceIf(key, entry.version, decided.value, options))
-			: await untilAnswered(() => place.store.putIfAbsent(key, decided.value, options));
-		if (written.kind === "written") return { before, after: decided.value };
-		if (written.kind === "late" || written.kind === "reused") throw new Unavailable("records");
-		return again;
-	});
-}
-
-function expiryOf(lifetimeMs: number | "endless" | undefined): Expiry {
-	if (lifetimeMs === undefined) return { kind: "keep" };
-	if (lifetimeMs === "endless") return { kind: "never" };
-	return { kind: "after", ms: Math.max(1, lifetimeMs) };
-}
-
-/** The kind each space was opened for, by store: a space's scan lists every record's key, so it holds one kind. */
-const openedFor = new WeakMap<Store, Map<string, "records" | "secret records">>();
-function claim(place: Place, kind: "records" | "secret records") {
-	const kinds = openedFor.get(place.store) ?? new Map<string, "records" | "secret records">();
-	openedFor.set(place.store, kinds);
-	const held = kinds.get(place.space.name);
-	if (held !== undefined && held !== kind) {
-		// A refusal of the boot, named by the space, so the operator reads why.
-		throw new BuildRefused(place.space.name, "a space holds records or secret records, not both");
-	}
-	kinds.set(place.space.name, kind);
-}
 
 /** Records of one shape by key, each changed atomically from what it holds. */
 export function recordsIn<T extends Json>(place: Place) {
+	plainDoor(place);
 	claim(place, "records");
 	return recordsOf<T>(place);
 }
@@ -246,11 +111,13 @@ function recordsOf<T extends Json>(place: Place) {
 
 export type Records<T extends Json> = ReturnType<typeof recordsIn<T>>;
 
-/** A record by its place and key, where `changeTogether` reads or writes it. */
-export interface Target {
-	readonly place: Place;
-	readonly key: string;
-}
+/**
+ * A record by its place and key, or by its place and the secret it is kept under, where
+ * `changeTogether` reads or writes it.
+ */
+export type Target =
+	| { readonly place: Place; readonly key: string; readonly set?: true }
+	| { readonly place: Place; readonly secret: string };
 
 /** What `changeTogether` does to one record: set it (with a lifetime, or keeping its own), or remove it; none keeps it. */
 export type Next<T> = Changed<T> | { readonly remove: true } | undefined;
@@ -268,6 +135,7 @@ export function pairedRecordsIn<T extends Json>(
 	if (!changesTogether(place.store)) {
 		refuse(where, "its store writes no records of two partitions as one");
 	}
+	plainDoor(place);
 	claim(place, "records");
 	const at = (key: string): Target => ({ place, key });
 	return {
@@ -304,13 +172,21 @@ export function changesTogether(target: Store): boolean {
 	return typeof target.batchAcross === "function";
 }
 
+/** A target's partition: its key, or the name its secret is kept by. */
+const partitionOf = (target: Target) =>
+	"secret" in target ? nameOf(target.place.space, target.secret) : target.key;
+/** Where a target is kept: a keyed set's record (`set`) as keyed sets keep it, any other as records do. */
 const recordKey = (target: Target) => ({
 	space: target.place.space,
-	partition: target.key,
-	name: "record",
+	partition: partitionOf(target),
+	name: "set" in target && target.set ? "set" : "record",
 });
 const sameTarget = (a: Target, b: Target) =>
-	a.place.space.name === b.place.space.name && a.key === b.key;
+	a.place.space.name === b.place.space.name &&
+	partitionOf(a) === partitionOf(b) &&
+	recordKey(a).name === recordKey(b).name;
+/** The kind of records a target holds its space to: under a secret, or plain, keyed sets among them. */
+const kindOf = (target: Target) => ("secret" in target ? "secret records" : "records");
 
 /** What one record held before a change of records as one, and holds after. */
 export interface ChangedRecord<T = Json> {
@@ -329,9 +205,11 @@ export interface ChangedRecord<T = Json> {
 export async function changeRecords(p: {
 	readonly targets: readonly Target[];
 	readonly watch?: (read: readonly (Json | undefined)[]) => readonly Target[];
+	/** Handed, as a change is, the deadline its attempt is written with; a retry its own. */
 	readonly decide: (
 		read: readonly (Json | undefined)[],
 		watched: readonly (Json | undefined)[],
+		attempt: Attempt,
 	) => { readonly targets?: readonly Next<Json>[]; readonly watched?: readonly Next<Json>[] };
 }): Promise<{
 	readonly targets: readonly ChangedRecord[];
@@ -342,9 +220,17 @@ export async function changeRecords(p: {
 	const target = anchor.place.store;
 	const batchAcross = target.batchAcross?.bind(target);
 	if (!batchAcross) throw new Error("the store writes no records of two partitions as one");
-	const checked = (named: Target) => {
-		if (named.place.store !== target) throw new Error("records changed together share one store");
-		claim(named.place, "records");
+	// A space is named one way in one call: plainly or by secret. A record and a set never share a name.
+	const namedAs = new Map<string, "records" | "secret records">();
+	const checked = (one: Target) => {
+		if (one.place.store !== target) throw new Error("records changed together share one store");
+		const kind = kindOf(one);
+		if ((namedAs.get(one.place.space.name) ?? kind) !== kind) {
+			throw new Error("records changed together name a space one way: plainly or by secret");
+		}
+		namedAs.set(one.place.space.name, kind);
+		// A set's space holds records, as keyedSetsIn claims it.
+		claim(one.place, kind);
 	};
 	p.targets.forEach((named, at) => {
 		checked(named);
@@ -374,6 +260,7 @@ export async function changeRecords(p: {
 		const decided = p.decide(
 			read,
 			watchedAt.map((at) => held[at]?.value),
+			{ deadline: marked.deadline },
 		);
 		const nexts: Next<Json>[] = held.map(() => undefined);
 		const set = (at: number, next: Next<Json>) => {
@@ -420,6 +307,12 @@ export async function changeRecords(p: {
 		};
 	});
 }
+
+/**
+ * The store key a target's record is kept under, as `changeRecords` reads and writes it: for
+ * subject-records, which reads such records through the store, never writing to read.
+ */
+changeRecords.keyOf = (target: Target): Key => recordKey(target);
 
 /**
  * Changes two records as one, from what both hold and what `watch` names besides, as
@@ -485,6 +378,8 @@ export function pairedRecordsAcross<A extends Json, B extends Json>(
 			"its two spaces declare other guarantees, so a fault could keep one and drop the other",
 		);
 	}
+	plainDoor(first);
+	plainDoor(second);
 	claim(first, "records");
 	claim(second, "records");
 	type Read = {
@@ -561,24 +456,25 @@ export function pairedRecordsAcross<A extends Json, B extends Json>(
 
 /** Records under a name made per space from an unguessable secret; the store never receives it. */
 export function secretRecordsIn<T extends Json>(place: Place) {
+	plainDoor(place);
 	claim(place, "secret records");
 	const named = recordsOf<T>(place);
-	const nameOf = (secret: string) =>
-		`1.${createHash("sha256").update(`${place.space.name}\n${secret}`).digest("base64url")}`;
+	const nameFor = (secret: string) => nameOf(place.space, secret);
 	return {
-		nameOf,
+		nameOf: nameFor,
 		create: (secret: string, value: T, lifetimeMs: number | "endless") =>
-			named.create(nameOf(secret), value, lifetimeMs),
-		read: (secret: string) => named.read(nameOf(secret)),
+			named.create(nameFor(secret), value, lifetimeMs),
+		read: (secret: string) => named.read(nameFor(secret)),
 		change: (secret: string, change: (current: T) => Changed<T> | undefined) =>
-			named.change(nameOf(secret), change),
-		remove: (secret: string) => named.remove(nameOf(secret)),
+			named.change(nameFor(secret), change),
+		remove: (secret: string) => named.remove(nameFor(secret)),
 		named,
 	};
 }
 
 /** Work that must be done later, kept until it is said done. */
 export function deferredIn(place: Place & DeferredSize) {
+	plainDoor(place);
 	const shardKey = (shard: number) => ({
 		space: place.space,
 		partition: `jobs-${shard}`,
@@ -627,121 +523,3 @@ export function deferredIn(place: Place & DeferredSize) {
 }
 
 export type Deferred = ReturnType<typeof deferredIn>;
-
-export interface Member {
-	readonly member: string;
-	readonly remainingMs: number;
-}
-
-const clearingMs = 10 * 60_000;
-
-export function overCap<T extends readonly [string, number]>(
-	byEnd: readonly T[],
-	added: string,
-	cap: number,
-) {
-	const over = Math.max(0, byEnd.length - cap);
-	const out = new Set(
-		byEnd
-			.filter(([name]) => name !== added)
-			.slice(0, over)
-			.map(([name]) => name),
-	);
-	return { held: byEnd.filter(([name]) => !out.has(name)), out: [...out] };
-}
-
-export function checkedCap(cap: number): number {
-	if (!Number.isInteger(cap) || cap < 1)
-		throw new TypeError("records: a set's cap is a whole number from 1");
-	return cap;
-}
-
-/** Sets of members by key, at most `cap` to a key, ending on the kernel's clock; what an add pushes out awaits in the same write. */
-export function keyedSetsIn(place: Place & { readonly cap: number; readonly clock: Clock }) {
-	const cap = checkedCap(place.cap);
-	const keyOf = (key: string) => ({ space: place.space, partition: key, name: "set" });
-	type Pair = readonly [string, number];
-	const isPair = (item: Json): item is Pair =>
-		Array.isArray(item) && typeof item[0] === "string" && typeof item[1] === "number";
-	const pairsIn = (value: Json | undefined) => (Array.isArray(value) ? value : []).filter(isPair);
-	const contentOf = (value: Json | undefined) => {
-		if (Array.isArray(value) || typeof value !== "object" || value === null) {
-			return { held: pairsIn(value), awaiting: [] as Pair[] };
-		}
-		const kept = value as { readonly held?: Json; readonly awaiting?: Json };
-		return { held: pairsIn(kept.held), awaiting: pairsIn(kept.awaiting) };
-	};
-	const live = (pairs: readonly Pair[], now: number) => pairs.filter(([, ends]) => ends > now);
-	const written = (held: readonly Pair[], awaiting: readonly Pair[], now: number) => {
-		const last = Math.max(...held.map(([, end]) => end), ...awaiting.map(([, end]) => end), now);
-		return {
-			value: { held: [...held], awaiting: [...awaiting] } as Json,
-			expiry: { kind: "after" as const, ms: Math.max(1, last - now) + clearingMs },
-		};
-	};
-	const byMember = (pairs: readonly Pair[]) => pairs.map(([member]) => member).sort(codePointOrder);
-	return {
-		add: async (
-			key: string,
-			member: string,
-			lifetimeMs: number,
-		): Promise<{ readonly pushedOut: readonly string[] }> => {
-			// The end is fixed at the add, so a write that lands late never shortens it.
-			const ends = place.clock.now() + lifetimeMs;
-			let pushedOut: string[] = [];
-			await rewrite(place, keyOf(key), (current) => {
-				const now = place.clock.now();
-				const content = contentOf(current);
-				const kept = new Map(live(content.held, now));
-				kept.set(member, Math.max(kept.get(member) ?? 0, ends));
-				const byEnd = [...kept].sort((a, b) => a[1] - b[1] || codePointOrder(a[0], b[0]));
-				const { held, out } = overCap(byEnd, member, cap);
-				pushedOut = out;
-				const awaiting = new Map(live(content.awaiting, now));
-				for (const name of out) awaiting.set(name, kept.get(name) ?? now);
-				return written(held, [...awaiting], now);
-			});
-			if (pushedOut.length > 0) {
-				place.log?.warn("records.pushed_out", { space: place.space.name, count: pushedOut.length });
-			}
-			return { pushedOut };
-		},
-		members: async (key: string): Promise<readonly Member[]> => {
-			const { entry } = await place.store.get(keyOf(key));
-			const now = place.clock.now();
-			return live(contentOf(entry?.value).held, now)
-				.map(([member, ends]) => ({ member, remainingMs: ends - now }))
-				.sort((a, b) => codePointOrder(a.member, b.member));
-		},
-		remove: async (key: string, member: string): Promise<void> => {
-			await rewrite(place, keyOf(key), (current) => {
-				if (current === undefined) return undefined;
-				const { held, awaiting } = contentOf(current);
-				const now = place.clock.now();
-				return written(
-					held.filter(([name]) => name !== member),
-					live(awaiting, now),
-					now,
-				);
-			});
-		},
-		awaiting: async (key: string): Promise<readonly string[]> => {
-			const { entry } = await place.store.get(keyOf(key));
-			return byMember(live(contentOf(entry?.value).awaiting, place.clock.now()));
-		},
-		settled: async (key: string, member: string): Promise<void> => {
-			await rewrite(place, keyOf(key), (current) => {
-				if (current === undefined) return undefined;
-				const { held, awaiting } = contentOf(current);
-				const now = place.clock.now();
-				return written(
-					held,
-					live(awaiting, now).filter(([name]) => name !== member),
-					now,
-				);
-			});
-		},
-	};
-}
-
-export type KeyedSets = ReturnType<typeof keyedSetsIn>;
