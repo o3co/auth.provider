@@ -15,6 +15,7 @@ import { federationGrantsConfig } from "@mod/federation-grants/testing";
 import { type HttpRequest, type HttpResponse, type Route, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	contract,
@@ -222,6 +223,7 @@ export async function connector(
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			relisting,
 			secretHashModule,
 			cookiesModule,
