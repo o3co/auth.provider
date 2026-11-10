@@ -360,3 +360,17 @@ it("reads and writes a record under a secret with a plain one as one, and refuse
 		}),
 	).rejects.toThrow(/by key or by secret, not both/);
 });
+
+it("hands the decision the deadline its attempt is written with, as a change is", async () => {
+	const { s, listPlace } = await open();
+	const before = await s.now();
+	let deadline = 0;
+	await changeRecords({
+		targets: [{ place: listPlace, key: "timed" }],
+		decide: (_read, _watched, attempt) => {
+			deadline = attempt.deadline;
+			return { targets: [{ value: { ids: [] } }] };
+		},
+	});
+	expect(deadline).toBeGreaterThan(before);
+});

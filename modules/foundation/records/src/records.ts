@@ -202,9 +202,11 @@ export interface ChangedRecord<T = Json> {
 export async function changeRecords(p: {
 	readonly targets: readonly Target[];
 	readonly watch?: (read: readonly (Json | undefined)[]) => readonly Target[];
+	/** Handed, as a change is, the deadline its attempt is written with; a retry its own. */
 	readonly decide: (
 		read: readonly (Json | undefined)[],
 		watched: readonly (Json | undefined)[],
+		attempt: Attempt,
 	) => { readonly targets?: readonly Next<Json>[]; readonly watched?: readonly Next<Json>[] };
 }): Promise<{
 	readonly targets: readonly ChangedRecord[];
@@ -254,6 +256,7 @@ export async function changeRecords(p: {
 		const decided = p.decide(
 			read,
 			watchedAt.map((at) => held[at]?.value),
+			{ deadline: marked.deadline },
 		);
 		const nexts: Next<Json>[] = held.map(() => undefined);
 		const set = (at: number, next: Next<Json>) => {
