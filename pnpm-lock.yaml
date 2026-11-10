@@ -1029,6 +1029,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
