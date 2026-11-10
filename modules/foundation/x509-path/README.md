@@ -17,7 +17,7 @@
 - CRL, OCSP: `revocation`'s `distributionPointsOf`, `verifyCrl`, `crlSays`, `ocspUrlsOf`, `ocspRequestOf` and `judgeOcsp`, as its card says.
 - `./testing`: a test authority for its own and its callers' tests.
   - Keys: `ecKeys`, `rsaKeys`, `pssKeys`. Certificates: `issue`, `hierarchy` (a root, an intermediate and a client leaf), `pemOf`, and `restated` (another algorithm stated beside the signature).
-  - Revocation: `crlOf`, `ocspOf`, and `pointAt`, a distribution point. Names for constraints: `dns`, `ip`, `subtree`.
+  - Revocation (CRLs and OCSP answers): `crlOf`, `ocspOf`, and `pointAt`, a distribution point. Names for constraints: `dns`, `ip`, `subtree`.
 
 ## Invariants
 - The path is chosen by the internal module `choice`, bounded and every edge checked, and the engine validates that chain alone, each certificate's issuer the next on it.
