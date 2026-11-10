@@ -4,6 +4,7 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, switchedModule, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { type Sessions, sessions } from "@mod/session";
@@ -37,6 +38,7 @@ async function serve() {
 			cookiesModule,
 			audit.module,
 			http,
+			httpServer,
 			switchedModule(sessionStandIn, sessions, down),
 			sessionParticipants,
 			subjectRevocationStandIn,
