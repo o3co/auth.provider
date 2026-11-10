@@ -23,7 +23,8 @@
 
 ## Data
 - CRLs as verified once when fetched, by location and the issuer whose key verified them, until their next update, their issuer's end, or their time to live; each check judges what was kept.
-- The serials kept CRLs list are held to 2^19 together (measured, not a bound: some 46 to 60 MiB at the full budget; `x509-path` holds a serial to 20 octets and keeps copies alone), the oldest CRLs going first; one listing more alone is not kept. A process composing `outbound` holds as much again in its own, some 120 MiB of kept CRLs at worst.
+- The serials kept CRLs list are held to 2^19 together, the oldest CRLs going first; one listing more alone is not kept. Their serial maps, measured: some 46 to 60 MiB at the full budget (`x509-path` holds a serial to 20 octets and keeps copies alone); with `outbound`'s, some 92 to 120 MiB a process. Apart from them: each body's issuer name, 4 KiB at most, and the one being read, a measured case.
+- A CRL is read after its fetch gives its place back, so the bodies waiting to be read are bounded not by `outbound`'s `max-concurrent` but by the distinct CRL locations the trusted client CAs name within `revocation.hosts`, 1 MiB each.
 - OCSP answers by the issuer's name and key and the serial, until they end or their signer does.
 - A revocation other than a hold (certificateHold), by issuer and serial, after what said it ends; a hold is asked again.
 - A failed source, not asked again for a while.
