@@ -13,7 +13,7 @@ const { namesFromSecret: recordsFor, ...guaranteeFor } = {
 } satisfies Record<keyof typeof codeStoreNeeds, Guarantee | typeof secretRecordsIn>;
 const guarantees = Object.values(guaranteeFor);
 const codes: Space = { name: "code-grant-store.codes", guarantees };
-const voids: Space = { name: "code-grant-store.voids", guarantees };
+const voids: Space = { name: "code-grant-store.voids", guarantees, subjectData: "none" };
 
 // Safe on many instances given the same `void-shards` and `voids-per-shard` on each
 // (deployment-guarantees, Several instances): void codes go to a shard by their hash, and a sweep
