@@ -10,6 +10,7 @@ Internal module of `kernel`: the clock, randomness and log every module is given
 
 ## Offers
 - `Clock`, `Random`, `Log`, `LogLevel`, `LogFields`, `LogLine`, `LogSink` and `Runtime`; `systemClock` and `systemRandom`.
+- `Clock`: `now()`, epoch ms; and, optional, `monotonic()`: milliseconds from an arbitrary origin, never going back; only differences mean anything, never comparable to `now()`. `systemClock` gives both; a clock a test writes may give `now()` alone.
 - `logSinks`, `thresholds` and `Threshold`; `routedLog` (level, clock, the sinks once built) and `guardedLog` (a test's log, made never to throw).
 
 ## Invariants

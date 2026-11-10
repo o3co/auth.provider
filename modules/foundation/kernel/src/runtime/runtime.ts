@@ -1,7 +1,13 @@
 import { randomBytes } from "node:crypto";
 
 export interface Clock {
+	/** Epoch ms. */
 	now(): number;
+	/**
+	 * Milliseconds from an arbitrary origin, never going back; only differences mean anything, never
+	 * comparable to `now()`. A clock may give none.
+	 */
+	monotonic?(): number;
 }
 
 export interface Random {
@@ -56,7 +62,10 @@ export interface Runtime {
 	readonly log: Log;
 }
 
-export const systemClock: Clock = Object.freeze({ now: () => Date.now() });
+export const systemClock: Clock = Object.freeze({
+	now: () => Date.now(),
+	monotonic: () => performance.now(),
+});
 
 export const systemRandom: Random = Object.freeze({
 	bytes: (length: number) => new Uint8Array(randomBytes(length)),
