@@ -25,7 +25,7 @@
   - `requests` (requests per source in each window, over both methods) and `window`.
   - `claims-parameter`, true by default: a claims request's names and value constraints are taken, and discovery says `claims_parameter_supported`. False ignores them and warns at boot `authorize.claims_parameter_off`; what else a claims request asks still holds, as `claims-request` and `flow` say.
 - Audit events to `audit`: declared in `./audit-events`, listed in the audit event reference. Never the code, `state`, the redirect URI or the scope; none for a malformed request, an unknown client or redirect URI, nor for unavailable, which only warns, naming what and the route (`http.unavailable` before the redirect URI is confirmed, `authorize.unavailable` after).
-- Test configuration builders (`./testing`)
+- `./testing`: `authorizeConfig`, a test configuration builder
 
 ## Invariants
 - Requests are limited per source by `rate-limit`'s policy, declared on both routes; over it, `429`.
