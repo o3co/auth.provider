@@ -1,7 +1,7 @@
 import { erasureMarks } from "@mod/erasure-extensions";
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
-import { store } from "@mod/store";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { store, storeControl } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import {
 	boundaryStore,
@@ -133,4 +133,24 @@ describe("subject-revocation's erasure over the wiring", () => {
 		const unguarded = await composed(false, (s) => s.unreachable(true));
 		expect(unguarded.app).toBeDefined();
 	});
+});
+
+it("boots over a store that offers no control record, erasure unknown: it warns at every start and never fences", async () => {
+	const simulated = simulatedStore();
+	// A store adapter of 0.19: the simulated store's own provisions but its control record.
+	const uncontrolled = {
+		...simulated.module,
+		provides: (simulated.module.provides ?? []).filter((p) => p.contract !== storeControl),
+	};
+	const recorded = recordingLog();
+	const app = await assemble({
+		modules: [uncontrolled, wiring, revocationModule],
+		config: kernelConfig(),
+		runtime: quietRuntime({ clock: { now: () => 1_800_000_000_000 }, log: recorded.log }),
+	});
+	expect(app.get(boundaryStore).erasureEnabled).toBeUndefined();
+	expect(recorded.lines().map((line) => line.event)).toContain(
+		"subject-revocation.erasure_unknown",
+	);
+	expect(await app.get(erasureFence).fence("alice", "r1")).toBe("passed");
 });
