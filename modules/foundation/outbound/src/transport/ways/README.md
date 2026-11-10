@@ -19,5 +19,8 @@ Internal module of `transport`: the way a request reaches its destination: direc
 - Plain http, a `plain-loopback` or `plain-internal` pair's, never goes through the proxy: outbound resolves the name and checks every address itself. Signed material the caller asks the proxy to carry (outbound's CRL fetch) goes to it in absolute form (`GET http://…`, the destination its Host, `proxy-authorization` the proxy's alone), but to `direct-hosts`; the proxy resolves and checks the name, outbound only an address the URL writes; the answer is read as any other.
 - For plain http taken as such a pair's (signed material too), to a host and port `plain-ipv4` names, the name is resolved to IPv4 addresses alone: every one of those is checked by the policy, the first reached, and an IPv6 one is neither checked nor reached. Other ports of the name, https to it, and plain http not taken as the pair's resolve every family.
 
+## Vocabulary
+- `proxy-refused`: the request was refused at the proxy hop, as far as the answer can tell. A CONNECT: any answer but 200, as only the proxy answers it and no tunnel was made. An absolute-form GET (a CRL's): 407, and 403 or 405 as the proxy's at best, a destination may answer them too; a 5xx stays `unreachable`, as it may be the destination's.
+
 ## Depends on
 - `outbound-policy` (address checks), `tls`, the package's contract (unavailable and its failure), `transport`'s types; node's `http`, `https`, `net` and `tls`

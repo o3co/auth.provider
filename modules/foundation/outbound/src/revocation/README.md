@@ -15,7 +15,7 @@
 - Each certificate on it but the anchor is checked by its issuer's CRL. No CRL distribution points: nothing to ask, good. Points unreadable: `malformed`; none for every reason by the issuer: `unsupported`; https alone: `https-only`; at no host listed: `unlisted`. Two plain http points at most are fetched.
 - An issuer's CRL comes through the internal module `fetching` (once for every check waiting, failures remembered, fetched again when due), fetched by the package's `crl-fetch` as signed material, through the proxy where one is set, and kept by the internal module `kept` (high-water marks, bounds), as their cards say.
 - A revocation other than a hold stands, by issuer and serial, though a later CRL leaves it out; a hold is asked again.
-- Log lines carry a reason and a count, never a host, a URL or a parser's words: `outbound.revocation_unconfirmed` (debug where `accept-unconfirmed`), `outbound.revocation_revoked`, each reason at most once a minute, counting those since.
+- Log lines carry a reason and a count, never a host, a URL or a parser's words (`proxy-refused` as `transport`'s `ways` card defines it): `outbound.revocation_unconfirmed` (debug where `accept-unconfirmed`), `outbound.revocation_revoked`, each reason at most once a minute, counting those since.
 - Cost: a check under one intermediate, its CRLs kept, about 2.6 ms, beside the path's choice `x509-path` measures against the store.
 
 ## Data
