@@ -13,7 +13,7 @@
 - `pairedRecordsIn` pairs a place's records so, and `pairedRecordsAcross` the records of two places, each refusing through the builder's `refuse` where its store cannot; `pairedRecordsAcross` also where its places are on two stores or their spaces declare other guarantees.
 - Records under a secret: the same but the scan (which their `named` records, reached by name, keep), kept under a name made from the secret, reached by secret or by name. They hold short-lived values only, so a rotation waits them out and they need no scan.
 - Deferred work: add, done, and each, which hands the work over; work that fails stays and is counted.
-- Keyed sets: add a member for a lifetime (answering those pushed out over the cap), the members with their time left, remove a member; the members pushed out and awaiting, and settling one. `keyedSetsIn.codec` (a cap and a clock) is the set's format at rest, its only definition: `keyedSetsIn` writes with it, and subject-records composes it inside `changeRecords`.
+- Keyed sets: add a member for a lifetime (answering those pushed out over the cap), the members with their time left, remove a member; the members pushed out and awaiting, and settling one. `keyedSetsIn.codec` (a cap and a clock) is the set's format at rest, its only definition: `keyedSetsIn` writes with it, and subject-records composes it inside `changeRecords`. (Internal module `keyed-sets`.)
 - No contract of its own: the wiring builds each over a place, with the cap and `kernel`'s clock for keyed sets.
 - Test stand-ins (`./testing`): records (several of them changed together too), deferred work and keyed sets in memory, a race on demand, and jobs that crowd one shard.
 
@@ -26,9 +26,6 @@
 - Records and deferred work leave expiry to the store; keyed sets read only `kernel`'s clock; no two clocks are compared.
 - Records hold JSON values. A change without a lifetime keeps the record's; a change's lifetime under 1 ms is 1 ms.
 - A conditional removal is a change: where the record holds what the caller expects, it changes it to a 1 ms lifetime, and from a millisecond later it is read no more.
-- A keyed set is one record per key, rewritten whole, so its cap stays small; anything in it that is not a member is no member.
-- A member ends at its add's time plus its lifetime on `kernel`'s clock, however late the write lands; the set is kept ten minutes past its last end, a fixed storage margin. What an add pushes out awaits in that same write, until its caller settles it or its end passes, so a caller stopped between the add and its own work finds it again. A set kept as a bare list, as before, reads as members alone.
-- Over the cap, the other members ending first are pushed out (ties by code point order), never the one being added, and that is logged with the space. A cap is a whole number from 1.
 - Deferred work is split over shards of a size the wiring decides; a full shard refuses an add as unavailable and logs it with the space, and nothing kept is pushed out.
 - Work stays until done; adding listed work writes again, as the listing may be another request's not yet confirmed.
 - A secret's name is `1.` and the base64url SHA-256 of the space's name, a line feed and the secret; the store never receives the secret.
