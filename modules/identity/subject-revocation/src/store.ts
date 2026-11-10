@@ -41,7 +41,8 @@ export interface BoundaryStore {
 	 * where it holds none), for the lifetime it answers, in one write held by the boundary as read:
 	 * `allowed` runs again when the boundary changes first, so it is pure. Writes nothing where it
 	 * answers none. Answers the receipt held under `receiptId` before the write and after it. Where
-	 * it is absent, erasure cannot be enabled (`subject-revocation`'s boot gate).
+	 * it is absent, the composition is unguarded: the boot gate refuses it where erasure reads
+	 * enabled; where `erasureEnabled` is absent too, that cannot be read, the stated exclusion.
 	 */
 	fence?(
 		subject: string,
@@ -54,7 +55,8 @@ export interface BoundaryStore {
 	/**
 	 * Whether erasure is enabled for the store's data: read as the store keeps it, and once enabled
 	 * in any epoch, enabled. Where it is absent, erasure is taken as off at start and for readiness,
-	 * with a warning at every start, and a store with `fence` fences every bundle; 0.22 refuses it.
+	 * with a warning at every start, and a store with `fence` fences every bundle of a guarded
+	 * composition; 0.22 refuses it.
 	 */
 	erasureEnabled?(): Promise<boolean>;
 }
@@ -62,8 +64,8 @@ export interface BoundaryStore {
 export const boundaryStore = contract<BoundaryStore>("subject-revocation.boundary-store");
 
 /**
- * A boundary store's `fence` where its store `can` fence, made then and only then, and none
- * where it cannot: a wiring spreads the answer with no branch of its own.
+ * A boundary store's `fence` where its store `can` write the receipt and the boundary as one, made
+ * then and only then, and none where it cannot: a wiring spreads the answer with no branch of its own.
  */
 export function fenceWhere(
 	can: boolean,
