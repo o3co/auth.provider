@@ -68,6 +68,13 @@ export function distributionPointsOf(cert: pkijs.Certificate): DistributionPoint
 	};
 }
 
+/**
+ * Whether an INTEGER's value fits in 20 octets, as RFC 5280 holds a serial number (§4.1.2.2) and a
+ * CRLNumber (§5.2.3): a 0x00 that only marks it positive is not counted.
+ */
+const withinOctets = (bytes: Uint8Array) =>
+	(bytes.length > 1 && bytes[0] === 0 ? bytes.length - 1 : bytes.length) <= 20;
+
 /** The most bytes of a CRL read; a dense one of 1 MiB lists some 45,000 serials. */
 const mostCrlBytes = 1 << 20;
 
@@ -202,6 +209,7 @@ async function readCrl(
 	}
 	const listed = new Map<string, { readonly held: boolean }>();
 	for (const entry of entries) {
+		if (!withinOctets(entry.userCertificate.valueBlock.valueHexView)) return unusable("malformed");
 		const reason = entry.crlEntryExtensions?.extensions.find((e) => e.extnID === oid.reasonCode);
 		const read = reason && decoded(reason.extnValue.valueBlock.valueHexView, (schema) => schema);
 		listed.set(hex(entry.userCertificate.valueBlock.valueHexView), isHold(read) ? held : revoked);
@@ -210,7 +218,7 @@ async function readCrl(
 	const read = number && decoded(number.extnValue.valueBlock.valueHexView, (schema) => schema);
 	// A CRLNumber is a non-negative INTEGER (RFC 5280 §5.2.3); any other is a CRL unread.
 	const bytes = read instanceof asn1js.Integer ? read.valueBlock.valueHexView : undefined;
-	if (number && (bytes === undefined || ((bytes[0] ?? 0) & 0x80) !== 0))
+	if (number && (bytes === undefined || ((bytes[0] ?? 0) & 0x80) !== 0 || !withinOctets(bytes)))
 		return unusable("malformed");
 	return {
 		kind: "verified",

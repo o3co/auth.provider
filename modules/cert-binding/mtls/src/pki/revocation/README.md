@@ -22,7 +22,7 @@
 - One check fetches from at most the policy's number of sources; past them is an outage, not remembered as failing.
 
 ## Data
-- CRLs as verified once when fetched, by location and the issuer whose key verified them, until their next update, their issuer's end, or their time to live; each check judges what was kept. The serials they list are held to 2^20 together (x509-path keeps some 47 B a serial, so some 50 MB), the oldest CRLs going first; one listing more alone is not kept. A process composing `outbound` holds as much again in its own.
+- CRLs as verified once when fetched, by location and the issuer whose key verified them, until their next update, their issuer's end, or their time to live; each check judges what was kept. The serials they list are held to 2^20 together (measured near 76 B a serial with 16-byte serials, so some 76 MiB at the full budget; `x509-path` holds a serial to 20 octets), the oldest CRLs going first; one listing more alone is not kept. A process composing `outbound` holds as much again in its own.
 - OCSP answers by the issuer's name and key and the serial, until they end or their signer does.
 - A revocation other than a hold (certificateHold), by issuer and serial, after what said it ends; a hold is asked again.
 - A failed source, not asked again for a while.
