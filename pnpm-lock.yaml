@@ -3452,6 +3452,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
