@@ -17,6 +17,7 @@ import {
 	type Store,
 	type WriteOptions,
 } from "@mod/store";
+import { kept, opened, ownersValue } from "./envelope/envelope.ts";
 import { type DeferredSize, shardOf } from "./shards.ts";
 
 export type { DeferredSize };
@@ -145,6 +146,26 @@ async function rewrite(
 	});
 }
 
+/**
+ * As `rewrite`, deciding on the value the key holds out of its envelope, and writing the decided
+ * one back in the envelope it was read in: answers the values, out of theirs.
+ */
+async function rewriteOpened(
+	place: Place,
+	key: Key,
+	decide: (
+		current: Json | undefined,
+		attempt: Attempt,
+	) => { readonly value: Json; readonly expiry: Expiry } | undefined,
+): Promise<{ readonly before: Json | undefined; readonly after: Json | undefined }> {
+	const { before, after } = await rewrite(place, key, (current, attempt) => {
+		const found = opened(current);
+		const decided = decide(found.value, attempt);
+		return decided && { value: kept(decided.value, found.subject), expiry: decided.expiry };
+	});
+	return { before: opened(before).value, after: opened(after).value };
+}
+
 function expiryOf(lifetimeMs: number | "endless" | undefined): Expiry {
 	if (lifetimeMs === undefined) return { kind: "keep" };
 	if (lifetimeMs === "endless") return { kind: "never" };
@@ -195,7 +216,9 @@ function recordsOf<T extends Json>(place: Place) {
 					expiry: lifetimeMs === "endless" ? { kind: "never" } : { kind: "after", ms: lifetimeMs },
 					...marked,
 				};
-				const made = typeof value === "function" ? value({ deadline: marked.deadline }) : value;
+				const made = ownersValue(
+					typeof value === "function" ? value({ deadline: marked.deadline }) : value,
+				);
 				const written = await untilAnswered(() =>
 					place.store.putIfAbsent(keyOf(key), made, options),
 				);
@@ -210,7 +233,7 @@ function recordsOf<T extends Json>(place: Place) {
 			}),
 		read: async (key: string): Promise<T | undefined> => {
 			const { entry } = await place.store.get(keyOf(key));
-			return entry?.value as T | undefined;
+			return opened(entry?.value).value as T | undefined;
 		},
 		/**
 		 * Removes the record whatever it holds. An absence may be another's removal not confirmed yet,
@@ -234,9 +257,11 @@ function recordsOf<T extends Json>(place: Place) {
 			key: string,
 			change: (current: T, attempt: Attempt) => Changed<T> | undefined,
 		): Promise<{ readonly before: T; readonly after: T } | undefined> => {
-			const { before, after } = await rewrite(place, keyOf(key), (current, attempt) => {
+			const { before, after } = await rewriteOpened(place, keyOf(key), (current, attempt) => {
 				const changed = current === undefined ? undefined : change(current as T, attempt);
-				return changed && { value: changed.value, expiry: expiryOf(changed.lifetimeMs) };
+				return (
+					changed && { value: ownersValue(changed.value), expiry: expiryOf(changed.lifetimeMs) }
+				);
 			});
 			if (before === undefined) return undefined;
 			return { before: before as T, after: after as T };
@@ -355,20 +380,24 @@ export async function changeRecords(p: {
 	return retried(async () => {
 		const marked = markedAt(anchor.place, await target.now());
 		// Each record held once: the targets, then what the watch names besides.
-		const held: { target: Target; version: string | undefined; value: Json | undefined }[] =
-			await Promise.all(
-				p.targets.map(async (named) => {
-					const { entry } = await target.get(recordKey(named));
-					return { target: named, version: entry?.version, value: entry?.value };
-				}),
-			);
+		const held: {
+			target: Target;
+			version: string | undefined;
+			value: Json | undefined;
+			subject?: string | undefined;
+		}[] = await Promise.all(
+			p.targets.map(async (named) => {
+				const { entry } = await target.get(recordKey(named));
+				return { target: named, version: entry?.version, ...opened(entry?.value) };
+			}),
+		);
 		const read = held.map((h) => h.value);
 		const named = p.watch?.(read) ?? [];
 		for (const watched of named) {
 			checked(watched);
 			if (held.some((h) => sameTarget(h.target, watched))) continue;
 			const { entry } = await target.get(recordKey(watched));
-			held.push({ target: watched, version: entry?.version, value: entry?.value });
+			held.push({ target: watched, version: entry?.version, ...opened(entry?.value) });
 		}
 		const watchedAt = named.map((w) => held.findIndex((h) => sameTarget(h.target, w)));
 		const decided = p.decide(
@@ -392,7 +421,8 @@ export async function changeRecords(p: {
 			const next = nexts[at];
 			if (next === undefined) return [];
 			if ("remove" in next) return [{ key: recordKey(h.target), remove: true as const }];
-			return [{ key: recordKey(h.target), put: next.value, expiry: expiryOf(next.lifetimeMs) }];
+			const put = kept(ownersValue(next.value), h.subject);
+			return [{ key: recordKey(h.target), put, expiry: expiryOf(next.lifetimeMs) }];
 		});
 		// Nothing to write: what was read is confirmed by a mark of its own, held by the same conditions.
 		const sent =
@@ -689,7 +719,7 @@ export function keyedSetsIn(place: Place & { readonly cap: number; readonly cloc
 			// The end is fixed at the add, so a write that lands late never shortens it.
 			const ends = place.clock.now() + lifetimeMs;
 			let pushedOut: string[] = [];
-			await rewrite(place, keyOf(key), (current) => {
+			await rewriteOpened(place, keyOf(key), (current) => {
 				const now = place.clock.now();
 				const content = contentOf(current);
 				const kept = new Map(live(content.held, now));
@@ -709,12 +739,12 @@ export function keyedSetsIn(place: Place & { readonly cap: number; readonly cloc
 		members: async (key: string): Promise<readonly Member[]> => {
 			const { entry } = await place.store.get(keyOf(key));
 			const now = place.clock.now();
-			return live(contentOf(entry?.value).held, now)
+			return live(contentOf(opened(entry?.value).value).held, now)
 				.map(([member, ends]) => ({ member, remainingMs: ends - now }))
 				.sort((a, b) => codePointOrder(a.member, b.member));
 		},
 		remove: async (key: string, member: string): Promise<void> => {
-			await rewrite(place, keyOf(key), (current) => {
+			await rewriteOpened(place, keyOf(key), (current) => {
 				if (current === undefined) return undefined;
 				const { held, awaiting } = contentOf(current);
 				const now = place.clock.now();
@@ -727,10 +757,10 @@ export function keyedSetsIn(place: Place & { readonly cap: number; readonly cloc
 		},
 		awaiting: async (key: string): Promise<readonly string[]> => {
 			const { entry } = await place.store.get(keyOf(key));
-			return byMember(live(contentOf(entry?.value).awaiting, place.clock.now()));
+			return byMember(live(contentOf(opened(entry?.value).value).awaiting, place.clock.now()));
 		},
 		settled: async (key: string, member: string): Promise<void> => {
-			await rewrite(place, keyOf(key), (current) => {
+			await rewriteOpened(place, keyOf(key), (current) => {
 				if (current === undefined) return undefined;
 				const { held, awaiting } = contentOf(current);
 				const now = place.clock.now();
