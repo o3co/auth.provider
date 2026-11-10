@@ -10,6 +10,7 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { type HttpResponse, listening, type Route, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { type MetadataItem, metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
@@ -153,6 +154,7 @@ export async function harness(
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			keysModule,
 			issuerModule,
 			memoryUsersStores().module,
