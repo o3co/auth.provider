@@ -20,11 +20,18 @@ const unconfirmed = (reason: Unconfirmed): Verdict => ({ kind: "unconfirmed", re
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
 
-/** An issuer as its CRLs are kept: its name's DER and its key's SHA-256. */
-const issuerKeyOf = (issuer: Certificate) =>
-	`${hex(new Uint8Array(issuer.subject.toSchema().toBER(false)))} ${createHash("sha256")
+/** The most bytes an issuer's name may take, keyed by: a CRL naming a longer one is refused anyway. */
+const mostNameBytes = 4096;
+
+/** An issuer as its CRLs are kept: its name's DER and its key's SHA-256; none for a name past the bound. */
+const issuerKeyOf = (issuer: Certificate) => {
+	const name = new Uint8Array(issuer.subject.toSchema().toBER(false));
+	if (name.byteLength > mostNameBytes) return undefined;
+	const key = createHash("sha256")
 		.update(new Uint8Array(issuer.subjectPublicKeyInfo.toSchema().toBER(false)))
-		.digest("hex")}`;
+		.digest("hex");
+	return `${hex(name)} ${key}`;
+};
 
 /**
  * Checks a peer's revocation: the one path `x509-path` chooses from what the peer sent toward the
@@ -49,6 +56,7 @@ export function revocationOver(given: {
 		if (points.kind === "none") return good;
 		if (points.kind === "unconfirmed") return unconfirmed(points.reason);
 		const key = issuerKeyOf(issuer);
+		if (key === undefined) return unconfirmed("malformed");
 		const serial = hex(cert.serialNumber.valueBlock.valueHexView);
 		if (kept.isRevoked(key, serial)) return revoked;
 		const crl = await crls.crlFor(key, issuer, points.urls, signal);

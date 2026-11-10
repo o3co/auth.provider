@@ -118,6 +118,18 @@ describe("a peer's revocation", () => {
 		});
 	});
 
+	it("keys no issuer by a name past 4 KiB, nor fetches from a URL past 2 KiB: both unconfirmed, never passed", async () => {
+		const root = await issue({ cn: "root", ca: true });
+		const long = await leafOf(root, { crl: `http://crl.example/${"a".repeat(2100)}` });
+		const s = checking(root, { [atRoot]: await crlOf({ by: root }) });
+		expect(await s.check(long)).toEqual({ kind: "unconfirmed", reason: "unsupported" });
+		const named = await issue({ cn: "n".repeat(5000), ca: true });
+		const under = await leafOf(named);
+		const t = checking(named, { [atRoot]: await crlOf({ by: named }) });
+		expect(await t.check(under)).toEqual({ kind: "unconfirmed", reason: "malformed" });
+		expect([s.fetched, t.fetched]).toEqual([[], []]);
+	});
+
 	it("finds an anchor without key identifiers whose name is written in another string type", async () => {
 		const root = await issue({ cn: "root", ca: true, printableSubject: true });
 		const mid = await issue({ cn: "mid", by: root, ca: true });
