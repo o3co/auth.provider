@@ -8,7 +8,6 @@
 		"`http.trusted-proxies`: the proxies in front, whose forwarded addresses are believed, written in the local layer; behind a proxy, without it every request's source is the proxy.",
 		"`http.client-certificate`: where a trusted proxy forwards client certificates, written in the local layer when a composed module needs them."
 	],
-	"network": "serves-http",
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",

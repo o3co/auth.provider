@@ -1,8 +1,8 @@
 import { type Clock, contract, extensionPoint, type Log, type Unavailable } from "@mod/kernel";
 import type { Source, TrustedProxies } from "@mod/request-source";
-import type { Values } from "./bodies/values.ts";
+import type { Values } from "./values/values.ts";
 
-export type { Values } from "./bodies/values.ts";
+export { fieldsOf, readOnly, type Values, valuesOf } from "./values/values.ts";
 
 export type Method = "GET" | "POST" | "PUT" | "DELETE";
 
@@ -44,7 +44,7 @@ export interface HttpResponse {
 	readonly loads?: Loads;
 }
 
-/** A rule a route can ask http to apply before its handler. Its owner makes it; it is unique as a value. */
+/** A rule a route can ask the server to apply before its handler. Its owner makes it; it is unique as a value. */
 export interface Policy<O = undefined> {
 	readonly kind: "policy";
 	readonly label: string;
@@ -64,46 +64,6 @@ export interface PolicyUse {
 export function use<O>(policy: Policy<O>, ...options: O extends undefined ? [] : [O]): PolicyUse {
 	return Object.freeze({ policy: policy as Policy<unknown>, options: options[0] });
 }
-
-/** How a policy applies: pass the request on to the next, or answer it. Throws Unavailable when it cannot tell. */
-export interface PolicyRule {
-	readonly policy: Policy<unknown>;
-	apply(
-		request: HttpRequest,
-		options: unknown,
-	): "pass" | HttpResponse | Promise<"pass" | HttpResponse>;
-}
-
-export function applying<O>(
-	policy: Policy<O>,
-	apply: (
-		request: HttpRequest,
-		options: O,
-	) => "pass" | HttpResponse | Promise<"pass" | HttpResponse>,
-): PolicyRule {
-	return { policy: policy as Policy<unknown>, apply: apply as PolicyRule["apply"] };
-}
-
-/** The rules of the policies, one per policy; http matches them to policies by value. */
-export const policies = extensionPoint<PolicyRule>("http.policies", { multiplicity: "many" });
-
-/** What a route's policies keep: `own-site`, no other site's request reaches the handler; `per-source`, a source over its count does not. */
-export type Guarantee = "own-site" | "per-source";
-
-/** A policy owner's own claim that these policies keep a guarantee, each for the methods named; a claim, never a proof. */
-export interface Mark {
-	readonly guarantee: Guarantee;
-	readonly policies: readonly {
-		readonly policy: Policy<unknown>;
-		readonly methods: readonly Method[];
-	}[];
-}
-
-/** One mark per guarantee, matched to the policies a route uses by value. */
-export const marks = extensionPoint<Mark>("http.marks", {
-	multiplicity: "keyed",
-	keyOf: (mark) => mark.guarantee,
-});
 
 /** A form is `application/x-www-form-urlencoded`; JSON is `application/json`; none is no body at all. */
 export type BodyKind = "form" | "json" | "none";
@@ -125,7 +85,7 @@ export interface CorsRule {
  *   and a middle `*` before a last (so an exact path first).
  * - The handler reads the URL parser's path (dot segments resolved, percent-encoding kept as sent, so an
  *   escaped `/` stays in its segment); a `*` handler checks the segments it takes by its own rules.
- * - `unavailable` is its answer to Unavailable. Its `noted` is called first, and its fields join http's one
+ * - `unavailable` is its answer to Unavailable. Its `noted` is called first, and its fields join the server's one
  *   warning, `http.unavailable`, with what was unavailable and the route's declared path; a `noted` that
  *   throws is logged `http.failed` by kind and the answer stands.
  */
@@ -140,19 +100,19 @@ export interface Route {
 	readonly cors?: CorsRule;
 	/** Whether it changes what the server keeps or the access a cookie gives; a GET says, any other method does. */
 	readonly changesState?: boolean;
-	/** Why a route changing state uses no policy marked `own-site` for its method. */
+	/** Why a route changing state takes requests that other sites send. */
 	readonly crossSite?: string;
-	/** Why a route changing state uses no policy marked `per-source` for its method. */
+	/** Why a route changing state takes any number of requests from one source. */
 	readonly unlimited?: string;
-	/** The answer when a policy or the handler throws Unavailable; without it, http's own. */
+	/** The answer when a policy or the handler throws Unavailable; without it, the server's own. */
 	readonly unavailable?: UnavailableAnswer;
 	handle(request: HttpRequest): HttpResponse | Promise<HttpResponse>;
 }
 
-/** A route's answer to Unavailable, given after http's one warning of it. */
+/** A route's answer to Unavailable, given after the server's one warning of it. */
 export interface UnavailableAnswer {
 	readonly response: HttpResponse;
-	/** What only the route knows: fields for http's warning, and anything it records itself (an audit event). */
+	/** What only the route knows: fields for the server's warning, and anything it records itself (an audit event). */
 	noted?(
 		request: HttpRequest,
 		unavailable: Unavailable,
@@ -247,10 +207,13 @@ export interface RunningServer {
 	drain(signal: AbortSignal): Promise<void>;
 }
 
-/** What serves a deployment's routes: http calls `serve` at start and the drain at stop; applying policies and checking marks is the server's own. */
+/** What serves a deployment's routes: http calls `serve` at start and the drain at stop; reading requests, applying the policies routes use and checking what routes declare is the server's own. */
 export interface HttpServer {
 	serve(input: ServerInput): Promise<RunningServer>;
 }
 
-/** The server that serves the routes: none, http's own; one, it; more, boot is refused. */
-export const httpServers = extensionPoint<HttpServer>("http.servers", { multiplicity: "many" });
+/** The one server that serves the routes; with none, or two, boot is refused. */
+export const httpServers = extensionPoint<HttpServer>("http.servers", {
+	multiplicity: "one",
+	missing: "compose @mod/http-server",
+});
