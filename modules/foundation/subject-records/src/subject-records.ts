@@ -3,7 +3,9 @@ import { codePointOrder, type Json } from "@mod/store";
 import { kept, opened, ownersValue } from "./envelope/envelope.ts";
 import { checkedSubjectPlace, indexOver, keysIn, type SubjectPlace } from "./index/index.ts";
 
+export { eraseSubject, sweepIndex } from "./erase/erase.ts";
 export { indexSpaceOf, type Phase, type SubjectPlace } from "./index/index.ts";
+export { subjectRecordsPhase } from "./phase/phase.ts";
 export { type SubjectKeyedSets, subjectKeyedSetsIn } from "./sets/sets.ts";
 
 /**

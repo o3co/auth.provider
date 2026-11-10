@@ -44,6 +44,8 @@ export function indexOver(place: Place, space: Space, index: Space) {
 			place: indexPlace,
 			key: `${subjects(subject)}.m${createHash("sha256").update(key).digest("hex")[0]}`,
 		}),
+		/** An entry of the index by its partition, as a scan of the index space finds it. */
+		entryAt: (partition: string): Target => ({ place: indexPlace, key: partition }),
 		/** Every bucket of a subject, as erasing it reads them. */
 		bucketsOf: (subject: string): Target[] =>
 			bucketNames.map((name) => ({ place: indexPlace, key: `${subjects(subject)}.${name}` })),

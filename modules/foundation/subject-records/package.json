@@ -8,6 +8,7 @@
 		".": "./src/subject-records.ts"
 	},
 	"dependencies": {
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/store": "workspace:*"

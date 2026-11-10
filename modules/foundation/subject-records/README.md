@@ -13,8 +13,10 @@
   - `bounded`: each record written raw, fenced at creation by its subject's tombstone, gone by its end, at most the space's `boundedMs`.
 - `secret` (bounded only) keys records by secrets, as records under a secret are.
 - `subjectKeyedSetsIn` (internal module `sets`) → keyed sets of `online-indexed` and `online-keyed` spaces.
+- `eraseSubject` (internal module `erase`: a place, a subject, an `online-keyed` owner's keys) → the space's `SpaceReport`; `sweepIndex` → a page of the index swept of keys whose records are gone.
+- `subjectRecordsPhase` (internal module `phase`): its mark, `read` (the store's control, once as a process starts, monotone) and `write` (the mark to write, only under maintenance).
 - `indexSpaceOf` (a space) → its index space: `.index` after its name, its guarantees, `internal`. The wiring declares it beside the space.
-- `Phase`: `reader`, records written raw with no index or tombstone, as they were; `indexed`, the rest below.
+- `Phase`: `reader`, records written raw with no index or tombstone, as they were; `indexed`, the rest below, from the mark `subject-records.phase`.
 
 ## Invariants
 - Every write goes through `records`' `changeRecords`, the one door to a space holding a subject's data; a read goes to the store and writes nothing.
@@ -27,13 +29,14 @@
 - A removal takes the record and its key from the bucket as one, the bucket going with its last key; no tombstone stops it.
 - A move holds both subjects' tombstones absent and rewrites the envelope and both buckets as one: `moved`, `missing`, `not-from` or `erased`.
 - A record physically held is in its subject's bucket, expired or not: a key leaves a bucket only with its record.
-- A bounded record lives 1 ms to `boundedMs`, never endless (TypeError), and keeps its end on a change; a tombstone fences only its creation. With secret keys, a record created before erasure may be used after it until its end: an auth code redeemed so has its tokens refused at token-endpoint's fence.
+- A bounded record lives 1 ms to `boundedMs`, never endless (TypeError), and keeps its end on a change; a tombstone fences only its creation. Erasing reports it `fenced` until the tombstone's deadline and `boundedMs`: the tombstone commits by its deadline on the store clock, so every record created before it ends by then. With secret keys, a record created before erasure may be used after it until its end: an auth code redeemed so has its tokens refused at token-endpoint's fence.
 - A record kept raw, from before records were indexed, is changed raw, with no tombstone condition. That is safe: records turn indexed only under the maintenance key, and the one migration indexes or removes every raw record of such a space before erasure can be enabled, so none remains when a tombstone can exist (account erasure §3.3, §5.1).
 - Cost: a create or removal rewrites one bucket whole, its size growing with the subject's records (about a sixteenth of them); fine for what an owner keeps per subject, and not capped.
 - Refuses at build, through the builder's `refuse`, a store that writes no records of two partitions as one, an index that is not the space's, a space declaring another category, and secret keys outside `bounded`.
+- Erasing writes the tombstone first, then removes only what reads absent or names the subject (internal module `erase`).
 
 ## Depends on
-- `kernel`, `store`, `records` (`changeRecords`, its targets, keys and keyed sets' codec)
+- `kernel`, `store`, `records` (`changeRecords`, its targets, keys and keyed sets' codec), `erasure-extensions` (the report)
 
 ## Vocabulary
 - subject: the account a record belongs to. tombstone: a subject's mark that no record of it is written past. bucket: part of a subject's index, the keys of its records.

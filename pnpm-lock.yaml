@@ -602,6 +602,9 @@ importers:
 
   modules/foundation/subject-records:
     dependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../erasure-extensions
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
