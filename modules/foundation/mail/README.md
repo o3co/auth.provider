@@ -18,7 +18,7 @@
 - `preparer`, for senders: called at build, it gives the function that turns a message into what may be sent, or refuses. `preparerTakes`, what it takes (`mailTemplates`, `mailPurposes`), for a sender's module to name in its takes.
 - Composition definition: the logging-only sender. It logs the purpose, a per-process keyed hash of the address, and the value names.
 - Operator section (logging-only sender): `accept-unsent`, default false; set true to accept that nothing is sent.
-- Contract tests, the module they compose with, and test configuration builders (`./testing`). A sender's harness may make its remote side answer with a limit or fail, saying words no failure may carry.
+- `./testing`: `mailContract`, the contract tests, `contractTemplates`, the module they compose with, and `mailConfig`. A sender's harness may make its remote side answer with a limit or fail, saying `remoteWords`, words no failure may carry.
 
 ## Invariants
 - One address per send; anything else (a list, a line break, a display name) is a TypeError.
