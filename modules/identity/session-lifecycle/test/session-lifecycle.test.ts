@@ -2,6 +2,7 @@ import { cookies } from "@mod/cookies";
 import cookiesModule from "@mod/cookies/module";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	BootRefused,
@@ -88,6 +89,7 @@ async function boot(
 		assemble({
 			modules: [
 				http,
+				httpServer,
 				cookiesModule,
 				sessionLifecycle,
 				sessionRequirements,
@@ -147,6 +149,7 @@ describe("session cookies", () => {
 		const refused = await assemble({
 			modules: [
 				http,
+				httpServer,
 				cookiesModule,
 				sessionLifecycle,
 				subjectRevocationStandIn,
@@ -452,6 +455,7 @@ describe("session entry", () => {
 		const app = await assemble({
 			modules: [
 				http,
+				httpServer,
 				cookiesModule,
 				sessionLifecycle,
 				sessionRequirements,
@@ -594,6 +598,7 @@ describe("session entry", () => {
 		const other = await assemble({
 			modules: [
 				http,
+				httpServer,
 				cookiesModule,
 				sessionLifecycle,
 				sessionRequirements,
@@ -1141,6 +1146,7 @@ describe("session raise", () => {
 		const other = await assemble({
 			modules: [
 				http,
+				httpServer,
 				cookiesModule,
 				sessionLifecycle,
 				sessionRequirements,
@@ -1391,6 +1397,7 @@ describe("revoking a subject", () => {
 it("takes every handle its takes name", async () => {
 	const modules = [
 		http,
+		httpServer,
 		cookiesModule,
 		sessionLifecycle,
 		sessionRequirements,

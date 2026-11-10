@@ -1,6 +1,7 @@
 import cookiesModule from "@mod/cookies/module";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { type Session, sessions } from "@mod/session";
@@ -33,6 +34,7 @@ async function boot(log = recordingLog()) {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			cookiesModule,
 			sessionLifecycle,
 			sessionRequirements,
