@@ -4916,6 +4916,9 @@ importers:
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../../scaffold/workspace-packages
       typescript:
         specifier: 6.0.3
         version: 6.0.3

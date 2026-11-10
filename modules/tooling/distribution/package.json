@@ -22,6 +22,7 @@
 		"@mod/docker-client": "workspace:*",
 		"@mod/local-registry": "workspace:*",
 		"@mod/trial": "workspace:*",
+		"@mod/workspace-packages": "workspace:*",
 		"typescript": "6.0.3",
 		"yaml": "2.9.1"
 	},
