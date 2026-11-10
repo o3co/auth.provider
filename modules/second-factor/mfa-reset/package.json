@@ -26,6 +26,7 @@
 		"@mod/cookies": "workspace:*",
 		"@mod/csrf": "workspace:*",
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/login-attributes": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa-binding-proof": "workspace:*",

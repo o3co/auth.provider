@@ -1,6 +1,7 @@
 import cookiesModule from "@mod/cookies/module";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
@@ -16,7 +17,7 @@ it("provides round trips over the composed store and cookies", async () => {
 			.by(() => ({ save: kept.records.create, update: kept.records.change })),
 	]);
 	const app = await assemble({
-		modules: [http, cookiesModule, store, roundTripModule],
+		modules: [http, httpServer, cookiesModule, store, roundTripModule],
 		config: { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) },
 		runtime: quietRuntime({ clock: { now: () => 0 } }),
 	});
@@ -40,7 +41,7 @@ it("takes all it names", async () => {
 			.by(() => ({ save: kept.records.create, update: kept.records.change })),
 	]);
 	const input = {
-		modules: [http, cookiesModule, store, roundTripModule],
+		modules: [http, httpServer, cookiesModule, store, roundTripModule],
 		config: { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) },
 		runtime: quietRuntime(),
 	};

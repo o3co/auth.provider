@@ -33,6 +33,7 @@
 	"devDependencies": {
 		"@mod/code-grant-store": "workspace:*",
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/records": "workspace:*",

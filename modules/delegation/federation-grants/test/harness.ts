@@ -12,6 +12,7 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { type HttpRequest, type HttpResponse, type Route, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import type { Module } from "@mod/kernel";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
@@ -230,6 +231,7 @@ export async function harness(
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			relisting,
 			secretHashModule,
 			sessionStandIn,

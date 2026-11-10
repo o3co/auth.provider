@@ -7,6 +7,7 @@ import { clientsConfig } from "@mod/clients/testing";
 import externalJwtModule from "@mod/external-jwt/module";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
@@ -62,6 +63,7 @@ async function boot(section: Record<string, unknown>, reach = true) {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			outboundModule,
 			tlsOptionsForTests,
 			externalJwtModule,

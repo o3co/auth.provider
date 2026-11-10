@@ -1,5 +1,6 @@
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
@@ -20,6 +21,7 @@ async function boot(signing?: Module, at = now) {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			signing ?? keysModule,
 			issuerModule,
 			senderBindingModule,
@@ -42,7 +44,7 @@ describe("access tokens, signed through accessTokenSigning", () => {
 	it("are signed and verified there, never through keys' own sign and verify", async () => {
 		// A ring of keys' own, apart: the stand-in hands on accessTokenSigning and refuses the rest.
 		const ring = await assemble({
-			modules: [http, keysModule],
+			modules: [http, httpServer, keysModule],
 			config: { ...kernelConfig(), ...httpConfig({}), ...keysConfig() },
 			runtime: quietRuntime({ clock: { now: () => now } }),
 		});

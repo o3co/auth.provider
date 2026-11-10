@@ -83,5 +83,9 @@ export interface StoreUpkeep {
 	): Promise<{ readonly keys: readonly Key[]; readonly cursor?: string; readonly server: string }>;
 }
 
-export const storeControl = contract<StoreControl>("store.control");
+/**
+ * Its owner lets it go unprovided until 0.22: a taker reads a mark it cannot read as unknown, failing
+ * closed, as long as store adapters of 0.19 provide none.
+ */
+export const storeControl = contract<StoreControl>("store.control", { optional: true });
 export const storeUpkeep = contract<StoreUpkeep>("store.upkeep");

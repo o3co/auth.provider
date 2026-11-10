@@ -1,6 +1,7 @@
 import { createPrivateKey, generateKeyPairSync, randomBytes } from "node:crypto";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { CompactSign, decodeProtectedHeader } from "jose";
@@ -25,7 +26,7 @@ const ed25519Pem = () => {
 
 async function open(section: unknown, at = runtime) {
 	const app = await assemble({
-		modules: [http, keysModule],
+		modules: [http, httpServer, keysModule],
 		config: { ...kernelConfig(), ...httpConfig(), keys: section },
 		runtime: at,
 	});
@@ -143,7 +144,7 @@ describe("accessTokenSigning", () => {
 			]);
 		const boot = (name: string) =>
 			assemble({
-				modules: [http, keysModule, asking(name)],
+				modules: [http, httpServer, keysModule, asking(name)],
 				config: { ...kernelConfig(), ...httpConfig(), keys: rotated },
 				runtime,
 			});

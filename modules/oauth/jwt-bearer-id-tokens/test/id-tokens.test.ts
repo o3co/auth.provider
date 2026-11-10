@@ -9,6 +9,7 @@ import { testSigner } from "@mod/external-jwt/testing";
 import type { GrantOutcome } from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { spentAssertions } from "@mod/jwt-bearer";
@@ -92,6 +93,7 @@ function assembly(
 	return {
 		modules: [
 			http,
+			httpServer,
 			tokensStandIn(),
 			issuerModule,
 			clientsModule,

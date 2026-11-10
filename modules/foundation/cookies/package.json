@@ -12,5 +12,8 @@
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/request-source": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/http-server": "workspace:*"
 	}
 }

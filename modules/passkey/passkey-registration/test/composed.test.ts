@@ -4,6 +4,7 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import loginGates from "@mod/login-gates/module";
@@ -56,6 +57,7 @@ function composition(
 	return {
 		modules: [
 			http,
+			httpServer,
 			csrfStandIn,
 			cookiesModule,
 			sessionStandIn,

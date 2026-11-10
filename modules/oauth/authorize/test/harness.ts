@@ -21,6 +21,7 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, defineModule, isUnavailable, kernelConfig, type Module } from "@mod/kernel";
@@ -135,6 +136,7 @@ export async function serve(
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			switchedModule(tokensStandIn({ revocable: options.revocable ?? true }), tokens, down.tokens),
 			issuerModule,
 			clientsModule,

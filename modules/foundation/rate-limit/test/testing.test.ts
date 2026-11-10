@@ -2,6 +2,7 @@ import { auditStandIn } from "@mod/audit/testing";
 import { listening, type PolicyUse, routes, use } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	type Assembly,
 	assemble,
@@ -135,7 +136,7 @@ it("offers both per-source policies, answering as the real ones do, with no stor
 		})),
 	]);
 	const app = await assemble({
-		modules: [http, rateLimitStandIn, routed],
+		modules: [http, httpServer, rateLimitStandIn, routed],
 		config: { ...kernelConfig(), ...httpConfig({ "trusted-proxies": ["127.0.0.1"] }) },
 		runtime,
 	});
@@ -185,14 +186,14 @@ it("marks both per-source policies for every method, as the real module does", a
 	for (const modules of compositions) {
 		for (const policy of [requestsPerSource, attemptsPerSource]) {
 			const app = await assemble({
-				modules: [http, ...modules, declared([use(policy, { name: "test", window })])],
+				modules: [http, httpServer, ...modules, declared([use(policy, { name: "test", window })])],
 				config: { ...kernelConfig(), ...httpConfig() },
 				runtime,
 			});
 			expect(app.get(listening), policy.label).toBeDefined();
 		}
 		const unlimited = assemble({
-			modules: [http, ...modules, declared([])],
+			modules: [http, httpServer, ...modules, declared([])],
 			config: { ...kernelConfig(), ...httpConfig() },
 			runtime,
 		});

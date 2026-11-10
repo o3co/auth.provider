@@ -6,6 +6,7 @@ import linkModule from "@mod/federation-link/module";
 import { listening, type Route, requestEnds, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	BootRefused,
@@ -157,6 +158,7 @@ async function serve(setup: Setup = {}) {
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			...(setup.withoutCsrf ? [] : [csrfStandIn]),
 			cookiesModule,
 			gatesModule,

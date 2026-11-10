@@ -1,6 +1,7 @@
 import { type SessionIssuance, sessionIssuances, type TokenTie, tokenTies } from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	BootRefused,
@@ -88,6 +89,7 @@ function assembly(options: Options = {}) {
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			options.tokens ??
 				switchedModule(
 					tokensStandIn({ revocable: options.revocation !== "unsupported" }),

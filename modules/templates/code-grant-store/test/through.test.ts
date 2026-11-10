@@ -11,6 +11,7 @@ import cookiesModule from "@mod/cookies/module";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, kernelConfig } from "@mod/kernel";
@@ -48,6 +49,7 @@ it("redeems a code once through code-grant wired to records, and revokes what it
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			keysModule,
 			tokensModule,
 			tokensStore,

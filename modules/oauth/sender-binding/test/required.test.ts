@@ -3,6 +3,7 @@ import clientsModule from "@mod/clients/module";
 import { clientsConfig, confidentialClient } from "@mod/clients/testing";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
@@ -32,7 +33,15 @@ const kind = (member: string, name?: string) =>
 	]);
 const boot = (section: Readonly<Record<string, unknown>> = {}, kinds = [kind("jkt", "dpop")]) =>
 	assemble({
-		modules: [http, issuerModule, clientsModule, secretHashModule, senderBindingModule, ...kinds],
+		modules: [
+			http,
+			httpServer,
+			issuerModule,
+			clientsModule,
+			secretHashModule,
+			senderBindingModule,
+			...kinds,
+		],
 		config: {
 			...kernelConfig(),
 			...httpConfig(),

@@ -1,5 +1,6 @@
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { type FactorKind, factorKinds } from "@mod/mfa-extensions";
@@ -26,6 +27,7 @@ const composition = (
 ) => ({
 	modules: [
 		http,
+		httpServer,
 		totpModule,
 		defineModule({ name: "reader", replicaSafe: true, takes: [factorKinds] }, (m) => [
 			m.provide(kinds).by((c) => c.collect(factorKinds)),

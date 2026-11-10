@@ -1,5 +1,6 @@
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, type BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
@@ -13,7 +14,7 @@ const boot = (
 	environment: "production" | "development" = "production",
 ) =>
 	assemble({
-		modules: [http, issuerModule],
+		modules: [http, httpServer, issuerModule],
 		config: {
 			...kernelConfig({ environment }),
 			...httpConfig(
@@ -38,7 +39,7 @@ it("names this provider by the configured URL, as written, frozen", async () => 
 
 it("builds a test configuration on https://issuer.example by default", async () => {
 	const built = await assemble({
-		modules: [http, issuerModule],
+		modules: [http, httpServer, issuerModule],
 		config: { ...kernelConfig(), ...httpConfig(), ...issuerConfig() },
 	});
 	expect(built.get(issuer).url).toBe("https://issuer.example");
@@ -88,7 +89,7 @@ it("collects the items this server names itself by, refusing two contributions o
 	]);
 	const bootWith = (...modules: ReturnType<typeof item>[]) =>
 		assemble({
-			modules: [http, issuerModule, ...modules],
+			modules: [http, httpServer, issuerModule, ...modules],
 			config: { ...kernelConfig(), ...httpConfig(), ...issuerConfig() },
 		});
 	const app = await bootWith(
@@ -114,7 +115,7 @@ it("collects the items this server names itself by, refusing two contributions o
 it("takes all it names, with a public origin and without one", async () => {
 	for (const origin of [{ "public-origin": "https://issuer.example" }, {}]) {
 		const input = {
-			modules: [http, issuerModule],
+			modules: [http, httpServer, issuerModule],
 			config: { ...kernelConfig(), ...httpConfig(origin), ...issuerConfig() },
 		};
 		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.

@@ -22,6 +22,7 @@
 	"devDependencies": {
 		"@mod/audit": "workspace:*",
 		"@mod/cookies": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa-binding": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",

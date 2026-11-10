@@ -8,6 +8,7 @@ import { clientsConfig, confidentialClient } from "@mod/clients/testing";
 import externalJwtModule from "@mod/external-jwt/module";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { type SignerKeys, signerKeys, spentAssertions } from "@mod/jwt-bearer";
@@ -306,6 +307,7 @@ describe("signer-keys-http under jwt-bearer", () => {
 			modules: [
 				location,
 				http,
+				httpServer,
 				tokensStandIn(),
 				issuerModule,
 				clientsModule,

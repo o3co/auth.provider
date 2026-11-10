@@ -5,6 +5,7 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime, recordingLog, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { type LoginFrom, logins } from "@mod/login-gates";
@@ -225,6 +226,7 @@ export async function serve(
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			audit.module,
 			csrfStandIn,
 			cookiesModule,

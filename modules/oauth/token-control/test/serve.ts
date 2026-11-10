@@ -11,6 +11,7 @@ import {
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, kernelConfig, type Module } from "@mod/kernel";
@@ -70,6 +71,7 @@ export async function serve(
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			switchedModule(tokensStandIn({ revocable }), tokens, down),
 			issuerModule,
 			clientsModule,
