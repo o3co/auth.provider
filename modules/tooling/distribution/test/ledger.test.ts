@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { readBundles } from "../src/contract.ts";
+import { readBundles } from "../src/workspace.ts";
 
 // What ships is decided by the directory a package sits in, never by its own `private`.
 it("ships ledger-wire in the user ledger's bundle, and keeps ledger-fakes in one that does not ship", () => {

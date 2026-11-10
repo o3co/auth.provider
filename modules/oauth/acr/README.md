@@ -18,6 +18,9 @@
 - Operator section: `values`, each acr and the amr sets that meet it, each set and each list non-empty; default empty.
 - Test configuration builders (`./testing`).
 
+## Deprecated
+- `amrSetsShape`: the schema behind `isAmrSets`, which the package reads its own settings with; use `isAmrSets`. A later release removes it.
+
 ## Invariants
 - An acr is met when a session holds every amr of any one of its sets.
 - The first acr asked that is met wins; acr have no order of strength.

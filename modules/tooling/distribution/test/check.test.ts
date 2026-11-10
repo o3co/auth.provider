@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { type Bundle, check } from "../src/contract.ts";
+import { check } from "../src/check.ts";
+import type { Bundle } from "../src/workspace.ts";
 
 const bundle = (
 	dir: string,

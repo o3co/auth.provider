@@ -2,7 +2,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { areaTarget, auditEvents, type Started } from "@mod/conformance";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { deviceScene } from "../src/main.ts";
+import { deviceScene } from "../src/area.ts";
 
 const issuer = "https://issuer.example";
 /** Unlike either system's default, so the limit is seen to come from the scene. */

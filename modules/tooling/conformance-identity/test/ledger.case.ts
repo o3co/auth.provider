@@ -9,7 +9,8 @@ import {
 } from "@mod/conformance";
 import { keysArea } from "@mod/conformance-keys";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { httpLedger, identityArea, type LedgerScene, ledgerBesideUsers } from "../src/main.ts";
+import { ledgerBesideUsers } from "../src/area.ts";
+import { httpLedger, identityArea, type LedgerScene } from "../src/main.ts";
 
 const issuer = "https://issuer.example";
 const credential = randomBytes(32).toString("hex");

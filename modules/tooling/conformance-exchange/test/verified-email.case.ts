@@ -3,7 +3,7 @@ import { areaTarget, type Started } from "@mod/conformance";
 import { browserAt } from "@mod/conformance-code/testing";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { exchangeScene } from "../src/main.ts";
+import { exchangeScene } from "../src/area.ts";
 
 const issuer = "https://issuer.example";
 const callback = "https://app.example/cb";

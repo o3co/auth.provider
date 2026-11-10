@@ -6,5 +6,4 @@ export {
 	type ExchangePart,
 	type ExchangeScene,
 	exchangeArea,
-	exchangeScene,
 } from "./area.ts";
