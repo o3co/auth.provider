@@ -4,6 +4,8 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
 	test: {
+		// The area's set-ups register as its package's entry loads.
+		setupFiles: ["./src/main.ts"],
 		// The fault scenes alone, each on a Redis topology and a deployment of its own.
 		include: ["test/**/*.faults.case.ts"],
 		reporters: ["default", evidenceReporter(), faultRunReporter()],
