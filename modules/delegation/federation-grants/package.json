@@ -37,6 +37,7 @@
 	},
 	"devDependencies": {
 		"@mod/cookies": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/session": "workspace:*",
