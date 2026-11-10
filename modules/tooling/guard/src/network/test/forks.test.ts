@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { Pkg } from "@mod/guard-imports";
 import { describe, expect, it, vi } from "vitest";
 import { budget, pkg } from "../../../test/workspace.ts";
-import { check } from "../../contract.ts";
+import { check } from "../../check.ts";
 
 // Each case checks a package, its sources bound by the type checker, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });

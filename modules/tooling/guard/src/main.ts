@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readWorkspace } from "@mod/guard-imports";
 import { branchingImports, heavyDependencyCards } from "./budget/budget.ts";
-import { type Budget, check } from "./contract.ts";
+import { check } from "./check.ts";
+import type { Budget } from "./contract.ts";
 import { kindRules } from "./kinds.ts";
 import { readDocuments } from "./workspace.ts";
 
