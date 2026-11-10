@@ -59,7 +59,7 @@ export default defineModule(
 					const [receipt] = changed.first;
 					return { before: receipt?.before, after: receipt?.after };
 				},
-				...erasureEnabledFrom(await c.find(storeControl)),
+				...erasureEnabledFrom(await c.getOptional(storeControl)),
 			};
 		}),
 	],
