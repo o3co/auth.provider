@@ -547,6 +547,11 @@ From `@mod/outbound`.
 | `outbound.plain-ipv4` | list of string | `[]` |  |  |  | The `host:port` pairs of `plain-loopback` or `plain-internal` whose name is resolved to IPv4 addresses alone, for plain http to that host and port: only those answers are checked and reached, and IPv6 ones are neither. For a network answering a name with an IPv4 address and an IPv6 one that does not reach, as ECS Service Connect writes both in the hosts file. Each names its host by name. |
 | `outbound.resolution` | helper \| in-process | `helper` |  |  |  | Where names are resolved, as the system resolves them: `helper`, in helper processes, one ended once no request waits on its lookups; `in-process`, here, where no deadline stops a lookup. |
 | `outbound.max-lookups` | integer (1–1024) |  |  |  |  | Names resolving at once, the outside party's half among them; one more is unavailable at once. Four by default, never more than max-concurrent. |
+| `outbound.revocation.hosts` | list of string | `[]` |  |  |  | The hosts a peer's CRL may be fetched from over plain http; `outbound.allow` and `deny` hold too. None: no peer's revocation is checked. |
+| `outbound.revocation.accept-unconfirmed` | boolean | `false` |  |  |  | Whether a request goes to a peer whose revocation cannot be confirmed (a CRL unsigned as it should be among them), said at every start. A revoked peer is never taken, from 0.22. |
+| `outbound.revocation.crl-entries` | integer (1–1024) | `64` |  |  |  | How many issuers' CRLs are kept, from 1 to 1,024. |
+| `outbound.revocation.failure-lifetime` | string | `30s` |  |  |  | How long a CRL fetch that failed is remembered, its peers unconfirmed meanwhile, from 1s to 1h. |
+| `outbound.revocation.crl-ttl` | string | `1h` |  |  |  | How long after a fetch a CRL is fetched again, the one kept answering until its next update, from 1s to 1d. |
 
 ## passkey-registration
 
