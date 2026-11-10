@@ -139,6 +139,8 @@ export async function honoursOf(
 		readonly "server-settings"?: Declared | undefined;
 	},
 	wanted: readonly Guarantee[],
+	/** A key of the store's own, written once where durable is checked, so the check itself fsyncs. */
+	fsyncKey: string,
 ): Promise<Honours> {
 	let answer: Honours;
 	try {
@@ -166,12 +168,18 @@ export async function honoursOf(
 			reasons.push(...goodReplicaProblems(info, needed === undefined ? undefined : Number(needed)));
 		}
 		reasons.push(...settings.problems);
+		if (reasons.length === 0 && wanted.includes("durable")) {
+			await client.set(fsyncKey, "1", "PX", 1000);
+		}
+		const evicted = /evicted_keys:(\d+)/.exec(await client.info("stats"))?.[1];
+		if (evicted === undefined) throw new Error("no evictions told");
+		const witness = `${before}.${evicted}`;
 		answer =
 			reasons.length > 0
 				? { kind: "unmet", reasons }
 				: settings.used.size > 0
-					? { kind: "declared", settings: [...settings.used] }
-					: { kind: "verified" };
+					? { kind: "declared", settings: [...settings.used], witness }
+					: { kind: "verified", witness };
 		// One answer from one server: none where the reads may have reached another.
 		if ((await historyOf(client)) !== before) throw new Error("another server");
 	} catch {

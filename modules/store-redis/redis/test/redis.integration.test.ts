@@ -312,7 +312,10 @@ it("answers durable unmet once the server skips its fsyncs while it rewrites, an
 	const app = await open([durable], undefined, proxyUrl);
 	stops.push(() => app.stop(1000));
 	const wanted = ["no-eviction", "durable", "replicated"] as const;
-	expect(await app.get(storeUpkeep).honours(wanted)).toEqual({ kind: "verified" });
+	expect(await app.get(storeUpkeep).honours(wanted)).toEqual({
+		kind: "verified",
+		witness: expect.any(String),
+	});
 	cli(container, "config", "set", "no-appendfsync-on-rewrite", "yes");
 	try {
 		const answer = await app.get(storeUpkeep).honours(wanted);
@@ -321,7 +324,22 @@ it("answers durable unmet once the server skips its fsyncs while it rewrites, an
 	} finally {
 		cli(container, "config", "set", "no-appendfsync-on-rewrite", "no");
 	}
-	expect(await app.get(storeUpkeep).honours(wanted)).toEqual({ kind: "verified" });
+	expect(await app.get(storeUpkeep).honours(wanted)).toEqual({
+		kind: "verified",
+		witness: expect.any(String),
+	});
+});
+
+it("leaves the ledger's entry, once a change has been made, on the replica a failover would promote", async () => {
+	const prefix = `l${Date.now()}x${++opened}`;
+	const app = await open([durable], prefix, proxyUrl);
+	stops.push(() => app.stop(1000));
+	const k = { space: contractSpaces[0] as Space, partition: "p", name: "k" };
+	expect((await app.get(store).putIfAbsent(k, 1, { expiry: { kind: "never" } })).kind).toBe(
+		"written",
+	);
+	const ledger = cli(replica, "get", keysUnder(prefix).ledgerKey);
+	expect(JSON.parse(ledger)).toMatchObject({ kept: { subjectDataEver: true } });
 });
 
 describe("redis", () => {
@@ -428,6 +446,11 @@ describe("redis", () => {
 			await waitFor(() => connectedReplicas() === 0 && !writable(), 20_000);
 			app = await open([durable, asker]);
 			expect((await context?.readinessReport(1000))?.answer).toBe("unready");
+			// Nothing changes before the ledger's entry is confirmed.
+			const early = { space: contractSpaces[0] as Space, partition: "early", name: "k" };
+			await expect(
+				app.get(store).putIfAbsent(early, 1, { expiry: { kind: "never" } }),
+			).rejects.toMatchObject({ name: "Unavailable" });
 			docker("unpause", replica);
 			docker("unpause", secondReplica);
 			paused = false;
@@ -435,6 +458,9 @@ describe("redis", () => {
 			// Past the second a check of the server serves.
 			await new Promise((r) => setTimeout(r, 1100));
 			expect((await context?.readinessReport(1000))?.answer).toBe("ready");
+			expect((await app.get(store).putIfAbsent(early, 1, { expiry: { kind: "never" } })).kind).toBe(
+				"written",
+			);
 		} finally {
 			await app?.stop(1000);
 			if (paused) {
