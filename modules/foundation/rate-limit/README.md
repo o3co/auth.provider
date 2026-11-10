@@ -36,7 +36,7 @@
 - Lockouts: one state per name and key, rewritten whole; no eviction, durable, replicated, and confirmed reads, as a release is read by another request. One that counted a release never expires.
 
 ## Depends on
-- `kernel`, `store`, `http`, `request-source`, `audit`, `metrics`
+- `kernel`, `store`, `http`, `http-server` (the policies' rules and marks), `request-source`, `audit`, `metrics`
 
 ## Vocabulary
 - window: the period over which counts are made.

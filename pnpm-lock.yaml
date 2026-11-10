@@ -547,6 +547,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../http-server
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel

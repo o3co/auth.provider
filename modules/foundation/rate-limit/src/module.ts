@@ -1,5 +1,5 @@
 import { audit } from "@mod/audit";
-import { marks, policies } from "@mod/http";
+import { marks, policies } from "@mod/http-server";
 import { contract, defineModule, isUnavailable, Unavailable } from "@mod/kernel";
 import { type Counter, instruments, counter as metricCounter } from "@mod/metrics";
 import { type Space, type Store, spaces, store } from "@mod/store";

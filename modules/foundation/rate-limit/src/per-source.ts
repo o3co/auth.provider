@@ -1,5 +1,6 @@
 import { type Audit, declaredAudit } from "@mod/audit";
-import { applying, type HttpRequest, type HttpResponse, jsonAnswer, type Mark } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
+import { applying, type Mark } from "@mod/http-server";
 import { isUnavailable, type Log } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import events from "./audit-events.ts";
