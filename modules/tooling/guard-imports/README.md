@@ -26,7 +26,7 @@
 - The kinds' order and roles: given by the caller, in the kind words it holds.
 
 ## Offers
-- `readWorkspace` (root → its packages, as pnpm lists them, minus the root), `scopeOf` (packages, rules, where findings go → the scope every rule reads: what a manifest declares apart from what a source is seen to say, each file's `facts` by one lexical program over every package's sources and the files the caller adds (a fork's helper), and the package whose directory holds a path), `surfacesOf` (packages, entry, `.` by default → each one's surface at that entry).
+- `readWorkspace` (root → its packages, as `workspace-packages` lists them, minus the root), `scopeOf` (packages, rules, where findings go → the scope every rule reads: what a manifest declares apart from what a source is seen to say, each file's `facts` by one lexical program over every package's sources and the files the caller adds (a fork's helper), and the package whose directory holds a path), `surfacesOf` (packages, entry, `.` by default → each one's surface at that entry).
 - `importRules` (scope, surfaces): every rule above, reported through the scope; `importViolations` (packages, rules → the findings).
 - The readers the other checks build on: `parse`, `packageOf`, `importsOf`, `importedNames`; `budgetsAsTest`, whether a file counts as a test (a published contract test suite does).
 - `lexicalAnalysis` and the facts' types (`FileFacts`, `Edge`, …): the `facts` card's; `Kinds`, `Rules`, `Scope`: `scopeOf`'s; `propertyDeclarations`: `owned-property`'s.
@@ -44,7 +44,7 @@
 - Internal modules `recorded` (G30), `taken` (G31), `owned-property` (G32), `facts` and `surface`.
 
 ## Depends on
-- `typescript`, `pnpm` (asks it for the workspace's packages).
+- `typescript`, `workspace-packages` (the workspace's packages).
 
 ## Vocabulary
 - scope: the packages, the rules they are read under, and where findings go.
