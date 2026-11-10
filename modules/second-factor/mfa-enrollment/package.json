@@ -27,6 +27,7 @@
 		"@mod/audit": "workspace:*",
 		"@mod/cookies": "workspace:*",
 		"@mod/csrf": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/login-attributes": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa-entry": "workspace:*",

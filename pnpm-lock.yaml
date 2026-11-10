@@ -3382,6 +3382,9 @@ importers:
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/login-attributes':
         specifier: workspace:*
         version: link:../../identity/login-attributes
