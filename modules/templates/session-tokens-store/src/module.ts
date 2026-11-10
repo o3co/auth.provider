@@ -20,17 +20,20 @@ const guaranteeFor: Record<keyof typeof issuedTokensNeeds, Guarantee> = {
 const issued: Space = {
 	name: "session-tokens-store.issued",
 	guarantees: Object.values(guaranteeFor),
+	subjectData: "none",
 };
 const indexGuaranteeFor: Record<keyof typeof tokenIndexNeeds, Guarantee> = guaranteeFor;
 const indexed: Space = {
 	name: "session-tokens-store.index",
 	guarantees: Object.values(indexGuaranteeFor),
+	subjectData: "none",
 };
 
 const pendingGuaranteeFor: Record<keyof typeof pendingSessionsNeeds, Guarantee> = guaranteeFor;
 const pending: Space = {
 	name: "session-tokens-store.pending-sessions",
 	guarantees: Object.values(pendingGuaranteeFor),
+	subjectData: "none",
 };
 
 /** A space's place: the composition's store, with its log and randomness. */
