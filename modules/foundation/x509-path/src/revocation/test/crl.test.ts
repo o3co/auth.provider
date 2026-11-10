@@ -447,6 +447,25 @@ describe("a verified CRL, apart from the certificate it is asked of", () => {
 		expect(await read(numbered(past))).toEqual({ kind: "unusable", reason: "malformed" });
 	});
 
+	it("refuses a CRL whose issuer's name is written past 4 KiB, though it compares equal to the issuer's", async () => {
+		const { intermediate } = await hierarchy();
+		const read = async (issuer: string) =>
+			verifyCrl(
+				await crlOf({ by: intermediate, issuer }),
+				intermediate.certificate,
+				Date.now(),
+				skewMs,
+				signatureAlgorithms,
+			);
+		expect((await read("intermediate")).kind).toBe("verified");
+		// Padded with spaces, which a name's comparison passes over: kept, it would keep them all.
+		expect((await read(`intermediate${" ".repeat(3_000)}`)).kind).toBe("verified");
+		expect(await read(`intermediate${" ".repeat(5_000)}`)).toEqual({
+			kind: "unusable",
+			reason: "malformed",
+		});
+	});
+
 	it("takes a CRL whose number is not a non-negative INTEGER as malformed", async () => {
 		const { intermediate } = await hierarchy();
 		const numbered = (value: asn1js.BaseBlock) =>

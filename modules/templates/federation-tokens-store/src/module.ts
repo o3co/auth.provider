@@ -27,6 +27,7 @@ const tokens: Space = {
 const locks: Space = {
 	name: "federation-tokens-store.locks",
 	guarantees: Object.values(locksGuaranteeFor),
+	subjectData: "none",
 };
 
 export default defineModule(

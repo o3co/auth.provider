@@ -12,6 +12,7 @@ const guaranteeFor: Record<keyof typeof spentAssertionsNeeds, Guarantee> = {
 const spent: Space = {
 	name: "jwt-bearer-store.spent",
 	guarantees: Object.values(guaranteeFor),
+	subjectData: "none",
 };
 
 export default defineModule(

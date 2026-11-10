@@ -10,7 +10,11 @@ const { namesFromSecret: recordsFor, ...guaranteeFor } = {
 	namesFromSecret: secretRecordsIn,
 } satisfies Record<keyof typeof reauthStoreNeeds, Guarantee | typeof secretRecordsIn>;
 /** Named when authorize kept these records; the name stays, so records written before an upgrade are found after it. */
-const reauths: Space = { name: "authorize-store.reauths", guarantees: Object.values(guaranteeFor) };
+const reauths: Space = {
+	name: "authorize-store.reauths",
+	guarantees: Object.values(guaranteeFor),
+	subjectData: "none",
+};
 
 export default defineModule({ name: "authorize-store", replicaSafe: true, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => reauths),

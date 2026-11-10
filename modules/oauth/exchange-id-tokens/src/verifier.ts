@@ -7,7 +7,13 @@ import { isWellFormedSubject, type Users } from "@mod/users";
 import { decodeJwt } from "jose";
 import { z } from "zod";
 import type { IdTokenChecks, IdTokenTaken } from "./contract.ts";
-import { type ClientEntry, type Kind, longestClockSkew, longestMaxAge } from "./section.ts";
+import {
+	type ClientEntry,
+	type Kind,
+	longestClockSkew,
+	longestMaxAge,
+	usedAllowanceMs,
+} from "./section.ts";
 import type { UsedIdTokens } from "./store.ts";
 
 export const idTokenType = "urn:ietf:params:oauth:token-type:id_token";
@@ -31,8 +37,6 @@ export interface VerifierParts {
 	readonly skewMs: number;
 }
 
-/** Kept past the last moment a token is taken by this much, so clock differences never let one back. */
-const usedAllowanceMs = 60_000;
 /** The latest any section takes an id_token after its `iat`, and after its `exp`: the longest max-age and clock skew. */
 const longestAgeMs = longestMaxAge * 1000;
 const longestSkewMs = longestClockSkew * 1000;

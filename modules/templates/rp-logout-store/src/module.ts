@@ -15,7 +15,11 @@ const guaranteeFor: Record<keyof typeof sessionClientsNeeds, Guarantee> = {
 	survivesCrash: "durable",
 	survivesFailover: "replicated",
 };
-const held: Space = { name: "rp-logout-store.clients", guarantees: Object.values(guaranteeFor) };
+const held: Space = {
+	name: "rp-logout-store.clients",
+	guarantees: Object.values(guaranteeFor),
+	subjectData: "none",
+};
 /** The notices state the same needs; typed by their own, so a need they add alone fails the type check. */
 const noticeGuaranteeFor: Record<keyof typeof pendingNoticesNeeds, Guarantee> = guaranteeFor;
 const pending: Space = {
