@@ -10,10 +10,7 @@
 - Any name taken from request headers: the public origin comes only from configuration.
 
 ## Offers
-- `routes`: a method, a path and a handler, with the policies used (and their options), the bodies taken and cross-origin use when declared; a GET route also answers HEAD, with the same headers and no body, unless it changes state.
-- A route's `unavailable`: its answer to Unavailable, and `noted`, called first, whose fields join http's one warning, `http.unavailable`, with what was unavailable and the route's declared path; a `noted` that throws is logged `http.failed` by kind and the answer stands.
-- Paths: a middle `*` segment takes exactly one non-empty segment, and a last `/*` everything under it; of the declared paths reaching a path, the one with a literal at the first segment they differ comes first, and a middle `*` before a last (so an exact path first).
-- A handler reads the URL parser's path (dot segments resolved, percent-encoding kept as sent, so an escaped `/` stays in its segment), and a `*` handler checks the segments it takes by its own rules.
+- `routes`: a method, a path and a handler, with the policies used (and their options), the bodies taken and cross-origin use when declared; how paths match, HEAD, and `unavailable`/`noted` are in `Route`'s doc comment.
 - Bodies: a route may take a form, JSON, none, or several, and any other body is `415`, refused only after the route's policies have seen the request.
 - A form and a JSON body share one size limit of 64 KiB: a larger form is read as empty, and a larger JSON body is `413`.
 - A JSON body is one object in well-formed UTF-8, frozen, naming no member twice in one object; anything else is `400`.
@@ -29,11 +26,12 @@
 - `listening` (the port) and `site` (the public origin; cookies can be made secure unless it is http, which boots only with `insecure-origin`; `proxied`, whether `trusted-proxies` names a proxy, without which no request's scheme is https); an answer's `cookies` are sent one `Set-Cookie` each; `client-certificate`'s `certificateForwarding` is provided from this section.
 - The section's other keys, each described in the settings list: `host`, `port`, `public-origin`, `cors-origins`, `headers-timeout`, `request-timeout`, `max-connections`, `proxy-hops`.
 - `requestEnds`: each request's end, once, answered or closed: the method sent, the declared path of the route reached (none when none), the status written or `closed` when the client closed first, and the milliseconds taken (never negative); its observers are told after the request, asynchronously, and what they throw or reject is dropped.
+- `httpServers`: the server serving the routes, given them, the settings and the observers at start and drained at stop; none, http serves them itself; two, boot is refused.
 - `jsonAnswer`: status, a JSON value, and any cookies and headers → an answer kept out of caches (`noStore`), but where the headers given replace its `cache-control` or `pragma`.
 - `./testing`: test configuration and request builders with working defaults.
 
 ## Invariants
-- Serves requests itself, as the one server of a deployment (`network`: `serves-http`). Every start under `insecure-origin` is warned of, as `kernel` warns each value a production deployment refuses: the session's cookie goes in the clear.
+- Serves requests, itself or through the one server contributed, as the one server of a deployment (`network`: `serves-http`). Every start under `insecure-origin` is warned of, as `kernel` warns each value a production deployment refuses: the session's cookie goes in the clear.
 - Boot is refused, naming the route and the policy, when two routes take one method and path, a route uses a policy no module applies, a policy has two rules, or a route breaks what it declares; policies match by value, and a label only names one in a report.
 - Every answer it writes carries the security headers, set in one place: a Content-Security-Policy whose default source is none, taking scripts, styles, images and fonts from this origin (styles and fonts also over https) and letting no one frame the answer, HSTS, `nosniff`, `X-Frame-Options`, `Referrer-Policy: no-referrer` and the cross-origin ones; a route's own values of them, its policy included, are replaced; only `loads` widens a page's policy.
 - Stop refuses new connections and closes idle ones; requests in flight finish (`Connection: close`) until its deadline cuts them.
