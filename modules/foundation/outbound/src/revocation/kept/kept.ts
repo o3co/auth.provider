@@ -1,6 +1,6 @@
 import type { VerifiedCrl } from "@mod/x509-path";
 
-/** The serials kept CRLs list at most, together: some 47 B each as x509-path keeps them. */
+/** The serials kept CRLs list at most, together: measured near 76 B each with 16-byte serials. */
 const mostSerials = 1 << 20;
 /** The issuers whose high-water mark is kept, and the revocations seen: never evicted. */
 const mostMarks = 4096;

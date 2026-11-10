@@ -19,9 +19,15 @@ const onHold = new pkijs.Extension({
 type Serving = Uint8Array | Fetched | ((signal: AbortSignal) => Promise<Fetched>);
 
 /** A check over `root` alone, its CRLs fetched from a table by URL at a clock the test moves. */
-function checking(root: Issued, table: Record<string, Serving>, hosts = ["crl.example"]) {
+function checking(
+	root: Issued,
+	table: Record<string, Serving>,
+	hosts = ["crl.example"],
+	atOnce = false,
+) {
 	let now = Date.now();
 	const fetched: string[] = [];
+	const running: Promise<unknown>[] = [];
 	const background: ((signal: AbortSignal) => Promise<unknown>)[] = [];
 	const revocation = revocationOver({
 		trust: storeTrust(pemOf(root.der)),
@@ -33,7 +39,10 @@ function checking(root: Issued, table: Record<string, Serving>, hosts = ["crl.ex
 				const serving = table[url] ?? "unreachable";
 				return typeof serving === "function" ? serving(signal) : serving;
 			},
-			inBackground: (refresh) => background.push(refresh),
+			inBackground: (refresh) => {
+				background.push(refresh);
+				if (atOnce) running.push(refresh(new AbortController().signal));
+			},
 			now: () => now,
 			failureMs: 30_000,
 			crlTtlMs: 3_600_000,
@@ -45,7 +54,8 @@ function checking(root: Issued, table: Record<string, Serving>, hosts = ["crl.ex
 			sent.map((one) => one.der),
 			signal,
 		);
-	return { check, fetched, background, table, later: (ms: number) => (now += ms) };
+	const settled = () => Promise.all(running);
+	return { check, fetched, background, settled, table, later: (ms: number) => (now += ms) };
 }
 
 const leafOf = (by: Issued, more = {}) =>
@@ -203,6 +213,30 @@ describe("fetching a CRL", () => {
 		expect(await started).toEqual({ kind: "unconfirmed", reason: "unreachable" });
 		expect(await waiting).toEqual({ kind: "good" });
 		expect(s.fetched).toHaveLength(2);
+	});
+
+	it("holds a refresh back by a failure remembered, as a fetch is held", async () => {
+		const root = await issue({ cn: "root", ca: true });
+		const leaf = await leafOf(root);
+		const s = checking(
+			root,
+			{ [atRoot]: await crlOf({ by: root, nextUpdate: Date.now() + 86_400_000 }) },
+			["crl.example"],
+			true,
+		);
+		expect(await s.check(leaf)).toEqual({ kind: "good" });
+		s.later(3_600_001);
+		s.table[atRoot] = "unreachable";
+		for (let n = 0; n < 5; n++) {
+			expect(await s.check(leaf)).toEqual({ kind: "good" });
+			await s.settled();
+		}
+		// The first refresh failed; the four after it waited on the failure's lifetime.
+		expect(s.fetched).toHaveLength(2);
+		s.later(31_000);
+		await s.check(leaf);
+		await s.settled();
+		expect(s.fetched).toHaveLength(3);
 	});
 
 	it("fetches again in the background after crl-ttl, the one kept answering meanwhile", async () => {

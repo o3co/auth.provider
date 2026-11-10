@@ -89,7 +89,8 @@ export function crlsOver(kept: Kept, fetching: Fetching) {
 				signatureAlgorithms,
 				signal,
 			);
-			if (read.kind === "aborted") return "aborted";
+			// Ended while it was read: what the reading says is not this fetch's to remember.
+			if (read.kind === "aborted" || signal.aborted) return "aborted";
 			if (read.kind === "unusable") {
 				reason = reasonOf(read.reason);
 				continue;
@@ -102,6 +103,7 @@ export function crlsOver(kept: Kept, fetching: Fetching) {
 			}
 			reason = fromTaken[taken];
 		}
+		if (signal.aborted) return "aborted";
 		failed.delete(key);
 		if (failed.size >= mostFailures) failed.delete(failed.keys().next().value as string);
 		failed.set(key, { reason, until: fetching.now() + fetching.failureMs });
@@ -126,6 +128,9 @@ export function crlsOver(kept: Kept, fetching: Fetching) {
 		crl: VerifiedCrl,
 		now: number,
 	) {
+		// A failure remembered holds a refresh back as it holds a fetch.
+		const failure = failed.get(key);
+		if (failure && now < failure.until) return;
 		const margin = Math.max((crl.nextUpdate - crl.thisUpdate) / 10, 60_000);
 		const due =
 			now - (fetchedAt.get(key) ?? 0) >= fetching.crlTtlMs || now >= crl.nextUpdate - margin;
