@@ -15,7 +15,7 @@
 - `auditEvents`: a module's declaration of its events (each kind's attributes, and when it is recorded), which it exports as `./audit-events` for the audit event reference; `declaredAudit` records only the kinds declared, with their attributes, and throws on another.
 - The built-in receiver `log`: the kind, the event's time (`occurred`, epoch ms), the subject and the attributes' names, never their values.
 - Operator section: `receivers`, their names or `none` (no default); `max-pending` (default 1000), each receiver's deliveries under way at once.
-- `./testing`: `auditConfig`, and `auditStandIn`, a stand-in that keeps every event.
+- `./testing`: `auditConfig`, a test configuration builder, and `auditStandIn`, a stand-in that keeps every event.
 
 ## Invariants
 - A receiver gets the event frozen, with its time (`at`, epoch ms) from `kernel`'s clock, whatever the emitter wrote.
