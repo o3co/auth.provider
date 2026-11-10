@@ -81,6 +81,16 @@ it("marks a subject a record of no time holds as one revoked now, and reads a ma
 	expect(isUnavailable(failed)).toBe(true);
 });
 
+it("never writes a boundary over a mark it cannot read: the revocation is unavailable, the mark stays", async () => {
+	const { revocations: boundaries, revocation, kept } = await boot();
+	const odd = { sessions: 1, erasedAt: "x" } as unknown as StoredBoundary;
+	await kept.records.create("alice", odd, "endless");
+	const failed = await boundaries.record("alice").catch((e: unknown) => e);
+	expect(isUnavailable(failed)).toBe(true);
+	expect(await kept.records.read("alice")).toEqual(odd);
+	expect(isUnavailable(await revocation.check("alice", now).catch((e: unknown) => e))).toBe(true);
+});
+
 it("lets no module take the erasure until account erasure is named", async () => {
 	const stores = memoryBoundaries(() => now);
 	const assembled = assemble({

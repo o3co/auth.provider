@@ -14,6 +14,7 @@ Internal module of `subject-revocation`: a subject's boundaries, how they are wr
 - `recorded`: the boundaries after a revocation at a time, the deadline of the write that records them, the erasure's mark kept; `comparedTo`: `compared` against a subject's boundaries, revoked where it is erased; `compared`: valid or revoked, in seconds, with the boundary widened by an allowance.
 - `writtenTo`: the store → the write `record` makes before its followers, at each attempt's deadline; a write handed no deadline, or one of no number, is unavailable.
 - `opened`: the boundaries a stored record holds, or none when it holds no time, or a mark that is no time; `stored`, `timeOf`.
+- An unreadable mark of erasure is never rewritten: the write is unavailable, as the read is. A record that holds no time and no mark is written over by the next revocation, as in 0.19.
 - `subjectRevocationOf`: the single-boundary interface over `revocations`.
 
 ## Invariants

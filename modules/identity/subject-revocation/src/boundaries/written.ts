@@ -24,6 +24,16 @@ export const opened = (record: StoredBoundary): Boundaries | undefined => {
 	};
 };
 
+/** Whether a record carries a mark of erasure, readable or not. */
+const markHeld = (record: StoredBoundary) => {
+	const value: unknown = record;
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		(value as { readonly erasedAt?: unknown }).erasedAt !== undefined
+	);
+};
+
 /** The deadline a store hands a write; one that hands none, or one of no number, has written nothing it can confirm. */
 export const timeOf = (write: BoundaryWrite | undefined) => {
 	const deadline: unknown = write?.deadline;
@@ -43,6 +53,8 @@ export function writtenTo(boundaries: BoundaryStore): Write {
 		// A record that holds no time keeps nothing: both kinds move.
 		const moved = (record: StoredBoundary, write: BoundaryWrite) => {
 			const held = opened(record);
+			// A mark of erasure that cannot be read is never written over: the mark stays for good.
+			if (held === undefined && markHeld(record)) throw new Unavailable("subject-revocation");
 			return stored(recorded(held, timeOf(write), keep && held !== undefined));
 		};
 		// Update first: a subject revoked before then costs one call.
