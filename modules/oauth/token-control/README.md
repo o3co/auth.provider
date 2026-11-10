@@ -10,7 +10,7 @@
 
 ## Offers
 - Routes: `POST /oauth/introspect` and `POST /oauth/revoke`. Revocation answers `http`'s listed origins (a page may send `authorization` and `content-type`, and read `www-authenticate` and `retry-after`); introspection answers none.
-- Extension point: revocable token kinds, one per hint; a kind takes a token and a client and answers written, done, unknown or unsupported.
+- Extension point `revocableKinds`: revocable token kinds, one per hint; a kind takes a token and a client and answers written, done, unknown or unsupported.
 - `issuer` metadata: `introspection_endpoint`, and `revocation_endpoint` where any token can be revoked; both absolute on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written. With each, its `*_auth_methods_supported` (`clients`' methods; at introspection, not `none`) and `*_auth_signing_alg_values_supported` where a method signs.
 - Audit events, never holding a token: declared in `./audit-events`, listed in the audit event reference.
 - Both events carry `source` when `request-source` determines it.
