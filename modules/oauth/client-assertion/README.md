@@ -11,15 +11,15 @@
 
 ## Offers
 - Composition definition: the method, which names the asymmetric algorithms it takes.
-- The client metadata section `client-assertion`: `keys`, public RSA, EC or OKP keys as JWKs, default empty.
+- The client metadata section `client-assertion` (`clientKeys`): `keys`, public RSA, EC or OKP keys as JWKs, default empty.
   - Each is read by `keys`' rules for outside keys: no private member, a `kid` that is a string, `use` `sig` and `key_ops` holding `verify` where given. A registered client's key that none of the operator's `algorithms` reads is warned of at every start, below.
   - Or `jwks-uri`: where the client publishes its key set, an https URL (http only where `outbound` allows plain http), as `url-setting` takes it; never beside written keys. A registered client's `jwks-uri` that `outbound`'s policy refuses refuses boot, with the keys to set (`outbound.refusals`).
   - `accept-loose-audience` (default false): also takes the client's assertions for a loose audience, below. A lasting setting, set by client for one whose library names the token endpoint.
   - Any other key is refused at boot.
-- Store interface for spent assertions: save a name for a lifetime, answering `created` or `exists`.
-  - Requirements: no eviction, survives a crash, never rolled back by failover.
+- Store interface for spent assertions, `spentAssertions`: save a name for a lifetime, answering `created` or `exists`.
+  - Requirements (`spentAssertionsNeeds`): no eviction, survives a crash, never rolled back by failover.
 - Operator section: `max-lifetime` (`1s` to `1d` in whole seconds, default `1h`) and `clock-skew` (`0s` to `5m`, default `30s`), each written with its unit; `algorithms` (asymmetric ones `external-jwt` knows; default RS256, ES256, ES384, ES512, EdDSA, one for each kind of key).
-- Test configuration builders, the section for test clients, and the contract test of the store interface (`./testing`).
+- `./testing`: `clientAssertionConfig`, the section for test clients (`clientKeysFor`), and the store interface's contract test (`spentAssertionsContract`).
 
 ## Invariants
 - The three values are read from the body only, a form or a JSON object; never from the query.

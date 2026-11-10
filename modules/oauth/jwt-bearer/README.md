@@ -8,11 +8,11 @@
 - Client authentication (`token-endpoint`).
 
 ## Offers
-- Composition definition (grant, taking its audience from the request, and identifying the client of a request naming none where an entry has a `client`, as `clientless` tells it), and its contract (`.`), naming the signing algorithms taken by default (`algorithms`, one for each kind of key) and every one there is to take (`takenAlgorithms`).
+- Composition definition (`./module`, grant type `jwtBearerGrantType`; the grant takes its audience from the request, and identifies the client of a request naming none where an entry has a `client`, as `clientless` tells it), and its contract (`.`), naming the signing algorithms taken by default (`algorithms`, one for each kind of key) and every one there is to take (`takenAlgorithms`).
 - Extension point `signerKeys`, one per issuer: the keys of the signer an assertion names (its subject and `kid`) with the algorithms they take, or none; it throws Unavailable when it cannot tell, and is asked anew for each assertion. One answering each signer's own keys alone declares `perSigner`.
 - Extension point `linkedSubjects`: the subject a linked issuer's verified signer stands for, by the IdP name and the signer's subject, or none; it throws Unavailable when it cannot tell. Contract `linkedIssuers`: each linked issuer with its IdP name (`upstream`), for the module declaring the names.
-- Store interface for spent assertions: save a name for a lifetime, answering `created` or `exists`. Needs: never evicted, survives a crash and a failover (losing one lets an assertion be reused). Its contract test (`./testing`).
-- Extension point `jtiLedgers`, one per issuer: a ledger shared with whatever else accepts that issuer's assertions, using one up by its `jti` as sent (`first` or `replayed`), in place of the store; it throws Unavailable when it cannot tell. Its contract test and a ledger in memory (`./testing`).
+- Store interface for spent assertions, `spentAssertions`: save a name for a lifetime, answering `created` or `exists`. Needs (`spentAssertionsNeeds`): never evicted, survives a crash and a failover (losing one lets an assertion be reused). Its contract test `spentAssertionsContract` (`./testing`).
+- Extension point `jtiLedgers`, one per issuer: a ledger shared with whatever else accepts that issuer's assertions, using one up by its `jti` as sent (`first` or `replayed`), in place of the store; it throws Unavailable when it cannot tell. Its contract test `jtiLedgerContract` and a ledger in memory `memoryJtiLedger` (`./testing`).
 - Extension point `delegatedAssertions`: a delegated issuer's assertions, checked and used up by another module by its own rules (`delegated`). Client metadata section `jwt-bearer` (`delegated`).
 - Operator section (`jwtBearerConfig` in `./testing`):
   - `issuers`, the trusted issuers, each entry as the internal module `issuers` reads it. `delegated-issuers`, as `issuers` reads them.

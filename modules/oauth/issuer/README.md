@@ -12,9 +12,9 @@
 
 ## Offers
 - `issuer`: its URL. `endpointOrigin` (the issuer) → the origin this provider names its endpoints on: the issuer URL's, which is `http`'s public origin wherever one is written, so it is there with no public origin too.
-- Extension point: metadata items, name → value; an item without a value is left out of the document.
+- Extension point `metadata`: metadata items, name → value; an item without a value is left out of the document.
 - Operator section: `url`, required; an http or https URL as `url-setting` takes it, without a query or a trailing /.
-- Test configuration builders (`./testing`); the URL defaults to `https://issuer.example`.
+- `./testing`: `issuerConfig`, a test configuration builder; the URL defaults to `https://issuer.example`.
 
 ## Invariants
 - Boot is refused when the issuer's origin differs from `http`'s public origin, where one is written, and for a plain-http issuer where none is (plain http comes only with the public origin http takes by `insecure-origin`). A production deployment refuses a plain-http issuer.

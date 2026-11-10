@@ -10,9 +10,9 @@
 ## Offers
 - Composition definition only. The binding kind: `cnf` member `jkt`, named `dpop` for operators, token type `DPoP`, explicit (it wins over an ambient binding, such as a certificate, a request also proves).
 - Contribution to `issuer`'s metadata: `dpop_signing_alg_values_supported`, the allowed algorithms.
-- Store interface for spent proofs: save a name for a lifetime, answering `created` or `exists`.
-  - Requirements: no eviction, survives a crash, never rolled back by failover.
-  - Its contract test, and the section for tests, `dpopConfig` (`./testing`).
+- Store interface for spent proofs, `spentProofs`: save a name for a lifetime, answering `created` or `exists`.
+  - Requirements (`spentProofsNeeds`): no eviction, survives a crash, never rolled back by failover.
+  - Its contract test `spentProofsContract`, and the section for tests, `dpopConfig` (`./testing`).
 - Operator section `dpop`: `algorithms`, `proof-window`, and `nonce` (`required`: `as` by default, asked at the token endpoint, where a token is bound; `as+rs`, at resources too, is no default, as a resource server outside this provider would have to ask it as well; `never` is warned of at every start, `dpop.nonce_not_asked`; `ttl`; `secret`, then required), `proofs` in `proofs-window` (default 60 in `1m`), times written with their unit; its keys are in the configuration reference.
 
 ## Invariants

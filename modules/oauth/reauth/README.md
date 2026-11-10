@@ -12,9 +12,9 @@
   - `remember` (the request's parameters, the time a login counts from, whether it is the step-up round trip → the record's name).
   - `take` (name, the request's parameters → the record, or none).
   - `fresh` (`prompt=login` asked, `max_age` in ms, whether a known authentication time is needed; the session's authentication time or that it is unknown; the taken record → yes / no).
-- Store interface (the assembly wires the implementation): re-authentications (per name, an unguessable value the place never keeps in clear; save / update from the current contents). Record contents are not shown to the store. Needs (`reauthStoreNeeds`): survives a crash, never rolled back by failover, names that derive from the unguessable value.
+- Store interface `reauthStore` (the assembly wires the implementation): re-authentications (per name, an unguessable value the place never keeps in clear; save / update from the current contents). Record contents are not shown to the store. Needs (`reauthStoreNeeds`): survives a crash, never rolled back by failover, names that derive from the unguessable value.
 - Operator section: `record-lifetime` (1m–1h, default `10m`, written with its unit), how long a record lives.
-- `./testing`: the contract test of the store interface, for every implementation.
+- `./testing`: `reauthStoreContract`, the store interface's contract test, for every implementation.
 
 ## Invariants
 - A record lives `record-lifetime`, 10 minutes unless set. A new record's name is made from 32 random bytes; if the name is already held, unavailable.
