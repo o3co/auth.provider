@@ -9,8 +9,10 @@ export interface Unlisted {
 
 /** A name, or the name a call, a type's arguments, a member or an index open with. */
 const opening = /^([A-Za-z_$][\w$]*)(?:[(<.[][\s\S]*)?$/;
+/** An entry point, which names its default export. */
+const entryPoint = /^\.\/[\w-]+$/;
 
-/** The names a card lists: each backticked token in its Offers and Deprecated sections that is a name, or opens with one. */
+/** The names a card lists: each backticked token in its Offers and Deprecated sections that is a name, opens with one, or is an entry point. */
 export function listedOn(card: string): Set<string> {
 	const listed = new Set<string>();
 	let section = "";
@@ -19,7 +21,8 @@ export function listedOn(card: string): Set<string> {
 		if (heading) section = heading[1] ?? "";
 		else if (section === "Offers" || section === "Deprecated") {
 			for (const [, token] of line.matchAll(/`([^`]+)`/g)) {
-				const name = opening.exec(token?.trim() ?? "")?.[1];
+				const text = token?.trim() ?? "";
+				const name = entryPoint.test(text) ? text : opening.exec(text)?.[1];
 				if (name) listed.add(name);
 			}
 		}
@@ -50,9 +53,10 @@ export function unlistedExports(packages: readonly Pkg[]): Unlisted[] {
 		const surfaces = surfacesOf(packages, entry);
 		return packages.flatMap((p) => {
 			const surface = surfaces.get(p.name);
-			// A `./module`'s default is the module itself, not a name the card lists.
-			const names = (surface ? unlistedIn(surface, listedOn(p.card ?? "")) : []).filter(
-				(name) => entry !== "./module" || name !== "default",
+			const listed = listedOn(p.card ?? "");
+			// A default is listed by its entry point's name; a `./module`'s is the module itself.
+			const names = (surface ? unlistedIn(surface, listed) : []).filter(
+				(name) => name !== "default" || (entry !== "./module" && !listed.has(entry)),
 			);
 			return names.length > 0 ? [{ where: p.name, entry, names }] : [];
 		});

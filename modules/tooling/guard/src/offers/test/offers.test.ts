@@ -70,3 +70,20 @@ it("asks a default exported from any entry but `./module`", () => {
 		{ where: "@mod/offers-default", entry: ".", names: ["default"] },
 	]);
 });
+
+it("lists an entry's default by the entry's name, and asks it of a card that never names the entry", () => {
+	const events = (name: string, offers: string) => ({
+		...pkg(
+			name,
+			{ "src/events.ts": "export default { kinds: ['made'] };\n" },
+			{ exports: { "./audit-events": "./src/events.ts" } },
+		),
+		card: card(offers),
+	});
+	expect(
+		unlistedExports([
+			events("@mod/offers-events-named", "- The events, declared in `./audit-events`."),
+			events("@mod/offers-events-unnamed", "- The events."),
+		]),
+	).toEqual([{ where: "@mod/offers-events-unnamed", entry: "./audit-events", names: ["default"] }]);
+});
