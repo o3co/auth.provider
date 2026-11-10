@@ -5,7 +5,7 @@ It is one composition, not every one: a module another composition adds opens wh
 
 ## What this composition leaves out
 
-Packages with a module the full template with every opt-in does not compose: `@mod/audit-stdout`, `@mod/mail`, `@mod/store`.
+Packages with a module the full template with every opt-in does not compose: `@mod/audit-stdout`, `@mod/erasure-journal-file`, `@mod/mail`, `@mod/store`.
 
 ## Routes
 

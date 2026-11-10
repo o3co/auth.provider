@@ -1,0 +1,8 @@
+{
+	"private": false,
+	"description": "Account erasure for auth-provider, a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js: the erasure journal kept in a file.",
+	"keywords": [
+		"erasure",
+		"gdpr"
+	]
+}

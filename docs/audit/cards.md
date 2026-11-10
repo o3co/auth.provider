@@ -31,6 +31,10 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `connect` (`src/connect`): the browser half of a connection.
   - `upstream-account` (`src/upstream-account`): whose upstream account a connection reached.
 
+## erasure
+
+- `@mod/erasure-journal-file` (adapter, `modules/erasure/erasure-journal-file`): Implements the `erasureJournal` contract with one file on the one node that runs erasure.
+
 ## foundation
 
 - `@mod/added-claims` (foundation, `modules/foundation/added-claims`): Owns the rules of the claims a grant adds to its access token, their shape, the names reserved and the limits, and the one walker that checks a set of them and copies it.
@@ -39,6 +43,8 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/client-certificate` (foundation, `modules/foundation/client-certificate`): Reads the client's certificate that a trusted proxy forwards, in the form the operator names.
 - `@mod/config-files` (foundation, `modules/foundation/config-files`): Reads an app's configuration files: layers HOCON files into one tree for `kernel`'s `assemble`, which checks each module's section.
 - `@mod/cookies` (foundation, `modules/foundation/cookies`): Builds `Set-Cookie` values for the names routes give, by one rule for this deployment.
+- `@mod/erasure-extensions` (foundation, `modules/foundation/erasure-extensions`): Owns the contract between account erasure and the owners of what it erases: each owner's eraser, the reports of what erasing did, and the names of the marks erasure keeps.
+- `@mod/erasure-journal` (foundation, `modules/foundation/erasure-journal`): Owns the contract of the one record of account erasures a deployment keeps: appending that an erasure began or finished, listing them, and the header that ties the record to the store's copy of it.
 - `@mod/external-jwt` (foundation, `modules/foundation/external-jwt`): Checks a JWT signed by a key from outside (header, key, signature, times, issuer, audience, subject), and keeps each key set fetched from a URL once in the process; knows no feature.
 - `@mod/host-entries` (foundation, `modules/foundation/host-entries`): How an operator writes a host in configuration (a name, `.name` for it and the names under it, an address, or a `host:port` pair), and whether a host is among such entries.
 - `@mod/http` (foundation, `modules/foundation/http`): Owns the HTTP entry point: it connects the routes that modules contribute and applies the policies each route declares.
