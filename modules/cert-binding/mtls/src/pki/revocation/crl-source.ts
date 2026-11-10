@@ -24,8 +24,8 @@ import {
 /** A CRL verified once, as it was fetched, by its issuer's key; judged again for each certificate. */
 export type KeptCrl = VerifiedCrl | Failed;
 
-/** The serials kept CRLs list at most, together: some 47 B each as x509-path keeps them. */
-export const mostKeptSerials = 1 << 20;
+/** The serials kept CRLs list at most, together: measured some 46 to 60 MiB at the full budget. */
+export const mostKeptSerials = 1 << 19;
 
 /** How much a kept CRL weighs against `mostKeptSerials`: the serials it lists. */
 export const serialsIn = (kept: KeptCrl) => ("listed" in kept ? kept.listed.size : 0);
