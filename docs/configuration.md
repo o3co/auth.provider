@@ -138,6 +138,14 @@ From `@mod/dpop`.
 | `dpop.nonce.ttl` | string | `5m` |  | `DPOP_NONCE_TTL` | `5m` | How often the nonce changes, from `1s` to `1h` in whole seconds; one is taken for twice this. |
 | `dpop.nonce.secret` | string |  |  | `DPOP_NONCE_SECRET` | `REPLACE-NONCE-SECRET-BASE64-32-BYTES` | The nonce's key, shared by every instance: base64 of 32 bytes or more; required unless never. |
 
+## erasure-journal-file
+
+From `@mod/erasure-journal-file`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `erasure-journal-file.path` | string |  | yes |  |  | The journal's file, an absolute path on the one node that runs erasure, kept apart from the store's backups. Its lock is the same path with `.lock` added. |
+
 ## exchange-id-tokens
 
 From `@mod/exchange-id-tokens`.
