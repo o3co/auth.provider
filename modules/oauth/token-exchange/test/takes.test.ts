@@ -3,6 +3,7 @@ import clientsModule from "@mod/clients/module";
 import { clientsConfig } from "@mod/clients/testing";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { kernelConfig } from "@mod/kernel";
@@ -18,6 +19,7 @@ it("takes all it names, with a longest lifetime written or not", async () => {
 		const input = {
 			modules: [
 				http,
+				httpServer,
 				tokensStandIn(),
 				issuerModule,
 				clientsModule,

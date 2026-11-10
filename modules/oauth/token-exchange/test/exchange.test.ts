@@ -13,6 +13,7 @@ import {
 } from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import {
@@ -213,6 +214,7 @@ async function serve(
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			watched,
 			issuerModule,
 			clientsModule,
@@ -591,6 +593,7 @@ describe("token-exchange: the subject check", () => {
 			assemble({
 				modules: [
 					http,
+					httpServer,
 					keysModule,
 					issuerModule,
 					senderBindingModule,
