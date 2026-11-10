@@ -65,9 +65,9 @@ describe("revocations seen", () => {
 });
 
 describe("CRLs kept", () => {
-	it("hold their listed serials to 2^20 together, the oldest going first, and one past it alone is not taken", () => {
+	it("hold their listed serials to 2^19 together, the oldest going first, and one past it alone is not taken", () => {
 		const kept = keptOver(8);
-		const half = 2 ** 19;
+		const half = 2 ** 18;
 		expect(kept.take("a", crl(1000, 1, half))).toBe("kept");
 		expect(kept.take("b", crl(1000, 1, half))).toBe("kept");
 		expect(kept.take("c", crl(1000, 1, 1))).toBe("kept");
@@ -76,7 +76,7 @@ describe("CRLs kept", () => {
 			true,
 			true,
 		]);
-		expect(kept.take("d", crl(1000, 1, 2 ** 20 + 1))).toBe("too-large");
+		expect(kept.take("d", crl(1000, 1, 2 ** 19 + 1))).toBe("too-large");
 		expect(kept.crlOf("b")).toBeDefined();
 	});
 

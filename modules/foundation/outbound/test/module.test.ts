@@ -13,6 +13,7 @@ import { configuredUrl } from "@mod/url-setting/testing";
 import { afterEach, expect, it, vi } from "vitest";
 import { type Narrower, outbound, signedOutbound } from "../src/contract.ts";
 import outboundModule, { NotTheFloor, outboundOver, section } from "../src/module.ts";
+import { revocationSection } from "../src/revocation/settings.ts";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -41,13 +42,8 @@ it("holds to the defaults: outbound-policy's for its keys, and outbound's own", 
 		"direct-hosts": [],
 		"plain-ipv4": [],
 		resolution: "helper",
-		revocation: {
-			hosts: [],
-			"accept-unconfirmed": false,
-			"crl-entries": 64,
-			"failure-lifetime": 30_000,
-			"crl-ttl": 3_600_000,
-		},
+		// Its own defaults, as its tests hold them.
+		revocation: revocationSection.parse({}),
 	});
 });
 
