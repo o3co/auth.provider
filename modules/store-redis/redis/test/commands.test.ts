@@ -37,6 +37,7 @@ function primary() {
 	const redis = fakeRedis();
 	redis.settings["min-replicas-to-write"] = "1";
 	redis.settings["min-replicas-max-lag"] = "10";
+	redis.replication.connected = 1;
 	return redis;
 }
 
@@ -211,13 +212,15 @@ describe("the commands the store needs", () => {
 		const redis = primary();
 		redis.writes.noReplicas = true;
 		const { ready } = await boot(await redis.listen(), "replicas");
-		expect(await ready()).toBe("ready");
+		// Booted, never refused; unready, as the ledger's entry waits for writes to be taken.
+		expect(await ready()).toBe("unready");
 		redis.down();
 	});
 
 	it("send SET of the confirmation key where replication is declared, and WAIT only with replicas", async () => {
 		const outcome = async (refused: string, replication?: "none" | "replicas") => {
 			const redis = primary();
+			if (replication !== "replicas") redis.replication.connected = 0;
 			redis.refused.add(refused);
 			const answer = await boot(await redis.listen(), replication).then(
 				() => "booted",

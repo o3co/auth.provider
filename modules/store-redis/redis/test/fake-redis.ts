@@ -47,7 +47,11 @@ export function fakeRedis() {
 	};
 	const writes = { noReplicas: false, keysRefused: false };
 	/** The good replicas `INFO` counts (`min_slaves_good_slaves`), shown only when set. */
-	const replication = { goodReplicas: undefined as number | undefined };
+	const replication = {
+		goodReplicas: undefined as number | undefined,
+		/** The replicas `ROLE` lists and a `WAIT` counts as acknowledging. */
+		connected: 0,
+	};
 	const cluster = { keysAnswer: undefined as string | undefined };
 	/** The run id each connection's server answers, by the order the connections came: the last for any after. */
 	const servers = {
@@ -134,7 +138,13 @@ export function fakeRedis() {
 						: `min_slaves_good_slaves:${replication.goodReplicas}\r\n`
 				}`,
 			);
-		if (name === "ROLE") return `*3\r\n${bulk(settings.role ?? "")}:0\r\n*0\r\n`;
+		if (name === "ROLE") {
+			const listed = `*3\r\n${bulk("10.0.0.2")}${bulk("6379")}${bulk("0")}`.repeat(
+				replication.connected,
+			);
+			return `*3\r\n${bulk(settings.role ?? "")}:0\r\n*${replication.connected}\r\n${listed}`;
+		}
+		if (name === "WAIT") return `:${replication.connected}\r\n`;
 		const setting = args[2] ?? "";
 		if (name === "CONFIG") {
 			const shown = settings[setting];

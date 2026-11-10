@@ -140,7 +140,9 @@ export async function honoursOf(
 	},
 	wanted: readonly Guarantee[],
 ): Promise<Honours> {
+	let answer: Honours;
 	try {
+		const before = await historyOf(client);
 		const asked: Space[] = wanted.length > 0 ? [{ name: "asked", guarantees: wanted }] : [];
 		const replicated = wanted.includes("replicated") || wanted.includes("confirmed-reads");
 		const reasons: string[] = [];
@@ -164,11 +166,24 @@ export async function honoursOf(
 			reasons.push(...goodReplicaProblems(info, needed === undefined ? undefined : Number(needed)));
 		}
 		reasons.push(...settings.problems);
-		if (reasons.length > 0) return { kind: "unmet", reasons };
-		return settings.used.size > 0
-			? { kind: "declared", settings: [...settings.used] }
-			: { kind: "verified" };
+		answer =
+			reasons.length > 0
+				? { kind: "unmet", reasons }
+				: settings.used.size > 0
+					? { kind: "declared", settings: [...settings.used] }
+					: { kind: "verified" };
+		// One answer from one server: none where the reads may have reached another.
+		if ((await historyOf(client)) !== before) throw new Error("another server");
 	} catch {
 		throw new Unavailable("store");
 	}
+	return answer;
+}
+
+/** The server a client reaches and its replication history, as INFO tells them. */
+async function historyOf(client: Redis): Promise<string> {
+	const server = /run_id:(\w+)/.exec(await client.info("server"))?.[1];
+	const history = /master_replid:(\w+)/.exec(await client.info("replication"))?.[1];
+	if (server === undefined || history === undefined) throw new Error("no server named");
+	return `${server}.${history}`;
 }

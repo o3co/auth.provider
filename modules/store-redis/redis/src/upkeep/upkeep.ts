@@ -123,11 +123,11 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 	let kept = false;
 	let keeping: Promise<void> | undefined;
 	/**
-	 * Adds each declared space to the ledger, unconfirmed: replication keeps order, so data that
-	 * outlives a failover was written after it, and any later confirmed write confirms it.
+	 * Adds each declared space to the ledger, confirmed as a replicated write is, so a replica
+	 * promoted after it holds it; kept only once it is.
 	 */
 	const keep = async () => {
-		await run(change, both, fenced(["keep", entries]));
+		await confirm(await run(change, both, fenced(["keep", entries])));
 		kept = true;
 	};
 	/**
@@ -233,8 +233,8 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 	};
 	/**
 	 * What no longer holds of the process's start: the record's epoch moved from the one it took;
-	 * the declared spaces not yet on the ledger, tried again; or one lost from it, as a failover
-	 * can lose the unconfirmed entry, added again.
+	 * the declared spaces not yet on the ledger, tried again; or one missing from it, or held as
+	 * holding no subject's data where this process declares it may, added again.
 	 */
 	const recheck = async (): Promise<string[]> => {
 		const held = await readAll(false);
@@ -246,7 +246,12 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 			);
 			return added ? [] : ["the declared spaces are not yet on the ledger: no change is made"];
 		}
-		if (!declared.every((space) => Object.hasOwn(held.ledger, space.name))) await keep();
+		const weakened = declared.some(
+			(space) =>
+				held.ledger[space.name]?.subjectDataEver !== true &&
+				(!Object.hasOwn(held.ledger, space.name) || space.subjectData !== noSubjectData),
+		);
+		if (weakened) await keep();
 		return [];
 	};
 	return { control, upkeep: checkedUpkeep(upkeep, declared), start, recheck, ready };

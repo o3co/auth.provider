@@ -184,10 +184,7 @@ export interface Taken {
 	epoch: string;
 }
 
-/**
- * Runs a script on `client`; every answer comes with the run id of the server that computed it
- * (`serverOf`). A change refused for an old epoch is unavailable.
- */
+/** Runs a script, its answer naming its server (`serverOf`); one refused for an old epoch is unavailable. */
 export function scriptsOn(client: Redis) {
 	return async (script: string, keys: string[], args: (string | number)[]) => {
 		let reply: unknown;

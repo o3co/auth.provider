@@ -14,7 +14,14 @@ const never = { expiry: { kind: "never" } } as const;
  * A client whose ledger write waits until the test settles it, every other script answering
  * `answer`; it records the order scripts were sent in, by whether each was the ledger's.
  */
-function heldLedger(answer: object) {
+function heldLedger(
+	answer: object,
+	options: {
+		readonly confirmed?: () => Promise<string>;
+		readonly declared?: readonly Space[];
+	} = {},
+) {
+	const declared = options.declared ?? [space];
 	const sent: string[] = [];
 	let settle: (ok: boolean) => void = () => {};
 	const ledger = new Promise<boolean>((resolve) => {
@@ -36,9 +43,9 @@ function heldLedger(answer: object) {
 	const upkeep = redisUpkeepWith({
 		run: scriptsOn(client),
 		serverOf,
-		confirmed: undefined,
+		confirmed: options.confirmed,
 		keys: keysUnder("t"),
-		declared: [space],
+		declared,
 		taken,
 		random: quietRuntime().random,
 		honours: async () => ({ kind: "verified" }),
@@ -47,11 +54,11 @@ function heldLedger(answer: object) {
 		client,
 		{} as Redis,
 		{ prefix: "t", replicationTimeoutMs: 1000, replication: undefined },
-		[space],
+		declared,
 		taken,
 		upkeep.ready,
 	);
-	return { store, sent, settle };
+	return { store, upkeep, sent, settle };
 }
 
 it("sends a change whose deadline passes while the shared ledger write is pending only after it, deadline and all, and answers late as its script judges", async () => {
@@ -74,4 +81,43 @@ it("answers a change unavailable and sends nothing of it where the shared ledger
 	expect(sent).toEqual(["keep"]);
 	await expect(store.putIfAbsent(key, 3, never)).rejects.toMatchObject({ name: "Unavailable" });
 	expect(sent).toEqual(["keep", "keep"]);
+});
+
+it("keeps the ledger's entry only once a confirmation round covers it on the server that wrote it, changing nothing till then", async () => {
+	const { store, sent, settle } = heldLedger(
+		{ kind: "written", version: "v" },
+		{ confirmed: async () => "another" },
+	);
+	settle(true);
+	await expect(store.putIfAbsent(key, 1, never)).rejects.toMatchObject({ name: "Unavailable" });
+	expect(sent).toEqual(["keep"]);
+});
+
+/** The control record and the ledger as the read answers them, the ledger holding `ledger`. */
+const recorded = (ledger: object) => ({
+	epoch: "",
+	maintenance: false,
+	requires: "[]",
+	marks: "{}",
+	ledger: JSON.stringify(ledger),
+});
+
+it("adds again a space missing from the ledger, or held as holding no subject's data where it is declared to hold some", async () => {
+	const held: Space = { name: "held", guarantees: [], subjectData: "online-indexed" };
+	const none: Space = { name: "none", guarantees: [], subjectData: "none" };
+	const ledgers = [
+		[{ none: { subjectDataEver: false } }, true],
+		[{ held: { subjectDataEver: false }, none: { subjectDataEver: false } }, true],
+		[{ held: { subjectDataEver: true }, none: { subjectDataEver: false } }, false],
+	] as const;
+	for (const [ledger, added] of ledgers) {
+		const { upkeep, sent, settle } = heldLedger(recorded(ledger), { declared: [held, none] });
+		settle(true);
+		await upkeep.start();
+		expect(await upkeep.recheck()).toEqual([]);
+		expect(
+			sent.filter((s) => s === "keep"),
+			JSON.stringify(ledger),
+		).toHaveLength(added ? 2 : 1);
+	}
 });

@@ -13,7 +13,7 @@ Internal module of `redis`: what the server's settings give the declared spaces,
 - `roleOf`, `replicasOf`: the server's `ROLE`, and the replicas it lists.
 - `evictionProblems`, `replicationProblems`, `durabilityProblems` (the settings, the declared spaces, what the operator stated): what the settings fail to give those spaces.
 - `refusedForGood` (an error): whether the server refuses a command for good.
-- `honoursOf` (the client, what the operator stated, the guarantees wanted): `store`'s `honours`, read anew as boot reads the settings, with the replicas from `ROLE` and the good replicas as the probe counts them; a setting taken as declared makes it declared.
+- `honoursOf` (the client, what the operator stated, the guarantees wanted): `store`'s `honours`, read anew as boot reads the settings, with the replicas from `ROLE` and the good replicas as the probe counts them; a setting taken as declared makes it declared. One answer from one server: where the run id or the replication id changed between its first read and its last, it is unavailable, never verified.
 
 ## Invariants
 - A setting is read by `CONFIG GET`. Where the server refuses it for good (`NOPERM`, or an unknown command or subcommand) or answers it empty, not showing it, the declared value is taken, and a needed one left undeclared is a problem; where it answers, a declared value that differs is a problem; any other error (`BUSY`, say) is thrown.

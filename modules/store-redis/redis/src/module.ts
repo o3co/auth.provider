@@ -363,8 +363,7 @@ export default defineModule(
 				const { problems } = await unmet(client, confirmer, declared, c.section);
 				if (problems.length > 0) return problems;
 				// A process under an old epoch changes nothing: it leaves traffic until it starts again.
-				const started = await upkeep.recheck();
-				return started.length > 0 ? started : goodReplicas();
+				return [...(await goodReplicas()), ...(await upkeep.recheck())];
 			};
 			return redisProbe([client, confirmer], recheck, c.log, c.clock);
 		}),
