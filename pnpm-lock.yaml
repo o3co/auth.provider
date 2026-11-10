@@ -2908,6 +2908,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records

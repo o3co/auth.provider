@@ -3,6 +3,7 @@ import { auditStandIn } from "@mod/audit/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import type { Verification } from "@mod/webauthn";
@@ -212,7 +213,14 @@ it("throws unavailable when a store cannot tell", async () => {
 
 it("offers registrations in a composition without a session, and serves no route of its own", async () => {
 	const app = await assemble({
-		modules: [http, memoryStores().module, auditStandIn().module, webauthn, passkeysModule],
+		modules: [
+			http,
+			httpServer,
+			memoryStores().module,
+			auditStandIn().module,
+			webauthn,
+			passkeysModule,
+		],
 		config: { ...kernelConfig(), ...httpConfig(), ...webauthnConfig(), ...passkeysConfig() },
 		runtime: quietRuntime(),
 	});
@@ -231,7 +239,14 @@ it("offers registrations in a composition without a session, and serves no route
 
 it("gives a ceremony the challenge lifetime the operator sets", async () => {
 	const app = await assemble({
-		modules: [http, memoryStores().module, auditStandIn().module, webauthn, passkeysModule],
+		modules: [
+			http,
+			httpServer,
+			memoryStores().module,
+			auditStandIn().module,
+			webauthn,
+			passkeysModule,
+		],
 		config: {
 			...kernelConfig(),
 			...httpConfig(),
