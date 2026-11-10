@@ -1,3 +1,5 @@
+// The area's set-ups register as its package's entry loads.
+import "../src/main.ts";
 import { generateKeyPairSync } from "node:crypto";
 import { areaTarget, sceneOf } from "@mod/conformance";
 import { codeArea } from "@mod/conformance-code";
