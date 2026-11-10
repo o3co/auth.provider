@@ -9,10 +9,17 @@ import {
 	kernelConfig,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { spaces, store } from "@mod/store";
-import { contractSpaces, overwrite, storeContract } from "@mod/store/testing";
+import { type Space, spaces, store, storeControl, storeUpkeep } from "@mod/store";
+import {
+	contractSpaces,
+	overwrite,
+	storeContract,
+	type UpkeepProcess,
+	upkeepContract,
+} from "@mod/store/testing";
 import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { keysUnder } from "../src/keys.ts";
 import redisModule from "../src/module.ts";
 
 /** The server the suite runs on; `STORE_REDIS_IMAGE` runs it on another, such as Valkey, by hand. */
@@ -218,11 +225,9 @@ it("answers an empty batch in time as committed with no versions, as the contrac
 	stops.push(() => app.stop(1000));
 	const s = app.get(store);
 	const now = await s.now();
-	expect(await s.batch([], [], { deadline: now + 60_000 })).toEqual({
-		kind: "committed",
-		versions: [],
-	});
-	expect(await s.batch([], [])).toEqual({ kind: "committed", versions: [] });
+	const committed = { kind: "committed", versions: [], at: expect.any(Number) };
+	expect(await s.batch([], [], { deadline: now + 60_000 })).toEqual(committed);
+	expect(await s.batch([], [])).toEqual(committed);
 });
 
 it("offers a batch across partitions and spaces of one guarantee, so the contract's batches across run on it", async () => {
@@ -276,6 +281,47 @@ storeContract("redis", {
 		stops.push(() => app.stop(1000));
 		return app.get(store);
 	},
+});
+
+/** The prefix each process of the upkeep contract opened, so another opens the same data. */
+const upkeepPrefixes = new WeakMap<UpkeepProcess, string>();
+const startOn = async (prefix: string, declared: readonly Space[]) => {
+	const owner = defineModule({ name: "upkeep-owner", replicaSafe: true, takes: [] }, (m) =>
+		declared.map((space) => m.contribute(spaces).by(() => space)),
+	);
+	const app = await open([owner], prefix, proxyUrl);
+	stops.push(() => app.stop(1000));
+	const process = {
+		store: app.get(store),
+		control: app.get(storeControl),
+		upkeep: app.get(storeUpkeep),
+	};
+	upkeepPrefixes.set(process, prefix);
+	return process;
+};
+upkeepContract("redis", {
+	start: (declared) => startOn(`u${Date.now()}x${++opened}`, declared),
+	another: (process, declared) => startOn(upkeepPrefixes.get(process) as string, declared),
+	holds: async (process, key) => {
+		const raw = keysUnder(upkeepPrefixes.get(process) as string).valueKey(key);
+		return cli(container, "exists", raw) === "1";
+	},
+});
+
+it("answers durable unmet once the server skips its fsyncs while it rewrites, and verified again once it does not", async () => {
+	const app = await open([durable], undefined, proxyUrl);
+	stops.push(() => app.stop(1000));
+	const wanted = ["no-eviction", "durable", "replicated"] as const;
+	expect(await app.get(storeUpkeep).honours(wanted)).toEqual({ kind: "verified" });
+	cli(container, "config", "set", "no-appendfsync-on-rewrite", "yes");
+	try {
+		const answer = await app.get(storeUpkeep).honours(wanted);
+		expect(answer.kind).toBe("unmet");
+		expect(JSON.stringify(answer)).toContain("no-appendfsync-on-rewrite no");
+	} finally {
+		cli(container, "config", "set", "no-appendfsync-on-rewrite", "no");
+	}
+	expect(await app.get(storeUpkeep).honours(wanted)).toEqual({ kind: "verified" });
 });
 
 describe("redis", () => {

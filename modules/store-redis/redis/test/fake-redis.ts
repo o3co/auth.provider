@@ -108,6 +108,14 @@ export function fakeRedis() {
 		if (name === "EVAL" && failing) {
 			return "-ERR user_script:1: Script attempted to access nonexistent global variable 'cjson'\r\n";
 		}
+		// The upkeep's read of the control record and the ledger: as a store that never had either.
+		if (
+			name === "EVAL" &&
+			(args[1] ?? "").includes("'epoch', 'maintenance', 'requires', 'marks'")
+		) {
+			const none = `{"epoch":"","maintenance":false,"requires":"[]","marks":"{}","ledger":"{}"}`;
+			return bulk(`${runIdOf(connection)}\n${none}`);
+		}
 		if (name === "EVAL") return bulk(`${runIdOf(connection)}\n{"now":"0","entries":[],"n":1}`);
 		if (name === "SET" && writes.keysRefused) return "-NOPERM No permissions to access a key\r\n";
 		if (name === "SET" && writes.noReplicas)

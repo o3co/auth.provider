@@ -10,7 +10,7 @@
 - Space names and meanings, and the shapes of values. Which feature uses it.
 
 ## Offers
-- Composition definition only.
+- Composition definition only; with the store, `storeControl` and `storeUpkeep` (internal module `upkeep`).
 - The probe `redis` at `kernel`'s `probes` (internal module `probe`), given what boot checked of the server to check again.
 - Operator section:
   - `url` (`redis` or `rediss`, with no query), `accept-plaintext` (false), `address-family` (`ipv4`, `ipv6`, or either unset), `prefix` (lower-case letters, digits and `-`; default `store`).
@@ -49,7 +49,7 @@
 - The operator's, outside these checks: keeping a detached or lagging replica from promotion, replicas' disk writes, and what a `CONFIG SET` or a failover after boot lets through until a probe answers unready.
 
 ## Data
-- Keys under the prefix, one hash tag per space and partition, holding values, counts, versions and marks.
+- Keys under the prefix, one hash tag per space and partition, holding values, counts, versions and marks; and the control record and the ledger of spaces (internal module `upkeep`).
 
 ## Depends on
 - `kernel`, `store`, `tls-options` (`tlsOptions`, `isFloor`; more inside `client`), `url-setting` (inside `client`)

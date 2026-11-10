@@ -22,7 +22,7 @@ const whole = (value: unknown) => {
  */
 function numbers<A extends Record<string, unknown>>(answer: A): A {
 	const out: Record<string, unknown> = { ...answer };
-	for (const field of ["now", "remainingMs", "resetAt", "count"]) {
+	for (const field of ["now", "remainingMs", "resetAt", "count", "at"]) {
 		if (!Object.hasOwn(out, field) || out[field] === null) continue;
 		const n = whole(out[field]);
 		if (n === undefined) throw new Unavailable("store");

@@ -1,20 +1,32 @@
 import { contract, defineModule, probes, setting } from "@mod/kernel";
-import { type Space, spaces, store } from "@mod/store";
+import { type Space, spaces, store, storeControl, storeUpkeep } from "@mod/store";
 import { isFloor, tlsOptions } from "@mod/tls-options";
 import { Redis } from "ioredis";
 import { z } from "zod";
 import { clientDebugs, clientOptions, plaintextWarning, queryRefusal } from "./client/client.ts";
+import { keysUnder } from "./keys.ts";
 import { goodReplicaProblems, redisProbe } from "./probe/probe.ts";
-import { clusterRefused, redisStore, refusedCommands, roundProblems } from "./redis-store.ts";
+import {
+	clusterRefused,
+	redisStore,
+	refusedCommands,
+	roundProblems,
+	scriptsOn,
+	serverOf,
+	type Taken,
+} from "./redis-store.ts";
+import { confirmationRounds } from "./round/round.ts";
 import {
 	durabilityProblems,
 	evictionProblems,
+	honoursOf,
 	type Role,
 	replicationProblems,
 	roleOf,
 	type SettingName,
 	serverSettings,
 } from "./settings/settings.ts";
+import { redisUpkeepWith } from "./upkeep/upkeep.ts";
 
 const section = z.strictObject({
 	url: z
@@ -205,6 +217,12 @@ const connections = contract<{
 	readonly declared: readonly Space[];
 }>("redis.connections");
 
+/** The one process over the store's data, whose epoch the store and its upkeep share. */
+const opened = contract<{
+	readonly store: ReturnType<typeof redisStore>;
+	readonly upkeep: ReturnType<typeof redisUpkeepWith>;
+}>("redis.opened");
+
 const takes = [spaces, tlsOptions] as const;
 
 // Safe on many instances: it is the shared store, given the same `url` and `prefix` on each
@@ -298,19 +316,38 @@ export default defineModule(
 			});
 			return { client, confirmer, declared };
 		}),
-		m.provide(store).by(async (c) => {
+		m.provide(opened).by(async (c) => {
 			const { client, confirmer, declared } = await c.get(connections);
-			return redisStore(
-				client,
-				confirmer,
-				{
-					prefix: c.section.prefix,
-					replicationTimeoutMs: c.section["replication-timeout"],
-					replication: c.section.replication,
-				},
+			const options = {
+				prefix: c.section.prefix,
+				replicationTimeoutMs: c.section["replication-timeout"],
+				replication: c.section.replication,
+			};
+			const taken: Taken = { epoch: "" };
+			const upkeep = redisUpkeepWith({
+				run: scriptsOn(client),
+				serverOf,
+				confirmed:
+					options.replication === undefined ? undefined : confirmationRounds(confirmer, options),
+				keys: keysUnder(options.prefix),
 				declared,
-			);
+				taken,
+				random: c.random,
+				honours: (wanted) => honoursOf(client, c.section, wanted),
+			});
+			try {
+				await upkeep.start();
+			} catch {
+				return c.refuse(
+					"redis",
+					"cannot take the control record's epoch, or add the declared spaces to the ledger, before the first write",
+				);
+			}
+			return { store: redisStore(client, confirmer, options, declared, taken), upkeep };
 		}),
+		m.provide(store).by(async (c) => (await c.get(opened)).store),
+		m.provide(storeControl).by(async (c) => (await c.get(opened)).upkeep.control),
+		m.provide(storeUpkeep).by(async (c) => (await c.get(opened)).upkeep.upkeep),
 		m.contribute(probes).by(async (c) => {
 			const { client, confirmer, declared } = await c.get(connections);
 			// Too few good replicas only the probe asks: boot waits unready rather than failing on a passing state.
@@ -321,9 +358,13 @@ export default defineModule(
 				const info = await client.info("replication");
 				return goodReplicaProblems(info, needed === undefined ? undefined : Number(needed));
 			};
+			const { upkeep } = await c.get(opened);
 			const recheck = async () => {
 				const { problems } = await unmet(client, confirmer, declared, c.section);
-				return problems.length > 0 ? problems : goodReplicas();
+				if (problems.length > 0) return problems;
+				// A process under an old epoch changes nothing: it leaves traffic until it starts again.
+				const started = await upkeep.recheck();
+				return started.length > 0 ? started : goodReplicas();
 			};
 			return redisProbe([client, confirmer], recheck, c.log, c.clock);
 		}),

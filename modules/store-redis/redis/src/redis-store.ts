@@ -13,7 +13,7 @@ import {
 } from "@mod/store";
 import { type Redis, ReplyError } from "ioredis";
 import { answerOf, list } from "./answer/answer.ts";
-import { keysUnder } from "./keys.ts";
+import { keysUnder, literal } from "./keys.ts";
 import { confirmationPipeline, confirmationRounds } from "./round/round.ts";
 import * as scripts from "./scripts.ts";
 import { refusedForGood } from "./settings/settings.ts";
@@ -22,9 +22,6 @@ import { refusedForGood } from "./settings/settings.ts";
 const scanPage = 200;
 
 type Raw = { value: string; version: string; expiresAt: string | null };
-
-/** A text matched literally by SCAN's pattern. */
-const literal = (text: string) => text.replace(/[*?[\]\\]/g, (c) => `\\${c}`);
 
 const digest = (request: string) => createHash("sha256").update(request).digest("hex");
 /** Where a script answer records the server it ran on, out of sight of the callers. */
@@ -155,6 +152,9 @@ export async function roundProblems(
 				"",
 				"",
 				"0",
+				// The epoch check's: the control record, and no epoch, as a process starts with.
+				`${options.prefix}:{#control}`,
+				"",
 			],
 		],
 	];
@@ -179,20 +179,17 @@ export async function roundProblems(
 	return problems;
 }
 
+/** The epoch a process took at its start, or entered since; '' for none. */
+export interface Taken {
+	epoch: string;
+}
+
 /**
- * `client` serves the operations; `confirmer` is a connection of its own for confirming
- * replication, so a WAIT never holds up the other commands.
+ * Runs a script on `client`; every answer comes with the run id of the server that computed it
+ * (`serverOf`). A change refused for an old epoch is unavailable.
  */
-export function redisStore(
-	client: Redis,
-	confirmer: Redis,
-	options: RedisStoreOptions,
-	declared: readonly Space[],
-): Store {
-	const { prefix } = options;
-	const { slot, valueKey, counterKey, versionKey, markKey, spaceHead } = keysUnder(prefix);
-	/** Runs a script; every answer comes with the run id of the server that computed it. */
-	const run = async (script: string, keys: string[], args: (string | number)[]) => {
+export function scriptsOn(client: Redis) {
+	return async (script: string, keys: string[], args: (string | number)[]) => {
 		let reply: unknown;
 		try {
 			reply = await client.eval(script, keys.length, ...keys, ...args);
@@ -200,9 +197,31 @@ export function redisStore(
 			throw new Unavailable("store");
 		}
 		const { server, answer } = answerOf(String(reply));
+		if (answer.kind === "stale") throw new Unavailable("store");
 		Object.defineProperty(answer, servedBy, { value: server, enumerable: false });
 		return answer;
 	};
+}
+
+export const serverOf = (answer: object) => (answer as Record<symbol, unknown>)[servedBy];
+
+/**
+ * `client` serves the operations; `confirmer` is a connection of its own for confirming
+ * replication, so a WAIT never holds up the other commands. Every change carries the epoch
+ * `taken`, and is refused once the control record's is another.
+ */
+export function redisStore(
+	client: Redis,
+	confirmer: Redis,
+	options: RedisStoreOptions,
+	declared: readonly Space[],
+	taken: Taken = { epoch: "" },
+): Store {
+	const { prefix } = options;
+	const { slot, valueKey, counterKey, versionKey, markKey, spaceValues, keyAt, controlKey } =
+		keysUnder(prefix);
+	const run = scriptsOn(client);
+	const fenced = (args: (string | number)[]) => [...args, controlKey, taken.epoch];
 	const confirmed = confirmationRounds(confirmer, options);
 	/**
 	 * Replicated spaces confirm what they wrote; spaces asking for confirmed reads confirm every
@@ -214,7 +233,7 @@ export function redisStore(
 			guarantees.includes("confirmed-reads") || (guarantees.includes("replicated") && wrote);
 		if (!needed) return;
 		const server = await confirmed();
-		if (server !== (answer as Record<symbol, unknown>)[servedBy]) throw new Unavailable("store");
+		if (server !== serverOf(answer)) throw new Unavailable("store");
 	};
 	const confirm = async <A extends { kind: string }>(key: Key, answer: A): Promise<A> => {
 		await confirmOn(key, writtenKinds.has(answer.kind), answer);
@@ -234,6 +253,10 @@ export function redisStore(
 					expiresAt: raw.expiresAt === null ? null : Number(raw.expiresAt),
 				})
 			: null;
+	const committed = (answer: { at?: unknown }, versions: (string | null)[]) =>
+		typeof answer.at === "number"
+			? { kind: "committed" as const, versions, at: answer.at }
+			: { kind: "committed" as const, versions };
 	const samePartition = (keys: readonly Key[]) => {
 		if (new Set(keys.map(slot)).size > 1) throw new Error("keys span more than one partition");
 	};
@@ -252,7 +275,7 @@ export function redisStore(
 		const answer = await run(
 			scripts.write,
 			[valueKey(key), versionKey(key), markKey(key, options.idempotency)],
-			[
+			fenced([
 				mode,
 				canonicalJson(value),
 				expected,
@@ -261,7 +284,7 @@ export function redisStore(
 				options.deadline ?? "",
 				digest(idempotencyRequest(mode, [key], args)),
 				marked(options),
-			],
+			]),
 		);
 		return confirm(key, answer);
 	};
@@ -272,6 +295,16 @@ export function redisStore(
 				const read = await confirm(key, await run(scripts.read, [valueKey(key)], []));
 				return { entry: entry(list<Raw | false>(read.entries, 1)[0]), now: read.now };
 			},
+			getMany: async (keys) => {
+				if (keys.length === 0) return [];
+				const read = await run(scripts.read, [...keys.map(valueKey)], []);
+				const confirming = keys.find((k) => k.space.guarantees.includes("confirmed-reads"));
+				if (confirming) await confirmOn(confirming, false, read);
+				const entries = list<Raw | false>(read.entries, keys.length);
+				return Object.freeze(
+					entries.map((raw) => Object.freeze({ entry: entry(raw), now: read.now as number })),
+				);
+			},
 			putIfAbsent: (key, value, options) => writeWith("putIfAbsent", key, value, "", options),
 			replaceIf: (key, version, value, options) =>
 				writeWith("replaceIf", key, value, version, options),
@@ -281,13 +314,13 @@ export function redisStore(
 				const answer = await run(
 					scripts.removeIf,
 					[valueKey(key), markKey(key, options?.idempotency)],
-					[
+					fenced([
 						by,
 						target,
 						options?.deadline ?? "",
 						digest(idempotencyRequest("removeIf", [key], [expected])),
 						marked(options),
-					],
+					]),
 				);
 				await confirm(key, answer);
 				return answer.kind === "removed"
@@ -298,7 +331,11 @@ export function redisStore(
 				const answer = await run(
 					scripts.take,
 					[valueKey(key), markKey(key, options?.idempotency)],
-					[options?.deadline ?? "", digest(idempotencyRequest("take", [key], [])), marked(options)],
+					fenced([
+						options?.deadline ?? "",
+						digest(idempotencyRequest("take", [key], [])),
+						marked(options),
+					]),
 				);
 				await confirm(key, answer);
 				return answer.kind === "taken"
@@ -311,8 +348,8 @@ export function redisStore(
 				const [first] = keys;
 				if (!first) {
 					// The script answers its own shape; an empty batch committed names no versions.
-					const empty = await run(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
-					return empty.kind === "committed" ? { kind: "committed", versions: [] } : empty;
+					const empty = await run(scripts.deadlineOnly, [], fenced([options?.deadline ?? ""]));
+					return empty.kind === "committed" ? committed(empty, []) : empty;
 				}
 				const names = [...new Set(keys.map(valueKey))];
 				const index = (key: Key) => names.indexOf(valueKey(key)) + 1;
@@ -335,19 +372,19 @@ export function redisStore(
 				const answer = await run(
 					scripts.batch,
 					[...names, versionKey(first), markKey(first, options?.idempotency)],
-					[JSON.stringify(spec), options?.deadline ?? "", digest(request), marked(options)],
+					fenced([JSON.stringify(spec), options?.deadline ?? "", digest(request), marked(options)]),
 				);
 				await confirm(first, answer);
 				return answer.kind === "committed"
-					? { kind: "committed", versions: list<string | null>(answer.versions, answer.n) }
+					? committed(answer, list<string | null>(answer.versions, answer.n))
 					: answer;
 			},
 			batchAcross: async (conditions, writes, options) => {
 				const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
 				const [first] = keys;
 				if (!first) {
-					const empty = await run(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
-					return empty.kind === "committed" ? { kind: "committed", versions: [] } : empty;
+					const empty = await run(scripts.deadlineOnly, [], fenced([options?.deadline ?? ""]));
+					return empty.kind === "committed" ? committed(empty, []) : empty;
 				}
 				const names = [...new Set(keys.map(valueKey))];
 				const index = (key: Key) => names.indexOf(valueKey(key)) + 1;
@@ -375,52 +412,38 @@ export function redisStore(
 				const answer = await run(
 					scripts.batchAcross,
 					[...names, ...versionKeys, ...markKeys],
-					[JSON.stringify(spec), options?.deadline ?? "", digest(request), marked(options)],
+					fenced([JSON.stringify(spec), options?.deadline ?? "", digest(request), marked(options)]),
 				);
 				// The spaces share their guarantees, so the first key's tells how to confirm.
 				await confirm(first, answer);
 				return answer.kind === "committed"
-					? { kind: "committed", versions: list<string | null>(answer.versions, answer.n) }
+					? committed(answer, list<string | null>(answer.versions, answer.n))
 					: answer;
 			},
 			count: async (key, window, options) => {
 				const answer = await run(
 					scripts.count,
 					[counterKey(key), markKey(key, options?.idempotency)],
-					[
+					fenced([
 						window.ms,
 						window.limit,
 						options?.deadline ?? "",
 						digest(idempotencyRequest("count", [key], [window.ms, window.limit])),
 						marked(options),
-					],
+					]),
 				);
 				return confirm(key, answer);
 			},
 			now: async () => (await run(scripts.now, [], [])).now as number,
 			scan: async (space, cursor) => {
-				const head = spaceHead(space);
 				let reply: [string, string[]];
 				try {
-					reply = await client.scan(
-						cursor ?? "0",
-						"MATCH",
-						`${literal(head)}*}:v:*`,
-						"COUNT",
-						scanPage,
-					);
+					reply = await client.scan(cursor ?? "0", "MATCH", spaceValues(space), "COUNT", scanPage);
 				} catch {
 					throw new Unavailable("store");
 				}
 				const [next, found] = reply;
-				const keys = found.map((at) => {
-					const [partition = "", name = ""] = at.slice(head.length).split("}:v:");
-					return {
-						space,
-						partition: decodeURIComponent(partition),
-						name: decodeURIComponent(name),
-					};
-				});
+				const keys = found.map((at) => keyAt(space, at));
 				return next === "0" ? { keys } : { keys, cursor: next };
 			},
 		},

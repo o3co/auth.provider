@@ -1,5 +1,7 @@
-import type { Space } from "@mod/store";
+import { Unavailable } from "@mod/kernel";
+import type { Guarantee, Honours, Space } from "@mod/store";
 import { type Redis, ReplyError } from "ioredis";
+import { goodReplicaProblems } from "../probe/probe.ts";
 
 /** The server's settings as the operator may declare them (`redis.server-settings`). */
 export interface Declared {
@@ -123,4 +125,50 @@ export async function durabilityProblems(
 	return [
 		`set appendonly yes, appendfsync always and no-appendfsync-on-rewrite no on the server (docs/runbook.md, Redis), which the durable guarantee of these spaces needs: ${names}`,
 	];
+}
+
+/**
+ * Whether the server gives these guarantees now, read as boot reads them, with replicas from ROLE
+ * and good replicas as the probe counts them; settings taken as declared make it declared.
+ */
+export async function honoursOf(
+	client: Redis,
+	s: {
+		readonly durability?: "none" | undefined;
+		readonly replication?: "none" | "replicas" | undefined;
+		readonly "server-settings"?: Declared | undefined;
+	},
+	wanted: readonly Guarantee[],
+): Promise<Honours> {
+	try {
+		const asked: Space[] = wanted.length > 0 ? [{ name: "asked", guarantees: wanted }] : [];
+		const replicated = wanted.includes("replicated") || wanted.includes("confirmed-reads");
+		const reasons: string[] = [];
+		if (s.durability === "none" && wanted.includes("durable")) {
+			reasons.push("redis.durability is none: a crash loses the latest writes");
+		}
+		if (s.replication === "none" && replicated) {
+			reasons.push("redis.replication is none: a failover loses writes");
+		}
+		const role = await roleOf(client);
+		const settings = serverSettings(client, s["server-settings"] ?? {});
+		reasons.push(
+			...(await evictionProblems(settings.read, asked)),
+			...(await replicationProblems(settings.read, role, asked, s.replication)),
+			...(await durabilityProblems(settings.read, asked, s.durability)),
+		);
+		if (s.replication === "replicas" && replicated) {
+			if (replicasOf(role) === 0) reasons.push("no replica is connected");
+			const needed = await settings.read("min-replicas-to-write");
+			const info = await client.info("replication");
+			reasons.push(...goodReplicaProblems(info, needed === undefined ? undefined : Number(needed)));
+		}
+		reasons.push(...settings.problems);
+		if (reasons.length > 0) return { kind: "unmet", reasons };
+		return settings.used.size > 0
+			? { kind: "declared", settings: [...settings.used] }
+			: { kind: "verified" };
+	} catch {
+		throw new Unavailable("store");
+	}
 }
