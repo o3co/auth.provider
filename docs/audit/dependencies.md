@@ -12,59 +12,61 @@ flowchart LR
   d0["audit-receivers"]
   d1["cert-binding"]
   d2["delegation"]
-  d3["foundation"]
-  d4["identity"]
-  d5["log-sinks"]
-  d6["metrics-publishers"]
-  d7["oauth"]
-  d8["passkey"]
-  d9["scaffold"]
-  d10["second-factor"]
-  d11["smtp"]
-  d12["store-redis"]
-  d13["templates"]
-  d14["tooling"]
-  d15["upstream-login"]
-  d16["user-ledger-http"]
-  d0 --> d3
-  d1 --> d3
-  d1 --> d7
-  d10 --> d3
-  d10 --> d4
-  d11 --> d3
-  d12 --> d3
-  d13 --> d10
-  d13 --> d15
-  d13 --> d2
-  d13 --> d3
+  d3["erasure"]
+  d4["foundation"]
+  d5["identity"]
+  d6["log-sinks"]
+  d7["metrics-publishers"]
+  d8["oauth"]
+  d9["passkey"]
+  d10["scaffold"]
+  d11["second-factor"]
+  d12["smtp"]
+  d13["store-redis"]
+  d14["templates"]
+  d15["tooling"]
+  d16["upstream-login"]
+  d17["user-ledger-http"]
+  d0 --> d4
+  d1 --> d4
+  d1 --> d8
+  d11 --> d4
+  d11 --> d5
+  d12 --> d4
   d13 --> d4
-  d13 --> d7
-  d13 --> d8
+  d14 --> d11
   d14 --> d16
-  d14 --> d3
+  d14 --> d2
+  d14 --> d4
+  d14 --> d5
+  d14 --> d8
   d14 --> d9
-  d15 --> d3
+  d15 --> d10
+  d15 --> d17
   d15 --> d4
-  d15 --> d7
-  d16 --> d10
-  d16 --> d3
   d16 --> d4
-  d16 --> d7
+  d16 --> d5
   d16 --> d8
-  d2 --> d15
-  d2 --> d3
+  d17 --> d11
+  d17 --> d4
+  d17 --> d5
+  d17 --> d8
+  d17 --> d9
+  d2 --> d16
   d2 --> d4
-  d2 --> d7
-  d4 --> d3
-  d5 --> d3
-  d6 --> d3
-  d7 --> d10
-  d7 --> d3
+  d2 --> d5
+  d2 --> d8
+  d3 --> d4
+  d5 --> d4
+  d6 --> d4
   d7 --> d4
-  d8 --> d10
-  d8 --> d3
+  d8 --> d11
   d8 --> d4
-  d8 --> d7
+  d8 --> d5
+  d9 --> d11
+  d9 --> d4
+  d9 --> d5
+  d9 --> d8
 ```
 
 ## By package
@@ -89,6 +91,12 @@ flowchart LR
 | `@mod/federation-grants` | feature | `@mod/audit`, `@mod/clients`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/login-gates`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/seal`, `@mod/subject-revocation`, `@mod/upstreams` |
 | `@mod/federation-grants-connect` | feature | `@mod/federation-grants`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/session`, `@mod/upstream-round-trip`, `@mod/upstreams`, `@mod/url-setting`, `@mod/users` |
 
+### erasure
+
+| Package | Kind | Depends on |
+|---|---|---|
+| `@mod/erasure-journal-file` | adapter | `@mod/erasure-journal`, `@mod/kernel` |
+
 ### foundation
 
 | Package | Kind | Depends on |
@@ -101,7 +109,6 @@ flowchart LR
 | `@mod/cookies` | foundation | `@mod/http`, `@mod/kernel`, `@mod/request-source` |
 | `@mod/erasure-extensions` | foundation | `@mod/kernel` |
 | `@mod/erasure-journal` | foundation | `@mod/kernel` |
-| `@mod/erasure-journal-file` | adapter | `@mod/erasure-journal`, `@mod/kernel` |
 | `@mod/external-jwt` | foundation | `@mod/kernel`, `@mod/keys`, `@mod/outbound` |
 | `@mod/host-entries` | foundation | `@mod/address-reach` |
 | `@mod/http` | foundation | `@mod/client-certificate`, `@mod/kernel`, `@mod/request-source`, `@mod/url-setting` |
