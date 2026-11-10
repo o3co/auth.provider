@@ -1,13 +1,13 @@
 import { Unavailable } from "@mod/kernel";
 import { recorded } from "../boundaries/boundaries.ts";
-import { markHeld, opened, stored, timeOf } from "../boundaries/written.ts";
+import { markIn, opened, stored, timeOf } from "../boundaries/written.ts";
 import type { SubjectErasure } from "../contract.ts";
 import type { BoundaryStore, BoundaryWrite, StoredBoundary } from "../store.ts";
 
 /** The erasure's mark, read from what a write answered; a store that answered no mark wrote none. */
 const markOf = (record: StoredBoundary) => {
-	const erasedAt = opened(record)?.erasedAt;
-	if (erasedAt === undefined) throw new Unavailable("subject-revocation");
+	const erasedAt = markIn(record);
+	if (typeof erasedAt !== "number") throw new Unavailable("subject-revocation");
 	return erasedAt;
 };
 
@@ -16,14 +16,14 @@ const markOf = (record: StoredBoundary) => {
  * boundaries are written: the boundaries kept, the first mark kept.
  */
 export function markedIn(boundaries: BoundaryStore): SubjectErasure["markErased"] {
-	// A record that holds no time and no mark keeps nothing: the mark comes with a `sessions`
-	// boundary at its time. A mark already there, readable or not, is never written over.
+	// A mark already there is never written over: one of a time is the first mark, its record left
+	// as it is, whatever else it holds; one of no time is unavailable. A record that holds no time
+	// and no mark keeps nothing: the mark comes with a `sessions` boundary at its time.
 	const marked = (record: StoredBoundary | undefined, write: BoundaryWrite) => {
+		const mark = record === undefined ? undefined : markIn(record);
+		if (record !== undefined && typeof mark === "number") return record;
+		if (mark !== undefined) throw new Unavailable("subject-revocation");
 		const held = record === undefined ? undefined : opened(record);
-		if (record !== undefined && held === undefined && markHeld(record)) {
-			throw new Unavailable("subject-revocation");
-		}
-		if (record !== undefined && held?.erasedAt !== undefined) return record;
 		const at = timeOf(write);
 		return stored({ ...(held ?? recorded(undefined, at, true)), erasedAt: at });
 	};

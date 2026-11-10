@@ -100,8 +100,7 @@ it("never rewrites a marked record it marks again, and never marks over a mark i
 		erasedAt: 17,
 	} as unknown as StoredBoundary;
 	await kept.records.create("alice", future, "endless");
-	const failed = await erasure.markErased("alice").catch((e: unknown) => e);
-	expect(isUnavailable(failed)).toBe(true);
+	expect(await erasure.markErased("alice")).toEqual({ kind: "marked", erasedAt: 17 });
 	expect(await kept.records.read("alice")).toEqual(future);
 	const odd = { sessions: 1, erasedAt: "x" } as unknown as StoredBoundary;
 	await kept.records.create("bob", odd, "endless");
