@@ -113,6 +113,17 @@ it("composes the workspace's full template: each axis's default, no owner it rep
 	expect(composed).not.toContain("@mod/mfa-witnessing");
 });
 
+// http's server is a bridge joining http alone: it comes wherever http does.
+it("composes http-server wherever http is composed: in full, needed, completed and a pattern", () => {
+	expect(full()).toContain("@mod/http-server");
+	expect(needed(["@mod/http"])).toContain("@mod/http-server");
+	expect(needed(["@mod/csrf"])).toEqual(expect.arrayContaining(["@mod/http", "@mod/http-server"]));
+	expect(completed(["@mod/http"])).toContain("@mod/http-server");
+	expect(composed({ features: { login: ["@mod/csrf"] } })).toEqual(
+		expect.arrayContaining(["@mod/http", "@mod/http-server"]),
+	);
+}, 60_000);
+
 // An axis whose owner has no module: a module that needs only the owner gets the owner's default adapter.
 it("composes federation, upstreams' default, with the wirings of what it needs, where a selection needs upstreams alone", () => {
 	const selections = [
