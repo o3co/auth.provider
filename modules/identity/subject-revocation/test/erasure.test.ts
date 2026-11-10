@@ -91,6 +91,28 @@ it("never writes a boundary over a mark it cannot read: the revocation is unavai
 	expect(isUnavailable(await revocation.check("alice", now).catch((e: unknown) => e))).toBe(true);
 });
 
+it("never rewrites a marked record it marks again, and never marks over a mark it cannot read", async () => {
+	const { erasure, kept } = await boot();
+	// A mark that reads, beside a part that does not: the first mark is answered, the record kept.
+	const future = {
+		sessions: 5,
+		delegations: "future-format",
+		erasedAt: 17,
+	} as unknown as StoredBoundary;
+	await kept.records.create("alice", future, "endless");
+	const failed = await erasure.markErased("alice").catch((e: unknown) => e);
+	expect(isUnavailable(failed)).toBe(true);
+	expect(await kept.records.read("alice")).toEqual(future);
+	const odd = { sessions: 1, erasedAt: "x" } as unknown as StoredBoundary;
+	await kept.records.create("bob", odd, "endless");
+	expect(isUnavailable(await erasure.markErased("bob").catch((e: unknown) => e))).toBe(true);
+	expect(await kept.records.read("bob")).toEqual(odd);
+	const marked = { sessions: 5, erasedAt: 17, later: "kept" } as unknown as StoredBoundary;
+	await kept.records.create("carol", marked, "endless");
+	expect(await erasure.markErased("carol")).toEqual({ kind: "marked", erasedAt: 17 });
+	expect(await kept.records.read("carol")).toEqual(marked);
+});
+
 it("lets no module take the erasure until account erasure is named", async () => {
 	const stores = memoryBoundaries(() => now);
 	const assembled = assemble({

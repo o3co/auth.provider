@@ -1,6 +1,6 @@
 import { Unavailable } from "@mod/kernel";
 import { recorded } from "../boundaries/boundaries.ts";
-import { opened, stored, timeOf } from "../boundaries/written.ts";
+import { markHeld, opened, stored, timeOf } from "../boundaries/written.ts";
 import type { SubjectErasure } from "../contract.ts";
 import type { BoundaryStore, BoundaryWrite, StoredBoundary } from "../store.ts";
 
@@ -16,12 +16,16 @@ const markOf = (record: StoredBoundary) => {
  * boundaries are written: the boundaries kept, the first mark kept.
  */
 export function markedIn(boundaries: BoundaryStore): SubjectErasure["markErased"] {
-	// A record that holds no time keeps nothing: the mark comes with a `sessions` boundary at its time.
+	// A record that holds no time and no mark keeps nothing: the mark comes with a `sessions`
+	// boundary at its time. A mark already there, readable or not, is never written over.
 	const marked = (record: StoredBoundary | undefined, write: BoundaryWrite) => {
 		const held = record === undefined ? undefined : opened(record);
+		if (record !== undefined && held === undefined && markHeld(record)) {
+			throw new Unavailable("subject-revocation");
+		}
+		if (record !== undefined && held?.erasedAt !== undefined) return record;
 		const at = timeOf(write);
-		const kept = held ?? recorded(undefined, at, true);
-		return stored({ ...kept, erasedAt: held?.erasedAt ?? at });
+		return stored({ ...(held ?? recorded(undefined, at, true)), erasedAt: at });
 	};
 	return async (subject) => {
 		const changed = await boundaries.update(subject, marked);

@@ -25,7 +25,7 @@ export const opened = (record: StoredBoundary): Boundaries | undefined => {
 };
 
 /** Whether a record carries a mark of erasure, readable or not. */
-const markHeld = (record: StoredBoundary) => {
+export const markHeld = (record: StoredBoundary) => {
 	const value: unknown = record;
 	return (
 		typeof value === "object" &&
