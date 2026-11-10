@@ -46,7 +46,7 @@ What each module contains is described by that module's contract card (each modu
 | Sending outbound HTTP requests, and the operator's section `outbound` | contract / setting | outbound |
 | Checking the revocation of an outbound request's TLS peer certificate by CRL, the hosts its CRLs are fetched from, and how many are kept how long (`outbound.revocation`) | contract / setting | outbound |
 | Where outbound requests may go: the destination policy and its boot questions | contract / setting | outbound-policy |
-| The floor of the provider's own TLS connections as a client, the certificate checked among it: the section `tls-options`, its contract and `heldToFloor` | contract / setting | tls-options |
+| The floor of the provider's own TLS connections as a client, its chain and name checked among it: the section `tls-options`, its contract and `heldToFloor` | contract / setting | tls-options |
 | What an IP address reaches by its kind: special-purpose, private, loopback | contract | address-reach |
 | How an operator writes a host in configuration (a name, `.name`, an address, a `host:port` pair), and whether a host is among such entries | vocabulary / setting | host-entries |
 | Fetching signed material | contract | outbound |
