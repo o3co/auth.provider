@@ -809,6 +809,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
