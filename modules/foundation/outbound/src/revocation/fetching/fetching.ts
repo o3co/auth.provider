@@ -10,6 +10,7 @@ export type Unconfirmed =
 	| "unsupported"
 	| "unreachable"
 	| "refused"
+	| "proxy-refused"
 	| "too-large"
 	| "malformed"
 	| "stale"
@@ -19,7 +20,13 @@ export type Unconfirmed =
 	| "revocation-state-full";
 
 /** What a fetch of a CRL brought: its bytes, why none, or `aborted` by the signal it was given. */
-export type Fetched = Uint8Array | "refused" | "unreachable" | "too-large" | "aborted";
+export type Fetched =
+	| Uint8Array
+	| "refused"
+	| "proxy-refused"
+	| "unreachable"
+	| "too-large"
+	| "aborted";
 
 /** How CRLs are fetched, and when; the package's, which alone sends requests and counts them. */
 export interface Fetching {
