@@ -1,12 +1,9 @@
 /** The workspace's packages, and the app's dependencies on them. */
-import { execFileSync } from "node:child_process";
+import { workspacePackages } from "@mod/workspace-packages";
 
 /** Package directories by name, as the workspace definition places them. */
-export function workspacePackages(root: string): Map<string, string> {
-	const listed = JSON.parse(
-		execFileSync("pnpm", ["ls", "-r", "--json", "--depth", "-1"], { cwd: root, encoding: "utf8" }),
-	) as { name: string; path: string }[];
-	return new Map(listed.map((entry) => [entry.name, entry.path]));
+export function packageDirsIn(root: string): Map<string, string> {
+	return new Map(workspacePackages(root).map((p) => [p.name, p.dir]));
 }
 
 /** Each name's dependency: a link to its workspace directory when given a workspace, else any version. */

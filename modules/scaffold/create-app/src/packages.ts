@@ -11,7 +11,7 @@ import {
 	sampleFile,
 } from "@mod/app-output";
 import { bundlesIn, declaredRanges, type Outside, type Read } from "./outside/contract.ts";
-import { dependenciesOf, workspacePackages } from "./project.ts";
+import { dependenciesOf, packageDirsIn } from "./project.ts";
 
 /** Where an entry's files lie in the app: under `node_modules`, the entry's own path. */
 const installed = (
@@ -98,7 +98,7 @@ export function packagesFor(plan: { readonly workspace?: string }, index = bundl
 	let listed: Map<string, string> | undefined;
 	// Listed on first use: a target refused as it is written reads no workspace.
 	const dirs = () => {
-		listed ??= workspacePackages(root);
+		listed ??= packageDirsIn(root);
 		return listed;
 	};
 	return {

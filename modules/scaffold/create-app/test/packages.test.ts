@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { packagesFor } from "../src/packages.ts";
-import { workspacePackages } from "../src/project.ts";
+import { packageDirsIn } from "../src/project.ts";
 
 /** A member's declarations for the guide, as its manifest holds them. */
 const declared = {
@@ -66,7 +66,7 @@ it("names a bundle's packages publicly, depending on each bundle once at the ind
 
 it("links the workspace's packages where one is given, naming them as the workspace does", async () => {
 	const packages = linked();
-	const kernelDir = workspacePackages(root).get("@mod/kernel");
+	const kernelDir = packageDirsIn(root).get("@mod/kernel");
 	expect(packages.dependencies(["@mod/kernel"])).toEqual({ "@mod/kernel": `link:${kernelDir}` });
 	expect(packages.importOf("@mod/kernel")).toBe("@mod/kernel");
 	expect((await packages.fragments(["@mod/kernel"])).map((f) => f.section)).toEqual(["kernel"]);

@@ -227,7 +227,7 @@ flowchart LR
 | `@mod/app-entries` | assembly | none |
 | `@mod/app-output` | assembly | `@mod/app-entries` |
 | `@mod/combinations` | assembly | `@mod/kinds`, `@mod/workspace-packages` |
-| `@mod/create-app` | assembly | `@mod/app-output`, `@mod/combinations` |
+| `@mod/create-app` | assembly | `@mod/app-output`, `@mod/combinations`, `@mod/workspace-packages` |
 | `@mod/kinds` | assembly | none |
 | `@mod/trial` | assembly | none |
 | `@mod/workspace-packages` | assembly | none |

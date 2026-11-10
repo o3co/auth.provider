@@ -3066,6 +3066,9 @@ importers:
       '@mod/combinations':
         specifier: workspace:*
         version: link:../combinations
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../workspace-packages
       semver:
         specifier: 7.8.5
         version: 7.8.5
