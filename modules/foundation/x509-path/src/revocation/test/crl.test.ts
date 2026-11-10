@@ -416,6 +416,35 @@ describe("a verified CRL, apart from the certificate it is asked of", () => {
 		});
 	});
 
+	it("holds a listed serial and its number to 20 octets of value, a byte that only marks it positive aside", async () => {
+		const { intermediate } = await hierarchy();
+		const integer = (bytes: number[]) =>
+			new asn1js.Integer({ valueHex: new Uint8Array(bytes).buffer });
+		// 20 octets, the first with its top bit set: 21 in DER with the 0x00 that keeps it positive.
+		const twenty = [0x00, 0x80, ...Array<number>(19).fill(0x11)];
+		const past = [0x01, ...Array<number>(20).fill(0x11)];
+		const read = async (more: Partial<Revoking>) =>
+			verifyCrl(
+				await crlOf({ by: intermediate, ...more }),
+				intermediate.certificate,
+				Date.now(),
+				skewMs,
+				signatureAlgorithms,
+			);
+		const listing = (bytes: number[]) => ({
+			revoked: [{ certificate: { serialNumber: integer(bytes) } } as unknown as Issued],
+		});
+		const numbered = (bytes: number[]) => ({
+			extensions: [
+				new pkijs.Extension({ extnID: "2.5.29.20", extnValue: integer(bytes).toBER(false) }),
+			],
+		});
+		expect((await read(listing(twenty))).kind).toBe("verified");
+		expect(await read(listing(past))).toEqual({ kind: "unusable", reason: "malformed" });
+		expect((await read(numbered(twenty))).kind).toBe("verified");
+		expect(await read(numbered(past))).toEqual({ kind: "unusable", reason: "malformed" });
+	});
+
 	it("takes a CRL whose number is not a non-negative INTEGER as malformed", async () => {
 		const { intermediate } = await hierarchy();
 		const numbered = (value: asn1js.BaseBlock) =>
