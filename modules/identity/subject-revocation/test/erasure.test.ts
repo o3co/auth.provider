@@ -1,7 +1,21 @@
-import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import {
+	assemble,
+	BootRefused,
+	type BuildContext,
+	contract,
+	defineModule,
+	isUnavailable,
+	kernelConfig,
+} from "@mod/kernel";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { revocations, subjectErasure, subjectRevocation } from "../src/contract.ts";
+import {
+	erasureFence,
+	erasureGuards,
+	revocations,
+	subjectErasure,
+	subjectRevocation,
+} from "../src/contract.ts";
 import revocationModule from "../src/module.ts";
 import { boundaryStore, type StoredBoundary } from "../src/store.ts";
 import { memoryBoundaries } from "./stores.ts";
@@ -85,4 +99,105 @@ it("lets no module take the erasure until account erasure is named", async () =>
 		(error: unknown) => (error instanceof BootRefused ? error.refusals : [error]),
 	);
 	expect(JSON.stringify(refused)).toMatch(/subject-revocation\.erasure/);
+});
+
+/** subject-revocation guarded or not, over a store as given; its readiness, its warnings, or why its boot was refused. */
+async function gated(
+	guarded: boolean,
+	set: (stores: ReturnType<typeof memoryBoundaries>) => void,
+	has: Parameters<typeof memoryBoundaries>[1] = {},
+) {
+	const stores = memoryBoundaries(() => now, has);
+	set(stores);
+	const recorded = recordingLog();
+	let context: BuildContext<unknown> | undefined;
+	const booted = assemble({
+		modules: [
+			revocationModule,
+			defineModule({ name: "boundaries", replicaSafe: false, takes: [] }, (m) => [
+				m.provide(boundaryStore).by(() => stores.boundaries),
+			]),
+			defineModule({ name: "guard", replicaSafe: false, takes: [] }, (m) =>
+				guarded ? [m.contribute(erasureGuards).by(() => ({ name: "guard" }))] : [],
+			),
+			defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
+				m.provide(contract<object>("asker")).by((c) => {
+					context = c;
+					return {};
+				}),
+			]),
+		],
+		config: kernelConfig(),
+		runtime: quietRuntime({ clock: { now: () => now }, log: recorded.log }),
+	});
+	const app = await booted.catch((error: unknown) => {
+		if (error instanceof BootRefused) return error;
+		throw error;
+	});
+	return {
+		...stores,
+		refused: app instanceof BootRefused ? JSON.stringify(app.refusals) : undefined,
+		app: app instanceof BootRefused ? undefined : app,
+		ready: () => context?.readinessReport(1000).then((r) => r.answer),
+		warned: () =>
+			recorded
+				.lines()
+				.filter((l) => l.level === "warn")
+				.map((l) => l.event),
+	};
+}
+
+it("refuses to start where erasure is enabled and the composition does not guard it", async () => {
+	const on = (s: ReturnType<typeof memoryBoundaries>) => {
+		s.erasure.on = true;
+	};
+	expect((await gated(false, on)).refused).toMatch(/subject-revocation/);
+	expect((await gated(true, on, { fence: false })).refused).toMatch(/subject-revocation/);
+	expect((await gated(true, on)).refused).toBeUndefined();
+});
+
+it("starts a guarded composition with its store down, reading no mark, and ready", async () => {
+	const booted = await gated(true, (s) => {
+		s.down.unavailable("read", "save", "update");
+		s.erasure.unreadable = true;
+	});
+	expect(booted.refused).toBeUndefined();
+	expect(await booted.ready()).toBe("ready");
+});
+
+it("starts an unguarded composition unready while the mark cannot be read, ready once it reads off", async () => {
+	const booted = await gated(false, (s) => {
+		s.erasure.unreadable = true;
+	});
+	expect(booted.refused).toBeUndefined();
+	expect(await booted.ready()).toBe("unready");
+	booted.erasure.unreadable = false;
+	expect(await booted.ready()).toBe("ready");
+});
+
+it("fences only where erasure is on or unread: a receipt where the subject is not erased, nothing where it is", async () => {
+	const off = await gated(true, () => {});
+	expect(await off.app?.get(erasureFence).fence("alice", "r0")).toBe("passed");
+	expect(off.receipts.size).toBe(0);
+	const unread = await gated(true, (s) => {
+		s.erasure.unreadable = true;
+	});
+	expect(await unread.app?.get(erasureFence).fence("alice", "r1")).toBe("passed");
+	expect([...unread.receipts.keys()]).toEqual(["r1"]);
+	const on = await gated(true, (s) => {
+		s.erasure.on = true;
+	});
+	const fence = on.app?.get(erasureFence);
+	expect(await fence?.fence("alice", "r2")).toBe("passed");
+	await on.app?.get(subjectErasure).markErased("alice");
+	expect(await fence?.fence("alice", "r3")).toBe("erased");
+	expect(await fence?.fence("bob", "r4")).toBe("passed");
+	expect([...on.receipts.keys()]).toEqual(["r2", "r4"]);
+});
+
+it("takes erasure as off, warning at every start, where the store cannot tell whether it is enabled", async () => {
+	const booted = await gated(false, () => {}, { erasureEnabled: false, fence: false });
+	expect(booted.warned()).toContain("subject-revocation.erasure_unknown");
+	expect(await booted.app?.get(erasureFence).fence("alice", "r0")).toBe("passed");
+	expect(await booted.ready()).toBe("ready");
 });

@@ -53,4 +53,25 @@ export interface SubjectErasure {
 export const subjectErasure = contract<SubjectErasure>("subject-revocation.erasure", {
 	takenBy: [],
 });
+/** The fence a bundle of credentials passes before it is answered, one write per bundle. */
+export interface ErasureFence {
+	/**
+	 * Passes where the subject is not erased, keeping a receipt under `receiptId` held by its
+	 * boundary as read, so a mark of erasure written meanwhile makes it read again; `erased` where
+	 * the subject is, and nothing is written. Where erasure is off, passes without writing.
+	 */
+	fence(subject: string, receiptId: string): Promise<"passed" | "erased">;
+}
+
+export const erasureFence = contract<ErasureFence>("subject-revocation.erasure-fence");
+
+/** A module's statement that, on this boundary, it checks access tokens and fences their issuance. */
+export interface ErasureGuard {
+	readonly name: string;
+}
+
+/** Where erasure is enabled, a composition must hold one at least, and a boundary store that fences. */
+export const erasureGuards = extensionPoint<ErasureGuard>("subject-revocation.erasure-guards", {
+	multiplicity: "many",
+});
 export * from "./store.ts";

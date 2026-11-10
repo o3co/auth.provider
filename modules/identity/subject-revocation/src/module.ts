@@ -1,7 +1,9 @@
-import { defineModule, Unavailable } from "@mod/kernel";
+import { contract, defineModule, probes, Unavailable } from "@mod/kernel";
 import { comparedTo, subjectRevocationOf } from "./boundaries/boundaries.ts";
 import { opened, writtenTo } from "./boundaries/written.ts";
 import {
+	erasureFence,
+	erasureGuards,
 	type Revocations,
 	revocationFollowers,
 	revocations,
@@ -9,12 +11,41 @@ import {
 	subjectRevocation,
 } from "./contract.ts";
 import { markedIn } from "./erasure/erasure.ts";
+import { erasureMark, fenceOver } from "./erasure/gate.ts";
 import { followedBy } from "./followers.ts";
 import { boundaryStore } from "./store.ts";
 
+/** The boot gate's reading: whether the composition guards erasure, and the mark as read. */
+const erasureGate = contract<{
+	readonly guarded: boolean;
+	readonly enabled: () => Promise<boolean | undefined>;
+}>("subject-revocation.erasure-gate");
+
 export default defineModule(
-	{ name: "subject-revocation", replicaSafe: true, takes: [boundaryStore, revocationFollowers] },
+	{
+		name: "subject-revocation",
+		replicaSafe: true,
+		takes: [boundaryStore, revocationFollowers, erasureGuards],
+	},
 	(m) => [
+		// Guarded is known without the store: a guarded composition starts whatever the store answers.
+		m.provide(erasureGate).by(async (c) => {
+			const boundaries = await c.get(boundaryStore);
+			const guarded = boundaries.fence !== undefined && (await c.collect(erasureGuards)).length > 0;
+			if (!boundaries.erasureEnabled) {
+				c.log.warn("subject-revocation.erasure_unknown", {
+					reason: "the boundary store does not tell whether erasure is enabled; 0.22 refuses it",
+				});
+			}
+			const enabled = erasureMark(boundaries);
+			if (!guarded && (await enabled()) === true) {
+				return c.refuse(
+					"subject-revocation",
+					"erasure is enabled, yet no module guards it or the boundary store does not fence",
+				);
+			}
+			return { guarded, enabled };
+		}),
 		m.provide(revocations).by(async (c): Promise<Revocations> => {
 			const boundaries = await c.get(boundaryStore);
 			const write = writtenTo(boundaries);
@@ -33,5 +64,21 @@ export default defineModule(
 		m
 			.provide(subjectErasure)
 			.by(async (c) => ({ markErased: markedIn(await c.get(boundaryStore)) })),
+		m
+			.provide(erasureFence)
+			.by(async (c) => fenceOver(await c.get(boundaryStore), (await c.get(erasureGate)).enabled)),
+		// An unguarded composition whose mark is unread stays out of traffic until the mark reads off.
+		m.contribute(probes).by(async (c) => {
+			const { guarded, enabled } = await c.get(erasureGate);
+			return {
+				name: "subject-revocation.erasure",
+				check: async () => {
+					if (guarded) return;
+					const on = await enabled();
+					if (on === undefined) throw new Error("whether erasure is enabled cannot be read yet");
+					if (on) throw new Error("erasure is enabled, yet this composition does not guard it");
+				},
+			};
+		}),
 	],
 );
