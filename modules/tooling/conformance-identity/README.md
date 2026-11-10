@@ -18,9 +18,8 @@
 - Scene composition and drivers (`conformance`). Starting the legacy system (`conformance-legacy`). Key parts (`conformance-keys`).
 
 ## Offers
-- Area `identity` and the shape of its parts (public origin, users, a user ledger over HTTP, return destination and attempt limits)
-- The need for a user ledger over HTTP
-- The need for a user ledger over HTTP beside users in the settings
+- Area `identity` (`identityArea`) and the shape of its parts (public origin, users, a user ledger over HTTP, return destination and attempt limits)
+- The need for a user ledger over HTTP (`httpLedger`)
 - The need for a ledger that revokes subjects over HTTP (`ledgerRevocation`), which the legacy build cannot meet
   - The window after the ledger's revocation answered in which a login of its subject may still be refused (`revocationWindowMs`, as U-0.19-126 states it), and a wait until a login is past the boundaries a scene read as recorded (`pastBoundaries`)
 - The need for a recent-authentication window (`recentAuthenticationWindow`), which the legacy build cannot meet
