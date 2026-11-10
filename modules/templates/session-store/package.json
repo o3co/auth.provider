@@ -18,6 +18,7 @@
 	"devDependencies": {
 		"@mod/cookies": "workspace:*",
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/session-participants": "workspace:*",
 		"@mod/session-requirements": "workspace:*",
