@@ -14,6 +14,7 @@ export type Unconfirmed =
 	| "malformed"
 	| "stale"
 	| "signature"
+	| "issuer"
 	| "rollback"
 	| "revocation-state-full";
 
@@ -36,13 +37,18 @@ const skewMs = 5 * 60_000;
 /** The failures remembered at most, the oldest going first. */
 const mostFailures = 4096;
 
+/** x509-path's reasons a CRL is unusable for its issuer: its name, its right to sign CRLs, its dates. */
+const byIssuer = new Set(["issuer", "issuer cannot sign crls", "issuer out of date"]);
+
 /** x509-path's reason a CRL is unusable, in outbound's words. */
-const reasonOf = (reason: string): Unconfirmed =>
+export const reasonOf = (reason: string): Unconfirmed =>
 	reason === "malformed" || reason === "unsupported"
 		? reason
 		: reason === "stale" || reason === "not yet"
 			? "stale"
-			: "signature";
+			: byIssuer.has(reason)
+				? "issuer"
+				: "signature";
 
 const fromTaken = {
 	rollback: "rollback",
@@ -130,14 +136,15 @@ export function crlsOver(kept: Kept, fetching: Fetching) {
 		}
 	}
 
-	const whileAwaited = <T>(run: Promise<T>, signal: AbortSignal) =>
-		Promise.race([
-			run,
-			new Promise<"aborted">((ended) => {
-				if (signal.aborted) ended("aborted");
-				signal.addEventListener("abort", () => ended("aborted"), { once: true });
-			}),
-		]);
+	const whileAwaited = <T>(run: Promise<T>, signal: AbortSignal) => {
+		let ended = () => {};
+		const aborted = new Promise<"aborted">((end) => {
+			ended = () => end("aborted");
+			if (signal.aborted) ended();
+			signal.addEventListener("abort", ended, { once: true });
+		});
+		return Promise.race([run, aborted]).finally(() => signal.removeEventListener("abort", ended));
+	};
 
 	return {
 		/** The issuer's CRL for a check under `signal`, or why it is unconfirmed. */

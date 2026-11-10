@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { crlSays, pathOf, type Trust } from "@mod/x509-path";
-import { crlsOver, type Fetching, type Unconfirmed } from "./fetching/fetching.ts";
+import { crlsOver, type Fetching, reasonOf, type Unconfirmed } from "./fetching/fetching.ts";
 import { keptOver } from "./kept/kept.ts";
 import { pointsOf } from "./points.ts";
 import { type Certificate, peerRules } from "./trust.ts";
@@ -61,7 +61,7 @@ export function revocationOver(given: {
 				if (!judged.held) kept.recordRevoked(key, serial);
 				return revoked;
 			case "unusable":
-				return unconfirmed(judged.reason === "stale" ? "stale" : "signature");
+				return unconfirmed(reasonOf(judged.reason));
 		}
 	}
 

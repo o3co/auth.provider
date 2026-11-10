@@ -91,6 +91,23 @@ describe("a peer's revocation", () => {
 		expect(s.fetched).toEqual([atRoot]);
 	});
 
+	it("tells a CRL its issuer could not have signed, as one without the right to sign CRLs, apart from one signed otherwise", async () => {
+		// Key usage for signing certificates alone: no cRLSign.
+		const root = await issue({ cn: "root", ca: true, keyUsage: 0x04 });
+		const leaf = await leafOf(root);
+		const other = await issue({ cn: "root", ca: true });
+		const s = checking(root, { [atRoot]: await crlOf({ by: root }) });
+		expect(await s.check(leaf)).toEqual({ kind: "unconfirmed", reason: "issuer" });
+		const signedOtherwise = await issue({ cn: "root", ca: true });
+		const t = checking(signedOtherwise, {
+			[atRoot]: await crlOf({ by: signedOtherwise, keys: other.keys }),
+		});
+		expect(await t.check(await leafOf(signedOtherwise))).toEqual({
+			kind: "unconfirmed",
+			reason: "signature",
+		});
+	});
+
 	it("finds an anchor without key identifiers whose name is written in another string type", async () => {
 		const root = await issue({ cn: "root", ca: true, printableSubject: true });
 		const mid = await issue({ cn: "mid", by: root, ca: true });
