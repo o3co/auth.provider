@@ -1,4 +1,9 @@
-import { type UsedIdTokens, usedIdTokens, type usedIdTokensNeeds } from "@mod/exchange-id-tokens";
+import {
+	longestUsedMs,
+	type UsedIdTokens,
+	usedIdTokens,
+	type usedIdTokensNeeds,
+} from "@mod/exchange-id-tokens";
 import { defineModule } from "@mod/kernel";
 import { recordsIn } from "@mod/records";
 import { type Guarantee, type Space, spaces, store } from "@mod/store";
@@ -12,6 +17,8 @@ const guaranteeFor: Record<keyof typeof usedIdTokensNeeds, Guarantee> = {
 const used: Space = {
 	name: "exchange-id-tokens-store.used",
 	guarantees: Object.values(guaranteeFor),
+	subjectData: "pseudonymous",
+	boundedMs: longestUsedMs,
 };
 
 export default defineModule(

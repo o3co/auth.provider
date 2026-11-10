@@ -320,6 +320,10 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Reaching a Redis off the host by a `rediss` URL: with a `redis` one in `redis.url`, what the store keeps and the password the URL carries go in the clear. Boot does not refuse it, and warns `redis.plaintext` at every start where the host is not loopback by its name. In production that is deprecated unless `redis.accept-plaintext` is set, and a later release refuses boot for it; set it only where the server offers no TLS.
   - Stating `redis.replication = none` only where there is no failover: a failover would lose the replicated spaces' writes, confirmed ones too, and every start warns `redis.replication_none`, naming those spaces.
 
+### Data a store keeps that no subject reaches
+
+A space that keeps a digest over an input including a random or per-request value holds no subject's data, even where the request it digests named the subject. The values: an authorize request's PKCE `code_challenge` (required, S256); a `jti` (required) with its issuer, client or key thumbprint. The digest is kept only for the replay or one-time window it guards, and nobody holding a subject's identifier can recompute it or match it to the subject. Such a space declares `subjectData: "none"`, and its card names its random input and points here.
+
 ## Audit
 
 - **Guaranteed:**

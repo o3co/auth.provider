@@ -9,7 +9,11 @@ const guaranteeFor: Record<keyof typeof spentProofsNeeds, Guarantee> = {
 	survivesCrash: "durable",
 	survivesFailover: "replicated",
 };
-const spent: Space = { name: "dpop-store.spent", guarantees: Object.values(guaranteeFor) };
+const spent: Space = {
+	name: "dpop-store.spent",
+	guarantees: Object.values(guaranteeFor),
+	subjectData: "none",
+};
 
 export default defineModule({ name: "dpop-store", replicaSafe: true, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => spent),
