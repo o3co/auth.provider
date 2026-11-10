@@ -1,6 +1,5 @@
 import { BuildRefused, isUnavailable, type Log, type Random, Unavailable } from "@mod/kernel";
 import type { Expiry, Json, Key, Space, Store, WriteOptions } from "@mod/store";
-import { kept, opened } from "../envelope/envelope.ts";
 
 export interface Place {
 	readonly store: Store;
@@ -124,26 +123,6 @@ export async function rewrite(
 		if (written.kind === "late" || written.kind === "reused") throw new Unavailable("records");
 		return again;
 	});
-}
-
-/**
- * As `rewrite`, deciding on the value the key holds out of its envelope, and writing the decided
- * one back in the envelope it was read in: answers the values, out of theirs.
- */
-export async function rewriteOpened(
-	place: Place,
-	key: Key,
-	decide: (
-		current: Json | undefined,
-		attempt: Attempt,
-	) => { readonly value: Json; readonly expiry: Expiry } | undefined,
-): Promise<{ readonly before: Json | undefined; readonly after: Json | undefined }> {
-	const { before, after } = await rewrite(place, key, (current, attempt) => {
-		const found = opened(current);
-		const decided = decide(found.value, attempt);
-		return decided && { value: kept(decided.value, found.subject), expiry: decided.expiry };
-	});
-	return { before: opened(before).value, after: opened(after).value };
 }
 
 export function expiryOf(lifetimeMs: number | "endless" | undefined): Expiry {

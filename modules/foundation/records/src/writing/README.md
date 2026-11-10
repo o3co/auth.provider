@@ -11,7 +11,7 @@ Internal module of `records`: how a record is written, the same for every kind o
 ## Offers
 - `Place`, `Attempt`, `Changed`, `writeDeadline`: as the package offers them.
 - `untilAnswered`, `retried` with `again`, `markedAt`, `confirmedAsRead`: one write sent and settled, a decision tried again.
-- `rewrite` and `rewriteOpened`: a key read, decided and written on its version, `rewriteOpened` deciding out of the record's envelope and writing back into it.
+- `rewrite`: a key read, decided and written on its version.
 - `expiryOf` (a lifetime) → the store's expiry; `claim` (a place, a kind) → the place held to one kind of records.
 
 ## Invariants
@@ -19,4 +19,4 @@ Internal module of `records`: how a record is written, the same for every kind o
 - A space holds one kind of records; a place opened for the other kind on the same store refuses the boot.
 
 ## Depends on
-- `kernel`, `store`; the internal module `envelope`
+- `kernel`, `store`
