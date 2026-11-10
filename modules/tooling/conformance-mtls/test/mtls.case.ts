@@ -1,3 +1,5 @@
+// The area's set-ups register as its package's entry loads.
+import "../src/main.ts";
 import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
 import { areaTarget, type Fake, fakeHttp, type Started } from "@mod/conformance";
 import { exportJWK, SignJWT } from "jose";
