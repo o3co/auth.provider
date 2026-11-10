@@ -128,6 +128,7 @@ flowchart LR
 | `@mod/seal` | foundation | `@mod/kernel`, `@mod/keys` |
 | `@mod/secret-hash` | foundation | `@mod/kernel` |
 | `@mod/store` | foundation | `@mod/kernel` |
+| `@mod/subject-records` | capability | `@mod/erasure-extensions`, `@mod/kernel`, `@mod/records`, `@mod/store` |
 | `@mod/tls-options` | foundation | `@mod/kernel` |
 | `@mod/url-setting` | foundation | none |
 | `@mod/x509-path` | foundation | none |

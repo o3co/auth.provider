@@ -16,6 +16,8 @@ import {
 	deferredIn,
 	type KeyedSets,
 	keyedSetsIn,
+	pairedRecordsAcross,
+	pairedRecordsIn,
 	type Records,
 	recordsIn,
 	secretRecordsIn,
@@ -943,4 +945,52 @@ it("refuses a space opened for records and for secret records on one store, in e
 	// Another store, or another space, holds its own kind.
 	secretRecordsIn<Counted>((await open()).place);
 	recordsIn<Counted>({ ...second.place, space: { ...space, name: "records-test.other" } });
+});
+
+it("holds the keyed set's format in its codec: the cap, those pushed out awaiting, and ten minutes past the last end", () => {
+	let now = 1_000;
+	const codec = keyedSetsIn.codec({ cap: 2, clock: { now: () => now } });
+	const first = codec.add(undefined, "a", 5_000);
+	const second = codec.add(first.next.value, "b", 6_000);
+	const third = codec.add(second.next.value, "c", 7_000);
+	expect(third.pushedOut).toEqual(["a"]);
+	expect(codec.members(third.next.value).map((m) => m.member)).toEqual(["b", "c"]);
+	expect(codec.awaiting(third.next.value)).toEqual(["a"]);
+	expect(third.next.lifetimeMs).toBe(7_000 - now + 600_000);
+	const settled = codec.settled(third.next.value, "a");
+	expect(settled && codec.awaiting(settled.value)).toEqual([]);
+	expect(codec.remove(undefined, "a")).toBeUndefined();
+	now = 6_500;
+	expect(codec.members(third.next.value)).toEqual([{ member: "c", remainingMs: 500 }]);
+});
+
+it("refuses to open a space holding a subject's data through any plain door, and opens one that holds none", () => {
+	const fake = {
+		batchAcross: async () => ({ kind: "committed", versions: [] }),
+	} as unknown as Store;
+	const random = { bytes: (n: number) => new Uint8Array(n) };
+	const at = (subjectData?: Space["subjectData"]) => ({
+		store: fake,
+		space: { name: `held-${subjectData ?? "none-declared"}`, guarantees: [], subjectData } as Space,
+		random,
+	});
+	const refuse = (where: string, reason: string): never => {
+		throw new Error(`${where}: ${reason}`);
+	};
+	const doors = [
+		(p: ReturnType<typeof at>) => recordsIn(p),
+		(p: ReturnType<typeof at>) => secretRecordsIn(p),
+		(p: ReturnType<typeof at>) => deferredIn({ ...p, shards: 1, perShard: 1 }),
+		(p: ReturnType<typeof at>) => keyedSetsIn({ ...p, cap: 1, clock: runtime.clock }),
+		(p: ReturnType<typeof at>) => pairedRecordsIn(p, "w", refuse),
+		(p: ReturnType<typeof at>) => pairedRecordsAcross(p, at("window"), "w", refuse),
+	];
+	for (const held of ["online-indexed", "online-keyed", "bounded"] as const) {
+		for (const door of doors) {
+			expect(() => door(at(held)), held).toThrow(/written through subject-records/);
+		}
+	}
+	expect(() => recordsIn(at("none"))).not.toThrow();
+	expect(() => keyedSetsIn({ ...at("window"), cap: 1, clock: runtime.clock })).not.toThrow();
+	expect(() => deferredIn({ ...at(), shards: 1, perShard: 1 })).not.toThrow();
 });
