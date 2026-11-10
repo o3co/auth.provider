@@ -83,6 +83,25 @@ export const erasureMarks = Object.freeze({
 	journal: "account-erasure.journal",
 });
 
+/** A store's control record as read for its marks, by name; this package reads no other part of it. */
+export interface MarksRead {
+	control(): Promise<{ readonly marks: Readonly<Record<string, unknown>> }>;
+}
+
+/**
+ * Whether erasure is enabled, as a store's control record tells it: the `enabled` mark is there, in
+ * any epoch, whatever it holds. Where no control record is offered (a store adapter that provides
+ * none), nothing: a reader takes erasure as unknown, and it cannot be enabled.
+ */
+export function erasureEnabledFrom(control: MarksRead | undefined): {
+	readonly erasureEnabled?: () => Promise<boolean>;
+} {
+	if (control === undefined) return {};
+	return {
+		erasureEnabled: async () => (await control.control()).marks[erasureMarks.enabled] !== undefined,
+	};
+}
+
 /** The erasure journal's copy in the control record. */
 export interface JournalMark {
 	readonly id: string;
