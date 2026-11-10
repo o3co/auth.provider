@@ -92,6 +92,8 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/secret-hash` (foundation, `modules/foundation/secret-hash`): Checks a secret against a stored bcrypt or scrypt hash, with the same work whether or not there is a hash to check against; knows no feature.
 - `@mod/store` (foundation, `modules/foundation/store`): Owns the contract of feature-neutral storage operations, each atomic and judged on the store clock, collects space declarations, and holds one memory implementation, not safe on many instances, whose `honours` answers durable and replicated unmet.
   - `upkeep` (`src/upkeep`): keeping a store's data whole, apart from reading and writing its keys.
+- `@mod/subject-records` (capability, `modules/foundation/subject-records`): Provides records of spaces that hold a subject's data, written so that erasing a subject finds them and nothing is written past its tombstone; a capability like `records`, built by a feature's wiring, never used by a feature.
+  - `envelope` (`src/envelope`): the envelope a subject's record is kept in, its subject beside its value.
 - `@mod/tls-options` (foundation, `modules/foundation/tls-options`): Owns the floor of the provider's own TLS connections as a client: the least version and the suites they take, and that each checks its peer's certificate.
 - `@mod/url-setting` (foundation, `modules/foundation/url-setting`): Decides which configured URLs boot, for every module that takes one by `urlSetting`, and when a section's own check of the URLs it holds may read them.
 - `@mod/x509-path` (foundation, `modules/foundation/x509-path`): Validates an X.509 certification path to the anchors, under rules its caller gives, with its signature rules. Knows no feature.
