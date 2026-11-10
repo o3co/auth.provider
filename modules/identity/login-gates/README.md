@@ -10,10 +10,10 @@
 - What an amr value means (whoever declares it).
 
 ## Offers
-- `login(request, facts, done?, from?)`: opened with the session and cookies, held with the gate's name, answer and cookies, or refused with the gate's name and no cookies; revoked, with no cookies, where `session`'s `open` refuses it, its subject revoked since the proof began.
-- `resume(request, facts, after, done?, from?)`: the same answer, from the gates after the one named `after`; expired, with no gate run, at or past `from`'s deadline.
-- `achievable(amr)`: whether the declared amr, taken together, include every one given.
-- `returnAllowed(target)`: whether a login may send the browser back to this target.
+- `logins.login(request, facts, done?, from?)`: opened with the session and cookies, held with the gate's name, answer and cookies, or refused with the gate's name and no cookies; revoked, with no cookies, where `session`'s `open` refuses it, its subject revoked since the proof began.
+- `logins.resume(request, facts, after, done?, from?)`: the same answer, from the gates after the one named `after`; expired, with no gate run, at or past `from`'s deadline.
+- `logins.achievable(amr)`: whether the declared amr, taken together, include every one given.
+- `logins.returnAllowed(target)`: whether a login may send the browser back to this target.
 - Extension point `loginGates`: a named gate whose `hold` answers pass, held with an answer and optional cookies, or refused; a gate declared `rechecked` is asked again on resume.
 - Extension point `amrSources`: the amr that a way of logging in or a gate can prove, under its name.
 - Extension point `returnPaths`: a path on the public origin that its owner lets a login return to, or with `segment` the paths one name segment below it.
