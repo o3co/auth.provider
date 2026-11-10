@@ -1,7 +1,7 @@
 import { erasureMarks } from "@mod/erasure-extensions";
-import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
+import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { store, storeControl } from "@mod/store";
+import { type Store, store, storeControl } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import {
 	boundaryStore,
@@ -9,6 +9,7 @@ import {
 	erasureGuards,
 	revocations,
 	subjectErasure,
+	subjectRevocation,
 } from "@mod/subject-revocation";
 import revocationModule from "@mod/subject-revocation/module";
 import { boundaryStoreContract } from "@mod/subject-revocation/testing";
@@ -135,7 +136,7 @@ describe("subject-revocation's erasure over the wiring", () => {
 	});
 });
 
-it("boots over a store that offers no control record, erasure unknown: it warns at every start and never fences", async () => {
+it("boots over a store that offers no control record, erasure unknown: it warns at every start and fences every bundle", async () => {
 	const simulated = simulatedStore();
 	// A store adapter of 0.19: the simulated store's own provisions but its control record.
 	const uncontrolled = {
@@ -153,4 +154,46 @@ it("boots over a store that offers no control record, erasure unknown: it warns 
 		"subject-revocation.erasure_unknown",
 	);
 	expect(await app.get(erasureFence).fence("alice", "r1")).toBe("passed");
+	await app.get(subjectErasure).markErased("alice");
+	expect(await app.get(erasureFence).fence("alice", "r2")).toBe("erased");
+});
+
+/** The simulated store, its batch across partitions taken away: a store that writes none as one. */
+function storeWithin() {
+	const simulated = simulatedStore();
+	const module = {
+		...simulated.module,
+		provides: (simulated.module.provides ?? []).map((p) =>
+			p.contract === store
+				? {
+						...p,
+						create: async (c: never) => {
+							const { batchAcross: _, ...within } = (await p.create(c)) as Store;
+							return within;
+						},
+					}
+				: p,
+		),
+	};
+	return { simulated, module };
+}
+
+it("boots over a store that writes no two partitions as one, offering no fence, refused only where erasure is enabled", async () => {
+	const off = storeWithin();
+	const app = await assemble({
+		modules: [off.module, wiring, revocationModule],
+		config: kernelConfig(),
+		runtime,
+	});
+	expect(app.get(boundaryStore).fence).toBeUndefined();
+	expect(await app.get(subjectRevocation).check("alice", 1)).toBe("valid");
+	expect(await app.get(erasureFence).fence("alice", "r1")).toBe("passed");
+	const on = storeWithin();
+	on.simulated.mark(erasureMarks.enabled, true);
+	const refused = await assemble({
+		modules: [on.module, wiring, revocationModule],
+		config: kernelConfig(),
+		runtime,
+	}).catch((error: unknown) => (error instanceof BootRefused ? error.refusals : [error]));
+	expect(JSON.stringify(refused)).toContain("the boundary store does not fence");
 });

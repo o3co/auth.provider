@@ -1,11 +1,12 @@
 import { erasureEnabledFrom } from "@mod/erasure-extensions";
 import { defineModule, optional } from "@mod/kernel";
-import { pairedRecordsAcross, recordsIn } from "@mod/records";
+import { changesTogether, pairedRecordsAcross, recordsIn } from "@mod/records";
 import { type Guarantee, type Space, spaces, store, storeControl } from "@mod/store";
 import {
 	type BoundaryStore,
 	boundaryStore,
 	type boundaryStoreNeeds,
+	fenceWhere,
 	type StoredBoundary,
 	type StoredReceipt,
 } from "@mod/subject-revocation";
@@ -37,28 +38,31 @@ export default defineModule(
 			const s = await c.get(store);
 			const place = { store: s, space: boundaries, log: c.log, random: c.random };
 			const records = recordsIn<StoredBoundary>(place);
-			const fenced = pairedRecordsAcross<StoredReceipt, StoredBoundary>(
-				{ ...place, space: receipts },
-				place,
-				"subject-revocation-store",
-				(where, reason) => c.refuse(where, reason),
-			);
 			return {
 				save: records.create,
 				read: records.read,
 				update: (subject, change) =>
 					records.change(subject, (record, write) => ({ value: change(record, write) })),
-				fence: async (subject, receiptId, allowed) => {
-					const changed = await fenced.changeRecords(
-						{ first: [receiptId], second: [] },
-						{
-							watch: () => ({ second: [subject] }),
-							decide: ({ second: [boundary] }) => ({ first: [allowed(boundary)] }),
-						},
+				// Paired once, and only where the store writes two partitions as one.
+				...fenceWhere(changesTogether(s), () => {
+					const fenced = pairedRecordsAcross<StoredReceipt, StoredBoundary>(
+						{ ...place, space: receipts },
+						place,
+						"subject-revocation-store",
+						(where, reason) => c.refuse(where, reason),
 					);
-					const [receipt] = changed.first;
-					return { before: receipt?.before, after: receipt?.after };
-				},
+					return async (subject, receiptId, allowed) => {
+						const changed = await fenced.changeRecords(
+							{ first: [receiptId], second: [] },
+							{
+								watch: () => ({ second: [subject] }),
+								decide: ({ second: [boundary] }) => ({ first: [allowed(boundary)] }),
+							},
+						);
+						const [receipt] = changed.first;
+						return { before: receipt?.before, after: receipt?.after };
+					};
+				}),
 				...erasureEnabledFrom(await c.getOptional(storeControl)),
 			};
 		}),
