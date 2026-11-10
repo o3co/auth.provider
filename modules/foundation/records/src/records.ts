@@ -182,10 +182,11 @@ const recordKey = (target: Target) => ({
 	name: "set" in target && target.set ? "set" : "record",
 });
 const sameTarget = (a: Target, b: Target) =>
-	a.place.space.name === b.place.space.name && partitionOf(a) === partitionOf(b);
-/** The kind of records a target reaches: under a secret, a keyed set, or plain. */
-const kindOf = (target: Target) =>
-	"secret" in target ? "secret records" : target.set ? "keyed sets" : "records";
+	a.place.space.name === b.place.space.name &&
+	partitionOf(a) === partitionOf(b) &&
+	recordKey(a).name === recordKey(b).name;
+/** The kind of records a target holds its space to: under a secret, or plain, keyed sets among them. */
+const kindOf = (target: Target) => ("secret" in target ? "secret records" : "records");
 
 /** What one record held before a change of records as one, and holds after. */
 export interface ChangedRecord<T = Json> {
@@ -219,17 +220,17 @@ export async function changeRecords(p: {
 	const target = anchor.place.store;
 	const batchAcross = target.batchAcross?.bind(target);
 	if (!batchAcross) throw new Error("the store writes no records of two partitions as one");
-	// A space is named one way in one call: by key, secret or set.
-	const namedAs = new Map<string, "records" | "secret records" | "keyed sets">();
+	// A space is named one way in one call: plainly or by secret. A record and a set never share a name.
+	const namedAs = new Map<string, "records" | "secret records">();
 	const checked = (one: Target) => {
 		if (one.place.store !== target) throw new Error("records changed together share one store");
 		const kind = kindOf(one);
 		if ((namedAs.get(one.place.space.name) ?? kind) !== kind) {
-			throw new Error("records changed together name a space one way: by key, secret or set");
+			throw new Error("records changed together name a space one way: plainly or by secret");
 		}
 		namedAs.set(one.place.space.name, kind);
-		// A set's space holds records, as keyedSetsIn claims it: "set" and "record" never collide.
-		claim(one.place, kind === "secret records" ? kind : "records");
+		// A set's space holds records, as keyedSetsIn claims it.
+		claim(one.place, kind);
 	};
 	p.targets.forEach((named, at) => {
 		checked(named);

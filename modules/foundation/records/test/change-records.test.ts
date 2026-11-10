@@ -359,7 +359,7 @@ it("reads and writes a record under a secret with a plain one as one, and refuse
 			],
 			decide: () => ({}),
 		}),
-	).rejects.toThrow(/one way: by key, secret or set/);
+	).rejects.toThrow(/one way: plainly or by secret/);
 	await expect(
 		changeRecords({ targets: [{ place: kept, key: "group", set: true }], decide: () => ({}) }),
 	).rejects.toThrow(/records or secret records, not both/);
@@ -387,8 +387,8 @@ it("tells the store key a target's record is kept under, plain or under a secret
 	expect(changeRecords.keyOf({ place: listPlace, secret: "x" }).partition).toMatch(/^1\./);
 });
 
-it("reaches a keyed set as keyed sets keep it, and refuses a space named as a set and by key in one call", async () => {
-	const { s, listPlace } = await open();
+it("reaches a keyed set as keyed sets keep it, and a set and a record of one space as one", async () => {
+	const { s, listPlace, listRecords } = await open();
 	const sets = keyedSetsIn({ ...listPlace, cap: 5, clock: { now: () => Date.now() } });
 	await sets.add("group", "one", 60_000);
 	const key = changeRecords.keyOf({ place: listPlace, key: "group", set: true });
@@ -402,13 +402,13 @@ it("reaches a keyed set as keyed sets keep it, and refuses a space named as a se
 		},
 	});
 	expect((await sets.members("group")).map((m) => m.member)).toEqual(["one", "two"]);
-	await expect(
-		changeRecords({
-			targets: [
-				{ place: listPlace, key: "group", set: true },
-				{ place: listPlace, key: "other" },
-			],
-			decide: () => ({}),
-		}),
-	).rejects.toThrow(/one way: by key, secret or set/);
+	await changeRecords({
+		targets: [
+			{ place: listPlace, key: "group", set: true },
+			{ place: listPlace, key: "group" },
+		],
+		decide: () => ({ targets: [{ remove: true }, { value: { ids: ["b"] }, lifetimeMs: 60_000 }] }),
+	});
+	expect(await sets.members("group")).toEqual([]);
+	expect(await listRecords.read("group")).toEqual({ ids: ["b"] });
 });
