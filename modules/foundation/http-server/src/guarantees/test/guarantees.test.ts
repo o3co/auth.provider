@@ -120,7 +120,7 @@ describe("a route's declared guarantees", () => {
 	it("refuses a second mark for one guarantee", async () => {
 		const again: Mark = { guarantee: "own-site", policies: [{ policy: shut, methods: ["POST"] }] };
 		expect(await refusalsOf(serveWith(owner([], [ownSite, again])))).toEqual([
-			["http.marks:own-site", "more than one contribution for the same key"],
+			["http-server.marks:own-site", "more than one contribution for the same key"],
 		]);
 	});
 
