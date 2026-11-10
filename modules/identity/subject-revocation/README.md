@@ -10,6 +10,7 @@
 - `revocations.record(subject, { keepDelegations? })`: moves `sessions` to the deadline of the write that records it, and `delegations` too unless kept, then answers `{ complete }`: whether every follower finished all its work, none left for later.
 - `revocations.compare(subject, time, kind, allowanceMs?)`: valid, or revoked by that kind's boundary widened by the allowance (none by default).
 - `subjectRevocation`: `revoke(subject)` records both kinds; `check(subject, authenticatedAt)` compares with `sessions`, the time in epoch milliseconds.
+- `subjectErasure.markErased(subject)` (internal module `erasure`): marks the subject erased for good; taken by no module until account erasure is named.
 - Extension point `revocationFollowers`: `follow(subject, { keepDelegations })`, called after each `record` has written the boundary, one at a time in collect order; a follower that leaves any of its work for later fails. Each must be safe to call again and to run from several hosts at once: concurrent revocations and a repeated `record` both call it again.
 - Store interface for boundaries (per subject: save unless held / read / write from what it holds, kept without end, each write handing its deadline), and what it needs from a store (never evicted, survives a crash, does not come back on failover).
 - The store needs no confirmed reads: the state is on the refusing side, and each `record` is reported only after its confirmed write.
@@ -23,6 +24,7 @@
 - A boundary is compared with times from the hosts' clocks, so the store's clock joins them: a host ahead of the store by d leaves d of a window, one behind refuses d more, and no interface moves a boundary back. Keeping clocks right is the operator's job.
 - A failing follower is logged by name and kind and does not stop the rest; the boundary stays, nothing here retries it, and `record` answers incomplete.
 - Comparison is in seconds; what started up to the second of the boundary plus the allowance is revoked. An allowance below zero is none, and one that is no number revokes. Comparison is done only through the offered interface and is not reimplemented by callers.
+- An erased subject is revoked by every comparison, whatever the time, kind or allowance; the mark is never moved or dropped.
 - When it cannot be read, it is unavailable, not "no boundary". A record that holds no time is unavailable too, and a revocation over it moves both kinds.
 
 ## Data

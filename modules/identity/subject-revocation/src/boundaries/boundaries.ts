@@ -1,12 +1,19 @@
-import type { Revocations, SubjectRevocation } from "../contract.ts";
+import type { BoundaryKind, Revocations, SubjectRevocation } from "../contract.ts";
 
-/** A subject's boundaries, opened; `delegations` is absent until a revocation moves it. */
+/**
+ * A subject's boundaries, opened; `delegations` is absent until a revocation moves it, `erasedAt`
+ * until the subject is erased.
+ */
 export interface Boundaries {
 	readonly sessions: number;
 	readonly delegations?: number;
+	readonly erasedAt?: number;
 }
 
-/** The boundaries after a revocation at `now`: a moved kind takes the later time, a kept one stays. */
+/**
+ * The boundaries after a revocation at `now`: a moved kind takes the later time, a kept one stays,
+ * and the erasure's mark stays as it was.
+ */
 export function recorded(
 	held: Boundaries | undefined,
 	now: number,
@@ -14,8 +21,21 @@ export function recorded(
 ): Boundaries {
 	const sessions = Math.max(held?.sessions ?? now, now);
 	const delegations = keepDelegations ? held?.delegations : Math.max(held?.delegations ?? now, now);
-	return delegations === undefined ? { sessions } : { sessions, delegations };
+	return {
+		sessions,
+		...(delegations === undefined ? {} : { delegations }),
+		...(held?.erasedAt === undefined ? {} : { erasedAt: held.erasedAt }),
+	};
 }
+
+/** Whether something started at `time` holds against the subject's boundaries: an erased subject's nothing does. */
+export const comparedTo = (
+	held: Boundaries,
+	time: number,
+	kind: BoundaryKind,
+	allowanceMs?: number,
+): "valid" | "revoked" =>
+	held.erasedAt !== undefined ? "revoked" : compared(time, held[kind], allowanceMs);
 
 /**
  * In seconds: something started in the boundary's own second is revoked too, and up to the

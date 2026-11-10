@@ -40,4 +40,17 @@ export const revocationFollowers = extensionPoint<RevocationFollower>(
 	"subject-revocation.followers",
 	{ multiplicity: "keyed", keyOf: (follower) => follower.name },
 );
+/** Marking a subject erased, for good: every comparison of its boundaries answers revoked from then. */
+export interface SubjectErasure {
+	/**
+	 * Marks the subject erased by a confirmed write at its deadline, the boundaries kept as they
+	 * are; a subject marked already keeps its first mark, which is answered.
+	 */
+	markErased(subject: string): Promise<{ readonly kind: "marked"; readonly erasedAt: number }>;
+}
+
+/** Taken by no module until account erasure, which alone marks a subject erased, is named. */
+export const subjectErasure = contract<SubjectErasure>("subject-revocation.erasure", {
+	takenBy: [],
+});
 export * from "./store.ts";
