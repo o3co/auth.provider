@@ -12,6 +12,7 @@ const guaranteeFor: Record<keyof typeof usedIdTokensNeeds, Guarantee> = {
 const used: Space = {
 	name: "exchange-id-tokens-store.used",
 	guarantees: Object.values(guaranteeFor),
+	subjectData: "pseudonymous",
 };
 
 export default defineModule(
