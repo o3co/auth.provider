@@ -8,12 +8,12 @@
 - Where a request may go, at which addresses, with what credential, and how far it may run: `outbound-policy`. What a destination means, and which destinations a feature uses: the caller's, in its own section.
 
 ## Offers
-- `outbound`: fetch a URL with a request and a narrower, answering status, headers and body, or throwing a destination refusal or unavailable with its failure. `isOutboundUnavailable` tells that unavailable by its mark, not its class, so a second bundled copy's is told too.
-- `outbound.signed`: the same for signed material, with the narrower's hosts always named.
+- `outbound`: fetch a URL with a request and a narrower, answering status, headers and body, or throwing a destination refusal or unavailable with its failure. That unavailable is `OutboundUnavailable`; `isOutboundUnavailable` tells it by its mark, not its class, so a second bundled copy's is told too.
+- `outbound.signed` (`signedOutbound`): the same for signed material, with the narrower's hosts always named.
 - `credentialHeaderRefusal` (`credential`'s): why a credential may not go as a header named so.
 - `DestinationRefused`, `RefusalReason` and `Narrower`, `outbound-policy`'s, as `fetch` throws and takes them. Composition definition, providing `outbound-policy`'s `outbound.refusals` (`plainInternal` and `browsedRefusal` too), `outbound.credentials` and `outbound.limits` from the section.
 - A JSON call: `postJson` posts a body as JSON, asking JSON back, its credential under the credential rule below (a Bearer token, or as given in the header named); a send that fails throws what its caller makes of `sendFailureOf`'s kind: the policy's reason, a `failure` (Vocabulary), or `no-answer`. `jsonObjectOf` reads one frozen UTF-8 object, at the status named, `200` by default.
-- Operator section `outbound`: `outbound-policy`'s keys, `max-concurrent`, `max-lookups`, `resolution`, the proxy, `direct-hosts` (a host list, as `host-entries` reads one), `plain-ipv4` and `revocation`; its keys are in the configuration reference.
+- `./module`: `outboundOver`, the paths over the settings, the lookups and the TLS floor, refusing a floor not tls-options' own (`NotTheFloor`). Operator section `outbound` (`section`): `outbound-policy`'s keys, `max-concurrent`, `max-lookups`, `resolution`, the proxy, `direct-hosts` (a host list, as `host-entries` reads one), `plain-ipv4` and `revocation`; its keys are in the configuration reference.
 
 ## Invariants
 - Sends every request that leaves the deployment itself, as no other package does (`network`: `outbound`).
