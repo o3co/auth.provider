@@ -21,6 +21,7 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
 - `require` replaces the set of spaces, under the maintenance key alone, and never with none.
 - Before its first change, a process adds each space it declares to the ledger; until it has, it changes nothing (each change unavailable) and its readiness says so, retrying. A space's `subjectDataEver` turns true once a declaration names a category other than `none`, or none at all, and never turns back. Only `retire` takes a space off, under the maintenance key alone, never one the process declares.
 - `honours` checks anew on each call, and answers verified, declared (naming the settings the operator declared) or unmet (with why).
+- `honours` answers a witness of the server and its history; equal witnesses, the same server and history, nothing evicted between. Its reader compares them, never the store.
 - `sweep` removes for good each expired key it meets, its answer confirmed as a write, and names the server each page ran on.
 
 ## Depends on

@@ -28,11 +28,13 @@ export interface StoreControl {
 
 /**
  * Whether the store gives a set of guarantees now: checked, taken from what the operator declared
- * where the store could not check (those settings named), or not, with why.
+ * where the store could not check (those settings named), or not, with why. Where it gives them, a
+ * witness of the server and its history: equal witnesses, the same server and history, nothing
+ * evicted between; the store never compares them, its reader does.
  */
 export type Honours =
-	| { readonly kind: "verified" }
-	| { readonly kind: "declared"; readonly settings: readonly string[] }
+	| { readonly kind: "verified"; readonly witness?: string }
+	| { readonly kind: "declared"; readonly settings: readonly string[]; readonly witness?: string }
 	| { readonly kind: "unmet"; readonly reasons: readonly string[] };
 
 /** A space the store has seen declared, and whether any declaration may have held a subject's data. */
