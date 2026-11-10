@@ -17,7 +17,7 @@
 - OCSP: a delegated responder's own revocation is checked before its good is taken, unless it says it needs none.
 - Under both, OCSP comes first, and the CRL may only add a revocation to an unknown; where OCSP gives no answer it can use, the CRL alone decides.
 - Any certificate revoked revokes the path.
-- Only a fetch that failed (unreachable, out of time or size, a server failing, busy or timed out, a responder's internal error or try later) is an outage.
+- Only a fetch that failed (unreachable, out of time or size, a server failing, busy or timed out, a responder's internal error or try later) is an outage; so is a fetched CRL that gets no turn to be read within one fetch's time (`timeout`), as x509-path reads one at a time, and nothing of it is remembered.
 - Anything else not confirmed good refuses, and a refusal outweighs an outage.
 - One check fetches from at most the policy's number of sources; past them is an outage, not remembered as failing.
 
