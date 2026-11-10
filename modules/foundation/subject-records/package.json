@@ -1,0 +1,18 @@
+{
+	"name": "@mod/subject-records",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "capability",
+	"exports": {
+		".": "./src/subject-records.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/store": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5"
+	}
+}
