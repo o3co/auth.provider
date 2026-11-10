@@ -1,4 +1,10 @@
-import { crlSays, distributionPointsOf, type Judged, verifyCrl } from "@mod/x509-path";
+import {
+	crlSays,
+	distributionPointsOf,
+	type Judged,
+	type VerifiedCrl,
+	verifyCrl,
+} from "@mod/x509-path";
 import type * as pkijs from "pkijs";
 import type { PathPolicy, RevocationPolicy, Sources } from "../contract.ts";
 import type { Alone, Expiring } from "./kept.ts";
@@ -14,18 +20,22 @@ import {
 	worse,
 } from "./outcome.ts";
 
-/** What the CRL says of `cert`, verified with its issuer's key and then judged, as of `now`. */
-async function judgeCrl(
-	der: Uint8Array,
-	cert: pkijs.Certificate,
-	issuer: pkijs.Certificate,
-	now: number,
-	skewMs: number,
-	taken: Parameters<typeof verifyCrl>[4],
-): Promise<Judged> {
-	const verified = await verifyCrl(der, issuer, now, skewMs, taken);
-	return verified.kind === "unusable" ? verified : crlSays(verified.crl, cert, issuer, now);
-}
+/** A CRL verified once, as it was fetched, by its issuer's key; judged again for each certificate. */
+export type KeptCrl = VerifiedCrl | Failed;
+
+/** The serials kept CRLs list at most, together: some 47 B each as x509-path keeps them. */
+export const mostKeptSerials = 1 << 20;
+
+/** How much a kept CRL weighs against `mostKeptSerials`: the serials it lists. */
+export const serialsIn = (kept: KeptCrl) => ("listed" in kept ? kept.listed.size : 0);
+
+const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+
+/** A CRL kept by where it came from and the issuer whose key verified it: another's is never taken for it. */
+const keptAs = (url: string, issuer: pkijs.Certificate) =>
+	`${url} ${hex(new Uint8Array(issuer.subject.toSchema().toBER(false)))} ${hex(
+		issuer.subjectPublicKeyInfo.subjectPublicKey.valueBlock.valueHexView,
+	)}`;
 
 /** Where a certificate's CRL is: its usable points' URLs; none where it names none, or they are unreadable. */
 const crlUrlsOf = (cert: pkijs.Certificate) => {
@@ -40,11 +50,15 @@ const saidOf = (judged: Exclude<Judged, { kind: "unusable" }>): Said =>
 export function crlSource(
 	policy: RevocationPolicy & Pick<PathPolicy, "signatureAlgorithms">,
 	sources: Sources,
-	crls: Expiring<Uint8Array | Failed>,
+	crls: Expiring<KeptCrl>,
 	alone: Alone,
 ) {
-	const crlSays = (url: string, cert: pkijs.Certificate, issuer: pkijs.Certificate, fetch: Fetch) =>
-		alone(`crl ${url}`, () => crlLooked(url, cert, issuer, fetch));
+	const lookedAlone = (
+		url: string,
+		cert: pkijs.Certificate,
+		issuer: pkijs.Certificate,
+		fetch: Fetch,
+	) => alone(`crl ${url}`, () => crlLooked(url, cert, issuer, fetch));
 	async function crlLooked(
 		url: string,
 		cert: pkijs.Certificate,
@@ -52,39 +66,37 @@ export function crlSource(
 		fetch: Fetch,
 	): Promise<Said> {
 		const now = sources.now();
-		const entry = crls.get(url);
+		const key = keptAs(url, issuer);
+		const entry = crls.get(key);
 		if (entry) {
-			if (!(entry.value instanceof Uint8Array)) return entry.value;
-			const judged = await judgeCrl(
-				entry.value,
-				cert,
-				issuer,
-				now,
-				policy.skewMs,
-				policy.signatureAlgorithms,
-			);
+			if (!("listed" in entry.value)) return entry.value;
+			const judged = crlSays(entry.value, cert, issuer, now);
 			return judged.kind === "unusable" ? refused(judged.reason) : saidOf(judged);
 		}
 		const fetched = await fetch(url);
 		if (!fetched) return limited;
 		if (fetched.kind !== "material") {
 			const failed = failedOf(fetched);
-			crls.set(url, failed, now + policy.failureMs);
+			crls.set(key, failed, now + policy.failureMs);
 			return failed;
 		}
-		const judged = await judgeCrl(
+		const verified = await verifyCrl(
 			fetched.body,
-			cert,
 			issuer,
 			now,
 			policy.skewMs,
 			policy.signatureAlgorithms,
 		);
+		if (verified.kind === "unusable") {
+			crls.set(key, refused(verified.reason), now + policy.failureMs);
+			return refused(verified.reason);
+		}
+		const judged = crlSays(verified.crl, cert, issuer, now);
 		if (judged.kind === "unusable") {
-			crls.set(url, refused(judged.reason), now + policy.failureMs);
+			crls.set(key, refused(judged.reason), now + policy.failureMs);
 			return refused(judged.reason);
 		}
-		crls.set(url, fetched.body, Math.min(judged.until, now + policy.crlTtlMs));
+		crls.set(key, verified.crl, Math.min(judged.until, now + policy.crlTtlMs));
 		return saidOf(judged);
 	}
 
@@ -97,7 +109,7 @@ export function crlSource(
 		if (urls.length === 0) return refused("no source");
 		let failed: Failed | undefined;
 		for (const url of urls) {
-			const said = await crlSays(url, cert, issuer, fetch);
+			const said = await lookedAlone(url, cert, issuer, fetch);
 			if (!isFailed(said)) return said;
 			failed = worse(failed, said);
 		}
