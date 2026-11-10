@@ -61,6 +61,17 @@ export interface BoundaryStore {
 
 export const boundaryStore = contract<BoundaryStore>("subject-revocation.boundary-store");
 
+/**
+ * A boundary store's `fence` where its store `can` fence, made then and only then, and none
+ * where it cannot: a wiring spreads the answer with no branch of its own.
+ */
+export function fenceWhere(
+	can: boolean,
+	fence: () => NonNullable<BoundaryStore["fence"]>,
+): Pick<BoundaryStore, "fence"> {
+	return can ? { fence: fence() } : {};
+}
+
 /** Losing a boundary would let revoked authentications back. */
 export const boundaryStoreNeeds = {
 	neverEvicted: true,
