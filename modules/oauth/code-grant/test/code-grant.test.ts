@@ -6,6 +6,7 @@ import { clientsConfig, confidentialClient } from "@mod/clients/testing";
 import { type Grant, type GrantInput, grants, sessionIssuances, targetRules } from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import {
@@ -168,6 +169,7 @@ function assembly(options: Options = {}) {
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			tokensStandIn({ revocable: (options.revocation ?? "denylist") === "denylist" }),
 			issuerModule,
 			clientsModule,
