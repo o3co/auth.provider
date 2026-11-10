@@ -323,6 +323,10 @@ importers:
       '@mod/request-source':
         specifier: workspace:*
         version: link:../request-source
+    devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../http-server
 
   modules/foundation/erasure-extensions:
     dependencies:
