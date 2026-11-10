@@ -195,6 +195,18 @@ it("fences only where erasure is on or unread: a receipt where the subject is no
 	expect([...on.receipts.keys()]).toEqual(["r2", "r4"]);
 });
 
+it("never passes a fence whose receipt id already holds a receipt, whatever the boundary holds", async () => {
+	const on = await gated(true, (s) => {
+		s.erasure.on = true;
+	});
+	const fence = on.app?.get(erasureFence);
+	expect(await fence?.fence("bob", "r")).toBe("passed");
+	await expect(fence?.fence("carol", "r")).rejects.toThrow("receipt id");
+	await on.app?.get(subjectErasure).markErased("alice");
+	await expect(fence?.fence("alice", "r")).rejects.toThrow("receipt id");
+	expect(await fence?.fence("alice", "r5")).toBe("erased");
+});
+
 it("takes erasure as off, warning at every start, where the store cannot tell whether it is enabled", async () => {
 	const booted = await gated(false, () => {}, { erasureEnabled: false, fence: false });
 	expect(booted.warned()).toContain("subject-revocation.erasure_unknown");

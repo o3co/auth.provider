@@ -40,7 +40,8 @@ export interface BoundaryStore {
 	 * Writes under `receiptId` the receipt `allowed` answers from the subject's boundary (none
 	 * where it holds none), for the lifetime it answers, in one write held by the boundary as read:
 	 * `allowed` runs again when the boundary changes first, so it is pure. Writes nothing where it
-	 * answers none. Where it is absent, erasure cannot be enabled (`subject-revocation`'s boot gate).
+	 * answers none. Answers the receipt held under `receiptId` before the write and after it. Where
+	 * it is absent, erasure cannot be enabled (`subject-revocation`'s boot gate).
 	 */
 	fence?(
 		subject: string,

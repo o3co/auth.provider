@@ -52,7 +52,9 @@ export function fenceOver(
 				if (held === undefined) throw new Unavailable("subject-revocation");
 				return held.erasedAt === undefined ? receipt(receiptId) : undefined;
 			};
-			const { after } = await boundaries.fence(subject, receiptId, allowed);
+			const { before, after } = await boundaries.fence(subject, receiptId, allowed);
+			// A receipt kept from before is no answer of this fence, passed or not.
+			if (before !== undefined) throw new Error("subject-revocation: a fence's receipt id is used");
 			return after === undefined ? "erased" : "passed";
 		},
 	};

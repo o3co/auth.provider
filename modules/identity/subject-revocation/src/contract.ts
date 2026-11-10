@@ -58,7 +58,8 @@ export interface ErasureFence {
 	/**
 	 * Passes where the subject is not erased, keeping a receipt under `receiptId` held by its
 	 * boundary as read, so a mark of erasure written meanwhile makes it read again; `erased` where
-	 * the subject is, and nothing is written. Where erasure is off, passes without writing.
+	 * the subject is, and nothing is written. Where erasure is off, passes without writing. A
+	 * `receiptId` already holding a receipt is thrown, never passed: each fence's is new.
 	 */
 	fence(subject: string, receiptId: string): Promise<"passed" | "erased">;
 }
