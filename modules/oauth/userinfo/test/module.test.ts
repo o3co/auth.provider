@@ -2,6 +2,7 @@ import { claimsSelections } from "@mod/claims-selection";
 import { listening, site } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { issuer, type MetadataItem, metadata } from "@mod/issuer";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
@@ -79,7 +80,7 @@ async function serve(publicOrigin: string | null = "https://as.example") {
 /** userinfo beside http and the parts it reads, on many instances, reached at `publicOrigin`; null writes none. */
 function composition(publicOrigin: string | null = "https://as.example") {
 	return {
-		modules: [http, parts, userinfoModule],
+		modules: [http, httpServer, parts, userinfoModule],
 		config: {
 			// Many instances: userinfo keeps nothing, so it never refuses them.
 			...kernelConfig({ deployment: "multi" }),
