@@ -4,6 +4,7 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	type BootRefused,
@@ -97,6 +98,7 @@ async function serve(setup: Setup = {}) {
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			gatesModule,
 			csrfStandIn,
 			cookiesModule,

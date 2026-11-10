@@ -2,6 +2,7 @@ import { auditStandIn } from "@mod/audit/testing";
 import { listening, routes, use } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { metrics } from "@mod/metrics";
@@ -579,7 +580,15 @@ async function serving(section?: Record<string, unknown>) {
 	const simulated = simulatedStore();
 	const audit = auditStandIn();
 	const app = await assemble({
-		modules: [http, audit.module, metricsModule, rateLimitModule, simulated.module, routed],
+		modules: [
+			http,
+			httpServer,
+			audit.module,
+			metricsModule,
+			rateLimitModule,
+			simulated.module,
+			routed,
+		],
 		config: {
 			...kernelConfig(),
 			...httpConfig({ "trusted-proxies": ["127.0.0.1"] }),

@@ -4,6 +4,7 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	BootRefused,
@@ -64,6 +65,7 @@ async function serve(setup: Setup = {}) {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			setup.logins ?? gatesModule,
 			csrfStandIn,
 			cookiesModule,
@@ -804,6 +806,7 @@ describe("login-password under a gate that refuses", () => {
 it("takes every handle its takes name, every module beside it as it boots", async () => {
 	const modules = [
 		http,
+		httpServer,
 		gatesModule,
 		csrfStandIn,
 		cookiesModule,

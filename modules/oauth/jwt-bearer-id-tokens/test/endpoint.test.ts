@@ -21,6 +21,7 @@ import { testSigner } from "@mod/external-jwt/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import jwtBearer from "@mod/jwt-bearer/module";
@@ -213,6 +214,7 @@ async function serve(
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			keysModule,
 			watched.module,
 			tokensStore,

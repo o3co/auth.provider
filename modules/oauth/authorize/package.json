@@ -41,6 +41,7 @@
 		"@mod/code-grant-store": "workspace:*",
 		"@mod/cookies": "workspace:*",
 		"@mod/csrf": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/session-participants": "workspace:*",

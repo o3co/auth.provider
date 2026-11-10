@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
@@ -86,6 +87,7 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			auditStandIn().module,
 			sessionStandIn,
 			sessionRequirements,

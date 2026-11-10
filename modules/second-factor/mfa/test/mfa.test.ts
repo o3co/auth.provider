@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	BootRefused,
@@ -257,6 +258,7 @@ async function serve(
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			audit.module,
 			subjectRevocationStandIn,
 			store ?? place.module,

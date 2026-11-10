@@ -5,6 +5,7 @@ import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import { type IdTokenMaker, idTokens, type RedemptionHook, redemptionHooks } from "@mod/code-grant";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { type MetadataItem, metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
@@ -85,6 +86,7 @@ export const composed = (p: {
 	modules: [
 		...(p.more ?? []),
 		http,
+		httpServer,
 		keysModule,
 		issuerModule,
 		memoryUsersStores().module,

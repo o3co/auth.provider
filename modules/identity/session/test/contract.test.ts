@@ -1,6 +1,7 @@
 import cookiesModule from "@mod/cookies/module";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { openedOf } from "@mod/session/testing";
@@ -48,6 +49,7 @@ async function placeOver(
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			cookiesModule,
 			sessionStandIn,
 			subjectRevocationStandIn,
@@ -131,6 +133,6 @@ describe("the stand-in's seams", () => {
 
 it("takes every handle its stand-in's takes name, the seams collected though none is contributed", async () => {
 	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
-	const modules = [http, cookiesModule, sessionStandIn, subjectRevocationStandIn];
+	const modules = [http, httpServer, cookiesModule, sessionStandIn, subjectRevocationStandIn];
 	expect((await takesUnused({ modules, config })).session).toBeUndefined();
 });

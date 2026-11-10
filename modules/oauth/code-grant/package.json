@@ -26,6 +26,7 @@
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",

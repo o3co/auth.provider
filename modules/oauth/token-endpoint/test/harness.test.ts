@@ -8,6 +8,7 @@ import { type Grant, grants, sessionIssuances, targetRules } from "@mod/grants";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	BootRefused,
@@ -107,6 +108,7 @@ it("hands a grant what the token endpoint hands it, for the same client, paramet
 	const harness = await assemble({
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			tokensStandIn(),
@@ -167,6 +169,7 @@ it("hands a grant that takes JSON its members as the token endpoint does", async
 	const harness = await assemble({
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			tokensStandIn(),
@@ -200,6 +203,7 @@ it("refuses an OAuth parameter sent in JSON as neither a string nor null before 
 	const harness = await assemble({
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			tokensStandIn(),
@@ -240,6 +244,7 @@ it("gives a test that calls a grant itself the input the harness hands the grant
 	const harness = await assemble({
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			tokensStandIn(),
@@ -284,6 +289,7 @@ it("answers a refusal of the issuance policies as the token endpoint does, asked
 	const harness = await assemble({
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			tokensStandIn(),
@@ -320,6 +326,7 @@ it("tells each session issuance of a token issued from a session, and one that f
 	const harness = await assemble({
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			tokensStandIn(),
@@ -361,6 +368,7 @@ it("refuses to boot with two rules for a request's audience, as the token endpoi
 		assemble({
 			modules: [
 				http,
+				httpServer,
 				clientsModule,
 				secretHashModule,
 				tokensStandIn(),
@@ -411,6 +419,7 @@ it("refuses an audience asked of a grant that takes none before the grant runs, 
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			tokensStandIn(),

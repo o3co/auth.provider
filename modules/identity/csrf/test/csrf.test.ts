@@ -3,6 +3,7 @@ import cookiesModule from "@mod/cookies/module";
 import { listening, routes, site, use } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	type Assembly,
 	assemble,
@@ -24,7 +25,7 @@ const cookieOf = (jar: Cookies, value: string) =>
 const runtime = quietRuntime();
 const boot = (origin = "https://as.example", modules: readonly Module[] = [csrfModule]) =>
 	assemble({
-		modules: [http, cookiesModule, ...modules],
+		modules: [http, httpServer, cookiesModule, ...modules],
 		config: {
 			// A plain-http origin is one only a development deployment takes.
 			...kernelConfig({ environment: origin.startsWith("http:") ? "development" : "production" }),
@@ -188,7 +189,7 @@ describe("without a public origin", () => {
 	it("refuses to start the module, as there is nothing to compare evidence with", async () => {
 		await expect(
 			assemble({
-				modules: [http, cookiesModule, csrfModule],
+				modules: [http, httpServer, cookiesModule, csrfModule],
 				config: { ...kernelConfig(), ...httpConfig({}) },
 				runtime,
 			}),
@@ -340,7 +341,7 @@ it("takes every handle its takes name, the module and its stand-in alike, at a p
 	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
 	for (const module of [csrfModule, csrfStandIn]) {
 		expect(
-			(await takesUnused({ modules: [http, cookiesModule, module], config })).csrf,
+			(await takesUnused({ modules: [http, httpServer, cookiesModule, module], config })).csrf,
 		).toBeUndefined();
 	}
 });
@@ -348,7 +349,10 @@ it("takes every handle its takes name, the module and its stand-in alike, at a p
 it("takes cookies in its stand-in without a public origin too, for the form tokens it hands out", async () => {
 	// The policy refuses every unsafe request without an origin; the form tokens still need the cookie.
 	const config = { ...kernelConfig(), ...httpConfig() };
-	const unused = await takesUnused({ modules: [http, cookiesModule, csrfStandIn], config });
+	const unused = await takesUnused({
+		modules: [http, httpServer, cookiesModule, csrfStandIn],
+		config,
+	});
 	expect(unused.csrf).toBeUndefined();
 });
 

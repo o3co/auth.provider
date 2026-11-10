@@ -8,6 +8,7 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	contract,
@@ -163,6 +164,7 @@ async function serve(
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			...sections,

@@ -13,6 +13,7 @@
 		"@mod/kernel": "workspace:*"
 	},
 	"devDependencies": {
+		"@mod/http-server": "workspace:*",
 		"@mod/keys": "workspace:*"
 	}
 }

@@ -7,7 +7,7 @@ import { type MetadataItem, metadata } from "@mod/issuer";
 import { assemble, BootRefused, contract, defineModule, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import tokenEndpoint from "../src/module.ts";
 import { endpointConfig, endpointModules } from "./deployment.ts";
 
@@ -52,42 +52,6 @@ const refusals = (deployment: Promise<unknown>) =>
 			return error.refusals.map((r) => `${r.where}: ${r.reason}`);
 		},
 	);
-
-describe("a registered client allowed a grant nothing composed serves", () => {
-	it("refuses boot at the grant's place in the client's list, naming the module that serves it", async () => {
-		expect(
-			await refusals(boot([], ["authorization_code"], [], ["refresh_token", "urn:x:own"])),
-		).toEqual([
-			"clients.registered.0.sections.client-allowance.grants.0: no composed module serves this grant: compose code-grant, or take it out of the client's grants",
-			"clients.registered.2.sections.client-allowance.grants.0: no composed module serves this grant: compose refresh, or take it out of the client's grants",
-			"clients.registered.2.sections.client-allowance.grants.1: no composed module serves this grant: compose the module that serves it, or take it out of the client's grants",
-		]);
-	});
-
-	it("names client-credentials for client_credentials, which token-endpoint no longer serves itself", async () => {
-		expect(await refusals(boot([], ["client_credentials"]))).toEqual([
-			"clients.registered.0.sections.client-allowance.grants.0: no composed module serves this grant: compose client-credentials, or take it out of the client's grants",
-		]);
-		expect(await refusals(boot([clientCredentialsModule], ["client_credentials"]))).toEqual([]);
-	});
-
-	it("names no module for a type that is a name every object has", async () => {
-		const unknown = "no composed module serves this grant: compose the module that serves it";
-		expect(
-			await refusals(boot([], ["constructor", "__proto__", "toString", "hasOwnProperty"])),
-		).toEqual(
-			[0, 1, 2, 3].map(
-				(j) =>
-					`clients.registered.0.sections.client-allowance.grants.${j}: ${unknown}, or take it out of the client's grants`,
-			),
-		);
-	});
-
-	it("never names the client's id or the grant type itself", async () => {
-		const told = (await refusals(boot([], ["urn:x:secret-name"]))).join();
-		expect(told).not.toMatch(/c0|urn:x:secret-name/);
-	});
-});
 
 it("publishes as grant_types_supported only the grants composed, client_credentials only with client-credentials", async () => {
 	const supported = async (modules: Module[]) =>

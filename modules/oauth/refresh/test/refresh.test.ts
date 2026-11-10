@@ -21,6 +21,7 @@ import { grants, targetRules, tokenTies } from "@mod/grants";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import {
@@ -139,6 +140,7 @@ function assembly(options: Options = {}) {
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			switchedModule(
 				switchedModule(
 					tokensStandIn({

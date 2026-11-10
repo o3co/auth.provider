@@ -21,6 +21,7 @@
 		"@mod/clients": "workspace:*",
 		"@mod/cookies": "workspace:*",
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/keys": "workspace:*",
 		"@mod/rate-limit": "workspace:*",

@@ -3,6 +3,7 @@ import type { Client, Section } from "@mod/clients";
 import { listening, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { redirectsFor } from "@mod/redirect-uris/testing";
@@ -109,6 +110,7 @@ it("leaves Unavailable before the redirect URI is trusted to http, which answers
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			defineModule({ name: "authorize-route", replicaSafe: false, takes: [] }, (m) => [
 				m.contribute(routes).by(() => ({
 					method: "GET",

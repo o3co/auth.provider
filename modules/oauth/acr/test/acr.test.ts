@@ -1,5 +1,6 @@
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { type MetadataItem, metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
@@ -43,6 +44,7 @@ const offering = (name: string, sets: string[][]) =>
 const assembly = (values: Record<string, string[][]>, extra: Module[]) => ({
 	modules: [
 		http,
+		httpServer,
 		issuerModule,
 		reader,
 		sessionStandIn,

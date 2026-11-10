@@ -1,6 +1,7 @@
 import type { HttpRequest } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, defineModule, isUnavailable, kernelConfig, Unavailable } from "@mod/kernel";
@@ -93,6 +94,7 @@ beforeAll(async () => {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			issuerModule,
 			senderBindingModule,
 			kind("jkt", "DPoP", "x-proof"),
