@@ -20,7 +20,7 @@
 - `requestEnds`: each request's end, once, answered or closed: the method sent, the declared path of the route reached (none when none), the status written or `closed` when the client closed first, and the milliseconds taken (never negative); its observers are told after the request, asynchronously, and what they throw or reject is dropped.
 - `httpServers`: the one server, given the declared routes, the settings, the observers, the log and the clock at start, and drained at stop.
 - `jsonAnswer`: status, a JSON value, and any cookies and headers → an answer kept out of caches (`noStore`), but where the headers given replace its `cache-control` or `pragma`.
-- `./testing`: test configuration and request builders with working defaults, read-only as a server gives a request.
+- `./testing`: `httpConfig` and `testRequest`, test configuration and request builders with working defaults, read-only as a server gives a request.
 
 ## Invariants
 - Boot is refused when two routes take one method and path, or when no server, or two, is contributed; with none, the refusal says to compose `http-server`.
