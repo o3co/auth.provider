@@ -68,6 +68,11 @@ function spaceOf(name: string, args: readonly unknown[]): Space | undefined {
 			const [conditions, written] = args as [readonly { key: Key }[], readonly { key: Key }[]];
 			return (conditions[0] ?? written[0])?.key.space;
 		}
+		// Reads of several keys are confirmed where any of their spaces confirms reads.
+		case "getMany": {
+			const keys = args[0] as readonly Key[];
+			return (keys.find((k) => k.space.guarantees.includes("confirmed-reads")) ?? keys[0])?.space;
+		}
 		default:
 			return (args[0] as Key | undefined)?.space;
 	}

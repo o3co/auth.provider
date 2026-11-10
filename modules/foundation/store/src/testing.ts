@@ -12,6 +12,12 @@ import {
 import type { section } from "./section.ts";
 
 export { type SimulatedStore, simulatedStore } from "./simulated.ts";
+export {
+	type UpkeepHarness,
+	type UpkeepProcess,
+	upkeepContract,
+	upkeepSpaces,
+} from "./upkeep/suite.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -759,12 +765,12 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				expect(stale).toEqual({ kind: "conflict", index: 0 });
 				expect((await s.get(written)).entry).toBeNull();
 				const { now } = await s.get(watched);
-				expect(await batchAcross([], [], { deadline: now + 60_000, idempotency: "empty" })).toEqual(
-					{
-						kind: "committed",
-						versions: [],
-					},
-				);
+				const { at, ...empty } = (await batchAcross([], [], {
+					deadline: now + 60_000,
+					idempotency: "empty",
+				})) as { at?: number };
+				expect(empty).toEqual({ kind: "committed", versions: [] });
+				if (at !== undefined) expect(at).toEqual(expect.any(Number));
 				expect((await batchAcross([], [], { deadline: now - 1 })).kind).toBe("late");
 			});
 
@@ -947,6 +953,30 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			});
 		});
 
+		describe("reads of several keys, and a batch's time", () => {
+			it("reads several keys in the order asked, none where absent", async (ctx) => {
+				const s = await harness.open();
+				if (!s.getMany) return ctx.skip();
+				const key = fresh();
+				await s.putIfAbsent(key("a"), "a", never);
+				await s.putIfAbsent(key("c"), "c", never);
+				const reads = await s.getMany([key("c"), key("b"), key("a")]);
+				expect(reads.map((r) => r.entry?.value ?? null)).toEqual(["c", null, "a"]);
+			});
+
+			it("tells the store time a batch committed at, where it tells one, and the same on a resend", async () => {
+				const s = await harness.open();
+				const key = fresh();
+				const before = await s.now();
+				const write = [{ key: key("a"), put: 1, expiry: { kind: "never" } }] as const;
+				const first = await s.batch([], write, { idempotency: "timed" });
+				if (first.kind !== "committed" || first.at === undefined) return;
+				expect(first.at).toBeGreaterThanOrEqual(before);
+				expect(first.at).toBeLessThanOrEqual(await s.now());
+				expect(await s.batch([], write, { idempotency: "timed" })).toEqual(first);
+			});
+		});
+
 		describe("scanning a space", () => {
 			const walk = async (s: Store, target: Space, between?: () => Promise<void>) => {
 				const seen = new Map<string, number>();
@@ -966,7 +996,10 @@ export function storeContract(name: string, harness: StoreHarness): void {
 
 			it("lists each live value's key in the space, over pages, and no counter, set or other space", async () => {
 				const s = await harness.open();
-				const live = Array.from({ length: 250 }, (_, i) => fresh(space, `q${i % 7}`)(`k${i}`));
+				// Names of the longest length, so each cursor given, which may name a key, is taken back.
+				const live = Array.from({ length: 250 }, (_, i) =>
+					fresh(space, `q${i % 7}`.padEnd(512, "q"))(`k${i}`.padEnd(512, "k")),
+				);
 				for (const k of live) await overwrite(s, k, 1, never);
 				const { now } = await s.get(fresh()("probe"));
 				const ends = now + 30;
