@@ -8,6 +8,7 @@ import { testSigner } from "@mod/external-jwt/testing";
 import { type GrantOutcome, targetRules } from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import {
@@ -111,6 +112,7 @@ function assembly(
 		modules: [
 			location,
 			http,
+			httpServer,
 			tokensStandIn(),
 			issuerModule,
 			clientsModule,
