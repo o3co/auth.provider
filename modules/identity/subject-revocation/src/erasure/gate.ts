@@ -29,7 +29,10 @@ export function erasureMark(boundaries: BoundaryStore): () => Promise<boolean | 
 	};
 }
 
-const receipt = (id: string) => ({ id }) as unknown as StoredReceipt;
+const receipt = (id: string) => ({
+	value: { id } as unknown as StoredReceipt,
+	lifetimeMs: receiptLifetimeMs,
+});
 
 /**
  * The fence over the store: no write where erasure is read as off; else the receipt, where the
@@ -49,7 +52,7 @@ export function fenceOver(
 				if (held === undefined) throw new Unavailable("subject-revocation");
 				return held.erasedAt === undefined ? receipt(receiptId) : undefined;
 			};
-			const { after } = await boundaries.fence(subject, receiptId, allowed, receiptLifetimeMs);
+			const { after } = await boundaries.fence(subject, receiptId, allowed);
 			return after === undefined ? "erased" : "passed";
 		},
 	};

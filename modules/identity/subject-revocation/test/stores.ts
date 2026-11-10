@@ -28,8 +28,8 @@ export function memoryBoundaries(
 				await kept.records.change(subject, (held) => ({ value: race(held) }));
 				continue;
 			}
-			if (made !== undefined) receipts.set(receiptId, made);
-			return { before: undefined, after: made };
+			if (made !== undefined) receipts.set(receiptId, made.value);
+			return { before: undefined, after: made?.value };
 		}
 	};
 	const erasureEnabled = async () => {

@@ -8,6 +8,12 @@ declare const storedReceipt: unique symbol;
 /** A fence's receipt as the store keeps it: only subject-revocation opens it. */
 export type StoredReceipt = { readonly [storedReceipt]: true };
 
+/** A receipt as a fence writes it: the receipt, and how long it is kept. */
+export interface ReceiptWrite {
+	readonly value: StoredReceipt;
+	readonly lifetimeMs: number;
+}
+
 /** A boundary write's own attempt, as the store hands it: the store-clock time past which that write is refused. */
 export interface BoundaryWrite {
 	readonly deadline: number;
@@ -31,16 +37,15 @@ export interface BoundaryStore {
 		change: (record: StoredBoundary, write: BoundaryWrite) => StoredBoundary,
 	): Promise<{ readonly before: StoredBoundary; readonly after: StoredBoundary } | undefined>;
 	/**
-	 * Keeps the receipt `allowed` makes from the subject's boundary (none where it holds none),
-	 * under `receiptId` for `lifetimeMs`, in one write held by the boundary as read: `allowed` runs
-	 * again when the boundary changes first, so it is pure. Writes nothing where it answers none.
-	 * Where it is absent, erasure cannot be enabled (`subject-revocation`'s boot gate).
+	 * Writes under `receiptId` the receipt `allowed` answers from the subject's boundary (none
+	 * where it holds none), for the lifetime it answers, in one write held by the boundary as read:
+	 * `allowed` runs again when the boundary changes first, so it is pure. Writes nothing where it
+	 * answers none. Where it is absent, erasure cannot be enabled (`subject-revocation`'s boot gate).
 	 */
 	fence?(
 		subject: string,
 		receiptId: string,
-		allowed: (record: StoredBoundary | undefined) => StoredReceipt | undefined,
-		lifetimeMs: number,
+		allowed: (record: StoredBoundary | undefined) => ReceiptWrite | undefined,
 	): Promise<{
 		readonly before: StoredReceipt | undefined;
 		readonly after: StoredReceipt | undefined;

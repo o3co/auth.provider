@@ -271,23 +271,24 @@ export function boundaryStoreContract(name: string, open: () => Promise<Boundary
 			const fence = place.boundaries.fence?.bind(place.boundaries);
 			if (!fence) return context.skip();
 			const made = (id: string) => ({ id }) as unknown as StoredReceipt;
+			const write = (id: string) => ({ value: made(id), lifetimeMs: 60_000 });
 			const subject = fresh();
 			const seen: unknown[] = [];
 			const allowing = (record: StoredBoundary | undefined) => {
 				seen.push(record);
-				return made("r1");
+				return write("r1");
 			};
-			expect(await fence(subject, fresh(), allowing, 60_000)).toEqual({
+			expect(await fence(subject, fresh(), allowing)).toEqual({
 				before: undefined,
 				after: made("r1"),
 			});
 			expect(seen).toEqual([undefined]);
 			await place.boundaries.save(subject, () => stored({ n: 1 }), "endless");
-			expect((await fence(subject, fresh(), () => undefined, 60_000)).after).toBeUndefined();
+			expect((await fence(subject, fresh(), () => undefined)).after).toBeUndefined();
 			if (place.raceNextFence) {
 				seen.length = 0;
 				place.raceNextFence(subject, (record) => stored({ n: counted(record) + 1 }));
-				await fence(subject, fresh(), allowing, 60_000);
+				await fence(subject, fresh(), allowing);
 				expect(seen.at(-1)).toEqual(stored({ n: 2 }));
 			}
 		});
