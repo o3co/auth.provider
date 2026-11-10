@@ -51,11 +51,12 @@ it("passes a bundle through every fence in order, under one receipt id each bund
 	expect(Buffer.from(ids[0] ?? "", "base64url")).toHaveLength(16);
 });
 
-it("ends at the first fence to refuse, naming it, and is unavailable where one cannot tell", async () => {
+it("ends at the first fence to refuse, naming it with any refusal's description, and is unavailable where one cannot tell", async () => {
 	const refusing = await boot(["passed", "refused", "passed"]);
 	expect(await refusing.fencing.pass({ subject: "alice" })).toEqual({
 		kind: "refused",
 		fence: "fence-1",
+		description: "issuance refused",
 	});
 	expect(refusing.asked.map((a) => a.fence)).toEqual(["fence-0", "fence-1"]);
 	const failing = await boot(["unavailable"]);

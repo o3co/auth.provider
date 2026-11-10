@@ -224,11 +224,15 @@ export const issuanceFences = extensionPoint<IssuanceFence>("tokens.issuance-fen
 export interface IssuanceFencing {
 	/**
 	 * Passes the bundle through the fences in collect order, under one receipt id; refused by the
-	 * first to refuse, which is named, the rest not asked. With no fence, passes.
+	 * first to refuse, which is named, with the description of any refused issuance, the rest not
+	 * asked. With no fence, passes.
 	 */
 	pass(bundle: {
 		readonly subject: string;
-	}): Promise<{ readonly kind: "passed" } | { readonly kind: "refused"; readonly fence: string }>;
+	}): Promise<
+		| { readonly kind: "passed" }
+		| { readonly kind: "refused"; readonly fence: string; readonly description: string }
+	>;
 }
 
 export const issuanceFencing = contract<IssuanceFencing>("tokens.issuance-fencing");

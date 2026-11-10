@@ -13,6 +13,7 @@ Internal module of `tokens`: the judgment `admits` and `issue` share, and the is
 - `judging` (the policies, the clock, the deadline) → the judgment `admits` and `issue` share.
 - `issuing` (the judgment, the issuing, the clock) → `admits` and `issue`, alike for tokens and its stand-in; `IssueAccess`, the issuing it takes.
 - `authenticatedAheadMs`, `issuanceTimeoutMs`: tokens' own rule's bound and the policies' default deadline.
+- `refusedDescription`: the description of an issuance refused for a reason the client is not to learn, a policy's unreadable answer or a fence's refusal.
 
 ## Invariants
 - The order policies are asked in: tokens' own rule first (an authentication time over 300 s ahead of the clock, a fixed allowance for hosts' clocks, as 0.17 allowed), then the issuance policies in name order, each asked the grant as its caller verified it; any answer but allowed refuses. All of them answer within `issuance-timeout` together: past it the issuance is unavailable, and the signal each policy is given aborts.

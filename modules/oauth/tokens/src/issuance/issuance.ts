@@ -16,6 +16,9 @@ export const authenticatedAheadMs = 300_000;
 /** How long the policies may take together unless the section says: its default. */
 export const issuanceTimeoutMs = 10_000;
 
+/** What a client is told of an issuance refused for a reason it is not to learn. */
+export const refusedDescription = "issuance refused";
+
 /** What a policy answers, or unavailable once the deadline passes: a policy that never answers holds nothing. */
 const within = <T>(answer: Promise<T>, deadline: AbortSignal): Promise<T> => {
 	// One answering after the deadline is dropped, its failure included.
@@ -58,7 +61,7 @@ export function judging(
 			// Anything but allowed refuses, so a policy's unreadable answer never issues.
 			return verdict.kind === "refused"
 				? { ...verdict, policy: name }
-				: { kind: "refused", policy: name, reason: "unreadable", description: "issuance refused" };
+				: { kind: "refused", policy: name, reason: "unreadable", description: refusedDescription };
 		}
 		return { kind: "allowed" };
 	};

@@ -9,7 +9,7 @@ Internal module of `tokens`: the fence a bundle of credentials passes before any
 - What a fence checks, and what its receipt keeps: the module contributing it (`subject-tokens`, over `subject-revocation`'s erasure fence). Where a bundle is fenced: its issuer (`token-endpoint`).
 
 ## Offers
-- `fencingOver` (the fences, the kernel's random) → `issuanceFencing.pass({ subject })`: passed, or refused by the fence named.
+- `fencingOver` (the fences, the kernel's random) → `issuanceFencing.pass({ subject })`: passed, or refused by the fence named, with `issuance`'s `refusedDescription`, so the answer is that of any issuance refused.
 
 ## Invariants
 - One receipt id per bundle, 16 random bytes from the kernel, base64url; with no fence, nothing is made and the bundle passes.
@@ -17,4 +17,4 @@ Internal module of `tokens`: the fence a bundle of credentials passes before any
 - `tokens` holds no gate of its own: whether erasure is enabled, and whether a composition guards it, are `subject-revocation`'s.
 
 ## Depends on
-- None; the package's contract.
+- `issuance` (`refusedDescription`); the package's contract.

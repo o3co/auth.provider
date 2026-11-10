@@ -1,4 +1,5 @@
 import type { IssuanceFence, IssuanceFencing } from "../contract.ts";
+import { refusedDescription } from "../issuance/issuance.ts";
 
 /** The receipt id's bytes: unguessable, one per bundle. */
 const idBytes = 16;
@@ -14,7 +15,7 @@ export function fencingOver(
 			const receiptId = Buffer.from(random.bytes(idBytes)).toString("base64url");
 			for (const fence of fences) {
 				if ((await fence.fence({ subject, receiptId })) === "refused") {
-					return { kind: "refused", fence: fence.name };
+					return { kind: "refused", fence: fence.name, description: refusedDescription };
 				}
 			}
 			return { kind: "passed" };
