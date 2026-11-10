@@ -25,7 +25,10 @@ export interface RecordStore<T> {
 	): Promise<{ readonly before: T; readonly after: T } | undefined>;
 }
 
-/** Changes the record, or saves `first` where there is none; one saved meanwhile is changed from what it holds. */
+/**
+ * Changes the record, or saves `first` where there is none; one saved meanwhile is changed from what it holds.
+ * @deprecated A helper the package writes its own stores with, exported by mistake; nothing replaces it, copy it. A later release removes it.
+ */
 export async function written<T>(
 	store: RecordStore<T>,
 	key: string,

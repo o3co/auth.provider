@@ -18,6 +18,9 @@
 - `userAttribute`, typed by `UserAttributes`: the attributes users names, by OIDC claim name `email`, `email_verified`, `name`, `picture` and `groups`; a user may hold others. `isAttributeValue` (name, value): whether users takes the value. `acceptedAttributes` (values of any shape): the named ones users takes, frozen; an email's verification only beside the email. `isWellFormedSubject`: a subject's shape, 1 to 255 ASCII characters.
 - `./testing`: contract tests for users, user ledgers and both Store interfaces, configuration builders, and both Store interfaces in memory.
 
+## Deprecated
+- `written`: a store helper exported by mistake; nothing replaces it, so copy it. A later release removes it.
+
 ## Invariants
 - A subject is 1 to 255 ASCII characters: one outside that refuses boot in the settings (the identifier's, where `subject` is left out), is unavailable in a ledger's answer, is none when looked up without asking the ledger, and throws TypeError on `link`.
 - Identifiers match exactly, never folded or trimmed, and a password as typed, with no Unicode normalization; an empty identifier or subject is none, and the ledger is not asked.
@@ -27,7 +30,6 @@
 - An upstream identity matches exactly, by IdP name and whole upstream subject, never by email, is never created on the fly, and links to one subject at most, also when two ask at once.
 - Only an explicit link links; unlinking removes only the subject's own link, and a written link finds its subject's user, or none where the ledger answers none for the subject: the ledger's none outweighs the link.
 - A contact is kept once per subject by its `canonicalAddress` form, as first given, up to 20 (a fixed capacity guard: no subject needs more), and another past them throws RangeError; an empty subject, upstream part or contact value throws TypeError.
-- A claimed contact is the user's `email` attribute, as given, apart from verified contacts.
 - Attribute values: `email` one `isAddress` takes that is also RFC 5322's addr-spec in ASCII (a dot-atom local part, LDH labels), `picture` an https URL that reads back as given, `email_verified` a boolean, `name` text holding more than blanks, `groups` a list of text, no text with a control or format character; another refuses boot in the settings, and from a ledger is left out, its name logged.
 - `email_verified` holds only beside `email`: without it, boot is refused in the settings, and a ledger's is left out, as it is with an email left out.
 - A password hash is one `secret-hash` reads (bcrypt or scrypt), else boot is refused; a password over 1024 bytes is none before any computation or ledger call (fixed, to guard hashing, far past NIST SP 800-63B's 64-character floor), and `secret-hash` decides the rest, within its assembly's `max-concurrent`.
@@ -39,4 +41,4 @@
 ## Vocabulary
 - user: a subject and frozen attributes. user ledger: the outside system that holds users.
 - upstream subject: who an upstream IdP says a user is. upstream identity: an IdP's name and an upstream subject there. link: an upstream identity tied to a subject, by the settings (fixed) or written.
-- verified contact: a way to reach a user that the user has shown is theirs. claimed contact: one the settings or a ledger state.
+- verified contact: a way to reach a user that the user has shown is theirs. claimed contact: the user's `email` attribute, as the settings or a ledger state it, apart from verified contacts.
