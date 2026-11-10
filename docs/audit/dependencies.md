@@ -99,6 +99,9 @@ flowchart LR
 | `@mod/client-certificate` | foundation | `@mod/kernel` |
 | `@mod/config-files` | foundation | `@mod/kernel` |
 | `@mod/cookies` | foundation | `@mod/http`, `@mod/kernel`, `@mod/request-source` |
+| `@mod/erasure-extensions` | foundation | `@mod/kernel` |
+| `@mod/erasure-journal` | foundation | `@mod/kernel` |
+| `@mod/erasure-journal-file` | adapter | `@mod/erasure-journal`, `@mod/kernel` |
 | `@mod/external-jwt` | foundation | `@mod/kernel`, `@mod/keys`, `@mod/outbound` |
 | `@mod/host-entries` | foundation | `@mod/address-reach` |
 | `@mod/http` | foundation | `@mod/client-certificate`, `@mod/kernel`, `@mod/request-source`, `@mod/url-setting` |
