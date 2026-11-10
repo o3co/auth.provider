@@ -78,7 +78,14 @@ function checkHandle(
 	pointsChecked: Set<Handle>,
 	refusals: Refusal[],
 ): void {
-	if (handle.kind === "contract") {
+	if (handle.kind === "optional") {
+		// Its contract's owner lets it go unprovided, or none may take it so; its takenBy holds as for any take.
+		if (handle.contract.optional !== true) {
+			refusals.push({ where: module.name, reason: `${handle.label} may not be taken optionally` });
+		}
+		const taken = takenByRefusal(handle.contract, module);
+		if (taken) refusals.push({ where: module.name, reason: taken });
+	} else if (handle.kind === "contract") {
 		const taken = takenByRefusal(handle, module);
 		if (taken) refusals.push({ where: module.name, reason: taken });
 		if (!own.has(handle) && !parts.providers.has(handle)) {
