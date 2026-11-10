@@ -7,7 +7,12 @@ export interface Contract<T> {
 }
 
 export type ExtensionRule<T> =
-	| { readonly multiplicity: "one" | "some" | "many" }
+	| {
+			readonly multiplicity: "one" | "some";
+			/** What to compose when nothing is contributed (`compose @mod/x`): it follows the point's refusal then, and only then. */
+			readonly missing?: string;
+	  }
+	| { readonly multiplicity: "many" }
 	| { readonly multiplicity: "keyed"; readonly keyOf: (contribution: T) => string };
 
 export interface ExtensionPoint<T> {
@@ -27,7 +32,10 @@ export type Handle =
 			readonly kind: "extension-point";
 			readonly label: string;
 			/** The rule the point's contributions are held to; what they are is erased. */
-			readonly rule: { readonly multiplicity: ExtensionRule<never>["multiplicity"] };
+			readonly rule: {
+				readonly multiplicity: ExtensionRule<never>["multiplicity"];
+				readonly missing?: string;
+			};
 	  };
 
 export function contract<T>(
