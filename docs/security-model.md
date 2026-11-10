@@ -322,7 +322,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
 
 ### Data a store keeps that no subject reaches
 
-A space that keeps a digest over an input including a random or per-request value holds no subject's data, even where the request it digests named the subject. The values: an authorize request's PKCE `code_challenge` (required, S256); a token's `jti` with its issuer, client or key thumbprint; the signed part (header and payload) of a one-time ID token. The digest is kept only for the replay or one-time window it guards, and nobody holding a subject's identifier can recompute it or match it to the subject. Such a space declares `subjectData: "none"`, and its card names its random input and points here.
+A space that keeps a digest over an input including a random or per-request value holds no subject's data, even where the request it digests named the subject. The values: an authorize request's PKCE `code_challenge` (required, S256); a `jti` (required) with its issuer, client or key thumbprint. The digest is kept only for the replay or one-time window it guards, and nobody holding a subject's identifier can recompute it or match it to the subject. Such a space declares `subjectData: "none"`, and its card names its random input and points here.
 
 ## Audit
 
