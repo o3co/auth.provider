@@ -33,8 +33,8 @@ export interface StoreControl {
  * evicted between; the store never compares them, its reader does.
  */
 export type Honours =
-	| { readonly kind: "verified"; readonly witness?: string }
-	| { readonly kind: "declared"; readonly settings: readonly string[]; readonly witness?: string }
+	| { readonly kind: "verified"; readonly witness: string }
+	| { readonly kind: "declared"; readonly settings: readonly string[]; readonly witness: string }
 	| { readonly kind: "unmet"; readonly reasons: readonly string[] };
 
 /** A space the store has seen declared, and whether any declaration may have held a subject's data. */
