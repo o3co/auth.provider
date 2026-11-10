@@ -13,8 +13,8 @@
 - Scene composition and drivers (`conformance`). Starting the legacy system (`conformance-legacy`). Key and user parts (`conformance-keys`, `conformance-identity`). Code flow scenes (`conformance-code`).
 
 ## Offers
-- Area `oauth` and the shape of its parts
-- Scene builder (builds the key parts and the OAuth parts from the form written in a scene)
+- Area `oauth` (`oauthArea`) and the shape of its parts
+- Scene builder `oauthScene` (builds the key parts and the OAuth parts from the form written in a scene)
 - The scene builder also takes store marks
 - The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run only with `CONFORMANCE_FAULTS=1`, as CI sets and the script does not; named to the evidence as `@mod/conformance-oauth#faults` by the run itself; the area's own run and its pattern runs leave them out
 

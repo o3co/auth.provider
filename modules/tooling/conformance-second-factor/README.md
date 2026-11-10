@@ -15,9 +15,10 @@
 - Scene composition and drivers (`conformance`). Starting the legacy system (`conformance-legacy`). Key and user parts.
 
 ## Offers
-- Area `second-factor` and the shape of its parts
+- Area `second-factor` (`secondFactorArea`) and the shape of its parts
 - Location of the raise page (`stepUpPage`)
-- Test tools (`./testing`): TOTP codes, a browser that keeps cookies and posts a form or JSON (with the answer's headers, where a scene reads them), an interface that starts a scene, enrols a user and reads the audit events the target sends, one that begins a binding and, where the target asks a binding proof, sends the code mailed to the user, one that passes login with a recovery code, one that raises with TOTP, the acr value a second factor satisfies
+- Test tools (`./testing`): TOTP codes (`totp`), a browser that keeps cookies and posts a form or JSON (`browser`, with the answer's headers, where a scene reads them), and the acr value a second factor satisfies (`secondFactorAcr`)
+  - `running`, an interface that starts a scene, enrols a user and reads the audit events the target sends; `beginBinding`, which begins a binding and, where the target asks a binding proof, sends the code mailed to the user; `letInByRecovery`, which passes login with a recovery code; `stepUp`, which raises with TOTP
   - The scenes' `issuer`, the one `password` they give their users, and `sessionCookie` (the session cookie a browser's jar holds)
 - The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run only with `CONFORMANCE_FAULTS=1`, as CI sets and the script does not; named to the evidence as `@mod/conformance-second-factor#faults` by the run itself; the area's own run and its pattern runs leave them out
 

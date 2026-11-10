@@ -14,8 +14,7 @@ import {
 } from "@mod/webauthn/testing";
 import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { passkeyArea } from "../src/area.ts";
-import type { PasskeyPart } from "../src/main.ts";
+import { type PasskeyPart, passkeyArea } from "../src/area.ts";
 
 const grantType = "urn:o3co:oauth:grant-type:webauthn";
 const signing = generateKeyPairSync("ed25519");

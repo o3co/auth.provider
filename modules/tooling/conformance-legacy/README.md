@@ -12,7 +12,7 @@
 - Scene vocabulary, and the legacy configuration per feature (each area's legacy set-up). The scene and driver contracts (`conformance`).
 
 ## Offers
-- Registration of legacy set-ups (area → fragments, needs that cannot be provided, declared differences)
+- Registration of legacy set-ups (`onLegacy`: area → fragments, needs that cannot be provided, declared differences)
 - Registration of driver `legacy` (registered on import)
 - Driver `legacy` runs the build in the legacy directory
 - Preparation script (`prepare-legacy`): clones the baseline from `LEGACY_SOURCE` (a local clone holding the commit, read only; required) into the legacy directory at the commit of `v0.17.0` (the version the legacy directory is named for), or at `LEGACY_COMMIT` (a full sha, for trying another by hand), and builds the standalone build and the packages the composed entry adds
