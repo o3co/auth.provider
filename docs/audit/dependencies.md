@@ -226,7 +226,7 @@ flowchart LR
 |---|---|---|
 | `@mod/app-entries` | assembly | none |
 | `@mod/app-output` | assembly | `@mod/app-entries` |
-| `@mod/combinations` | assembly | `@mod/kinds` |
+| `@mod/combinations` | assembly | `@mod/kinds`, `@mod/workspace-packages` |
 | `@mod/create-app` | assembly | `@mod/app-output`, `@mod/combinations` |
 | `@mod/kinds` | assembly | none |
 | `@mod/trial` | assembly | none |

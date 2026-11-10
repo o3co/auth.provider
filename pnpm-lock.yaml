@@ -3050,6 +3050,9 @@ importers:
       '@mod/kinds':
         specifier: workspace:*
         version: link:../kinds
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../workspace-packages
     devDependencies:
       vitest:
         specifier: 5.0.5
