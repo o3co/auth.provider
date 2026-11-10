@@ -3106,6 +3106,9 @@ importers:
 
   modules/scaffold/trial:
     dependencies:
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../workspace-packages
       '@o3co/ts.hocon':
         specifier: 1.14.3
         version: 1.14.3(yaml@2.9.1)(zod@4.6.7)
