@@ -17,7 +17,7 @@ const { namesFromSecret: recordsFor, ...guaranteeFor } = {
 } satisfies Record<keyof typeof deviceStoreNeeds, Guarantee | typeof secretRecordsIn>;
 const guarantees = Object.values(guaranteeFor);
 const devices: Space = { name: "device-grant-store.devices", guarantees };
-const codes: Space = { name: "device-grant-store.user-codes", guarantees };
+const codes: Space = { name: "device-grant-store.user-codes", guarantees, subjectData: "none" };
 
 export default defineModule(
 	{ name: "device-grant-store", replicaSafe: true, takes: [store] },
