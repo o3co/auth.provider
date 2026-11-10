@@ -9,14 +9,14 @@
 - Sending, resolving names, connecting, the proxy and the answers: `outbound`, which owns the operator's section `outbound` and applies this policy to every request. What a destination means to a feature: the caller's.
 
 ## Offers
-- `outbound.refusals`: at boot, why the policy refuses a URL and what to set, `<reason>: <what to set>` (the `outbound` destination keys `policySettings` takes, `outbound.plain-ipv4`, or the URL to write otherwise), naming keys alone and never the URL's host, port or other value; nothing when the policy lets it through.
+- `outbound.refusals` (`outboundRefusals`): at boot, why the policy refuses a URL and what to set, `<reason>: <what to set>` (the `outbound` destination keys `policySettings` takes, `outbound.plain-ipv4`, or the URL to write otherwise), naming keys alone and never the URL's host, port or other value; nothing when the policy lets it through.
   - It resolves no name and sends nothing, so a caller sending credentials can refuse boot on a destination it could never reach; a name passes on its name, an address in the URL is checked at once. A host the caller's own narrowing leaves out is told as no key to set.
   - Its `plainInternal`: whether a URL is taken as plain http to a `plain-internal` pair for the caller's own `internal` URL; absent, it is read as no.
   - Its `browsedRefusal`: why a URL the browser is sent to is refused: plain http other than at a loopback name or as `plainInternal` takes it; absent, plain http is refused.
 - `destinationRefusal` (the refusals, a URL, a narrowing, what is refused, `it` unless given) → the boot refusal every module gives for it, `outbound's destination policy refuses <what>: <reason>: <what to set>`, or nothing; the words are this package's alone.
 - `browsedRefusalText` (the refusals, a URL the browser goes to, a narrowing, what), the same for `browsedRefusal`: `outbound's policy for what the browser goes to refuses <what>: …`, https alone where it is absent.
-- `outbound.credentials`: at boot, why a caller's credential must not go to its URLs (`origins`: more than one; `scheme`: one neither https nor a named `plain-loopback` or `plain-internal` pair), or nothing; `credentialRefusalText` gives either in the words every caller uses.
-- `outbound.limits`: at boot, where a request under a narrowing is cut (`timeoutMs`, `maxBytes`): the operator's caps narrowed, never widened, the same limits the sender cuts it at.
+- `outbound.credentials` (`credentialPolicy`): at boot, why a caller's credential must not go to its URLs (`origins`: more than one; `scheme`: one neither https nor a named `plain-loopback` or `plain-internal` pair), or nothing; `credentialRefusalText` gives either in the words every caller uses.
+- `outbound.limits` (`outboundLimits`): at boot, where a request under a narrowing is cut (`timeoutMs`, `maxBytes`): the operator's caps narrowed, never widened, the same limits the sender cuts it at.
 - `policySettings`: the keys a section takes for the policy (`allow`, `allow-any-public`, `deny`, `plain-loopback`, `plain-internal`, `internal-hosts`, the size caps and `timeout`).
 - `policyOf` (the settings) → the policy: admitting a URL, admitting the addresses it resolved to and answering those checked, explaining a refusal, the credential rule, whether a host is listed, and the limits a request is cut at.
 - `DestinationRefused` (`reason`); `DestinationRefused.is` tells one by its mark, even bundled twice.
