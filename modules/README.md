@@ -314,6 +314,7 @@ What each module contains is described by that module's contract card (each modu
 | Running the provider against independent client libraries, and the differences accepted with each | contract / data | interop-clients |
 | Running the OpenID Foundation's conformance suite against the provider, and the expected entries a test's result may take | contract / data | interop-oidf |
 | Repo layout (where packages go) | setting | the workspace definition |
+| Listing the packages a workspace's definition places, by name and directory | contract | workspace-packages |
 | Generating a project: the command, the plan, and where the packages come from (the workspace or a bundle's index) | contract | create-app |
 | A generated project's files (a listed app, or a deployment of full or a pattern: the module list, configuration gathered from the modules' fragments, env and local examples, Dockerfile, README) | template | app-output |
 | A generated app's entries (its start and the scripts its composed modules call for: how each boots, refuses, checks 0.17's variables, writes and stops) | template | app-entries |

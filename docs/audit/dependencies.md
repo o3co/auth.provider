@@ -230,6 +230,7 @@ flowchart LR
 | `@mod/create-app` | assembly | `@mod/app-output`, `@mod/combinations` |
 | `@mod/kinds` | assembly | none |
 | `@mod/trial` | assembly | none |
+| `@mod/workspace-packages` | assembly | none |
 
 ### second-factor
 
