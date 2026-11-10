@@ -22,6 +22,7 @@
 - `admits`: whether `tokens`' issuance policies allow a grant now, under the grant type, the session it comes from and `tokens`' `continuing`.
 - `issue`: asks again, then issues with the binding, and the expiry cap and lifetime the grant gives. A grant may add claims (`AccessGrant.claims`, under `added-claims`' rules).
 - A refused issuance is a value the grant returns unread; it is answered for every grant as `400 invalid_grant` with the policy's description.
+- Every credential an `issued` answer carries, additions included, is for the one subject its `issue` issued under: an answer issued under none or more than one is the grant's fault, `500`, none of it answered. Before it goes out, that subject passes `tokens`' issuance fences; a bundle refused is answered as a refused issuance, with `tokens`' description.
 - `target`: the audience `targets` answers within the grant's ceiling.
 - A grant that takes its audience from the request declares `targets`; any other is first asked the rule's `untargeted`, and its refusal is answered before the grant runs.
 - A grant declares `readsAmbient`: `cookie` when it reads the session's cookie, which a browser sends by itself, and then checks the request's origin itself; `none` otherwise. The token endpoint's route has no own-site policy and relies on it; it is a declaration, never a proof.
