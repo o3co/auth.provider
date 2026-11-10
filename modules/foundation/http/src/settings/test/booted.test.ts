@@ -1,9 +1,9 @@
 import { certificateForwarding } from "@mod/client-certificate";
 import { BootRefused } from "@mod/kernel";
 import { urlSetting } from "@mod/url-setting";
-import { describe, expect, it } from "vitest";
-import { type HttpRequest, listening, site } from "../../contract.ts";
-import { boot, handlers, serveWith, warning } from "../../serving/test/serve.ts";
+import { expect, it } from "vitest";
+import { boot, warning } from "../../../test/boot.ts";
+import { listening, site } from "../../contract.ts";
 
 it("says it is reached through a proxy only when it trusts one", async () => {
 	expect((await boot()).get(site).proxied).toBe(false);
@@ -108,55 +108,19 @@ it("refuses a key its section does not know", async () => {
 	await expect(boot({ "trusted-proxy": ["127.0.0.1"] })).rejects.toThrow(BootRefused);
 });
 
-describe("the client's certificate", () => {
-	const der = Uint8Array.from([48, 3, 2, 1, 1]);
-	const sent = { "client-cert": `:${Buffer.from(der).toString("base64")}:` };
-	let seen: HttpRequest["source"]["clientCertificate"];
-	const reading = handlers([
-		{
-			method: "GET",
-			path: "/",
-			handle: (request) => {
-				seen = request.source.clientCertificate;
-				return { status: 204 };
-			},
-		},
-	]);
-	const forwarding = (trusted: string[]) => ({
-		"trusted-proxies": trusted,
-		"client-certificate": { dialect: "rfc9440" },
-	});
-
-	it("is handed to a handler as a trusted proxy forwards it, with no warning", async () => {
-		const { runtime, count } = warning();
-		await fetch(await serveWith(reading, forwarding(["127.0.0.1"]), runtime), { headers: sent });
-		expect(seen).toEqual({ kind: "certificate", leaf: der, chain: [] });
-		expect(count("http.client_certificate_ignored")).toBe(0);
-	});
-
-	it("is ignored from a peer not trusted, with a warning once a minute", async () => {
-		const { runtime, count } = warning();
-		const base = await serveWith(reading, forwarding([]), runtime);
-		await fetch(base, { headers: sent });
-		expect(seen).toBeUndefined();
-		await fetch(base, { headers: sent });
-		expect(count("http.client_certificate_ignored")).toBe(1);
-	});
-
-	it("is read where the operator names it, in a form it names", async () => {
-		const forwarded = (certificate: unknown) => boot({ "client-certificate": certificate });
-		await expect(forwarded({ dialect: "rfc9440" })).resolves.toBeDefined();
-		await expect(forwarded({ dialect: "pem", header: "x-client-cert" })).resolves.toBeDefined();
-		const xfcc = await forwarded({ dialect: "xfcc" });
-		expect(xfcc.get(certificateForwarding)).toEqual({ configured: true });
-		expect((await boot()).get(certificateForwarding)).toEqual({ configured: false });
-		for (const bad of [
-			{ dialect: "pem" },
-			{ dialect: "der" },
-			{ dialect: "rfc9440", header: "Bad Name" },
-			{ dialect: "xfcc", "chain-header": "x-chain" },
-		]) {
-			await expect(forwarded(bad), JSON.stringify(bad)).rejects.toBeInstanceOf(BootRefused);
-		}
-	});
+it("reads the client's certificate where the operator names it, in a form it names", async () => {
+	const forwarded = (certificate: unknown) => boot({ "client-certificate": certificate });
+	await expect(forwarded({ dialect: "rfc9440" })).resolves.toBeDefined();
+	await expect(forwarded({ dialect: "pem", header: "x-client-cert" })).resolves.toBeDefined();
+	const xfcc = await forwarded({ dialect: "xfcc" });
+	expect(xfcc.get(certificateForwarding)).toEqual({ configured: true });
+	expect((await boot()).get(certificateForwarding)).toEqual({ configured: false });
+	for (const bad of [
+		{ dialect: "pem" },
+		{ dialect: "der" },
+		{ dialect: "rfc9440", header: "Bad Name" },
+		{ dialect: "xfcc", "chain-header": "x-chain" },
+	]) {
+		await expect(forwarded(bad), JSON.stringify(bad)).rejects.toBeInstanceOf(BootRefused);
+	}
 });

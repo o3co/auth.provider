@@ -104,7 +104,7 @@ describe("route policies", () => {
 		const ours = policy("shared.name");
 		const twice = handlers([], [applying(ours, () => "pass"), applying(ours, () => "pass")]);
 		expect(await refusalsOf(serveWith(twice))).toEqual([
-			["http.policies", "more than one rule for a policy: shared.name"],
+			["http-server.policies", "more than one rule for a policy: shared.name"],
 		]);
 	});
 });

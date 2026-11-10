@@ -1,9 +1,9 @@
 import { deepFreeze } from "@mod/kernel";
 import type { Source } from "@mod/request-source";
 import type { z } from "zod";
-import { fieldsOf, readOnly, valuesOf } from "./bodies/values.ts";
 import type { HttpRequest } from "./contract.ts";
 import type { section } from "./settings/section.ts";
+import { fieldsOf, readOnly, valuesOf } from "./values/values.ts";
 
 export type HttpSettings = z.input<typeof section>;
 

@@ -1,7 +1,8 @@
 import { expect, it } from "vitest";
-import { fieldsOf, paramsOf, type Values, valuesOf } from "../values.ts";
+import type { Values } from "../../contract.ts";
+import { paramsOf } from "../values.ts";
 
-it("answers a name's value only when it holds exactly one", () => {
+it("reads a name's value as one only when it is sent once", () => {
 	const values = paramsOf("a=1&b=2&b=3&c=") as Values;
 	expect([values.single("a"), values.single("b"), values.single("c"), values.single("d")]).toEqual([
 		"1",
@@ -9,7 +10,6 @@ it("answers a name's value only when it holds exactly one", () => {
 		"",
 		undefined,
 	]);
-	expect(valuesOf(new Map([["e", []]])).single("e")).toBeUndefined();
 });
 
 /** The values a query's or a form's text reads as, by name; undefined when refused. */
@@ -50,15 +50,4 @@ it("refuses percent-escapes that are not well-formed UTF-8, in a name or a value
 it("lists the names holding more than one value, in the order sent", () => {
 	expect(paramsOf("z=1&a=2&z=3&m=4&a=5")?.repeated()).toEqual(["z", "a"]);
 	expect(paramsOf("a=1&b=2")?.repeated()).toEqual([]);
-	expect(fieldsOf({ a: "1", b: "2", n: 3 }).fields.repeated()).toEqual([]);
-});
-
-it("throws on writes, and keeps its value lists frozen", () => {
-	const values = valuesOf(new Map([["a", ["1"]]]));
-	const map = values as unknown as Map<string, string[]>;
-	expect(() => map.set("a", [])).toThrow(TypeError);
-	expect(() => map.delete("a")).toThrow(TypeError);
-	expect(() => map.clear()).toThrow(TypeError);
-	expect(Object.isFrozen(values.get("a"))).toBe(true);
-	expect(Object.isFrozen(values.repeated())).toBe(true);
 });

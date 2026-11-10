@@ -11,13 +11,14 @@ import { ignoredCertificates } from "@mod/client-certificate";
 import { type Clock, isUnavailable, type Log, type Unavailable } from "@mod/kernel";
 import { ignoredForwarding, sourceOf, type TrustedProxies } from "@mod/request-source";
 import { bodyOf } from "../bodies/body.ts";
-import { paramsOf, readOnly } from "../bodies/values.ts";
+import { paramsOf } from "../bodies/values.ts";
 import {
 	type HttpRequest,
 	type HttpResponse,
 	jsonAnswer,
 	noStore,
 	type RequestEndObserver,
+	readOnly,
 } from "../contract.ts";
 import { crossOrigin, preflight } from "../cors/cors.ts";
 import { ending } from "../ending/ending.ts";

@@ -1,8 +1,9 @@
 import type { IncomingMessage } from "node:http";
 import { deepFreeze } from "@mod/kernel";
 import type { BodyKind, HttpRequest } from "../contract.ts";
+import { fieldsOf, type Values, valuesOf } from "../contract.ts";
 import { repeatsName } from "./json.ts";
-import { fieldsOf, paramsOf, type Values, valuesOf } from "./values.ts";
+import { paramsOf } from "./values.ts";
 
 const limit = 64 * 1024;
 

@@ -47,15 +47,9 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/erasure-journal` (foundation, `modules/foundation/erasure-journal`): Owns the contract of the one record of account erasures a deployment keeps: appending that an erasure began or finished, listing them, and the header that ties the record to the store's copy of it.
 - `@mod/external-jwt` (foundation, `modules/foundation/external-jwt`): Checks a JWT signed by a key from outside (header, key, signature, times, issuer, audience, subject), and keeps each key set fetched from a URL once in the process; knows no feature.
 - `@mod/host-entries` (foundation, `modules/foundation/host-entries`): How an operator writes a host in configuration (a name, `.name` for it and the names under it, an address, or a `host:port` pair), and whether a host is among such entries.
-- `@mod/http` (foundation, `modules/foundation/http`): Owns the HTTP entry point: it connects the routes that modules contribute and applies the policies each route declares.
-  - `bodies` (`src/bodies`): the values a request is sent with, by name, from its body as its route takes it and from its query alike.
-  - `cors` (`src/cors`): the answers to cross-origin requests, for the routes that declare them.
-  - `ending` (`src/ending`): tells the observers of `requestEnds` each request's end.
-  - `guarantees` (`src/guarantees`): whether each route keeps what it declares about the requests it lets through.
-  - `guards` (`src/guards`): the policies each route uses, matched to the rules modules contribute.
-  - `security-headers` (`src/security-headers`): the security headers every answer carries, and a page's policy.
-  - `serving` (`src/serving`): the server that answers each request with the route it reaches.
+- `@mod/http` (foundation, `modules/foundation/http`): Owns the HTTP entry point: the routes that modules contribute, the words they are written in, and the section the one server serves by.
   - `settings` (`src/settings`): the schema of `http`'s operator section.
+  - `values` (`src/values`): the values a request is received with, by name, read-only, from decoded input: a map, a JSON object's members.
 - `@mod/http-ops` (feature, `modules/foundation/http-ops`): Answers the liveness and readiness routes, and times each request for `metrics`.
 - `@mod/http-server` (foundation, `modules/foundation/http-server`): Serves the routes `http` declares, as the server `http` takes through `httpServers`: reads each request, applies the policies its route uses, and writes the answer.
   - `bodies` (`src/bodies`): the values a request is sent with, by name, from its body as its route takes it and from its query alike.
