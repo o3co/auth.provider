@@ -231,7 +231,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `endpoint-in` (`src/endpoint-in`): the endpoint's handler, built over what the assembly gives.
   - `identified` (`src/identified`): the client of a request naming none, as a grant identifies it.
   - `route` (`src/route`): the handler of `POST /oauth/token`, from the request to the answer, and what a grant issues through.
-- `@mod/token-exchange` (feature, `modules/oauth/token-exchange`): Contributes the Token Exchange grant (RFC 8693), `urn:ietf:params:oauth:grant-type:token-exchange`. It issues access tokens only.
+- `@mod/token-exchange` (feature, `modules/oauth/token-exchange`): Contributes the Token Exchange grant (RFC 8693), `urn:ietf:params:oauth:grant-type:token-exchange`.
   - `target` (`src/target`): the scope and the one audience an exchange issues for.
 - `@mod/tokens` (feature, `modules/oauth/tokens`): Owns the access token: its format, issuance, verification and revocation; stamps and checks `issuer`'s URL as `iss`.
   - `fencing` (`src/fencing`): the fence a bundle of credentials passes before any of it is answered.
