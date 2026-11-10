@@ -19,10 +19,10 @@
 - Scene composition and drivers (`conformance`). Starting the legacy system (`conformance-legacy`). Key, user, client and second-factor parts (their own areas).
 
 ## Offers
-- Area `code` and the shape of its parts
-- Scene builder (builds the key, identity, OAuth, second-factor, mTLS and code parts from the form written in a scene)
+- Area `code` (`codeArea`) and the shape of its parts
+- Scene builder `codeScene` (builds the key, identity, OAuth, second-factor, mTLS and code parts from the form written in a scene)
 - The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run only with `CONFORMANCE_FAULTS=1`, as CI sets and the script does not; named to the evidence as `@mod/conformance-code#faults` by the run itself; CI runs it in three shards, each a leg of its own (`evidence-runs`' `shards`), a count to revisit where a leg passes ten minutes, the area's own run and its pattern runs leaving them out
-- Test tools (`./testing`): a logged-in browser, requests to the authorization endpoint, `backChannel` (the headers the deployment's proxy adds to a client's own call), and `succeeded` (a set-up's answer read only when it succeeded, else the scene fails naming what answered, its status and its body's start)
+- Test tools (`./testing`): `browserAt`, a logged-in browser behind the deployment's proxy, requests to the authorization endpoint, `backChannel` (the headers the deployment's proxy adds to a client's own call), and `succeeded` (a set-up's answer read only when it succeeded, else the scene fails naming what answered, its status and its body's start)
 
 ## Invariants
 - The scenes of a logout a client starts are the internal module `logout`, those of userinfo `userinfo`, those of the acr asked `acr`, those of the claims a request names beyond its scope `claims`, those of refusing an unverified email `verified-email`, those of a subject the ledger revokes `revocation`, those of clients whose id is the URL of their metadata document `documents`, those of resource indicators `resource`, and that of the whole metadata document `discovery`.
