@@ -360,6 +360,9 @@ it("reads and writes a record under a secret with a plain one as one, and refuse
 			decide: () => ({}),
 		}),
 	).rejects.toThrow(/one way: by key, secret or set/);
+	await expect(
+		changeRecords({ targets: [{ place: kept, key: "group", set: true }], decide: () => ({}) }),
+	).rejects.toThrow(/records or secret records, not both/);
 });
 
 it("hands the decision the deadline its attempt is written with, as a change is", async () => {

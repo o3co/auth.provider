@@ -219,7 +219,7 @@ export async function changeRecords(p: {
 	const target = anchor.place.store;
 	const batchAcross = target.batchAcross?.bind(target);
 	if (!batchAcross) throw new Error("the store writes no records of two partitions as one");
-	// A space is named one way in one call: by key, or by secret.
+	// A space is named one way in one call: by key, secret or set.
 	const namedAs = new Map<string, "records" | "secret records" | "keyed sets">();
 	const checked = (one: Target) => {
 		if (one.place.store !== target) throw new Error("records changed together share one store");
@@ -228,8 +228,8 @@ export async function changeRecords(p: {
 			throw new Error("records changed together name a space one way: by key, secret or set");
 		}
 		namedAs.set(one.place.space.name, kind);
-		// Keyed sets hold their space to no kind, as keyedSetsIn does not.
-		if (kind !== "keyed sets") claim(one.place, kind);
+		// A set's space holds records, as keyedSetsIn claims it: "set" and "record" never collide.
+		claim(one.place, kind === "secret records" ? kind : "records");
 	};
 	p.targets.forEach((named, at) => {
 		checked(named);
