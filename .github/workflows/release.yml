@@ -284,6 +284,47 @@ jobs:
           retention-days: 90
           overwrite: true
 
+  # A report of the known vulnerabilities in the lists, which nothing waits for: the publish job does
+  # not need it, and its failure fails no run. It reads alone; Trivy runs in its pinned image with the
+  # lists read-only and no token.
+  scan:
+    name: Known vulnerabilities in the lists
+    needs: sbom
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Take the lists
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.sbom.outputs.lists }}
+          path: ${{ runner.temp }}/sbom
+          merge-multiple: true
+      - name: Scan them
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm release:scan "$RUNNER_TEMP/sbom" "$RUNNER_TEMP/scan"
+          cat "$RUNNER_TEMP/scan/README.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the report
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-scan
+          path: ${{ runner.temp }}/scan
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+
   # Publishing alone, with what it takes: the tarballs the pack job kept, held to those the lists
   # were made of and to what npm holds, then the draft release with its assets, then npm. Nothing
   # the release packed runs here. Its environment, which each name's trusted publisher names, takes

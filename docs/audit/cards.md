@@ -468,6 +468,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `release-listed` (`src/release-listed`): where the release publishes, the tarballs held to those its lists of what it ships were made of.
   - `release-notes` (`src/release-notes`): the release's notes, from the version's section of the changelog.
   - `release-sbom` (`src/release-sbom`): the release's lists of what it ships (SBOMs), made from the tarballs it publishes.
+  - `release-scan` (`src/release-scan`): a report of the known vulnerabilities in what the release ships, read from its lists.
   - `order` (`src/release/order`): in what order the release packs and publishes what `pnpm bundles` built.
   - `packing` (`src/release/packing`): the release packed, the index sealed over every bundle before its own.
   - `workflow-caches` (`src/workflow-caches`): CI's and the release's workflows held to restoring no cache in a run a release takes evidence from.
