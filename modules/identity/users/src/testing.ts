@@ -3,6 +3,7 @@ import { defineModule, isUnavailable } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import type { Contact, Ledger, Users } from "./contract.ts";
 import {
+	type ContactStore,
 	contactStore,
 	type LinkStore,
 	linkStore,
@@ -12,6 +13,7 @@ import {
 	type StoredName,
 	type SubjectRecordStore,
 } from "./store.ts";
+import { portsRefused } from "./stores/ports.ts";
 
 const toUnpaddedBase64 = (bytes: Buffer) => bytes.toString("base64").replace(/=+$/, "");
 
@@ -503,9 +505,63 @@ export function linkStoreContract(
 	describe(`users' link store: ${name}`, () => {
 		recordTests(open);
 
-		it("offers the names' records and unowned together, or neither", async () => {
-			const { names, unowned } = (await open()).records as LinkStore;
-			expect(names === undefined).toBe(unowned === undefined);
+		it("offers its ports as whole sets: names and unowned together or neither; remove, erase and migrate together or none, and only with names", async () => {
+			const links = (await open()).records as LinkStore;
+			expect(portsRefused(links, {} as ContactStore)).toBeUndefined();
+		});
+
+		it("removes a record only where the check holds, in the write that removes it", async (context) => {
+			const links = (await open()).records as LinkStore;
+			if (!links.remove) return context.skip();
+			const key = `removed-${Math.random().toString(36).slice(2)}`;
+			await links.save(key, { subject: key } as unknown as StoredLink, "endless", key);
+			expect(await links.remove(key, () => false)).toBe("left");
+			expect(await links.read(key)).toEqual({ subject: key });
+			expect(await links.remove(key, () => true)).toBe("removed");
+			expect(await links.read(key)).toBeUndefined();
+			expect(await links.remove(key, () => true)).toBe("missing");
+		});
+
+		it("keeps a name's record raw once through unowned, or answers closed and writes nothing, never throwing", async (context) => {
+			const links = (await open()).records as LinkStore;
+			if (!links.unowned) return context.skip();
+			const key = JSON.stringify({ idp: `n-${Math.random().toString(36).slice(2)}` });
+			const record = { issuer: "https://a.example" } as unknown as StoredName;
+			const first = await links.unowned(key, record, "endless");
+			if (first === "closed") {
+				expect(await links.read(key)).toBeUndefined();
+				return;
+			}
+			expect(first).toBe("created");
+			expect(await links.unowned(key, record, "endless")).toBe("exists");
+			expect(await links.read(key)).toEqual({ issuer: "https://a.example" });
+		});
+
+		it("answers erased to a save for a subject its erase fenced, where it erases", async (context) => {
+			const links = (await open()).records as LinkStore;
+			if (!links.erase) return context.skip();
+			const subject = `s-${Math.random().toString(36).slice(2)}`;
+			const report = await links.erase(subject, new AbortController().signal);
+			// A store not yet indexed erases nothing, so fences nothing: no case there.
+			if (report.kind !== "erased") return context.skip();
+			const key = `after-${subject}`;
+			expect(await links.save(key, { subject } as unknown as StoredLink, "endless", subject)).toBe(
+				"erased",
+			);
+			expect(await links.read(key)).toBeUndefined();
+		});
+
+		it("reads the names' records only as confirmed, as names relies on before a migration lets one go", async (context) => {
+			const place = await open();
+			const { names } = place.records as LinkStore;
+			const { stallReplicas: stall } = place;
+			if (!names || !stall) return context.skip();
+			const key = JSON.stringify({ idp: `c-${Math.random().toString(36).slice(2)}` });
+			await names.save(key, { issuer: "https://a.example" } as unknown as StoredName, "endless");
+			stall(true);
+			await expect(names.read(key)).rejects.toSatisfy(isUnavailable);
+			stall(false);
+			expect(await names.read(key)).toEqual({ issuer: "https://a.example" });
 		});
 
 		it("reads only what is confirmed", async (context) => {
