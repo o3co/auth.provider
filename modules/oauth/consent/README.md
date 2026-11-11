@@ -13,11 +13,11 @@
 ## Offers
 - `grantedFor`: the range a subject agreed to that counts for a client now, from a confirmed read.
 - `coversFor`: whether a grant that counts holds the range; an empty range still needs one.
-- `grantFor`: widens the grant to the union, or replaces one that does not count, answering after a confirmed write.
+- `grantFor`: widens the grant to the union, or replaces one that does not count, answering once the write is confirmed; unavailable where the store answers the subject erased, which only a race with its erasure reaches. A stopgap, giving `Unavailable` a second meaning: consent gains a refusal answer, its callers switch, and the throw goes.
 - A grant counts for a client the operator registered whatever it holds under, and for a client from another source only under its section's `under` now (`grants`' card).
 - `askFor`: parks a request for the session's subject and a client and answers the consent page URL with a `challenge` query parameter; only while `asking`, which a set page makes true. The pending consent holds a client's `under`.
 - `askFor` refuses with `TypeError` a destination that is not an https URL on the `http` public origin, or holds whitespace or a control character.
-- `askFor` refuses with `TypeError` a range entry that is empty, repeated, or holds whitespace or a control character.
+- `askFor` refuses with `TypeError` a range entry that is empty, repeated, or holds whitespace or a control character; it is unavailable where the ask store answers the subject erased, only in a race with its erasure.
 - Routes `GET` and `POST /oauth/consent`, answering the consent page (`page`'s card).
 - Audit events, with the subject: declared in `./audit-events`, listed in the audit event reference.
 - Client metadata section `consent`: `first-party` (default false), `name` (trimmed, cut to 200 characters), `uri` (an https URL), `host` and `under`.
@@ -25,7 +25,7 @@
 - `isFirstParty`: true only for a client the operator registered with `first-party` set; every start warns `consent.first_party` for each such client.
 - `canBeAgreed`: whether a grant can ever count for a client: false for one from another source whose section says no `under`, which no answer could cover.
 - Operator section: `page` (an https URL without userinfo or fragment, or plain http on a loopback host outside production, as `authorize`'s login page; unset by default, so nobody is asked) and `challenge-lifetime` (written with its unit, `1m` to `1h` in whole seconds, default `10m`).
-- Store interfaces for grants and asks: save once, read, and update from what the record holds.
+- Store interfaces for grants and asks: save once for its subject (last: `created`, `exists`, or `erased`, taken as refused), read, and update from what the record holds; optional `erase` and `migrate` (a `Walk`, consent's `SubjectReading`), required in 0.22. `askLifetimeMaxMs` (1 hour) bounds an ask, for a Store that fences asks by it.
 - `./testing`: configuration builders, both store interfaces on `records` stand-ins, and the store contract tests.
 
 ## Invariants
@@ -42,7 +42,7 @@
 - The ask store needs the same except confirmed reads, and must not keep the key in clear.
 
 ## Depends on
-- `kernel`, `http`, `url-setting`, `request-source`, `session`, `csrf`, `clients`, `client-documents`, `redirect-uris`, `audit`
+- `kernel`, `http`, `url-setting`, `request-source`, `session`, `csrf`, `clients`, `client-documents`, `redirect-uris`, `audit`, `erasure-extensions` (the reports and the migration's reading)
 
 ## Vocabulary
 - Consent range: a set of strings from the caller; a grant widens by their union, and under another `under` starts anew.

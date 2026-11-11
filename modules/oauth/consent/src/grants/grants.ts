@@ -58,30 +58,44 @@ export function grantsWith({ store }: GrantsParts) {
 		const known = new Set(held.range);
 		return range.every((r) => known.has(r));
 	};
-	/** Under what the agreement was shown under; a range under another description is not kept beside it. */
+	/**
+	 * Under what the agreement was shown under; a range under another description is not kept beside
+	 * it. `refused` where the Store answers the subject erased: nothing kept, never read as held.
+	 */
 	const keep = async (
 		clientId: string,
 		subject: string,
 		range: readonly string[],
 		under: string | undefined,
-	) => {
+	): Promise<"kept" | "refused"> => {
 		const key = grantKey(clientId, subject);
 		const change = (record: StoredGrant) => {
 			const held = heldIn(record);
 			const stays = under === undefined || held?.under === under ? (held?.range ?? []) : [];
 			return { value: written([...stays, ...range], under) };
 		};
-		if (await store.update(key, change)) return;
-		if ((await store.save(key, written(range, under), "endless")) === "created") return;
+		if (await store.update(key, change)) return "kept";
+		const saved = await store.save(key, written(range, under), "endless", subject);
+		if (saved === "created") return "kept";
+		if (saved === "erased") return "refused";
 		// Another request saved it first: change what it saved.
 		if (!(await store.update(key, change))) throw new Unavailable("consent");
+		return "kept";
 	};
 	return {
 		rangeFor,
 		covers,
 		keep,
-		grant: (client: Client, subject: string, range: readonly string[]) =>
-			keep(client.id, subject, range, underOf(client)),
+		/**
+		 * `grantFor`: unavailable where the subject is erased, which only a race with its erasure
+		 * reaches. A stopgap: consent's contract gains a refusal answer, its callers switch, and the
+		 * throw goes.
+		 */
+		grant: async (client: Client, subject: string, range: readonly string[]) => {
+			if ((await keep(client.id, subject, range, underOf(client))) === "refused") {
+				throw new Unavailable("consent");
+			}
+		},
 	};
 }
 

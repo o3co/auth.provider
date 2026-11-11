@@ -70,7 +70,9 @@ export default defineModule(
 						deadline: c.clock.now() + lifetimeMs,
 						...(under === undefined ? {} : { under }),
 					});
-					const saved = await asks.save(askKey(session.id, challenge), record, lifetimeMs);
+					const subject = session.context.subject;
+					const saved = await asks.save(askKey(session.id, challenge), record, lifetimeMs, subject);
+					// `erased` only in a race with the subject's erasure: unavailable, as an unwritten ask is.
 					if (saved !== "created") throw new Unavailable("consent");
 					const sent = new URL(page);
 					sent.searchParams.set("challenge", challenge);

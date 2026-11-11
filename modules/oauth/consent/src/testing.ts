@@ -87,8 +87,8 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 		const { records } = await open();
 		const key = fresh();
 		const odd = held({ state: "unheard-of", nested: { list: [1, "two"] } });
-		expect(await records.save(key, odd, 60_000)).toBe("created");
-		expect(await records.save(key, held({ n: 1 }), 60_000)).toBe("exists");
+		expect(await records.save(key, odd, 60_000, "alice")).toBe("created");
+		expect(await records.save(key, held({ n: 1 }), 60_000, "alice")).toBe("exists");
 		expect(await records.read(key)).toEqual(odd);
 		expect(await records.update(key, () => undefined)).toEqual({ before: odd, after: odd });
 		expect(await records.read(fresh())).toBeUndefined();
@@ -98,7 +98,7 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 	it("changes a record only from what it holds, again after a racing writer", async () => {
 		const place = await open();
 		const key = fresh();
-		await place.records.save(key, held({ n: 1 }), 60_000);
+		await place.records.save(key, held({ n: 1 }), 60_000, "alice");
 		expect(await place.records.update(key, plus)).toEqual({
 			before: held({ n: 1 }),
 			after: held({ n: 2 }),
@@ -113,16 +113,27 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 	it("ends a record at exactly its lifetime, which a change keeps, or never", async () => {
 		const place = await open();
 		const [ending, endless] = [fresh(), fresh()];
-		await place.records.save(ending, held({ n: 1 }), 1000);
-		await place.records.save(endless, held({ n: 1 }), "endless");
+		await place.records.save(ending, held({ n: 1 }), 1000, "alice");
+		await place.records.save(endless, held({ n: 1 }), "endless", "alice");
 		place.advance(999);
 		await place.records.update(ending, plus);
 		expect(await place.records.read(ending)).toEqual(held({ n: 2 }));
 		place.advance(1);
 		expect(await place.records.read(ending)).toBeUndefined();
-		expect(await place.records.save(ending, held({ n: 3 }), 1000)).toBe("created");
+		expect(await place.records.save(ending, held({ n: 3 }), 1000, "alice")).toBe("created");
 		place.advance(10 * 365 * 86_400_000);
 		expect(await place.records.read(endless)).toEqual(held({ n: 1 }));
+	});
+
+	it("refuses, where the Store erases, every save for a subject it erased, and only for that subject", async (context) => {
+		const place = await open();
+		const { erase } = place.records;
+		if (!erase) return context.skip();
+		await place.records.save(fresh(), held({ n: 1 }), 60_000, "erin");
+		const report = await erase.call(place.records, "erin", new AbortController().signal);
+		expect(["erased", "fenced"]).toContain(report.kind);
+		expect(await place.records.save(fresh(), held({ n: 2 }), 60_000, "erin")).toBe("erased");
+		expect(await place.records.save(fresh(), held({ n: 3 }), 60_000, "finn")).toBe("created");
 	});
 
 	it("keeps records through a restart and through memory pressure", async (context) => {
@@ -130,7 +141,7 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 		const { restart, pressMemory } = place;
 		if (!restart || !pressMemory) return context.skip();
 		const key = fresh();
-		await place.records.save(key, held({ n: 1 }), 60_000);
+		await place.records.save(key, held({ n: 1 }), 60_000, "alice");
 		await restart();
 		await pressMemory();
 		expect(await place.records.read(key)).toEqual(held({ n: 1 }));
@@ -142,7 +153,7 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 		if (!lose || !failover) return context.skip();
 		const key = fresh();
 		lose();
-		expect(await place.records.save(key, held({ n: 1 }), 60_000)).toBe("created");
+		expect(await place.records.save(key, held({ n: 1 }), 60_000, "alice")).toBe("created");
 		lose();
 		expect((await place.records.update(key, plus))?.after).toEqual(held({ n: 2 }));
 		await failover();
@@ -163,7 +174,7 @@ export function grantStoreContract(
 			const { stallReplicas: stall } = place;
 			if (!stall) return context.skip();
 			const key = fresh();
-			await place.records.save(key, {} as StoredGrant, "endless");
+			await place.records.save(key, {} as StoredGrant, "endless", "alice");
 			stall(true);
 			await expect(place.records.read(key)).rejects.toSatisfy(isUnavailable);
 			stall(false);
@@ -182,7 +193,7 @@ export function askStoreContract(name: string, open: () => Promise<ConsentPlace<
 			const { holds } = place;
 			if (!holds) return context.skip();
 			const [key, kept] = [fresh(), fresh()];
-			await place.records.save(key, { kept } as unknown as StoredAsk, 60_000);
+			await place.records.save(key, { kept } as unknown as StoredAsk, 60_000, "alice");
 			await place.records.read(key);
 			await place.records.update(key, (record) => ({ value: record }));
 			expect([holds(kept), holds(key)]).toEqual([true, false]);

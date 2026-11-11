@@ -1421,6 +1421,9 @@ importers:
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
