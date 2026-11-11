@@ -83,7 +83,7 @@ export interface Eraser {
 	 * Required in 0.20; optional, read as true, in 0.22; removed after.
 	 */
 	readonly erasable: boolean;
-	/** The erasers, by name, whose runs this one's follow; account erasure orders them. */
+	/** The erasers, by name, whose runs this one's follow: for account erasure to order them by. */
 	readonly after?: readonly string[];
 	/** While the provider serves: writes the subject's tombstones and removes its records. */
 	online(subject: string, signal: AbortSignal): Promise<Erased>;
