@@ -28,7 +28,9 @@ export type ResetOutcome =
 			readonly kind: "stopped";
 			readonly at: "sessions" | "parts" | "lock";
 			readonly removed: Removed;
-	  };
+	  }
+	/** A boundary step read the subject as erased: refused, the factors perhaps gone already. */
+	| { readonly kind: "erased" };
 
 /** An operator's reset of a subject's second factors, for the embedder that has verified who asks. */
 export interface MfaReset {

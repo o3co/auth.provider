@@ -15,7 +15,7 @@ const answer = <T>(a: Answer<T> | undefined, fallback: T) => {
 /** A reset over scripted parts: each call takes the next scripted answer, recording what it was asked. */
 const place = (
 	script: {
-		readonly records?: Answer<{ complete: boolean }>[];
+		readonly records?: Answer<{ complete: boolean; erased?: true }>[];
 		readonly clear?: Answer<{ count: number; kinds: string[] }>;
 		readonly release?: Answer<object>;
 		/** Parts by name, each call taking the next scripted answer (a done count, stopped, or a failure). */
@@ -217,7 +217,13 @@ describe("a reset run, answering how it ended", () => {
 	it("records and logs a stopped run as before, and a second run finishes it", async () => {
 		const p = place({ records: [new Unavailable("subject-revocation")] });
 		expect(await p.reset.run("dee")).toEqual({ kind: "stopped", at: "sessions" });
-		expect(p.attributes()).toEqual([{ by: "operator", sessions: "false", complete: "false" }]);
+		// No boundary step answered, so the record leaves the subject out, saying why.
+		expect(p.events).toEqual([
+			{
+				kind: "mfa.reset",
+				attributes: { by: "operator", withheld: "unread", sessions: "false", complete: "false" },
+			},
+		]);
 		expect(p.lines().map((l) => l.fields)).toEqual([
 			{ stoppedAt: "sessions", error: "Unavailable" },
 		]);
@@ -391,5 +397,59 @@ describe("a reset's parts", () => {
 		});
 		expect(p.calls.filter((c) => c.startsWith("release"))).toEqual(["release mfa ann true whole"]);
 		expect(p.attributes().at(-1)).toMatchObject({ parts: "alpha=0 beta=1", complete: "true" });
+	});
+});
+
+describe("a reset of a subject a boundary step reads as erased", () => {
+	const refused = (complete: string, more: Record<string, string> = {}) => ({
+		kind: "mfa.reset.refused",
+		attributes: { by: "operator", complete, ...more },
+	});
+
+	it("is refused at the first boundary, doing nothing else and naming no subject", async () => {
+		const p = place({ records: [{ complete: true, erased: true }], parts: { links: [1] } });
+		expect(await p.reset.run("ann", { requestedBy: "ticket-7" })).toEqual({ kind: "erased" });
+		expect(p.calls).toEqual(["record ann keep=true"]);
+		expect(p.events).toEqual([refused("true", { requestedBy: "ticket-7" })]);
+		expect(p.lines().map((l) => [l.event, l.fields])).toEqual([["mfa-flows.reset_refused", {}]]);
+	});
+
+	it("reads erased before complete: a step that left a session open is refused, not stopped at sessions", async () => {
+		const p = place({ records: [{ complete: false, erased: true }] });
+		expect(await p.reset.run("ann")).toEqual({ kind: "erased" });
+		expect(p.events).toEqual([refused("false")]);
+	});
+
+	it("is refused at the second boundary, the factors gone already, naming no subject", async () => {
+		const p = place({ records: [{ complete: true }, { complete: true, erased: true }] });
+		expect(await p.reset.run("ann")).toEqual({ kind: "erased" });
+		expect(p.calls).toEqual([
+			"record ann keep=true",
+			"clear ann",
+			"release mfa ann true whole",
+			"record ann keep=true",
+		]);
+		expect(p.events).toEqual([refused("true")]);
+	});
+
+	it("is refused where erasure lands mid-run: the release meets the dropped lockout, the second boundary reads the mark", async () => {
+		const p = place({
+			records: [{ complete: true }, { complete: true, erased: true }],
+			release: new Unavailable("rate-limit"),
+		});
+		expect(await p.reset.run("ann")).toEqual({ kind: "erased" });
+		expect(p.events).toEqual([refused("true")]);
+	});
+
+	it("names the subject where a boundary step answered not erased and none erased, the second unavailable", async () => {
+		const p = place({ records: [{ complete: true }, new Unavailable("subject-revocation")] });
+		expect(await p.reset.run("ann")).toEqual({
+			kind: "stopped",
+			at: "sessions",
+			removed: { count: 2, kinds: ["backup", "code"] },
+		});
+		expect(p.events.map((e) => [e.kind, e.subject, e.attributes?.withheld])).toEqual([
+			["mfa.reset", "ann", undefined],
+		]);
 	});
 });
