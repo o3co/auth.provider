@@ -37,7 +37,8 @@ export const forgottenIn = (space: string, removed: number): ForgottenReport => 
 
 /**
  * What putting one space's records written before indexing into the index did: indexed, or
- * removed as orphans proven to have no owner; or not finished, with why.
+ * removed as records holding no subject's data (`removed`: orphans proven to have no owner, and
+ * records the owner kept elsewhere first); or not finished, with why.
  */
 export type MigrationReport = ReportMade &
 	(
@@ -66,6 +67,16 @@ export type SubjectOf =
  * failure is `unreadable`, never `orphan`.
  */
 export type SubjectReading = (key: string, value: unknown) => Promise<SubjectOf>;
+
+/**
+ * The owner's step for a record its reading answered `orphan`, before the migration removes it:
+ * it keeps what the record holds outside the space being migrated, where the owner still needs it.
+ * It runs on the value a confirmed change held, never on an unconfirmed read; it writes only
+ * outside that space; what it keeps is durable and confirmed before it returns, so the source may
+ * go; and it is idempotent, as a rerun or a record changed meanwhile runs it again. A throw stops
+ * the space, removing nothing more.
+ */
+export type Elsewhere = (key: string, value: unknown) => Promise<void>;
 
 /** An eraser's answer: its spaces' reports, and the logout notices it could not tell were delivered. */
 export interface Erased {

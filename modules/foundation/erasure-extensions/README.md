@@ -9,9 +9,9 @@
 ## Offers
 - The extension point `erasers`, keyed by an eraser's name, which a space's `erasedBy` gives.
 - `Eraser`: `online` (one subject, while serving), `window` (subjects, under the maintenance key) and `migrate` (once, under the maintenance key), each taking an `AbortSignal`; `window` and `migrate` take a `Walk` the tool hands in. `erasable` (required in 0.20, optional and read as true in 0.22, removed after): whether it can erase every space it erases on the stores behind it; for a space `subject-records` reports, that its store has the erase ports. `after`: the erasers, by name, it follows.
-- `SubjectOf` (`subject`, `orphan`, `unreadable` with why) and `SubjectReading`: an owner's reading of a record's subject from its key and stored value, for a migration.
+- `SubjectOf` (`subject`, `orphan`, `unreadable` with why) and `SubjectReading`: an owner's reading of a record's subject from its key and stored value, for a migration. `Elsewhere`: the owner's step for an orphan before its removal, keeping what it holds outside the space, durable and confirmed, idempotent; a throw stops the space.
 - `Erased`: an eraser's reports and `logoutGaps`, the logout notices it could not tell were delivered, 0 for an eraser with no notices to lose.
-- `SpaceReport` (`erased`, `fenced` with its `until`, `stopped` with why) and `MigrationReport` (`migrated` with what was indexed and removed, `stopped`), each naming its space by its declared name.
+- `SpaceReport` (`erased`, `fenced` with its `until`, `stopped` with why) and `MigrationReport` (`migrated` with what was indexed and what was removed as holding no subject's data, owner copies included; `stopped`), each naming its space by its declared name.
 - `ForgottenReport` (`forgotten`, with what the run removed) and `forgottenIn(space, removed)`, which makes one: the owner of a `pseudonymous` space claims that nothing it keeps there under the subject's id, as its card bounds it, remains, beyond a record of its own that says only that the subject was erased there.
 - `Walk`: a walk of a space by name, removing what expired, each page naming its server.
 - `erasureMarks` (`account-erasure.enabled`, `account-erasure.journal`) and `JournalMark`, the journal's header id and last number as the control record keeps them.
