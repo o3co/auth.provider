@@ -1,3 +1,4 @@
+import { subjectErasure } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
 import { back, harness } from "../../../test/harness.ts";
 
@@ -34,6 +35,31 @@ describe("following a subject's revocation", () => {
 		expect(h.stores.peek(same)).not.toMatchObject({ status: "pending" });
 		expect(h.stores.peek(next)).toMatchObject({ status: "pending" });
 		expect(await listed(h)).toEqual([next]);
+	});
+
+	it("still ends a grant of a subject it is told is erased, and drops its entry, recording the end without the subject", async () => {
+		const h = await harness();
+		const { id } = await h.connected();
+		h.advance(1000);
+		await h.app.get(subjectErasure).markErased("alice");
+		h.events.length = 0;
+		await h.revoke("alice");
+		expect(h.stores.peek(id)).toMatchObject({ status: "revoked" });
+		expect(await listed(h)).toEqual([]);
+		const ended = h.events.filter((e) => e.kind === "federation.grant.revoked");
+		expect(ended.map((e) => [e.subject, e.attributes?.outcome, e.attributes?.withheld])).toEqual([
+			[undefined, "backstop", "erased"],
+		]);
+	});
+
+	it("names the subject in the end it records where it is not told erased", async () => {
+		const h = await harness();
+		await h.connected();
+		h.advance(1000);
+		h.events.length = 0;
+		await h.revoke("alice");
+		const ended = h.events.filter((e) => e.kind === "federation.grant.revoked");
+		expect(ended.map((e) => [e.subject, e.attributes?.withheld])).toEqual([["alice", undefined]]);
 	});
 
 	it("writes nothing over a revocation or a renewal another writer made meanwhile", async () => {
