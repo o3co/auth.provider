@@ -99,6 +99,5 @@ describe("how a pattern's app is generated", () => {
 			template: "full",
 			add: expect.arrayContaining(["@mod/dpop"]),
 		});
-		// Reading the whole workspace's manifests takes seconds on a loaded host.
-	}, 30_000);
+	});
 });
