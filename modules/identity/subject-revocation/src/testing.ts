@@ -120,6 +120,10 @@ export function subjectRevocationContract(
 	});
 }
 
+/** `erased` from the stand-in's own marks, as the module answers it from the record its write read. */
+const erasedOf = (held: Boundaries | undefined): { readonly erased?: true } =>
+	held?.erasedAt === undefined ? {} : { erased: true };
+
 /**
  * A stand-in for tests of the modules that use subject revocation: boundaries kept in memory on
  * the composition's clock, recorded and compared by subject-revocation's own rules, and followed
@@ -131,7 +135,9 @@ export const subjectRevocationStandIn = defineModule(
 		m.provide(revocations).by(async (c) => {
 			const boundaries = new Map<string, Boundaries>();
 			const write: Write = async (subject, keep) => {
-				boundaries.set(subject, recorded(boundaries.get(subject), c.clock.now(), keep));
+				const held = boundaries.get(subject);
+				boundaries.set(subject, recorded(held, c.clock.now(), keep));
+				return erasedOf(held);
 			};
 			return {
 				record: followedBy(write, await c.collect(revocationFollowers), c.log),
@@ -156,7 +162,9 @@ export function laggingRevocation() {
 		(m) => [
 			m.provide(revocations).by(async (c) => {
 				const write: Write = async (subject, keep) => {
-					boundaries.set(subject, recorded(boundaries.get(subject), c.clock.now(), keep));
+					const held = boundaries.get(subject);
+					boundaries.set(subject, recorded(held, c.clock.now(), keep));
+					return erasedOf(held);
 				};
 				return {
 					record: followedBy(write, await c.collect(revocationFollowers), c.log),

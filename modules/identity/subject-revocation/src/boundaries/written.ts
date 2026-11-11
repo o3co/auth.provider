@@ -31,6 +31,10 @@ export const markIn = (record: StoredBoundary): unknown => {
 	return (value as { readonly erasedAt?: unknown }).erasedAt;
 };
 
+/** `erased` where the record the committed write read carried a mark of a time; none otherwise. */
+const erasedIn = (before: StoredBoundary): { readonly erased?: true } =>
+	typeof markIn(before) === "number" ? { erased: true } : {};
+
 /** The deadline a store hands a write; one that hands none, or one of no number, has written nothing it can confirm. */
 export const timeOf = (write: BoundaryWrite | undefined) => {
 	const deadline: unknown = write?.deadline;
@@ -56,10 +60,13 @@ export function writtenTo(boundaries: BoundaryStore): Write {
 			return stored(recorded(held, timeOf(write), keep && held !== undefined));
 		};
 		// Update first: a subject revoked before then costs one call.
-		if (await boundaries.update(subject, moved)) return;
+		const updated = await boundaries.update(subject, moved);
+		if (updated) return erasedIn(updated.before);
 		const first = (write: BoundaryWrite) => stored(recorded(undefined, timeOf(write), keep));
-		if ((await boundaries.save(subject, first, "endless")) === "created") return;
+		if ((await boundaries.save(subject, first, "endless")) === "created") return {};
 		// Another request saved the first boundary meanwhile: move it from what it holds.
-		if (!(await boundaries.update(subject, moved))) throw new Unavailable("subject-revocation");
+		const raced = await boundaries.update(subject, moved);
+		if (!raced) throw new Unavailable("subject-revocation");
+		return erasedIn(raced.before);
 	};
 }
