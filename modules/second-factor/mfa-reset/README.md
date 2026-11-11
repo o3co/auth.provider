@@ -9,7 +9,7 @@
 
 ## Offers
 - `mfaReset.run(subject, { requestedBy? })`, for an embedder that has verified who asks, answering how the run ended (`ResetOutcome`): `done` with `removed` (how many factors went), their `kinds` and `parts` (each part's count by name, none where none is composed), or `stopped` with `at` (`sessions`, `factors`, `parts` or `lock`) where a step was unavailable, which running it again finishes; a failure not unavailable, at any step, is thrown.
-  - `erased`: a boundary step read the subject as erased, and the run was refused.
+  - `erased`: a boundary step read the subject as erased, and the run was refused; a fault met earlier in the run is still thrown instead, after the refused record is written.
 - `resetCandidates.unclaimed(subject)`, for an operator finding whom to reset: how many of the subject's counting factors are written and stand for nothing (a unique value's claim missing or another's), beside one that stands included, as `factorReading` reads them; it changes nothing.
 - Extension point `resetParts` (`ResetPart`: `name`, `remove(subject)` answering done with how many went or stopped), one per name: two of one name refuse boot.
   - A stopped run carries `removed` (`count`, `kinds`) where the factors' removal answered before it stopped: never at `factors`, always at `parts` and `lock`, and at `sessions` only when the second boundary stopped it. Without it, whether the factors went is not known: a removal that failed after `mfa` removed the records (a witness that could not clear its mark) has taken them.

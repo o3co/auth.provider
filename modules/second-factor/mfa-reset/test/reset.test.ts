@@ -432,13 +432,24 @@ describe("a reset of a subject a boundary step reads as erased", () => {
 		expect(p.events).toEqual([refused("true")]);
 	});
 
-	it("is refused where erasure lands mid-run: the release meets the dropped lockout, the second boundary reads the mark", async () => {
+	it("is refused where erasure lands mid-run: the release meets the dropped lockout, the second boundary reads erased", async () => {
 		const p = place({
 			records: [{ complete: true }, { complete: true, erased: true }],
 			release: new Unavailable("rate-limit"),
 		});
 		expect(await p.reset.run("ann")).toEqual({ kind: "erased" });
 		expect(p.events).toEqual([refused("true")]);
+	});
+
+	it("throws a fault met earlier in the run, after the refused record is written with no subject", async () => {
+		const broken = new Error("broken");
+		const p = place({
+			records: [{ complete: true }, { complete: true, erased: true }],
+			clear: broken,
+		});
+		await expect(p.reset.run("ann")).rejects.toBe(broken);
+		expect(p.events).toEqual([refused("true")]);
+		expect(p.lines().map((l) => l.event)).toEqual(["mfa-flows.reset_refused"]);
 	});
 
 	it("names the subject where a boundary step answered not erased and none erased, the second unavailable", async () => {
