@@ -45,7 +45,10 @@ it("scans the lists in a job of its own that reads alone, within a time, failing
 	expect(steps.filter((s) => s.run?.includes("pnpm release:scan"))).toHaveLength(1);
 	// The lists taken by the id the sbom job gave, never by name.
 	const taken = steps.filter((s) => s.uses?.startsWith("actions/download-artifact@"));
-	expect(taken.map((s) => s.with?.["artifact-ids"])).toEqual(["${{ needs.sbom.outputs.lists }}"]);
+	expect(taken).toHaveLength(1);
+	expect(String(taken[0]?.with?.["artifact-ids"])).toMatch(
+		/^\$\{\{ needs\.sbom\.outputs\.lists \}\}$/,
+	);
 });
 
 it("is needed by no job, so no release waits for it or stops on it", () => {
