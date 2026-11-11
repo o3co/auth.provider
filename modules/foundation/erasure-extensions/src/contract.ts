@@ -1,7 +1,7 @@
 import { extensionPoint } from "@mod/kernel";
 
 declare const made: unique symbol;
-/** Made by `subject-records` alone, which erases; an eraser passes it on, never writes one. */
+/** A `SpaceReport`'s brand: made by `subject-records` alone, which erases; an eraser passes it on, never makes one. */
 export type ReportMade = { readonly [made]: true };
 
 /**
@@ -15,6 +15,25 @@ export type SpaceReport = ReportMade &
 		| { readonly kind: "fenced"; readonly space: string; readonly until: number }
 		| { readonly kind: "stopped"; readonly space: string; readonly reason: string }
 	);
+
+/**
+ * What erasing a subject did in a `pseudonymous` space, by its declared name: its owner claims that
+ * nothing it keeps there under the subject's id, as its card bounds it, remains, beyond a record of
+ * the owner's own that says only that the subject was erased there; `removed` counts what that run
+ * removed. Made by the owner through `forgottenIn`, with no brand: it states no tombstone.
+ */
+export interface ForgottenReport {
+	readonly kind: "forgotten";
+	readonly space: string;
+	readonly removed: number;
+}
+
+/** A `pseudonymous` space's report, by its declared name and what the run removed. */
+export const forgottenIn = (space: string, removed: number): ForgottenReport => ({
+	kind: "forgotten",
+	space,
+	removed,
+});
 
 /**
  * What putting one space's records written before indexing into the index did: indexed, or
@@ -50,7 +69,7 @@ export type SubjectReading = (key: string, value: unknown) => Promise<SubjectOf>
 
 /** An eraser's answer: its spaces' reports, and the logout notices it could not tell were delivered. */
 export interface Erased {
-	readonly reports: readonly SpaceReport[];
+	readonly reports: readonly (SpaceReport | ForgottenReport)[];
 	/** Counted high where unsure; 0 for an eraser with no notices to lose. */
 	readonly logoutGaps: number;
 }
@@ -73,19 +92,22 @@ export interface Walk {
 
 /**
  * Erases one owner's spaces of a subject's data, by its name, which those spaces' `erasedBy`
- * gives. A run cut short by `signal` answers `stopped` (`aborted`) for the spaces it did not finish.
+ * gives. A run cut short by `signal` answers `stopped` (`aborted`) for each space `subject-records`
+ * reports; an eraser over no such space throws the signal's reason. An eraser that throws, abort
+ * included, is not done, and running it again finishes it.
  */
 export interface Eraser {
 	readonly name: string;
 	/**
-	 * Whether every space this eraser erases is held by a store with the erase ports: a statement
-	 * of the stores behind it, known at build, not of a run. One that is not answers empty reports.
+	 * Whether this eraser can erase every space it erases on the stores behind it: known at build,
+	 * not of a run. For a space `subject-records` reports, that its store has the erase ports. One
+	 * that cannot answers empty reports.
 	 * Required in 0.20; optional, read as true, in 0.22; removed after.
 	 */
 	readonly erasable: boolean;
 	/** The erasers, by name, whose runs this one's follow: for account erasure to order them by. */
 	readonly after?: readonly string[];
-	/** While the provider serves: writes the subject's tombstones and removes its records. */
+	/** While the provider serves: erases the subject's data in its spaces. */
 	online(subject: string, signal: AbortSignal): Promise<Erased>;
 	/** Under the maintenance key: the same for each subject, walking where an index cannot reach. */
 	window(subjects: readonly string[], walk: Walk, signal: AbortSignal): Promise<Erased>;
