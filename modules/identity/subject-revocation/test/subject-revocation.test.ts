@@ -1,7 +1,7 @@
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { revocations, subjectRevocation } from "../src/contract.ts";
+import { revocations, subjectErasure, subjectRevocation } from "../src/contract.ts";
 import revocationModule from "../src/module.ts";
 import { type BoundaryStore, boundaryStore, type StoredBoundary } from "../src/store.ts";
 import {
@@ -48,7 +48,14 @@ async function boot(front: (boundaries: BoundaryStore) => BoundaryStore = (b) =>
 		runtime,
 	});
 	const revocation = app.get(subjectRevocation);
-	return { ...stores, clock, adapter, revocation, revocations: app.get(revocations) };
+	return {
+		...stores,
+		clock,
+		adapter,
+		revocation,
+		revocations: app.get(revocations),
+		erasure: app.get(subjectErasure),
+	};
 }
 
 it("refuses authentications up to the boundary's second, and only for that subject", async () => {
@@ -212,9 +219,9 @@ it("is unavailable when another request's first boundary is gone before it moves
 });
 
 subjectRevocationContract("subject-revocation over the records stand-in", async () => {
-	const { adapter, revocation, revocations } = await boot();
+	const { adapter, revocation, revocations, erasure } = await boot();
 	// A boundary is its write's deadline: an authentication counts as after it a patience later.
-	return { revocation, revocations, ...adapter, settlesAfterMs: patience + 1000 };
+	return { revocation, revocations, erasure, ...adapter, settlesAfterMs: patience + 1000 };
 });
 
 subjectRevocationContract("the stand-in", async () => {
@@ -224,7 +231,12 @@ subjectRevocationContract("the stand-in", async () => {
 		config: kernelConfig(),
 		runtime,
 	});
-	return { revocation: app.get(subjectRevocation), revocations: app.get(revocations), ...adapter };
+	return {
+		revocation: app.get(subjectRevocation),
+		revocations: app.get(revocations),
+		erasure: app.get(subjectErasure),
+		...adapter,
+	};
 });
 
 subjectRevocationContract("the lagging stand-in, caught up", async () => {
@@ -234,7 +246,12 @@ subjectRevocationContract("the lagging stand-in, caught up", async () => {
 		config: kernelConfig(),
 		runtime,
 	});
-	return { revocation: app.get(subjectRevocation), revocations: app.get(revocations), ...adapter };
+	return {
+		revocation: app.get(subjectRevocation),
+		revocations: app.get(revocations),
+		erasure: app.get(subjectErasure),
+		...adapter,
+	};
 });
 
 it("answers, while it lags, by the boundaries as they stood when it began, and by the latest once caught up", async () => {

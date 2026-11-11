@@ -4,7 +4,6 @@ import { expect, it } from "vitest";
 import { revocationFollowers, revocations, subjectErasure } from "../src/contract.ts";
 import revocationModule from "../src/module.ts";
 import { type BoundaryStore, boundaryStore } from "../src/store.ts";
-import { subjectRevocationStandIn } from "../src/testing.ts";
 import { memoryBoundaries } from "./stores.ts";
 
 const now = 1_800_000_000_000;
@@ -97,15 +96,4 @@ it("is unavailable, telling no follower, where the record carries a mark that is
 	await kept.records.create("alice", { sessions: now, erasedAt: "soon" } as never, "endless");
 	await expect(r.record("alice")).rejects.toSatisfy(isUnavailable);
 	expect(told).toEqual([]);
-});
-
-it("answers erased from the stand-in's own marks: none it holds, so the key is absent", async () => {
-	const follower = telling();
-	const app = await assemble({
-		modules: [subjectRevocationStandIn, follower.module],
-		config: kernelConfig(),
-		runtime,
-	});
-	expect(await app.get(revocations).record("alice")).toEqual({ complete: true });
-	expect(follower.told).toEqual([{ subject: "alice", keepDelegations: false }]);
 });
