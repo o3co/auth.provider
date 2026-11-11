@@ -16,6 +16,7 @@
 - `lockouts`: check; record a failure; reserve an attempt; end a run on success; hand back an abandoned attempt; tell a release's standing; release, whole or on terms judged as written, refusing terms that keep their id for no positive whole number of ms.
 - A reservation is the check and one counted attempt in one write; a held key counts nothing; the reservation that starts a hold says so.
 - `lockoutProblem`: why a lockout policy cannot be used, for the caller to refuse boot.
+- `subjectLockouts`: a lockout name whose keys are subject ids, contributed by the module locking by it; a name contributed twice refuses the boot. The eraser `rate-limit` drops a subject's key under each (internal module `drop`); the stand-in contributes it too, declaring no space.
 - Audit events: declared in `./audit-events`, listed in the audit event reference; a policy's uncounted request says whether it was refused or let through.
 - The counter `auth_rate_limit_uncounted_total` (to `metrics.instruments`): each use `rateLimit` (`limit` `requests`) or `attemptLimit` (`attempts`) could not count, once, whether a policy or a handler counted it.
 - A stand-in (`./testing`) counting in memory, with no store or audit, answering alike but never failing.
@@ -24,19 +25,17 @@
 - A count that cannot be made is unavailable; only the requests policy set `open` then lets a request through. Any other failure is thrown.
 - Keys of any length are taken; a name keeps its windows apart, where names hold no line feed (a name and a key are joined by one).
 - A wait is a hint: at least a second, or the whole window where it is shorter, and never longer than the window, which the store's clock judges.
-- Lockout times are the store's: a hold ends at its time; a fixed hold ends only by release.
-- Handing back the attempt that fixed a hold lifts it; handing back any other keeps it.
-- Attempt times are unique within a key and never go back, so a reservation names one attempt.
-- A success ends the run but keeps failures in the budget; the budget's window is the caller's.
-- A lockout that keeps losing races is unavailable; a reservation it cannot hand back stays a failure, the safe side. A stored lockout state of another shape is unavailable, never read as no hold.
+- How a lockout holds, counts, hands back and releases, and how its state is kept: internal module `lockout`.
+- A dropped key is unavailable at every entry point, `failed` and `releaseUnder` (`whole` included) among them, and none writes it again. Only a request racing its subject's erasure meets one: that 503 is not an outage. A subject id is never issued again, so a key stays dropped for good. Only the names composed at erasure are dropped.
 
 ## Data
 - Limit windows: no eviction, so a flood cannot reset a count; not replicated, as no credential depends on them.
 - Attempt windows: no eviction and replicated, so a failover cannot lift a limit on guesses.
-- Lockouts: one state per name and key, rewritten whole; no eviction, durable, replicated, and confirmed reads, as a release is read by another request. One that counted a release never expires.
+- Lockouts: one state per name and key, `pseudonymous`, erased by `rate-limit` (internal module `lockout`).
 
 ## Depends on
-- `kernel`, `store`, `http`, `http-server` (the policies' rules and marks), `request-source`, `audit`, `metrics`
+- `kernel`, `store`, `http`, `http-server` (the policies' rules and marks), `request-source`, `audit`, `metrics`, `erasure-extensions` (the eraser)
 
 ## Vocabulary
 - window: the period over which counts are made.
+- dropped: a lockout key whose subject was erased; it holds nothing else, answers unavailable and is never written again. The eraser's report calls it `forgotten`, erasure-extensions' word.

@@ -1,8 +1,10 @@
+import { erasers } from "@mod/erasure-extensions";
 import { marks, policies } from "@mod/http-server";
 import { contract, defineModule } from "@mod/kernel";
 import type { Json } from "@mod/store";
-import { attemptLimit, lockouts, type RateLimit, rateLimit } from "./contract.ts";
-import { type LockoutStates, lockoutCounter } from "./lockout.ts";
+import { attemptLimit, lockouts, type RateLimit, rateLimit, subjectLockouts } from "./contract.ts";
+import { lockoutEraser } from "./drop/drop.ts";
+import { type LockoutStates, lockoutCounter } from "./lockout/lockout.ts";
 import { retryAfterMs } from "./partition.ts";
 import { limitingAttempts, limitingRequests, perSourceMark } from "./per-source.ts";
 
@@ -58,7 +60,7 @@ const noAudit = { record: () => {} };
 
 /** Every limit, lockout and per-source policy, counted in memory with no store and no audit. */
 export const rateLimitStandIn = defineModule(
-	{ name: "rate-limit", replicaSafe: false, takes: [] },
+	{ name: "rate-limit", replicaSafe: false, takes: [subjectLockouts] },
 	(m) => [
 		m.provide(memory).by((c) => ({
 			windows: memoryCounter(c.clock.now),
@@ -68,6 +70,12 @@ export const rateLimitStandIn = defineModule(
 		m.provide(rateLimit).by(async (c) => (await c.get(memory)).windows),
 		m.provide(attemptLimit).by(async (c) => (await c.get(memory)).attempts),
 		m.provide(lockouts).by(async (c) => lockoutCounter((await c.get(memory)).lockouts)),
+		// The same eraser over the memory states; it declares no space, holding none in a store.
+		m
+			.contribute(erasers)
+			.by(async (c) =>
+				lockoutEraser((await c.get(memory)).lockouts, await c.collect(subjectLockouts)),
+			),
 		m.contribute(policies).by(async (c) =>
 			limitingAttempts((await c.get(memory)).attempts, {
 				log: c.log,

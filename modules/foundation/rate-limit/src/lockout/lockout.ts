@@ -8,13 +8,18 @@ import type {
 	ReleaseTerms,
 	Reserved,
 	Standing,
-} from "./contract.ts";
-import { partitionOf } from "./partition.ts";
+} from "../contract.ts";
+import { partitionOf } from "../partition.ts";
 
-/** A release is written by one request and read by another to allow attempts again. */
+/**
+ * A release is written by one request and read by another to allow attempts again. Keyed by a
+ * one-way hash of the name and key; a subject's keys are dropped by this package's own eraser.
+ */
 export const lockoutSpace: Space = {
 	name: "rate-limit.lockouts",
 	guarantees: ["no-eviction", "durable", "replicated", "confirmed-reads"],
+	subjectData: "pseudonymous",
+	erasedBy: "rate-limit",
 };
 
 type State = {
@@ -55,20 +60,38 @@ const wellShaped = (v: { readonly [k: string]: unknown }) =>
 			v.used.every(
 				(u) => u !== null && typeof u === "object" && typeof u.id === "string" && time(u.until),
 			)));
-/** No state is no hold; one of another shape is unavailable, never read as no hold. */
-const stateOf = (value: Json | null | undefined): State => {
-	if (value === null || value === undefined) return empty;
-	if (
-		typeof value !== "object" ||
-		Array.isArray(value) ||
-		!wellShaped(value as { readonly [k: string]: unknown })
-	) {
-		throw new Unavailable("rate-limit");
+/** What a key holds once its subject was erased: nothing else, never expiring, never written again. */
+export const dropped = Object.freeze({ dropped: 1 }) satisfies Json;
+
+/** The one reading of a stored value: none, the dropped key's value, a state, or another shape. */
+export type Parsed =
+	| { readonly kind: "absent" }
+	| { readonly kind: "dropped" }
+	| { readonly kind: "state"; readonly state: State }
+	| { readonly kind: "other" };
+
+export function parsed(value: Json | null | undefined): Parsed {
+	if (value === null || value === undefined) return { kind: "absent" };
+	if (typeof value !== "object" || Array.isArray(value)) return { kind: "other" };
+	const fields = value as { readonly [k: string]: unknown };
+	const keys = Object.keys(fields);
+	if (keys.length === 1 && keys[0] === "dropped" && fields.dropped === dropped.dropped) {
+		return { kind: "dropped" };
 	}
-	return value as unknown as State;
+	return wellShaped(fields)
+		? { kind: "state", state: value as unknown as State }
+		: { kind: "other" };
+}
+
+/** No state is no hold; a dropped key, or one of another shape, is unavailable, never read as no hold. */
+const stateOf = (value: Json | null | undefined): State => {
+	const read = parsed(value);
+	if (read.kind === "absent") return empty;
+	if (read.kind === "state") return read.state;
+	throw new Unavailable("rate-limit");
 };
 
-/** The state as of `now`: a quiet run is forgotten; failures older than the budget window and ids past keeping drop out. */
+/** The state as of `now`: a quiet run is forgotten; failures older than the budget window and ids past keeping are let go. */
 function aged(state: State, policy: LockoutPolicy, now: number): State {
 	const spent = state.spent.filter((at) => at > now - policy.budgetWindowMs);
 	const quiet = !state.fixed && state.lastAt > 0 && now - state.lastAt > policy.memoryMs;

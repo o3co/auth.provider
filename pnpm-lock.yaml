@@ -568,6 +568,9 @@ importers:
       '@mod/audit':
         specifier: workspace:*
         version: link:../audit
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../erasure-extensions
       '@mod/http':
         specifier: workspace:*
         version: link:../http

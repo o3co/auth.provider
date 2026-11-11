@@ -91,6 +91,8 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `ways` (`src/transport/ways`): the way a request reaches its destination: directly at an address checked here, through the proxy's tunnel, or, for plain http the caller asks the proxy to carry, in absolute form to the proxy.
 - `@mod/outbound-policy` (foundation, `modules/foundation/outbound-policy`): Owns the destination policy: where an outbound request may go, at which addresses, with what credential, and how far it may run, judged from the operator's settings without sending anything.
 - `@mod/rate-limit` (foundation, `modules/foundation/rate-limit`): Counts uses in windows on `store`, and locks keys out after failures (backoff, a budget in a window, a hard limit, forgetting a quiet run).
+  - `drop` (`src/drop`): its eraser, dropping a subject's lockout keys.
+  - `lockout` (`src/lockout`): the lockout counter, over the states one store space keeps.
 - `@mod/records` (capability, `modules/foundation/records`): Provides records that know no feature: keyed records, records under a secret, deferred work, and keyed sets.
   - `keyed-sets` (`src/keyed-sets`): sets of members by key, at most a cap to a key, ending on `kernel`'s clock.
   - `together` (`src/together`): records of several partitions and spaces changed as one.
