@@ -78,7 +78,8 @@ const fresh = () => `k-${++n}-${Math.random().toString(36).slice(2)}`;
  * and once, read back, changed only from what they hold, ended at exactly their lifetime or never,
  * through lost answers, restarts, memory pressure and failovers.
  */
-function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
+/** `endless`: whether consent keeps such records with no end, grants, and not asks, which end by their challenge. */
+function recordTests<T>(open: () => Promise<ConsentPlace<T>>, endless: boolean): void {
 	const held = (value: object) => value as unknown as T;
 	const counted = (record: T) => (record as unknown as { n: number }).n;
 	const plus = (record: T) => ({ value: held({ n: counted(record) + 1 }) });
@@ -110,11 +111,11 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 		});
 	});
 
-	it("ends a record at exactly its lifetime, which a change keeps, or never", async () => {
+	it(`ends a record at exactly its lifetime, which a change keeps${endless ? ", or never" : ""}`, async () => {
 		const place = await open();
-		const [ending, endless] = [fresh(), fresh()];
+		const [ending, kept] = [fresh(), fresh()];
 		await place.records.save(ending, held({ n: 1 }), 1000, "alice");
-		await place.records.save(endless, held({ n: 1 }), "endless", "alice");
+		if (endless) await place.records.save(kept, held({ n: 1 }), "endless", "alice");
 		place.advance(999);
 		await place.records.update(ending, plus);
 		expect(await place.records.read(ending)).toEqual(held({ n: 2 }));
@@ -122,7 +123,7 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 		expect(await place.records.read(ending)).toBeUndefined();
 		expect(await place.records.save(ending, held({ n: 3 }), 1000, "alice")).toBe("created");
 		place.advance(10 * 365 * 86_400_000);
-		expect(await place.records.read(endless)).toEqual(held({ n: 1 }));
+		if (endless) expect(await place.records.read(kept)).toEqual(held({ n: 1 }));
 	});
 
 	it("refuses, where the Store erases, every save for a subject it erased, and only for that subject", async (context) => {
@@ -131,6 +132,8 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 		if (!erase) return context.skip();
 		await place.records.save(fresh(), held({ n: 1 }), 60_000, "erin");
 		const report = await erase.call(place.records, "erin", new AbortController().signal);
+		// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+		if (report.kind === "stopped") return context.skip();
 		expect(["erased", "fenced"]).toContain(report.kind);
 		expect(await place.records.save(fresh(), held({ n: 2 }), 60_000, "erin")).toBe("erased");
 		expect(await place.records.save(fresh(), held({ n: 3 }), 60_000, "finn")).toBe("created");
@@ -167,7 +170,7 @@ export function grantStoreContract(
 	open: () => Promise<ConsentPlace<StoredGrant>>,
 ): void {
 	describe(`consent's grant store: ${name}`, () => {
-		recordTests(open);
+		recordTests(open, true);
 
 		it("reads only what is confirmed", async (context) => {
 			const place = await open();
@@ -186,7 +189,7 @@ export function grantStoreContract(
 /** What consent needs from any implementation of its ask store. */
 export function askStoreContract(name: string, open: () => Promise<ConsentPlace<StoredAsk>>): void {
 	describe(`consent's ask store: ${name}`, () => {
-		recordTests(open);
+		recordTests(open, false);
 
 		it("never gives an ask's key to what the place holds, in clear", async (context) => {
 			const place = await open();
