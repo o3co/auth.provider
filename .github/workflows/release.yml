@@ -30,7 +30,7 @@ jobs:
     steps:
       # No credential left in the checkout's git configuration; main's history, which the tag's first
       # parent must be on.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -39,7 +39,7 @@ jobs:
       - name: The tag as pushed
         run: git fetch --no-tags --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       # The token is this step's alone, and nothing installed runs beside it.
@@ -57,7 +57,7 @@ jobs:
       - name: Keep it for the publish job
         id: kept
         if: steps.judge.outputs.route == 'public'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-evidence
           path: ${{ runner.temp }}/evidence
@@ -84,7 +84,7 @@ jobs:
       # Fixed here, never taken from the tag or an input.
       EVIDENCE_REPOSITORY: o3co/auth.provider-security
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -93,7 +93,7 @@ jobs:
       - name: The tag as pushed
         run: git fetch --no-tags --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - name: A token reading the security repository's runs
@@ -126,7 +126,7 @@ jobs:
         run: node modules/tooling/distribution/src/release-evidence/judge.ts "$RUNNER_TEMP/fetched" "$RUNNER_TEMP/evidence"
       - name: Keep it for the publish job
         id: kept
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-evidence
           path: ${{ runner.temp }}/evidence
@@ -146,11 +146,11 @@ jobs:
       tarballs: ${{ steps.tarballs.outputs.artifact-id }}
       run: ${{ steps.run.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
 
@@ -200,7 +200,7 @@ jobs:
       # attempt's id.
       - name: Save the tarballs
         id: tarballs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-tarballs
           path: |
@@ -234,7 +234,7 @@ jobs:
             > "$at/environment.json"
       - name: Keep it for the publish job
         id: run
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-run
           path: ${{ runner.temp }}/release-run
@@ -255,16 +255,16 @@ jobs:
     outputs:
       lists: ${{ steps.lists.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Take the tarballs the pack job kept
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ needs.pack.outputs.tarballs }}
           path: ${{ runner.temp }}/tarballs
@@ -276,7 +276,7 @@ jobs:
           pnpm release:sbom "$RUNNER_TEMP/tarballs" "$RUNNER_TEMP/sbom"
       - name: Keep them for the publish job
         id: lists
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-sbom
           path: ${{ runner.temp }}/sbom
@@ -305,11 +305,11 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
@@ -349,13 +349,13 @@ jobs:
       # The workspace's own scripts that check the tarballs; no install script runs where the token is.
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Take the tarballs the pack job kept
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ needs.pack.outputs.tarballs }}
           path: ${{ runner.temp }}/tarballs
           merge-multiple: true
       - name: Take the lists
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ needs.sbom.outputs.lists }}
           path: ${{ runner.temp }}/sbom
@@ -376,13 +376,13 @@ jobs:
       # The assets the release keeps past any artifact's days: the lists, and the evidence (the CI
       # run's that tested the tag's tree, with its manifest, and this run's own).
       - name: Take the evidence of the tested tree
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ needs.evidence.outputs.route == 'public' && needs.evidence.outputs.evidence || needs.evidence-security.outputs.evidence }}
           path: ${{ runner.temp }}/release-evidence
           merge-multiple: true
       - name: Take the release run's own evidence
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ needs.pack.outputs.run }}
           path: ${{ runner.temp }}/release-evidence/release-run
