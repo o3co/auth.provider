@@ -148,7 +148,7 @@ flowchart LR
 | `@mod/session-participants` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/session-requirements` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/subject-attributes` | feature | `@mod/kernel`, `@mod/login-attributes`, `@mod/session`, `@mod/users` |
-| `@mod/subject-revocation` | feature | `@mod/kernel` |
+| `@mod/subject-revocation` | feature | `@mod/erasure-extensions`, `@mod/kernel` |
 | `@mod/users` | feature | `@mod/kernel`, `@mod/mail-address`, `@mod/secret-hash` |
 
 ### log-sinks
