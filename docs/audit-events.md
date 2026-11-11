@@ -176,7 +176,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | Kind | Attributes | Recorded when |
 |---|---|---|
 | `subject.revocation.denied` | `reason`, `source` | a request to revoke a subject was refused for its source, credential or body, or as a window could not count |
-| `subject.revocation.requested` | `delegations`, `outcome`, `source`, `withheld` | the ledger's revocation of a subject was recorded, or its recording failed or was not confirmed; without the subject, `withheld` `erased`, where the revocation said it is erased |
+| `subject.revocation.requested` | `delegations`, `outcome`, `source`, `withheld` | the ledger's revocation of a subject was recorded, or its recording failed or was not confirmed; without the subject, `withheld` `erased` where the revocation said it is erased, or `unread` where it did not answer (`unknown`, `failed`) |
 
 ## @mod/token-control
 

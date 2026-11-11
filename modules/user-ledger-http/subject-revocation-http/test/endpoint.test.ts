@@ -403,18 +403,17 @@ describe("recording", () => {
 		]);
 	});
 
-	it("names the subject in an unknown or failed record, written before the revocation could say whether it is erased", async () => {
+	it("records an unknown or failed revocation without the subject, unread, keeping what the ledger matches it by", async () => {
 		const { send, recording, recorded } = harness();
-		recording.erased = true;
 		recording.answer = "unknown";
 		await send();
 		recording.answer = "broken";
 		await expect(send()).rejects.toThrow("broken");
-		expect(recorded.map((e) => [e.subject, e.attributes?.outcome, e.attributes?.withheld])).toEqual(
-			[
-				["alice", "unknown", undefined],
-				["alice", "failed", undefined],
-			],
+		expect(recorded).toEqual(
+			["unknown", "failed"].map((outcome) => ({
+				kind: "subject.revocation.requested",
+				attributes: { delegations: "end", outcome, source: inside, withheld: "unread" },
+			})),
 		);
 	});
 
@@ -438,8 +437,7 @@ describe("recording", () => {
 		expect(recorded).toEqual([
 			{
 				kind: "subject.revocation.requested",
-				subject: "alice",
-				attributes: { delegations: "end", outcome: "failed", source: inside },
+				attributes: { delegations: "end", outcome: "failed", source: inside, withheld: "unread" },
 			},
 		]);
 	});

@@ -4,7 +4,7 @@ import { auditEvents } from "@mod/audit";
 export default auditEvents({
 	"subject.revocation.requested": {
 		attributes: ["delegations", "outcome", "source", "withheld"],
-		when: "the ledger's revocation of a subject was recorded, or its recording failed or was not confirmed; without the subject, `withheld` `erased`, where the revocation said it is erased",
+		when: "the ledger's revocation of a subject was recorded, or its recording failed or was not confirmed; without the subject, `withheld` `erased` where the revocation said it is erased, or `unread` where it did not answer (`unknown`, `failed`)",
 	},
 	"subject.revocation.denied": {
 		attributes: ["reason", "source"],
