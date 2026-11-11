@@ -1,6 +1,7 @@
 import { isUnavailable, type Log, type Refusal } from "@mod/kernel";
 import type { UpstreamNames } from "../contract.ts";
-import { type LinkStore, type StoredLink, written } from "../store.ts";
+import type { StoredName } from "../store.ts";
+import type { NameRecords } from "./records.ts";
 
 /** A name's issuer moved, as the operator states it. */
 export interface IssuerMoved {
@@ -34,9 +35,9 @@ export function namesRefused(declarations: readonly UpstreamNames[]): string[] {
 
 /** A name's key among the links': an object, where a link's is a list. */
 const keyOf = (name: string) => JSON.stringify({ idp: name });
-const recordOf = (issuer: string) => ({ issuer }) as unknown as StoredLink;
+const recordOf = (issuer: string) => ({ issuer }) as unknown as StoredName;
 /** The issuer a record keeps; of another shape, an empty one, which no declared issuer equals. */
-const issuerIn = (record: StoredLink) => {
+const issuerIn = (record: StoredName) => {
 	const { issuer } = record as { issuer?: unknown };
 	return typeof issuer === "string" ? issuer : "";
 };
@@ -49,11 +50,8 @@ export interface IssuersJudged {
 }
 
 /** The refusal a store that cannot answer is, never no record. */
-const cannotAnswer: readonly Refusal[] = [
-	{
-		where: "users",
-		reason: "the link store cannot answer for the issuers IdP names stand for",
-	},
+const cannotAnswer = (stores: string): readonly Refusal[] => [
+	{ where: "users", reason: `${stores} cannot answer for the issuers IdP names stand for` },
 ];
 async function answeredBy<T>(run: () => Promise<T>, otherwise: T): Promise<T> {
 	try {
@@ -71,7 +69,7 @@ async function answeredBy<T>(run: () => Promise<T>, otherwise: T): Promise<T> {
 export async function issuersJudged(
 	declarations: readonly UpstreamNames[],
 	moved: readonly IssuerMoved[],
-	links: LinkStore,
+	records: NameRecords,
 	log: Pick<Log, "warn">,
 ): Promise<IssuersJudged> {
 	const byName = Map.groupBy(declaredIn(declarations), (n) => n.name);
@@ -84,7 +82,7 @@ export async function issuersJudged(
 	const moving = new Map<string, IssuerMoved>();
 	const judged = async (): Promise<readonly Refusal[]> => {
 		for (const name of byName.keys()) {
-			const record = await links.read(keyOf(name));
+			const record = await records.read(keyOf(name));
 			kept.set(name, record === undefined ? undefined : issuerIn(record));
 		}
 		const refusals: Refusal[] = [];
@@ -113,13 +111,17 @@ export async function issuersJudged(
 			const issuer = issuerOf(name) as string;
 			if (held === issuer) {
 				// Not written, so read again: another instance may have moved it during this build.
-				const now = await links.read(keyOf(name));
+				const now = await records.read(keyOf(name));
 				if (now !== undefined && issuerIn(now) !== issuer) refusals.push(differs(name));
-				if (now !== undefined) continue;
+				if (now !== undefined) {
+					// The copy follows what is kept, every boot: a write cut short between the two heals here.
+					await records.copied(keyOf(name));
+					continue;
+				}
 			}
 			const move = moving.get(name);
 			// Another instance may keep or move it first: what it wrote is judged as read here.
-			const { after } = await written(links, keyOf(name), recordOf(issuer), (record) =>
+			const { after } = await records.written(keyOf(name), recordOf(issuer), (record) =>
 				move && issuerIn(record) === move.from ? { value: recordOf(move.to) } : undefined,
 			);
 			if (issuerIn(after) !== issuer) refusals.push(differs(name));
@@ -129,7 +131,7 @@ export async function issuersJudged(
 		return [];
 	};
 	return {
-		refusals: await answeredBy(judged, cannotAnswer),
-		settle: () => answeredBy(writeKept, cannotAnswer),
+		refusals: await answeredBy(judged, cannotAnswer(records.stores)),
+		settle: () => answeredBy(writeKept, cannotAnswer(records.stores)),
 	};
 }

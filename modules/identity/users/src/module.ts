@@ -7,6 +7,7 @@ import { ledgerUsers } from "./ledger.ts";
 import { keptLinks } from "./links/kept.ts";
 import { ledgerLinks } from "./links/ledger.ts";
 import { issuersJudged, namesRefused } from "./names/names.ts";
+import { nameRecordsOver } from "./names/records.ts";
 import { keyOf, record, registeredUsers } from "./registered.ts";
 import { contactStore, linkStore } from "./store.ts";
 
@@ -98,8 +99,14 @@ export default defineModule(
 				? contributedSource(ledger, c.log)
 				: registeredUsers(c.section.registered, (inUse) => checkers.checkerOf(inUse));
 			const links = await c.get(linkStore);
+			if ((links.names === undefined) !== (links.unowned === undefined)) {
+				return c.refuse(
+					"users",
+					"the link store offers one of names and unowned: it offers both, for names to leave the link space, or neither",
+				);
+			}
 			const moved = c.section["issuer-moved"];
-			const across = await issuersJudged(declarations, moved, links, c.log);
+			const across = await issuersJudged(declarations, moved, nameRecordsOver(links), c.log);
 			if (across.refusals.length > 0) return c.refuseAll(across.refusals);
 			// Written only once no module refuses this boot, so a refused one changes nothing kept.
 			c.onBuilt(async () => {

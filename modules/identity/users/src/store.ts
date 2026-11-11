@@ -4,6 +4,10 @@ declare const storedLink: unique symbol;
 /** Who an upstream identity is linked to, as the store keeps it: only users opens it. */
 export type StoredLink = { readonly [storedLink]: true };
 
+declare const storedName: unique symbol;
+/** The issuer an IdP name stands for, as the store keeps it: only users opens it. */
+export type StoredName = { readonly [storedName]: true };
+
 declare const storedContacts: unique symbol;
 /** A subject's verified contacts, as the store keeps them: only users opens them. */
 export type StoredContacts = { readonly [storedContacts]: true };
@@ -45,8 +49,28 @@ export async function written<T>(
 	return again;
 }
 
-export type LinkStore = RecordStore<StoredLink>;
+export type LinkStore = RecordStore<StoredLink> & {
+	/**
+	 * The IdP names' own records, apart from the links: offered with `unowned`, or neither. Optional
+	 * in 0.20, without it names keeping their records in the link space alone; required in 0.22.
+	 */
+	readonly names?: NameStore;
+	/**
+	 * Saves an IdP name's record in the link space, which holds no subject, unless the key holds one;
+	 * `closed` where the link space keeps no such record any more, `names` then keeping it. Offered
+	 * with `names`, or neither.
+	 * @deprecated Names' records from before they moved out of the link space; removed in 0.22, when
+	 * `names` is required.
+	 */
+	readonly unowned?: (
+		key: string,
+		record: StoredName,
+		lifetimeMs: "endless",
+	) => Promise<"created" | "exists" | "closed">;
+};
 export type ContactStore = RecordStore<StoredContacts>;
+/** IdP names' records, apart from the links. */
+export type NameStore = RecordStore<StoredName>;
 
 export const linkStore = contract<LinkStore>("users.link-store");
 export const contactStore = contract<ContactStore>("users.contact-store");
@@ -58,6 +82,17 @@ export const linkStoreNeeds = {
 	survivesFailover: true,
 	confirmedReads: true,
 } as const;
+
+/**
+ * A name's record holds the issuer a boot judges the name by: lost or come back, a name could stand
+ * for another issuer unnoticed; a move another instance wrote must be read.
+ */
+export interface NameStoreNeeds {
+	readonly neverEvicted: true;
+	readonly survivesCrash: true;
+	readonly survivesFailover: true;
+	readonly confirmedReads: true;
+}
 
 /** Losing a verified contact would make its owner verify it again. */
 export const contactStoreNeeds = {

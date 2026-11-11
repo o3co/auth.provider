@@ -14,7 +14,7 @@
 - Extension point `upstreamNames`: the IdP names a module passes to `byUpstream`, each with the issuer it stands for, one list per module; boot is refused on a name or issuer that is no non-empty string, and on a name standing for two issuers, within one list or across them or against the issuer kept for it from an earlier boot, naming the declaring modules and never a name or an issuer (internal module `names`).
 - Operator section `registered`: `identifier`, `subject` (default the identifier), `password-hash`, `attributes`, `upstream` (each `{ idp, subject }`).
 - Operator section `issuer-moved` (each `{ idp, from, to }`, default none): a name's stated move to another issuer, its links going with it; an entry the kept and declared issuers do not match refuses boot, and every assembly no module refuses warns `users.issuer_moved` while one is listed.
-- Store interfaces for links, per upstream identity, with each declared IdP name's issuer, and verified contacts, per subject, kept without end: no eviction, survives a crash and a failover, and link reads confirmed.
+- Store interfaces for links, per upstream identity, with each declared IdP name's issuer, and verified contacts, per subject, kept without end: no eviction, survives a crash and a failover, and link reads confirmed. Its `names` and `unowned` come together or neither (optional in 0.20; in 0.22 `names` required, `unowned` gone).
 - `userAttribute`, typed by `UserAttributes`: the attributes users names, by OIDC claim name `email`, `email_verified`, `name`, `picture` and `groups`; a user may hold others. `isAttributeValue` (name, value): whether users takes the value. `acceptedAttributes` (values of any shape): the named ones users takes, frozen; an email's verification only beside the email. `isWellFormedSubject`: a subject's shape, 1 to 255 ASCII characters.
 - `./testing`: contract tests for users, user ledgers and both Store interfaces, configuration builders, and both Store interfaces in memory.
 
@@ -26,7 +26,7 @@
 - Identifiers match exactly, never folded or trimmed, and a password as typed, with no Unicode normalization; an empty identifier or subject is none, and the ledger is not asked.
 - Boot is refused on identifiers that differ only in case, Unicode normal form or surrounding whitespace, on two identifiers with one subject, on an upstream identity linked to two users, on one whose IdP name no module declares (at its `idp`), and on more than one ledger or a ledger beside `registered` users.
 - Unanswerable is never read as none: a written link then is unavailable, as nothing can say who it stands for, and claimed contacts are unanswerable.
-- A name stands for one issuer across boots, kept once in the link store once no module refuses the boot, with a ledger composed too; a store that cannot answer refuses boot. A store that does not keep it across a restart says so at every start (`store.volatile_accepted`, `redis.durability_none`), and a change of issuer then goes unseen.
+- A name stands for one issuer across boots, with a ledger composed too; a store that cannot answer refuses boot (how it is kept: internal module `names`).
 - An upstream identity matches exactly, by IdP name and whole upstream subject, never by email, is never created on the fly, and links to one subject at most, also when two ask at once.
 - Only an explicit link links; unlinking removes only the subject's own link, and a written link finds its subject's user, or none where the ledger answers none for the subject: the ledger's none outweighs the link.
 - A contact is kept once per subject by its `canonicalAddress` form, as first given, up to 20 (a fixed capacity guard: no subject needs more), and another past them throws RangeError; an empty subject, upstream part or contact value throws TypeError.
@@ -40,5 +40,5 @@
 
 ## Vocabulary
 - user: a subject and frozen attributes. user ledger: the outside system that holds users.
-- upstream subject: who an upstream IdP says a user is. upstream identity: an IdP's name and an upstream subject there. link: an upstream identity tied to a subject, by the settings (fixed) or written.
+- upstream subject: who an upstream IdP says a user is. upstream identity: an IdP's name and an upstream subject there. link: an upstream identity tied to a subject, by the settings (fixed) or written. link store: the links, and through `names` the issuer each IdP name stands for.
 - verified contact: a way to reach a user that the user has shown is theirs. claimed contact: the user's `email` attribute, as the settings or a ledger state it, apart from verified contacts.

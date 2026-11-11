@@ -10,7 +10,15 @@ import {
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { describe, expect, it, vi } from "vitest";
-import { type Ledger, type LinkStore, ledgers, upstreamNames, users } from "../../contract.ts";
+import {
+	contactStore,
+	type Ledger,
+	type LinkStore,
+	ledgers,
+	linkStore,
+	upstreamNames,
+	users,
+} from "../../contract.ts";
 import usersModule from "../../module.ts";
 import { memoryUsersStores } from "../../testing.ts";
 
@@ -31,6 +39,8 @@ interface Boot {
 	readonly names?: Readonly<Record<string, string>>;
 	readonly moved?: readonly { idp: string; from: string; to: string }[];
 	readonly more?: readonly Module[];
+	/** The stores' module, in place of the memory stores'. */
+	readonly stores?: Module;
 }
 
 /** Boots users on the stores; answers its warnings, or the refusals it was refused with. */
@@ -40,7 +50,7 @@ async function boot(stores: ReturnType<typeof memoryUsersStores>, b: Boot = {}) 
 		modules: [
 			usersModule,
 			secretHashModule,
-			stores.module,
+			b.stores ?? stores.module,
 			declaring("federation", b.names ?? { corp: issuerA }),
 			...(b.more ?? []),
 		],
@@ -376,5 +386,98 @@ describe("a stated move of a name's issuer", () => {
 		const refused = await boot(stores, { names: { corp: issuerB }, moved: [move] });
 		expect(refused.refusals?.map((r) => r.where)).toEqual(["users.issuer-moved.0"]);
 		expect(await issuerKept(stores, "corp")).toBeUndefined();
+	});
+});
+
+describe("an IdP name's issuer, with a name store", () => {
+	const kept = async (stores: ReturnType<typeof memoryUsersStores>, name: string) => ({
+		links: await stores.links.store.read(nameKey(name)),
+		names: await stores.names.store.read(nameKey(name)),
+	});
+
+	it("is kept in the link space first, and copied to the name store", async () => {
+		const stores = memoryUsersStores({ names: true });
+		expect((await boot(stores)).refusals).toBeUndefined();
+		expect(await kept(stores, "corp")).toEqual({
+			links: { issuer: issuerA },
+			names: { issuer: issuerA },
+		});
+	});
+
+	it("copies the link space's record to the name store at every boot, an equal one and one a cut write left behind", async () => {
+		const stores = memoryUsersStores({ names: true });
+		await stores.links.store.save(nameKey("corp"), { issuer: issuerA } as never, "endless");
+		expect((await boot(stores)).refusals).toBeUndefined();
+		expect((await kept(stores, "corp")).names).toEqual({ issuer: issuerA });
+		// A write cut short between the two left the copy behind: the next boot brings it in step.
+		await stores.names.store.update(nameKey("corp"), () => ({
+			value: { issuer: issuerC } as never,
+		}));
+		expect((await boot(stores)).refusals).toBeUndefined();
+		expect((await kept(stores, "corp")).names).toEqual({ issuer: issuerA });
+	});
+
+	it("judges a stated move against the link space, rewriting it first, then the copy", async () => {
+		const stores = memoryUsersStores({ names: true });
+		await boot(stores);
+		const moved = await boot(stores, {
+			names: { corp: issuerB },
+			moved: [{ idp: "corp", from: issuerA, to: issuerB }],
+		});
+		expect(moved.refusals).toBeUndefined();
+		expect(await kept(stores, "corp")).toEqual({
+			links: { issuer: issuerB },
+			names: { issuer: issuerB },
+		});
+	});
+
+	it("keeps a new name in the name store alone once the link space keeps none, and reads it from there", async () => {
+		const stores = memoryUsersStores({ names: true });
+		stores.linksClosed.on = true;
+		expect((await boot(stores)).refusals).toBeUndefined();
+		expect(await kept(stores, "corp")).toEqual({ links: undefined, names: { issuer: issuerA } });
+		expect((await boot(stores, { names: { corp: issuerB } })).refusals).toEqual(
+			refusedAs("federation declares"),
+		);
+	});
+
+	it("reads a name kept in the name store alone as kept, making no record in the link space again", async () => {
+		const stores = memoryUsersStores({ names: true });
+		await stores.names.store.save(nameKey("corp"), { issuer: issuerA } as never, "endless");
+		expect((await boot(stores)).refusals).toBeUndefined();
+		expect((await boot(stores, { names: { corp: issuerB } })).refusals).toEqual(
+			refusedAs("federation declares"),
+		);
+		expect(await kept(stores, "corp")).toEqual({ links: undefined, names: { issuer: issuerA } });
+	});
+
+	it("refuses a link store offering one of names and unowned, and keeps names in the link space where it offers neither", async () => {
+		const offering = (ports: Partial<LinkStore>) => {
+			const stores = memoryUsersStores();
+			const links = { ...stores.links.store, ...ports };
+			return {
+				stores,
+				module: defineModule({ name: "users-stores", replicaSafe: false, takes: [] }, (m) => [
+					m.provide(linkStore).by(() => links),
+					m.provide(contactStore).by(() => stores.contacts.store),
+				]),
+			};
+		};
+		const refusal = [
+			{
+				where: "users",
+				reason:
+					"the link store offers one of names and unowned: it offers both, for names to leave the link space, or neither",
+			},
+		];
+		const namesOnly = offering({ names: memoryUsersStores({ names: true }).names.store });
+		expect((await boot(namesOnly.stores, { stores: namesOnly.module })).refusals).toEqual(refusal);
+		const unownedOnly = offering({ unowned: async () => "created" });
+		expect((await boot(unownedOnly.stores, { stores: unownedOnly.module })).refusals).toEqual(
+			refusal,
+		);
+		const neither = memoryUsersStores();
+		expect((await boot(neither)).refusals).toBeUndefined();
+		expect(await neither.links.store.read(nameKey("corp"))).toEqual({ issuer: issuerA });
 	});
 });

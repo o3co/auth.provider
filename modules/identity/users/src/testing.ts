@@ -4,10 +4,12 @@ import { describe, expect, it } from "vitest";
 import type { Contact, Ledger, Users } from "./contract.ts";
 import {
 	contactStore,
+	type LinkStore,
 	linkStore,
 	type RecordStore,
 	type StoredContacts,
 	type StoredLink,
+	type StoredName,
 } from "./store.ts";
 
 const toUnpaddedBase64 = (bytes: Buffer) => bytes.toString("base64").replace(/=+$/, "");
@@ -382,14 +384,27 @@ function memoryStore<T>() {
 }
 
 /** users' store interfaces kept in memory, for tests that assemble users. */
-export function memoryUsersStores() {
+export function memoryUsersStores(options: { readonly names?: true } = {}) {
 	const links = memoryStore<StoredLink>();
 	const contacts = memoryStore<StoredContacts>();
+	const names = memoryStore<StoredName>();
+	/** While on, the link space keeps no names' record: `unowned` answers `closed`, as once indexed. */
+	const linksClosed = { on: false };
+	const linkPorts: LinkStore = options.names
+		? {
+				...links.store,
+				names: names.store,
+				unowned: async (key, record) =>
+					linksClosed.on
+						? "closed"
+						: links.store.save(key, record as unknown as StoredLink, "endless"),
+			}
+		: links.store;
 	const module = defineModule({ name: "users-stores", replicaSafe: false, takes: [] }, (m) => [
-		m.provide(linkStore).by(() => links.store),
+		m.provide(linkStore).by(() => linkPorts),
 		m.provide(contactStore).by(() => contacts.store),
 	]);
-	return { module, links, contacts };
+	return { module, links, contacts, names, linksClosed };
 }
 
 /** A place that keeps one of users' kinds of record, as one implementation of its store interfaces offers it. */
@@ -485,6 +500,11 @@ export function linkStoreContract(
 ): void {
 	describe(`users' link store: ${name}`, () => {
 		recordTests(open);
+
+		it("offers the names' records and unowned together, or neither", async () => {
+			const { names, unowned } = (await open()).records as LinkStore;
+			expect(names === undefined).toBe(unowned === undefined);
+		});
 
 		it("reads only what is confirmed", async (context) => {
 			const place = await open();
