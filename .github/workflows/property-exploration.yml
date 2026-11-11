@@ -5,12 +5,14 @@ name: Property exploration
 # fails by luck. This workflow looks further: on a schedule, and by hand, it runs every property
 # test under a seed of its own and many more runs. It runs on no pull request.
 #
-# A failing seed is never retried. It opens an issue with the seed, the run count and the
-# counterexample; the fix keeps that counterexample as an explicit example beside its property,
-# so every pull request runs it from then on.
+# The schedule explores develop, where the code is being written; a `schedule` runs only from the
+# default branch, so it starts once this file reaches main. By hand it explores the branch it is
+# run on.
 #
-# A `schedule` runs only from the default branch, so the schedule starts once this file reaches
-# main; `workflow_dispatch` runs it on any branch meanwhile.
+# A failing seed is never retried. It is reported on the one open issue labelled
+# `property-exploration`, opened if none is: the seed, the run count, the commit and the
+# counterexample. The fix keeps that counterexample as an explicit example beside its property,
+# so every pull request runs it from then on, and closes the issue.
 on:
   schedule:
     - cron: '41 3 * * *'
@@ -25,8 +27,7 @@ on:
         required: false
         default: '2000'
 
-permissions:
-  contents: read
+permissions: {}
 
 # One exploration at a time; a scheduled one never cancels another under way.
 concurrency:
@@ -34,17 +35,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Installs and runs the code under test, so it holds nothing that writes.
   explore:
     name: Explore the properties
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: read
-      # Opens the issue for a failing seed.
-      issues: write
+    outputs:
+      seed: ${{ steps.chosen.outputs.seed }}
+      runs: ${{ steps.chosen.outputs.runs }}
+      commit: ${{ steps.chosen.outputs.commit }}
+      failed: ${{ steps.explored.outputs.failed }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ github.event_name == 'schedule' && 'develop' || github.ref }}
           persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -67,9 +73,20 @@ jobs:
           case "$seed$runs" in
             *[!0-9]*) echo "::error::the seed and the runs are digits"; exit 1 ;;
           esac
-          echo "seed=$seed" >> "$GITHUB_OUTPUT"
-          echo "runs=$runs" >> "$GITHUB_OUTPUT"
-          echo "Seed \`$seed\`, \`$runs\` runs of each property, at \`$GITHUB_SHA\`." >> "$GITHUB_STEP_SUMMARY"
+          commit=$(git rev-parse HEAD)
+          {
+            echo "seed=$seed"
+            echo "runs=$runs"
+            echo "commit=$commit"
+          } >> "$GITHUB_OUTPUT"
+          echo "Seed \`$seed\`, \`$runs\` runs of each property, at \`$commit\`." >> "$GITHUB_STEP_SUMMARY"
+      # No property test is an error of the run, not a failing seed: it opens no issue.
+      - name: Find the property tests
+        run: |
+          if [ -z "$(git ls-files '*.properties.test.ts')" ]; then
+            echo "::error::no *.properties.test.ts at $(git rev-parse HEAD)"
+            exit 1
+          fi
       - name: Run every property test
         id: explored
         env:
@@ -79,39 +96,62 @@ jobs:
           set +e
           pnpm vitest run properties.test 2>&1 | tee "$RUNNER_TEMP/properties.log"
           status=${PIPESTATUS[0]}
-          echo "status=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" -ne 0 ]; then echo "failed=true" >> "$GITHUB_OUTPUT"; fi
           exit "$status"
       - name: Keep the log
-        if: failure() && steps.explored.outputs.status != '' && steps.explored.outputs.status != '0'
+        if: failure() && steps.explored.outputs.failed == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: properties-log
           path: ${{ runner.temp }}/properties.log
           retention-days: 30
-      - name: Open an issue for the failing seed
-        if: failure() && steps.explored.outputs.status != '' && steps.explored.outputs.status != '0'
+
+  # Reports a failing seed; it checks out and installs nothing.
+  report:
+    name: Report the failing seed
+    needs: explore
+    if: ${{ !cancelled() && needs.explore.outputs.failed == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: properties-log
+          path: ${{ runner.temp }}/log
+      - name: Report on the open issue, or open one
         env:
           GH_TOKEN: ${{ github.token }}
-          SEED: ${{ steps.chosen.outputs.seed }}
-          RUNS: ${{ steps.chosen.outputs.runs }}
+          SEED: ${{ needs.explore.outputs.seed }}
+          RUNS: ${{ needs.explore.outputs.runs }}
+          COMMIT: ${{ needs.explore.outputs.commit }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LABEL: property-exploration
         run: |
           # What the log says of the failure, the generated values among it (the line closing a
-          # scheduler's order); none found still opens the issue.
-          grep -E 'FAIL |Property failed|Counterexample|resolved`,|Shrunk|Caused by' "$RUNNER_TEMP/properties.log" \
-            > "$RUNNER_TEMP/failure.txt" || true
+          # scheduler's order); none found still reports.
+          grep -E 'FAIL |Property failed|Counterexample|resolved`,|Shrunk|Caused by' \
+            "$RUNNER_TEMP/log/properties.log" > "$RUNNER_TEMP/failure.txt" || true
           {
-            echo "A property test fails under seed \`$SEED\` with \`$RUNS\` runs, at \`$GITHUB_SHA\` ($GITHUB_REF_NAME)."
+            echo "A property test fails under seed \`$SEED\` with \`$RUNS\` runs, at \`$COMMIT\`."
             echo
             echo "- Run: $RUN_URL (its artifact \`properties-log\` holds the whole log)"
-            echo "- Again, locally: \`FC_SEED=$SEED FC_RUNS=$RUNS pnpm vitest run properties.test\`"
+            echo "- Again, locally: \`git checkout $COMMIT && FC_SEED=$SEED FC_RUNS=$RUNS pnpm vitest run properties.test\`"
             echo
-            echo "Not to be retried. The fix keeps this counterexample as an explicit example beside its property."
+            echo "Not to be retried. The fix keeps this counterexample as an explicit example beside its property, and closes this issue."
             echo
             echo '```'
             head -40 "$RUNNER_TEMP/failure.txt" | cut -c1-3000
             echo '```'
-          } > "$RUNNER_TEMP/issue.md"
-          gh issue create --repo "$GITHUB_REPOSITORY" \
-            --title "Property exploration: seed $SEED fails" \
-            --body-file "$RUNNER_TEMP/issue.md"
+          } > "$RUNNER_TEMP/report.md"
+          gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" --color B60205 \
+            --description "A seed the scheduled property exploration found failing" --force
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/report.md"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --label "$LABEL" \
+              --title "Property exploration: seed $SEED fails" --body-file "$RUNNER_TEMP/report.md"
+          fi
