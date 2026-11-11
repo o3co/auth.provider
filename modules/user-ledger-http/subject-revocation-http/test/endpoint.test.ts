@@ -50,7 +50,11 @@ function harness(
 	const requests = windowCounter();
 	const recorded: AuditRecord[] = [];
 	const revoked: { subject: string; keepDelegations: boolean | undefined }[] = [];
-	const recording = { answer: "complete" as "complete" | "incomplete" | "unknown" | "broken" };
+	const recording = {
+		answer: "complete" as "complete" | "incomplete" | "unknown" | "broken",
+		/** Whether the revocation answers that the subject is erased. */
+		erased: false,
+	};
 	const logged = recordingLog();
 	// Notes each credential the endpoint reads, so a comparison that stops early shows.
 	const compared: number[] = [];
@@ -70,7 +74,10 @@ function harness(
 				revoked.push({ subject, keepDelegations: given?.keepDelegations });
 				if (recording.answer === "unknown") throw new Unavailable("subject-revocation");
 				if (recording.answer === "broken") throw new Error("broken");
-				return { complete: recording.answer === "complete" };
+				return {
+					complete: recording.answer === "complete",
+					...(recording.erased ? { erased: true as const } : {}),
+				};
 			},
 		},
 		recorded: { record: (event) => recorded.push(event) },
@@ -370,6 +377,45 @@ describe("recording", () => {
 			["warn", "subject-revocation-http.incomplete"],
 			["warn", "subject-revocation-http.unknown"],
 		]);
+	});
+
+	it("records a revocation it is told is erased without the subject, answering as for any subject", async () => {
+		const { send, recording, recorded } = harness();
+		recording.erased = true;
+		const complete = await send();
+		recording.answer = "incomplete";
+		const incomplete = await send();
+		expect([complete.status, incomplete.status]).toEqual([200, 503]);
+		expect(recorded).toEqual([
+			{
+				kind: "subject.revocation.requested",
+				attributes: { delegations: "end", outcome: "complete", source: inside, withheld: "erased" },
+			},
+			{
+				kind: "subject.revocation.requested",
+				attributes: {
+					delegations: "end",
+					outcome: "incomplete",
+					source: inside,
+					withheld: "erased",
+				},
+			},
+		]);
+	});
+
+	it("names the subject in an unknown or failed record, written before the revocation could say whether it is erased", async () => {
+		const { send, recording, recorded } = harness();
+		recording.erased = true;
+		recording.answer = "unknown";
+		await send();
+		recording.answer = "broken";
+		await expect(send()).rejects.toThrow("broken");
+		expect(recorded.map((e) => [e.subject, e.attributes?.outcome, e.attributes?.withheld])).toEqual(
+			[
+				["alice", "unknown", undefined],
+				["alice", "failed", undefined],
+			],
+		);
 	});
 
 	it("answers a resend as the first, recording it again", async () => {

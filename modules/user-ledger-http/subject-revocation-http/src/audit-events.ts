@@ -3,8 +3,8 @@ import { auditEvents } from "@mod/audit";
 /** What the ledger's revocation route records. */
 export default auditEvents({
 	"subject.revocation.requested": {
-		attributes: ["delegations", "outcome", "source"],
-		when: "the ledger's revocation of a subject was recorded, or its recording failed or was not confirmed",
+		attributes: ["delegations", "outcome", "source", "withheld"],
+		when: "the ledger's revocation of a subject was recorded, or its recording failed or was not confirmed; without the subject, `withheld` `erased`, where the revocation said it is erased",
 	},
 	"subject.revocation.denied": {
 		attributes: ["reason", "source"],

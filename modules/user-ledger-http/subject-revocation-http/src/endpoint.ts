@@ -92,21 +92,31 @@ export function endpointOf(parts: EndpointParts) {
 		if (unknown || !isSubject(subject) || (delegations !== "end" && delegations !== "keep")) {
 			return denied("invalid_request", jsonAnswer(400, { error: "invalid_request" }));
 		}
-		const requested = (outcome: "complete" | "incomplete" | "unknown" | "failed") =>
+		/** Names the subject unless the revocation said it is erased; one that did not answer could not say. */
+		const requested = (outcome: "complete" | "incomplete" | "unknown" | "failed", erased = false) =>
 			audit.record("subject.revocation.requested", {
-				subject,
-				attributes: { delegations, outcome, source: told },
+				...(erased ? {} : { subject }),
+				attributes: {
+					delegations,
+					outcome,
+					source: told,
+					...(erased ? { withheld: "erased" } : {}),
+				},
 			});
-		const outcome = await parts.revocations
+		const answered = await parts.revocations
 			.record(subject, { keepDelegations: delegations === "keep" })
-			.then(({ complete }) => (complete ? "complete" : "incomplete"))
+			.then(({ complete, erased }) => ({
+				outcome: complete ? ("complete" as const) : ("incomplete" as const),
+				erased: erased === true,
+			}))
 			.catch((error) => {
-				if (isUnavailable(error)) return "unknown" as const;
+				if (isUnavailable(error)) return { outcome: "unknown" as const, erased: false };
 				// Recorded before http answers it, so the attempt is not lost.
 				requested("failed");
 				throw error;
 			});
-		requested(outcome);
+		const { outcome } = answered;
+		requested(outcome, answered.erased);
 		if (outcome === "complete") return jsonAnswer(200, { complete: true });
 		parts.log.warn(`subject-revocation-http.${outcome}`, {});
 		return jsonAnswer(
