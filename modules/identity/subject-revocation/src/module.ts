@@ -1,7 +1,7 @@
 import { erasers } from "@mod/erasure-extensions";
 import { contract, defineModule, probes, Unavailable } from "@mod/kernel";
 import { comparedTo, subjectRevocationOf } from "./boundaries/boundaries.ts";
-import { markIn, opened, writtenTo } from "./boundaries/written.ts";
+import { erasedIn, markIn, opened, writtenTo } from "./boundaries/written.ts";
 import {
 	erasedSubjects,
 	erasureFence,
@@ -12,7 +12,7 @@ import {
 	subjectErasure,
 	subjectRevocation,
 } from "./contract.ts";
-import { erasedIn, markedIn } from "./erasure/erasure.ts";
+import { markedIn } from "./erasure/erasure.ts";
 import { type Enablement, erasureMark, fenceOver } from "./erasure/gate.ts";
 import { followedBy } from "./followers.ts";
 import { boundaryStore } from "./store.ts";
