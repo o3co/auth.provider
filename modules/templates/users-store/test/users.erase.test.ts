@@ -68,7 +68,7 @@ it("migrates what 0.19 and the reader phase wrote, keeping a name's record in th
 	const links = app.get(linkStore);
 	// The name's record left the link space for the name store; the trace is gone.
 	expect(await links.read(name)).toBeUndefined();
-	expect(await links.names?.read(name)).toEqual({ issuer: "https://a.example" });
+	expect(await links.issuers?.read(name)).toEqual({ issuer: "https://a.example" });
 	expect(await links.read(link("u-gone"))).toBeUndefined();
 	expect(await links.unowned?.(name, issuer, "endless")).toBe("closed");
 

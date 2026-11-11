@@ -101,7 +101,7 @@ export default defineModule(
 				remove: records.remove,
 				erase: records.erase,
 				migrate: records.migrate,
-				names: { save: named.create, read: named.read, update: named.change },
+				issuers: { save: named.create, read: named.read, update: named.change },
 				// A name's record holds no subject: raw in the link space until its records are indexed.
 				unowned: (key, record, lifetimeMs) =>
 					records.unowned(key, record as unknown as Json, lifetimeMs),

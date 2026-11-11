@@ -11,7 +11,7 @@ Internal module of `users`: what an IdP name stands for, within one boot and acr
 
 ## Offers
 - `namesRefused` (the declarations) → reasons, for one boot.
-- `nameRecordsOver` (the link store) → where names are kept: its `names` and `unowned`, or the link space alone; `issuersJudged` (the declarations, `issuer-moved`, those records, the log) → refusals, across boots, reading alone, and `settle`: what to write once no module refuses the boot, answering what is refused of what it finds written.
+- `nameRecordsOver` (the link store) → where names are kept: its `issuers` and `unowned`, or the link space alone; `issuersJudged` (the declarations, `issuer-moved`, those records, the log) → refusals, across boots, reading alone, and `settle`: what to write once no module refuses the boot, answering what is refused of what it finds written.
 - `isNameKey`, `nameSubjectOf` (a name's record) → no subject's, an orphan by its key where it holds exactly `{ issuer }`, a string; anything more or else is unreadable, as it may hold a subject's data; `namesKept` (the name store) → names' `Elsewhere`: before the migration removes a name's record from the link space, it is kept in the name store as the link space holds it, rewritten where it differs, and read back confirmed, or the step throws and the space stops; nothing for any other key.
 
 ## Invariants
@@ -30,4 +30,4 @@ Internal module of `users`: what an IdP name stands for, within one boot and acr
 - Format 1: `{ issuer }`, under `{"idp":<name>}`, which no link's key can be (a link's is a list); kept without end.
 
 ## Depends on
-- `kernel`, `erasure-extensions` (`SubjectOf`, `Elsewhere`); users' contract and link store (its `names` and `unowned`)
+- `kernel`, `erasure-extensions` (`SubjectOf`, `Elsewhere`); users' contract and link store (its `issuers` and `unowned`)

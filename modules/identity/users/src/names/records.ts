@@ -29,7 +29,7 @@ export interface NameRecords {
 const attempts = 8;
 
 /**
- * Names' records in the link space alone, as before `names`: no copy. `saveName` is users' view of
+ * Names' records in the link space alone, as before `issuers`: no copy. `saveName` is users' view of
  * the link store's `save` called without a subject, as before 0.20, for a name holds none: a type
  * over the same method, never one an implementation writes.
  */
@@ -107,9 +107,9 @@ function split(links: LinkStore, unowned: NonNullable<LinkStore["unowned"]>, nam
 	return records;
 }
 
-/** Names' records over the link store: its `names` and `unowned` where offered, else the link space alone. */
+/** Names' records over the link store: its `issuers` and `unowned` where offered, else the link space alone. */
 export function nameRecordsOver(links: LinkStore): NameRecords {
-	const { names } = links;
+	const { issuers: names } = links;
 	if (names === undefined || links.unowned === undefined) return inLinks(links);
 	const unowned: NonNullable<LinkStore["unowned"]> = async (key, record, lifetimeMs) => {
 		if (links.unowned === undefined) throw new TypeError("users: the link store's unowned went");

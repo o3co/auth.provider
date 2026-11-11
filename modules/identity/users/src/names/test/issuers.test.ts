@@ -451,7 +451,7 @@ describe("an IdP name's issuer, with a name store", () => {
 		expect(await kept(stores, "corp")).toEqual({ links: undefined, names: { issuer: issuerA } });
 	});
 
-	it("refuses a link store offering one of names and unowned, and keeps names in the link space where it offers neither", async () => {
+	it("refuses a link store offering one of issuers and unowned, and keeps names in the link space where it offers neither", async () => {
 		const offering = (ports: Partial<LinkStore>) => {
 			const stores = memoryUsersStores();
 			const links = { ...stores.links.store, ...ports };
@@ -467,10 +467,10 @@ describe("an IdP name's issuer, with a name store", () => {
 			{
 				where: "users",
 				reason:
-					"the link store offers one of names and unowned: it offers both, for names to leave the link space, or neither",
+					"the link store offers one of issuers and unowned: it offers both, for names to leave the link space, or neither",
 			},
 		];
-		const namesOnly = offering({ names: memoryUsersStores({ names: true }).names.store });
+		const namesOnly = offering({ issuers: memoryUsersStores({ names: true }).names.store });
 		expect((await boot(namesOnly.stores, { stores: namesOnly.module })).refusals).toEqual(refusal);
 		const unownedOnly = offering({ unowned: async () => "created" });
 		expect((await boot(unownedOnly.stores, { stores: unownedOnly.module })).refusals).toEqual(
@@ -491,7 +491,7 @@ describe("an IdP name's issuer, judged as the copy follows it", () => {
 		let reads = 0;
 		const links: LinkStore = {
 			...stores.links.store,
-			names: stores.names.store,
+			issuers: stores.names.store,
 			unowned: async (key, record) => stores.links.store.save(key, record as never, "endless"),
 			read: async (key) => {
 				if (key === nameKey("corp")) await hook(stores, ++reads);

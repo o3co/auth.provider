@@ -82,15 +82,15 @@ const issuer = { issuer: "https://a.example" } as unknown as StoredName;
 it("offers every port as one set: names apart from the links, and unowned keeping a name's record raw while not indexed", async () => {
 	const { app } = await opened();
 	const links = app.get(linkStore);
-	for (const port of [links.remove, links.erase, links.migrate, links.names, links.unowned]) {
+	for (const port of [links.remove, links.erase, links.migrate, links.issuers, links.unowned]) {
 		expect(port).toBeDefined();
 	}
 	expect(await links.unowned?.(nameKey, issuer, "endless")).toBe("created");
 	expect(await links.unowned?.(nameKey, issuer, "endless")).toBe("exists");
 	expect(await links.read(nameKey)).toEqual({ issuer: "https://a.example" });
-	expect(await links.names?.read(nameKey)).toBeUndefined();
-	expect(await links.names?.save(nameKey, issuer, "endless")).toBe("created");
-	expect(await links.names?.read(nameKey)).toEqual({ issuer: "https://a.example" });
+	expect(await links.issuers?.read(nameKey)).toBeUndefined();
+	expect(await links.issuers?.save(nameKey, issuer, "endless")).toBe("created");
+	expect(await links.issuers?.read(nameKey)).toEqual({ issuer: "https://a.example" });
 });
 
 it("answers closed for a name's record once indexed, writing nothing in the link space", async () => {

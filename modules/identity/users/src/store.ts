@@ -92,8 +92,8 @@ export async function written<T>(
 }
 
 /**
- * Links by upstream identity. Its `names` and `unowned` come together or neither; its `remove`,
- * `erase` and `migrate` together or none, and only with `names`: a part of a set refuses the boot.
+ * Links by upstream identity. Its `issuers` and `unowned` come together or neither; its `remove`,
+ * `erase` and `migrate` together or none, and only with `issuers`: a part of a set refuses the boot.
  * Each is optional in 0.20 and required in 0.22, but `unowned`, which goes then.
  */
 export type LinkStore = SubjectRecordStore<StoredLink> & {
@@ -110,13 +110,13 @@ export type LinkStore = SubjectRecordStore<StoredLink> & {
 	 * The IdP names' own records, apart from the links: offered with `unowned`, or neither. Optional
 	 * in 0.20, without it names keeping their records in the link space alone; required in 0.22.
 	 */
-	readonly names?: NameStore;
+	readonly issuers?: NameStore;
 	/**
 	 * Saves an IdP name's record in the link space, which holds no subject, unless the key holds one;
-	 * `closed` where the link space keeps no such record any more, `names` then keeping it. Offered
-	 * with `names`, or neither.
+	 * `closed` where the link space keeps no such record any more, `issuers` then keeping it. Offered
+	 * with `issuers`, or neither.
 	 * @deprecated Names' records from before they moved out of the link space; removed in 0.22, when
-	 * `names` is required.
+	 * `issuers` is required.
 	 */
 	readonly unowned?: (
 		key: string,

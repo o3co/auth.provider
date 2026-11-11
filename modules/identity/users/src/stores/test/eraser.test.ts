@@ -27,7 +27,7 @@ function ported() {
 	const report = (space: string) => ({ kind: "erased", space, removed: 0 }) as never;
 	const links = {
 		...(memory.links.store as unknown as LinkStore),
-		names: memory.names.store,
+		issuers: memory.names.store,
 		unowned: async () => "created" as const,
 		remove: async () => "removed" as const,
 		erase: async (subject: string) => {
@@ -65,7 +65,7 @@ it("is erasable only where the link store offers its whole set and the contact s
 	expect(await bare.online("s-a", signal)).toEqual({ reports: [], logoutGaps: 0 });
 	const { links, contacts } = ported();
 	expect(usersEraser(links, contacts, readings).erasable).toBe(true);
-	const { names: _dropped, ...withoutNames } = links;
+	const { issuers: _dropped, ...withoutNames } = links;
 	expect(usersEraser(withoutNames, contacts, readings).erasable).toBe(false);
 });
 

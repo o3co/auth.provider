@@ -25,7 +25,7 @@ export function usersEraser(
 	contacts: ContactStore,
 	readings: ErasureReadings,
 ): Eraser {
-	const { erase: eraseLinks, migrate: migrateLinks, names } = links;
+	const { erase: eraseLinks, migrate: migrateLinks, issuers: names } = links;
 	const { erase: eraseContacts, migrate: migrateContacts } = contacts;
 	if (
 		!everyPortOffered(links, contacts) ||

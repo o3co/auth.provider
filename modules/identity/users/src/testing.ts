@@ -396,7 +396,7 @@ export function memoryUsersStores(options: { readonly names?: true } = {}) {
 	const linkPorts: LinkStore = options.names
 		? {
 				...links.store,
-				names: names.store,
+				issuers: names.store,
 				unowned: async (key, record) =>
 					linksClosed.on
 						? "closed"
@@ -505,7 +505,7 @@ export function linkStoreContract(
 	describe(`users' link store: ${name}`, () => {
 		recordTests(open);
 
-		it("offers its ports as whole sets: names and unowned together or neither; remove, erase and migrate together or none, and only with names", async () => {
+		it("offers its ports as whole sets: issuers and unowned together or neither; remove, erase and migrate together or none, and only with issuers", async () => {
 			const links = (await open()).records as LinkStore;
 			expect(portsRefused(links, {} as ContactStore)).toBeUndefined();
 		});
@@ -553,7 +553,7 @@ export function linkStoreContract(
 
 		it("reads the names' records only as confirmed, as names relies on before a migration lets one go", async (context) => {
 			const place = await open();
-			const { names } = place.records as LinkStore;
+			const { issuers: names } = place.records as LinkStore;
 			const { stallReplicas: stall } = place;
 			if (!names || !stall) return context.skip();
 			const key = JSON.stringify({ idp: `c-${Math.random().toString(36).slice(2)}` });
