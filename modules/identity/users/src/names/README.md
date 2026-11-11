@@ -4,7 +4,7 @@ Internal module of `users`: what an IdP name stands for, within one boot and acr
 
 ## Responsibilities
 - Refuses names that stand for two issuers within one boot, and a name standing for another issuer than the one kept for it.
-- Keeps each declared name's issuer, and moves it as the operator states: in the link store, and, where a name store is offered, a copy there.
+- Keeps each declared name's issuer, and moves it as the operator states: in the link store, and, where a name store is offered (the link store's `issuers`), a copy there.
 
 ## Not here
 - Which names exist (the declaring modules). Links and what they match by (`links`).

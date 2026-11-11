@@ -467,7 +467,7 @@ describe("an IdP name's issuer, with a name store", () => {
 			{
 				where: "users",
 				reason:
-					"the link store offers one of issuers and unowned: it offers both, for names to leave the link space, or neither",
+					"the link store offers one of issuers and unowned: it offers both, for names to be copied apart, or neither",
 			},
 		];
 		const namesOnly = offering({ issuers: memoryUsersStores({ issuers: true }).issuers.store });

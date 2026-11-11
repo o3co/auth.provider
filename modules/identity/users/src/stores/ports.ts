@@ -9,7 +9,7 @@ import type { ContactStore, LinkStore } from "../store.ts";
  */
 export function portsRefused(links: LinkStore, contacts: ContactStore): string | undefined {
 	if ((links.issuers === undefined) !== (links.unowned === undefined)) {
-		return "the link store offers one of issuers and unowned: it offers both, for names to leave the link space, or neither";
+		return "the link store offers one of issuers and unowned: it offers both, for names to be copied apart, or neither";
 	}
 	const linkPorts = [links.remove, links.erase, links.migrate].filter((p) => p !== undefined);
 	if (linkPorts.length !== 0 && linkPorts.length !== 3) {

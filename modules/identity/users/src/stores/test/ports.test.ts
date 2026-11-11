@@ -19,10 +19,10 @@ it("takes a link store's remove, erase and migrate as one set, with names, and a
 	const links = (more: object) => ({ ...base, ...more }) as LinkStore;
 	expect(portsRefused(links({}), contacts)).toBeUndefined();
 	expect(portsRefused(links({ ...ports, issuers: names, unowned }), contacts)).toBeUndefined();
-	// Names may leave the link space with no erasure ports: issuers and unowned alone.
+	// Names may be copied apart with no erasure ports: issuers and unowned alone.
 	expect(portsRefused(links({ issuers: names, unowned }), contacts)).toBeUndefined();
 	expect(portsRefused(links({ issuers: names }), contacts)).toBe(
-		"the link store offers one of issuers and unowned: it offers both, for names to leave the link space, or neither",
+		"the link store offers one of issuers and unowned: it offers both, for names to be copied apart, or neither",
 	);
 	expect(portsRefused(links({ remove: ports.remove, issuers: names, unowned }), contacts)).toBe(
 		"the link store offers part of remove, erase and migrate: it offers all three, or none",
