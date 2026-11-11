@@ -51,7 +51,7 @@ const run = (name: string, answer: string, lists = ["image.cdx.json", "app.cdx.j
 it("runs the pinned Trivy on each list read-only, with no setting of the run passed in, and removes its volume", () => {
 	const { commands, sbom, out, report } = run(
 		"found",
-		`echo '{"SchemaVersion":2,"Results":[{"Vulnerabilities":[{"VulnerabilityID":"CVE-1","PkgName":"a","InstalledVersion":"1","FixedVersion":"2","Severity":"CRITICAL"}]}]}'`,
+		`echo '{"SchemaVersion":2,"Results":[{"Packages":[{"Name":"a"}],"Vulnerabilities":[{"VulnerabilityID":"CVE-1","PkgName":"a","InstalledVersion":"1","FixedVersion":"2","Severity":"CRITICAL"}]}]}'`,
 	);
 	const runs = commands.filter((c) => c.startsWith("run "));
 	expect(runs).toHaveLength(2);
@@ -60,6 +60,7 @@ it("runs the pinned Trivy on each list read-only, with no setting of the run pas
 		expect(c).toContain(`-v ${sbom}:/in:ro`);
 		expect(c).toContain(` ${config.trivy} sbom `);
 		expect(c).toContain("--exit-code 0");
+		expect(c).toContain("--list-all-pkgs");
 		expect(c).toContain(`--db-repository ${config.databases.join(",")}`);
 		expect(c.endsWith(`/in/${list}`)).toBe(true);
 		expect(c).not.toMatch(/(^| )(-e|--env|--env-file)( |=)/);
@@ -70,7 +71,7 @@ it("runs the pinned Trivy on each list read-only, with no setting of the run pas
 	expect(existsSync(join(out, "image.trivy.json"))).toBe(true);
 	expect(existsSync(join(out, "app.trivy.json"))).toBe(true);
 	expect(report).toContain("auth-provider 9.9.9");
-	expect(report).toContain("| `app.cdx.json` | 1 | 0 | 0 | 0 | 0 |");
+	expect(report).toContain("| `app.cdx.json` | 1 | 1 | 0 | 0 | 0 | 0 |");
 });
 
 it("exits 0 when Trivy fails, telling each list not scanned with Trivy's last line", () => {
@@ -86,8 +87,18 @@ it("exits 0 when Trivy fails, telling each list not scanned with Trivy's last li
 });
 
 it("tells a list the release did not make as not scanned", () => {
-	const { report, commands } = run("missing", `echo '{"SchemaVersion":2}'`, ["app.cdx.json"]);
+	const { report, commands } = run(
+		"missing",
+		`echo '{"SchemaVersion":2,"Results":[{"Packages":[{"Name":"a"}]}]}'`,
+		["app.cdx.json"],
+	);
 	expect(report).toContain("| `image.cdx.json` | not scanned: the release made no such list |");
-	expect(report).toContain("| `app.cdx.json` | 0 | 0 | 0 | 0 | 0 |");
+	expect(report).toContain("| `app.cdx.json` | 1 | 0 | 0 | 0 | 0 | 0 |");
 	expect(commands.filter((c) => c.startsWith("run "))).toHaveLength(1);
+});
+
+it("tells a list in which Trivy read no package as not scanned, never as clean", () => {
+	const { report } = run("none-read", `echo '{"SchemaVersion":2,"Results":[]}'`);
+	expect(report).toContain("| `image.cdx.json` | not scanned: Trivy read no packages |");
+	expect(report).toContain("| `app.cdx.json` | not scanned: Trivy read no packages |");
 });

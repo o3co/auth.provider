@@ -62,6 +62,7 @@ try {
 					"sbom",
 					"--scanners",
 					"vuln",
+					"--list-all-pkgs",
 					"--format",
 					"json",
 					"--exit-code",

@@ -17,14 +17,17 @@ export interface Finding {
 	readonly severity: string;
 }
 
-/** A list read: its findings, or why it is told as not scanned. */
+/** A list read: how many packages Trivy read in it and its findings, or why it is told as not scanned. */
 export type Read =
-	| { readonly list: string; readonly findings: readonly Finding[] }
+	| { readonly list: string; readonly packages: number; readonly findings: readonly Finding[] }
 	| { readonly list: string; readonly notScanned: string };
 
 export const severities = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"] as const;
 
-/** The findings in Trivy's JSON, each once by id and package; output that is not Trivy's report is not scanned. */
+/**
+ * The findings in Trivy's JSON, each once by id and package. Output that is not Trivy's report, or a
+ * report of no package read (a list whose components Trivy did not recognise), is not scanned.
+ */
 export function readScan(scanned: Scanned): Read {
 	if ("notScanned" in scanned) return scanned;
 	let report: unknown;
@@ -38,6 +41,11 @@ export function readScan(scanned: Scanned): Read {
 		return { list: scanned.list, notScanned: "Trivy's output is not its report" };
 	if (results !== undefined && !Array.isArray(results))
 		return { list: scanned.list, notScanned: "Trivy's report holds no list of results" };
+	const read = ((results ?? []) as { Packages?: unknown }[]).reduce(
+		(n, r) => n + (Array.isArray(r.Packages) ? r.Packages.length : 0),
+		0,
+	);
+	if (read === 0) return { list: scanned.list, notScanned: "Trivy read no packages" };
 	const all = ((results ?? []) as { Vulnerabilities?: unknown }[]).flatMap((r) =>
 		Array.isArray(r.Vulnerabilities) ? (r.Vulnerabilities as Record<string, unknown>[]) : [],
 	);
@@ -55,15 +63,15 @@ export function readScan(scanned: Scanned): Read {
 		};
 		findings.set(`${finding.id} ${finding.pkg} ${finding.installed}`, finding);
 	}
-	return { list: scanned.list, findings: [...findings.values()] };
+	return { list: scanned.list, packages: read, findings: [...findings.values()] };
 }
 
 /** The report in Markdown: what was scanned with what, the counts, and the fixable critical and high findings. */
 export function reportOf(read: readonly Read[], trivy: string, version: string): string {
 	const counts = read.map((r) =>
 		"notScanned" in r
-			? `| \`${r.list}\` | not scanned: ${cell(r.notScanned)} |||||`
-			: `| \`${r.list}\` | ${severities.map((s) => r.findings.filter((f) => f.severity === s).length).join(" | ")} |`,
+			? `| \`${r.list}\` | not scanned: ${cell(r.notScanned)} ||||||`
+			: `| \`${r.list}\` | ${r.packages} | ${severities.map((s) => r.findings.filter((f) => f.severity === s).length).join(" | ")} |`,
 	);
 	const fixable = read.flatMap((r) =>
 		"notScanned" in r
@@ -80,8 +88,8 @@ export function reportOf(read: readonly Read[], trivy: string, version: string):
 
 Found by Trivy (\`${trivy}\`) in the lists the release made (\`release-sbom\`), against its vulnerability database on the day of the release run. A report only: nothing here stopped or delayed the release. Each list's full findings are in \`<list>.trivy.json\` beside this file.
 
-| List | ${severities.map((s) => s.toLowerCase()).join(" | ")} |
-|---|---|---|---|---|---|
+| List | packages read | ${severities.map((s) => s.toLowerCase()).join(" | ")} |
+|---|---|---|---|---|---|---|
 ${counts.join("\n")}
 
 ## Critical and high with a fix
