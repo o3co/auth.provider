@@ -14,5 +14,9 @@
 		"@mod/store": "workspace:*",
 		"@mod/subject-records": "workspace:*",
 		"@mod/users": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/erasure-extensions": "workspace:*",
+		"@mod/secret-hash": "workspace:*"
 	}
 }

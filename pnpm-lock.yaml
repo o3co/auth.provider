@@ -4492,6 +4492,13 @@ importers:
       '@mod/users':
         specifier: workspace:*
         version: link:../../identity/users
+    devDependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
 
   modules/templates/webauthn-store:
     dependencies:
