@@ -6,7 +6,7 @@ Internal module of `subject-records`: the one migration of a space's records wri
 - Puts each raw record of a space into its subject's index, or removes it where its owner proves it has none, once records are indexed.
 
 ## Not here
-- Whose a record is: the owner's `SubjectReading`. Walking the space and when the migration runs: account erasure's tool, which hands in the `Walk`. Keyed sets: their own migration, later.
+- Whose a record is: the owner's `SubjectReading`. Walking the space and when the migration runs: account erasure's tool, which hands in the `Walk`. Keyed sets: it migrates records only, so a keyed set kept raw stays raw and unlisted.
 
 ## Offers
 - `migrateRecords` (a place, a `Walk`, the owner's `SubjectReading`, a signal) → a `MigrationReport`: `migrated` with what was indexed and removed, or `stopped` with why (`not-indexed`, `aborted`, `unavailable`, `index-unreadable`, `walk-unsteady`, `unreadable: …`, `a record keyed by another subject`).

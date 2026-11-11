@@ -6,7 +6,7 @@ import type { Phase, SubjectPlace } from "../index/index.ts";
 import { migrateRecords } from "../migrate/migrate.ts";
 import type { PhaseOnce } from "../phase/phase.ts";
 import { subjectKeyedSetsIn } from "../sets/sets.ts";
-import { subjectRecordsIn } from "../subject-records.ts";
+import { subjectRecordsIn } from "../writes/writes.ts";
 
 type Refuse = (where: string, reason: string) => never;
 /** A builder's methods, each answering a promise. */

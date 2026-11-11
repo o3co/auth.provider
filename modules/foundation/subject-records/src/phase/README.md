@@ -10,7 +10,6 @@ Internal module of `subject-records`: the phase records are in, as the store's c
 
 ## Offers
 - `subjectRecordsPhase`: `mark` (`subject-records.phase`); `read` (the store's control) → the phase; `once` (a control, or none where the store adapter offers none) → `PhaseOnce`, the phase as one process reads it once and keeps it: unavailable while the store cannot answer, read again at the next call, `reader` with no control; `write` (a control record, the store it is of) → the mark to write, or `not-in-maintenance`, then `not-paired`.
-- `held` and `HeldPhase`: `once`'s former names, until consent-store reads `once`.
 
 ## Invariants
 - The read is monotone: a mark of `indexed`, in any epoch, reads `indexed`; anything else, or none, `reader`.

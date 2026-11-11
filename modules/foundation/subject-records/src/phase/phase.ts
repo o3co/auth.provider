@@ -8,8 +8,6 @@ const mark = "subject-records.phase";
 export interface PhaseOnce {
 	read(): Promise<Phase>;
 }
-/** The former name of `PhaseOnce`, until consent-store reads `once`. */
-export type HeldPhase = PhaseOnce;
 
 const read = async (control: StoreControl): Promise<Phase> =>
 	(await control.control()).marks[mark]?.value === "indexed" ? "indexed" : "reader";
@@ -40,8 +38,6 @@ export const subjectRecordsPhase = Object.freeze({
 	 * With no control (a store adapter that offers none), `reader`.
 	 */
 	once: subjectRecordsPhaseOnce,
-	/** The former name of `once`, until consent-store reads `once`. */
-	held: (control: StoreControl | undefined): PhaseOnce => subjectRecordsPhaseOnce(control),
 	/**
 	 * The mark that turns records indexed, for the store whose control record `control` is:
 	 * `not-in-maintenance` outside the maintenance key, then `not-paired` where the store writes no

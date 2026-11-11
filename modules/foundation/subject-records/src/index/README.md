@@ -3,7 +3,7 @@
 Internal module of `subject-records`: where a space keeps its subjects' index, and how it is named.
 
 ## Responsibilities
-- Names a space's index space, and each subject's tombstone and buckets in it.
+- Names a space's index space, and each subject's tombstone, buckets and witnesses in it.
 
 ## Not here
 - Writing them: the package's builders, through `records`' `changeRecords`.
@@ -11,7 +11,7 @@ Internal module of `subject-records`: where a space keeps its subjects' index, a
 ## Offers
 - `indexSpaceOf` (a space) → its index space: `.index` after its name, its guarantees, `internal`; `isIndexSpaceOf` checks one.
 - `indexOver` (a place, its space, its index space) → `tombOf` (a subject), `bucketOf` (a subject, a key), `bucketsOf` (a subject: all 16), `witnessOf` (a subject, `record` or `set`) and `entryAt` (a partition, as a scan finds it), each a target of the index space.
-- `entriesIn` (a bucket's value, its space) → its entries, or `UnreadableIndex`; `listedWith` and `listedWithout` → the bucket's next with an entry, or without those picked; `targetOf` (an entry) → what it lists; `bucketNames`, the 16.
+- `entriesIn` (a bucket's value, its space) → its entries, or `UnreadableIndex`; `listedWith` and `listedWithout` → the bucket's next with an entry, or without those picked; `targetOf` (an entry) → what it lists; `bucketNames`, the 16; `witnessed`, what a witness holds.
 - `SubjectPlace` and `Phase`, as the package offers them; `checkedSubjectPlace` (a place, the categories a builder writes) → its category, refusing at build, through the builder's `refuse`, a store with no batch across once indexed, an index not the space's, and another category.
 
 ## Invariants
