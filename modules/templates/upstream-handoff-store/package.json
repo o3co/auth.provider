@@ -10,8 +10,8 @@
 	},
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
-		"@mod/records": "workspace:*",
 		"@mod/store": "workspace:*",
+		"@mod/subject-records": "workspace:*",
 		"@mod/upstream-handoff": "workspace:*"
 	},
 	"devDependencies": {
