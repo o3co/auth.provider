@@ -23,6 +23,7 @@ Internal module of `federation-grants`: the client routes, and the revocation fo
 - A revocation is `204` in any state and audited once, written and unlisted by `retention`'s rules, as the backstop's is; a pending grant's status needs the client to still be allowed.
 - Lodgings are counted per client before they are written; pushed-out intents end.
 - The follower writes only over the state it judged, ends a covered grant or pending intent, and leaves an established grant kept with only its renewal ended.
+- Told the subject is erased, it still ends the grants and drops their entries, and records each end (`federation.grant.revoked`) without the subject, `withheld` `erased`: `subject-revocation`'s rule for whoever is told it.
 
 ## Depends on
 - `http`, `request-source`, `clients`, `rate-limit`, `audit`, `upstreams` (the configured connections), `subject-revocation` (the follower's type), `kernel`; `grant`, `retention`, `refresh`, the package's store interfaces

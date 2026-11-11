@@ -34,7 +34,7 @@ export default auditEvents({
 		when: "a client is refused a grant's token or renewal, with why (`reason`); by the client only before the grant is found",
 	},
 	"federation.grant.revoked": {
-		attributes: ["client", "connection", "outcome", "source"],
-		when: "a grant ends, revoked by its client or by the subject's revocation (`outcome`)",
+		attributes: ["client", "connection", "outcome", "source", "withheld"],
+		when: "a grant ends, revoked by its client or by the subject's revocation (`outcome`); without the subject, `withheld` `erased`, where the revocation said it is erased",
 	},
 });

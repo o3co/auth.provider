@@ -37,7 +37,7 @@ export function followerWith(p: FollowParts): RevocationFollower {
 		if (!intent || !(await judge.intentRevoked(grant, intent))) return "left";
 		return grant.status === "pending" ? "ended" : "renewal";
 	};
-	const follow = async (subject: string, id: string) => {
+	const follow = async (subject: string, id: string, erased: boolean) => {
 		const read = records.grantOf(await p.grants.read(id));
 		const judged = read?.subject === subject ? await verdict(read) : "left";
 		if (!read || judged === "left") {
@@ -64,17 +64,23 @@ export function followerWith(p: FollowParts): RevocationFollower {
 		if (now?.status !== "revoked") return;
 		await p.subjects.remove(subject, id);
 		if (was?.status === "revoked") return;
+		// Told the subject is erased, the record leaves it out and says why: the grant still ends.
 		declaredAudit(p.audit, events).record("federation.grant.revoked", {
-			subject,
-			attributes: { client: now.client, connection: now.connection, outcome: "backstop" },
+			...(erased ? {} : { subject }),
+			attributes: {
+				client: now.client,
+				connection: now.connection,
+				outcome: "backstop",
+				...(erased ? { withheld: "erased" } : {}),
+			},
 		});
 	};
 	return {
 		name: "federation-grants",
-		follow: async (subject) => {
+		follow: async (subject, { erased }) => {
 			let failed = 0;
 			for (const { member } of await p.subjects.members(subject)) {
-				await follow(subject, member).catch(() => {
+				await follow(subject, member, erased === true).catch(() => {
 					failed++;
 				});
 			}
