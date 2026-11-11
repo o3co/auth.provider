@@ -12,6 +12,7 @@
 - A `tokens` access condition: a token whose family has ended is revoked.
 - A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family, answered as written so it is audited; another client is answered the same, and a family already marked revoked is finished before it is answered.
 - `grants`' token tie `family`: a token's family, `ended` (`family has ended`) or held to its end, naming the family's session, if any, to issue from; a token issued from it is adopted.
+- The eraser `refresh` (internal module `settle`).
 - Contract `lineage`: `start(...)` → a family's first refresh token, or nothing for a client not allowed to refresh.
 - Operator section `refresh`, with `lifetime` (written with its unit, in whole seconds) and `bind-confidential-clients` (false, as 0.17); its keys are in the configuration reference.
 - Audit event `refresh.family_revoked`, with the client, and the subject unless `withheld`, when a reuse revokes a family; never a token, its secret or the family's name: declared in `./audit-events`, listed in the audit event reference.
