@@ -23,14 +23,14 @@
 - A boundary is compared with times from the hosts' clocks, so the store's clock joins them: a host ahead of the store by d leaves d of a window, one behind refuses d more, and no interface moves a boundary back. Keeping clocks right is the operator's job.
 - A failing follower is logged by name and kind and does not stop the rest; the boundary stays, nothing here retries it, and `record` answers incomplete.
 - Comparison is in seconds; what started up to the second of the boundary plus the allowance is revoked. An allowance below zero is none, and one that is no number revokes. Comparison is done only through the offered interface and is not reimplemented by callers.
-- An erased subject is revoked by every comparison, whatever the time, kind or allowance; the mark is never moved or dropped. Where erasure is enabled and the mark is read, a composition not covered does not start, naming the owners that cannot erase; unread, it starts unready, and traffic must reach only ready instances; a store that cannot tell is the stated exclusion. A covered one starts whatever the store answers.
+- An erased subject is revoked by every comparison, whatever the time, kind or allowance; the mark is never moved or dropped. Where erasure is enabled, a composition not covered does not start (the boot gate, its readiness and its exclusions: internal module `erasure`).
 - When it cannot be read, it is unavailable, not "no boundary". A record that holds no time is unavailable too, and a revocation over it moves both kinds. A record with a mark of erasure that is a time is revoked, and fenced as erased, whatever else it holds.
 
 ## Data
 - One record per subject: `sessions`, and `delegations` once a revocation moved it; a record of a single time is read as that time for both.
 
 ## Deprecated
-- A `BoundaryStore` without `erasureEnabled`: warned at every start (`subject-revocation.erasure_unknown`), and where it fences, every bundle of a guarded composition is fenced (+1 write) until it tells; 0.22 refuses it.
+- A `BoundaryStore` without `erasureEnabled`: deprecated, refused in 0.22 (what it does until then: internal module `erasure`).
 
 ## Depends on
 - `kernel`, `erasure-extensions` (the erasers the gate reads `erasable` of)
