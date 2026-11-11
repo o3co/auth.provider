@@ -547,6 +547,20 @@ describe("an IdP name's issuer, judged as the copy follows it", () => {
 		expect(await stores.issuers.store.read(nameKey("corp"))).toEqual({ issuer: issuerB });
 	});
 
+	it("judges the record read last, not the one it serialises equal to: a key held undefined is a difference", async () => {
+		const { stores, module } = hooked(async (s, read) => {
+			// The settle read A and copies it; before its read again, A gains a key held undefined.
+			if (read === 3)
+				await s.links.store.update(nameKey("corp"), () => ({
+					value: { issuer: issuerA, extra: undefined } as never,
+				}));
+		});
+		await stores.links.store.save(nameKey("corp"), { issuer: issuerA } as never, "endless");
+		expect((await boot(stores, { stores: module })).refusals).toEqual(
+			refusedAs("federation declares"),
+		);
+	});
+
 	it("judges a record holding more than its issuer as a difference, never a match", async () => {
 		const { stores, module } = hooked(async () => {});
 		const carrying = { issuer: issuerA, subject: "s-a", email: "a@example.com" };

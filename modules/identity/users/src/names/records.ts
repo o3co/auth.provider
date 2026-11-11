@@ -69,13 +69,14 @@ function split(links: LinkStore, unowned: NonNullable<LinkStore["unowned"]>, nam
 			JSON.stringify(record) === same ? undefined : { value: kept };
 		await written(names, key, kept, align);
 	};
-	/** The copy in step: copied, then the link space read again until it holds what was copied. */
+	/** The copy in step: copied, then the link space read again until it holds it; what was read last is returned. */
 	const inStep = async (key: string, kept: StoredName): Promise<StoredName> => {
 		let copying = kept;
 		for (let attempt = 0; attempt < attempts; attempt += 1) {
 			await copyOf(key, copying);
 			const now = await fromLinks(key);
-			if (now === undefined || JSON.stringify(now) === JSON.stringify(copying)) return copying;
+			if (now === undefined) return copying;
+			if (JSON.stringify(now) === JSON.stringify(copying)) return now;
 			copying = now;
 		}
 		throw new Unavailable("users");
