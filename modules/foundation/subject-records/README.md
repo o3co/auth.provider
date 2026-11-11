@@ -35,5 +35,6 @@
 ## Vocabulary
 - subject: the account a record belongs to.
 - tombstone: a subject's mark that no record of it is written past.
+- floor: `tombstoneFloor`, the guarantees a tombstone needs, which every space holding a subject's data declares.
 - bucket: part of a subject's index, the entries of its records and sets.
 - witness: the index's mark that this package wrote an envelope at a subject's key, telling it from a raw value of its shape.
