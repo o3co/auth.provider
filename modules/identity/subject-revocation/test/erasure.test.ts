@@ -1,3 +1,4 @@
+import { type Eraser, erasers } from "@mod/erasure-extensions";
 import {
 	assemble,
 	BootRefused,
@@ -6,6 +7,7 @@ import {
 	defineModule,
 	isUnavailable,
 	kernelConfig,
+	probes,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
@@ -21,6 +23,14 @@ import { boundaryStore, type StoredBoundary } from "../src/store.ts";
 import { memoryBoundaries } from "./stores.ts";
 
 const now = 1_800_000_000_000;
+/** An owner's eraser that states whether it can erase, erasing nothing. */
+const ownerEraser = (name: string, erasable: boolean): Eraser => ({
+	name,
+	erasable,
+	online: async () => ({ reports: [], logoutGaps: 0 }),
+	window: async () => ({ reports: [], logoutGaps: 0 }),
+	migrate: async () => [],
+});
 /** How far past its store-clock time a boundary's write may land: records' patience, its deadline. */
 const patience = 10_000;
 
@@ -137,6 +147,7 @@ async function gated(
 	guarded: boolean,
 	set: (stores: ReturnType<typeof memoryBoundaries>) => void,
 	has: Parameters<typeof memoryBoundaries>[1] = {},
+	owners: Readonly<Record<string, boolean>> = {},
 ) {
 	const stores = memoryBoundaries(() => now, has);
 	set(stores);
@@ -150,6 +161,11 @@ async function gated(
 			]),
 			defineModule({ name: "guard", replicaSafe: false, takes: [] }, (m) =>
 				guarded ? [m.contribute(erasureGuards).by(() => ({ name: "guard" }))] : [],
+			),
+			defineModule({ name: "owners", replicaSafe: false, takes: [] }, (m) =>
+				Object.entries(owners).map(([name, erasable]) =>
+					m.contribute(erasers).by(() => ownerEraser(name, erasable)),
+				),
 			),
 			defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(contract<object>("asker")).by((c) => {
@@ -170,6 +186,11 @@ async function gated(
 		refused: app instanceof BootRefused ? JSON.stringify(app.refusals) : undefined,
 		app: app instanceof BootRefused ? undefined : app,
 		ready: () => context?.readinessReport(1000).then((r) => r.answer),
+		unerasable: () =>
+			recorded
+				.lines()
+				.filter((l) => l.event === "subject-revocation.erasure_unerasable")
+				.map((l) => `${String(l.fields.owners)}: ${String(l.fields.reason)}`),
 		warned: () =>
 			recorded
 				.lines()
@@ -292,4 +313,70 @@ it("reads a mark of a time first: a record that holds one beside a part it canno
 	await on.kept.records.create("alice", future, "endless");
 	expect(await on.app?.get(erasureFence).fence("alice", "r0")).toBe("erased");
 	expect(on.receipts.size).toBe(0);
+});
+
+it("covers erasure only where every owner erases: one that cannot is named, refused where enabled, unready while unread", async () => {
+	const on = (st: ReturnType<typeof memoryBoundaries>) => {
+		st.erasure.on = true;
+	};
+	const owners = { consent: true, legacy: false };
+	const refused = await gated(true, on, {}, owners);
+	expect(refused.refused).toMatch(/these cannot erase: legacy/);
+	const unread = await gated(
+		true,
+		(st) => {
+			st.erasure.unreadable = true;
+		},
+		{},
+		owners,
+	);
+	expect(unread.refused).toBeUndefined();
+	expect(unread.unerasable()).toEqual([
+		expect.stringMatching(/^legacy: their stores cannot erase/),
+	]);
+	expect(await unread.ready()).toBe("unready");
+	unread.erasure.unreadable = false;
+	expect(await unread.ready()).toBe("ready");
+	// Every owner erasing, a guarded composition is covered: it starts ready with its store down.
+	const covered = await gated(
+		true,
+		(st) => {
+			st.down.unavailable("read", "save", "update");
+			st.erasure.unreadable = true;
+		},
+		{},
+		{ consent: true },
+	);
+	expect([covered.refused, await covered.ready()]).toEqual([undefined, "ready"]);
+	expect(covered.unerasable()).toEqual([]);
+});
+
+it("starts ready where the store cannot tell and an owner cannot erase, warning both and the rule it must keep", async () => {
+	const booted = await gated(true, () => {}, { erasureEnabled: false }, { legacy: false });
+	const rule = "this node must never serve a deployment where erasure is enabled";
+	expect(booted.refused).toBeUndefined();
+	expect(booted.unknownWhy()).toEqual([expect.stringContaining(rule)]);
+	expect(booted.unerasable()).toEqual([expect.stringContaining(rule)]);
+	expect(await booted.ready()).toBe("ready");
+});
+
+it("refuses the start of an eraser whose build reaches the gate, collecting probes, never waiting on it", async () => {
+	const stores = memoryBoundaries(() => now);
+	const assembled = assemble({
+		modules: [
+			revocationModule,
+			defineModule({ name: "boundaries", replicaSafe: false, takes: [] }, (m) => [
+				m.provide(boundaryStore).by(() => stores.boundaries),
+			]),
+			defineModule({ name: "looping", replicaSafe: false, takes: [probes] }, (m) => [
+				m.contribute(erasers).by(async (c) => {
+					await c.collect(probes);
+					return ownerEraser("looping", true);
+				}),
+			]),
+		],
+		config: kernelConfig(),
+		runtime: quietRuntime(),
+	});
+	await expect(assembled).rejects.toThrow();
 });
