@@ -24,7 +24,7 @@
 - A failing follower is logged by name and kind and does not stop the rest; the boundary stays, nothing here retries it, and `record` answers incomplete.
 - Comparison is in seconds; what started up to the second of the boundary plus the allowance is revoked. An allowance below zero is none, and one that is no number revokes. Comparison is done only through the offered interface and is not reimplemented by callers.
 - An erased subject is revoked by every comparison, whatever the time, kind or allowance; the mark is never moved or dropped. Where erasure is enabled and the mark is read, a composition without a fence or a guard does not start; unread, it starts unready, and traffic must reach only ready instances; a store that cannot tell is the stated exclusion. A guarded one starts whatever the store answers.
-- When it cannot be read, it is unavailable, not "no boundary". A record that holds no time is unavailable too, and a revocation over it moves both kinds.
+- When it cannot be read, it is unavailable, not "no boundary". A record that holds no time is unavailable too, and a revocation over it moves both kinds. A record with a mark of erasure that is a time is revoked, and fenced as erased, whatever else it holds.
 
 ## Data
 - One record per subject: `sessions`, and `delegations` once a revocation moved it; a record of a single time is read as that time for both.

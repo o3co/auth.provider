@@ -274,3 +274,22 @@ it("warns an unguarded composition over a store that cannot tell that no issuanc
 	expect(booted.unknownWhy()).toEqual([expect.stringContaining("no module guards it")]);
 	expect(await booted.ready()).toBe("ready");
 });
+
+it("reads a mark of a time first: a record that holds one beside a part it cannot read is revoked and erased, as marking answers it", async () => {
+	const { revocation, revocations: boundaries, erasure, kept } = await boot();
+	const future = {
+		sessions: 5,
+		delegations: "future-format",
+		erasedAt: 17,
+	} as unknown as StoredBoundary;
+	await kept.records.create("alice", future, "endless");
+	expect(await erasure.markErased("alice")).toEqual({ kind: "marked", erasedAt: 17 });
+	expect(await revocation.check("alice", now)).toBe("revoked");
+	expect(await boundaries.compare("alice", now, "delegations")).toBe("revoked");
+	const on = await gated(true, (s) => {
+		s.erasure.on = true;
+	});
+	await on.kept.records.create("alice", future, "endless");
+	expect(await on.app?.get(erasureFence).fence("alice", "r0")).toBe("erased");
+	expect(on.receipts.size).toBe(0);
+});

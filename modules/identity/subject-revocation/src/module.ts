@@ -1,6 +1,6 @@
 import { contract, defineModule, probes, Unavailable } from "@mod/kernel";
 import { comparedTo, subjectRevocationOf } from "./boundaries/boundaries.ts";
-import { opened, writtenTo } from "./boundaries/written.ts";
+import { markIn, opened, writtenTo } from "./boundaries/written.ts";
 import {
 	erasureFence,
 	erasureGuards,
@@ -59,6 +59,8 @@ export default defineModule(
 				compare: async (subject, time, kind, allowanceMs) => {
 					const record = await boundaries.read(subject);
 					if (record === undefined) return "valid";
+					// A mark of a time revokes all, whatever else the record holds, as marking answers it.
+					if (typeof markIn(record) === "number") return "revoked";
 					const held = opened(record);
 					if (held === undefined) throw new Unavailable("subject-revocation");
 					return comparedTo(held, time, kind, allowanceMs);
