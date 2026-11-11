@@ -10,8 +10,8 @@ import {
 	type Place,
 	pairedRecordsIn,
 	recordsIn,
-} from "../src/records.ts";
-import { memoryRecords } from "../src/testing.ts";
+} from "../../records.ts";
+import { memoryRecords } from "../../testing.ts";
 
 const runtime = quietRuntime({
 	clock: { now: () => 1_800_000_000_000 },

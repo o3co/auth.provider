@@ -40,12 +40,14 @@
 		"release:evidence-fetch": "pnpm --filter @mod/distribution run release-evidence-fetch",
 		"release:evidence-judge": "pnpm --filter @mod/distribution run release-evidence-judge",
 		"release:sbom": "pnpm --filter @mod/distribution run release-sbom",
+		"release:scan": "pnpm --filter @mod/distribution run release-scan",
 		"release:listed": "pnpm --filter @mod/distribution run release-listed",
 		"release:notes": "pnpm --filter @mod/distribution run release-notes"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.15",
 		"@types/node": "26.6.5",
+		"fast-check": "4.10.2",
 		"typescript": "6.0.3",
 		"vitest": "5.0.5"
 	}

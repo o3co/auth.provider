@@ -93,6 +93,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/rate-limit` (foundation, `modules/foundation/rate-limit`): Counts uses in windows on `store`, and locks keys out after failures (backoff, a budget in a window, a hard limit, forgetting a quiet run).
 - `@mod/records` (capability, `modules/foundation/records`): Provides records that know no feature: keyed records, records under a secret, deferred work, and keyed sets.
   - `keyed-sets` (`src/keyed-sets`): sets of members by key, at most a cap to a key, ending on `kernel`'s clock.
+  - `together` (`src/together`): records of several partitions and spaces changed as one.
   - `writing` (`src/writing`): how a record is written, the same for every kind of place.
 - `@mod/request-source` (foundation, `modules/foundation/request-source`): Decides a request's source (address, scheme, whether it was determined) from the direct peer and the headers a trusted proxy sets.
 - `@mod/seal` (foundation, `modules/foundation/seal`): Seals and opens stored data with authenticated encryption, by each key's algorithm (AES-256-GCM), under a key ring read at boot.
@@ -468,6 +469,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `release-listed` (`src/release-listed`): where the release publishes, the tarballs held to those its lists of what it ships were made of.
   - `release-notes` (`src/release-notes`): the release's notes, from the version's section of the changelog.
   - `release-sbom` (`src/release-sbom`): the release's lists of what it ships (SBOMs), made from the tarballs it publishes.
+  - `release-scan` (`src/release-scan`): a report of the known vulnerabilities in what the release ships, read from its lists.
   - `order` (`src/release/order`): in what order the release packs and publishes what `pnpm bundles` built.
   - `packing` (`src/release/packing`): the release packed, the index sealed over every bundle before its own.
   - `workflow-caches` (`src/workflow-caches`): CI's and the release's workflows held to restoring no cache in a run a release takes evidence from.
