@@ -33,4 +33,4 @@
 ## Vocabulary
 - eraser: an owner's part that erases a subject's data from the owner's spaces.
 - tombstone: a subject's mark in a space that no record of it may be written past.
-- forgotten: a `pseudonymous` space's report kind. The owner's record that the subject was erased there is not a tombstone: it fences nothing and no `erased` or `fenced` report stands on it.
+- forgotten: a `pseudonymous` space's report kind. The owner's record that the subject was erased there is not a tombstone: no `erased` or `fenced` report stands on it, whatever it refuses in the owner's own space.
