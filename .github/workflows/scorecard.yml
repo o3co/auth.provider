@@ -1,0 +1,45 @@
+name: Scorecard
+
+# OpenSSF Scorecard: how the repository is run (branch protection, pinned
+# dependencies, token permissions, signed releases) scored check by check.
+# Scorecard reads the default branch, so it runs on pushes to main, weekly on
+# main, and when a branch protection rule changes; a `schedule` or
+# `branch_protection_rule` event runs only from the default branch. It reports
+# to code scanning and fails nothing.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 4 * * 1'
+  branch_protection_rule:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    name: Scorecard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Reads the workflow runs for the CI-Tests and Dangerous-Workflow checks.
+      actions: read
+      # Uploads the SARIF to code scanning.
+      security-events: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # The results stay in this repository's code scanning: nothing goes to
+      # OpenSSF's public API, so the job asks for no id-token.
+      - uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: false
+      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: scorecard.sarif
+          category: scorecard
