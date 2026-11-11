@@ -1,7 +1,11 @@
 import { assemble, type BuildContext, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { simulatedStore } from "@mod/store/testing";
-import { heldLoginStore, type StoredHeldLogin } from "@mod/upstream-handoff";
+import {
+	heldLoginLifetimeMaxMs,
+	heldLoginStore,
+	type StoredHeldLogin,
+} from "@mod/upstream-handoff";
 import { heldLoginStoreContract } from "@mod/upstream-handoff/testing";
 import { expect, it } from "vitest";
 import wiring from "../src/module.ts";
@@ -72,7 +76,7 @@ it("keeps no held login past upstream-handoff's bound", async () => {
 	const { app } = await opened("indexed");
 	const held = app.get(heldLoginStore);
 	await expect(
-		held.save("h", { n: 1 } as unknown as StoredHeldLogin, 3_600_001, "alice"),
+		held.save("h", { n: 1 } as unknown as StoredHeldLogin, heldLoginLifetimeMaxMs + 1, "alice"),
 	).rejects.toBeInstanceOf(TypeError);
 });
 
