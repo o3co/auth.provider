@@ -114,8 +114,8 @@ export function subjectRecordsIn<T extends Json>(
 		 * window's fence, epoch and restarts (account erasure §5.1). Its records read as orphans to
 		 * the one migration, through the owner's `Elsewhere`. It has no read, removal or scan of its
 		 * own: the builder's `read`, `change` and `remove` reach them.
-		 * @deprecated Raw records of a space from before its non-subject records moved out (users'
-		 * names); removed in 0.22.
+		 * @deprecated Raw records of a space from before its non-subject records moved out; removed in
+		 * 0.22.
 		 */
 		unowned: async (
 			key: string,

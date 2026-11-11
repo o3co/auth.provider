@@ -256,7 +256,7 @@ it("runs the owner's step for each orphan before removing it, on the value it co
 	expect(await raw(indexed, "o")).toBeNull();
 });
 
-it("stops the space where the owner's step throws, removing that orphan and nothing more", async () => {
+it("stops the space where the owner's step throws, keeping that orphan and removing nothing more", async () => {
 	const { at, walk, put, raw } = await opened();
 	await put(indexed, "o", { owner: "nobody" });
 	const elsewhere: Elsewhere = async () => {

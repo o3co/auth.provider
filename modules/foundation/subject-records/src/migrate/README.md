@@ -9,7 +9,7 @@ Internal module of `subject-records`: the one migration of a space's records wri
 - Whose a record is: the owner's `SubjectReading`. Walking the space and when the migration runs: account erasure's tool, which hands in the `Walk`. Keyed sets: it migrates records only, so a keyed set kept raw stays raw and unlisted.
 
 ## Offers
-- `migrateRecords` (a place, a `Walk`, the owner's `SubjectReading`, a signal, and optionally the owner's `Elsewhere`) → a `MigrationReport`: `migrated` with what was indexed and what was removed as holding no subject's data, owner copies included, or `stopped` with why (`not-indexed`, `aborted`, `unavailable`, `index-unreadable`, `walk-unsteady`, `unreadable: …`, `a record keyed by another subject`).
+- `migrateRecords` (a place, a `Walk`, the owner's `SubjectReading`, a signal, and optionally the owner's `Elsewhere`) → a `MigrationReport`: `migrated` with what was indexed and what was removed: orphans, those the owner kept elsewhere first among them; or `stopped` with why (`not-indexed`, `aborted`, `unavailable`, `index-unreadable`, `walk-unsteady`, `unreadable: …`, `elsewhere: …`, `a record keyed by another subject`).
 
 ## Invariants
 - A record is migrated already only where its envelope is listed in its subject's bucket (`online-indexed`) or witnessed (`online-keyed`), never by its shape alone: a raw value of an envelope's shape is wrapped whole.
