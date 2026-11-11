@@ -394,6 +394,8 @@ it("erases a subject's consent through consent-store under any order of two inst
 					const until = new Map<string, number>();
 					/** Grants answered created, of subjects no erasure has begun for when it answered. */
 					const created = new Set<string>();
+					/** Asks answered created, of subjects no erasure has begun for: whose, and their end on the store clock. */
+					const asked = new Map<string, { readonly who: string; readonly end: number }>();
 
 					const exec = async (a: Act, set?: (id: number) => void) => {
 						const id = ++ids;
@@ -431,6 +433,11 @@ it("erases a subject's consent through consent-store under any order of two inst
 									);
 									if (saved === "erased")
 										expect(begun.has(a.subject), "an ask erased unasked").toBe(true);
+									if (saved === "created" && !begun.has(a.subject)) {
+										// The store clock stands between steps: the ask ends this far on from now.
+										const end = hostNow + shifted + a.lifetimeMs;
+										asked.set(askKey(a.subject, a.n), { who: a.subject, end });
+									}
 									return;
 								}
 								case "answer":
@@ -566,6 +573,14 @@ it("erases a subject's consent through consent-store under any order of two inst
 							expect(
 								await (d.instances[0] as (typeof d.instances)[number]).grants.read(key),
 								`${key} lost`,
+							).toBeDefined();
+						}
+						// And its asks: each created before any erasure of it reads until its own end.
+						for (const [key, { who, end }] of asked) {
+							if (begun.has(who) || hostNow + shifted >= end) continue;
+							expect(
+								await (d.instances[1] as (typeof d.instances)[number]).asks.read(key),
+								`${key} lost before its end`,
 							).toBeDefined();
 						}
 						const heldVersions = new Map<string, string | undefined>();

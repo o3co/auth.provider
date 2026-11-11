@@ -53,13 +53,13 @@ jobs:
             --arg kind "$KIND" --arg matrix "$MATRIX" \
             '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
             > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The commit-message scan and the per-commit install check walk the
           # pull request's own commits.
           fetch-depth: 0
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node }}
       - name: Get pnpm store path
@@ -69,7 +69,7 @@ jobs:
       - name: Cache pnpm store
         # A run whose evidence a release may take restores no cache: whoever saved it is not known.
         if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
@@ -82,7 +82,7 @@ jobs:
           SPEC_EVIDENCE_DIR: ${{ matrix.node == '24' && format('{0}/evidence', runner.temp) || '' }}
       - name: Keep the evidence of the tests that ran
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: evidence-checks-${{ matrix.node }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
@@ -204,9 +204,9 @@ jobs:
             --arg kind "$KIND" --arg matrix "$MATRIX" \
             '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
             > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node }}
       - name: Get pnpm store path
@@ -216,7 +216,7 @@ jobs:
       - name: Cache pnpm store
         # A run whose evidence a release may take restores no cache: whoever saved it is not known.
         if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
@@ -227,7 +227,7 @@ jobs:
           SPEC_EVIDENCE_DIR: ${{ matrix.node == '24' && format('{0}/evidence', runner.temp) || '' }}
       - name: Keep the evidence of the tests that ran
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: evidence-integration-${{ matrix.node }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
@@ -270,7 +270,7 @@ jobs:
     outputs:
       due: ${{ steps.count.outputs.due }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - id: count
@@ -361,7 +361,7 @@ jobs:
       faults: ${{ steps.plan.outputs.faults }}
       sha: ${{ steps.plan.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The daily run tests develop, where merged work waits for the next release.
           ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
@@ -369,7 +369,7 @@ jobs:
           # its paths.
           fetch-depth: 0
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - run: pnpm install --frozen-lockfile
@@ -420,7 +420,7 @@ jobs:
       # The runner context is not available in a job's env, so the legacy
       # build's directory is set here.
       - run: echo "LEGACY_DIR=$RUNNER_TEMP/legacy-0.17.0" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The commit the plan fixed: on the daily run, develop as the plan found it.
           ref: ${{ needs.conformance-plan.outputs.sha }}
@@ -428,7 +428,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - name: Get pnpm store path
@@ -438,7 +438,7 @@ jobs:
       - name: Cache pnpm store
         # A run whose evidence a release may take restores no cache: whoever saved it is not known.
         if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
@@ -446,7 +446,7 @@ jobs:
       - name: Cache the legacy build
         # A run whose evidence a release may take restores no cache: whoever saved it is not known.
         if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ runner.temp }}/legacy-0.17.0
           key: legacy-0.17.0-${{ hashFiles('modules/tooling/conformance-legacy/scripts/**', 'modules/tooling/conformance-legacy/src/dir.ts') }}
@@ -464,7 +464,7 @@ jobs:
       # so it is kept as long as their evidence, which GitHub re-runs within.
       - name: Keep it for the areas
         id: kept
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: legacy-build
           path: ${{ runner.temp }}/legacy.tgz
@@ -500,12 +500,12 @@ jobs:
       # The runner context is not available in a job's env, so the legacy
       # build's directory is set here.
       - run: echo "LEGACY_DIR=$RUNNER_TEMP/legacy-0.17.0" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The commit the plan fixed: on the daily run, develop as the plan found it.
           ref: ${{ needs.conformance-plan.outputs.sha }}
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - name: Get pnpm store path
@@ -515,7 +515,7 @@ jobs:
       - name: Cache pnpm store
         # A run whose evidence a release may take restores no cache: whoever saved it is not known.
         if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
@@ -523,7 +523,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # Only this run's own artifact, by the id legacy-build gave: no other run's can stand in.
       - name: Take the legacy build this run made
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ needs.legacy-build.outputs.legacy }}
           path: ${{ runner.temp }}/legacy-archive
@@ -543,7 +543,7 @@ jobs:
         run: pnpm --filter "${{ matrix.area }}" run conformance
       - name: Keep the evidence of the tests that ran
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: evidence-area-${{ strategy.job-index }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
@@ -573,12 +573,12 @@ jobs:
             --arg kind "$KIND" --arg matrix "$MATRIX" \
             '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
             > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The commit the plan fixed: on the daily run, develop as the plan found it.
           ref: ${{ needs.conformance-plan.outputs.sha }}
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - name: Get pnpm store path
@@ -588,7 +588,7 @@ jobs:
       - name: Cache pnpm store
         # A run whose evidence a release may take restores no cache: whoever saved it is not known.
         if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
@@ -602,7 +602,7 @@ jobs:
           SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
       - name: Keep the output of each area that failed
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: conformance-output-${{ matrix.pattern }}
           path: ${{ runner.temp }}/conformance-*/output.log
@@ -610,7 +610,7 @@ jobs:
           retention-days: 14
       - name: Keep the evidence of the tests that ran
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: evidence-pattern-${{ matrix.pattern }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
@@ -652,12 +652,12 @@ jobs:
             --arg kind "$KIND" --arg matrix "$MATRIX" --arg shard "$SHARD" \
             '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind, matrix: $matrix, shard: $shard})}' \
             > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The commit the plan fixed: on the daily run, develop as the plan found it.
           ref: ${{ needs.conformance-plan.outputs.sha }}
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - name: Get pnpm store path
@@ -667,7 +667,7 @@ jobs:
       - name: Cache pnpm store
         # A run whose evidence a release may take restores no cache: whoever saved it is not known.
         if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
@@ -725,7 +725,7 @@ jobs:
           }
       - name: Keep what each scene ran on
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fault-setups-${{ strategy.job-index }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/fault-setups
@@ -733,7 +733,7 @@ jobs:
           retention-days: 30
       - name: Keep the evidence of the tests that ran
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: evidence-faults-${{ strategy.job-index }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
@@ -758,7 +758,7 @@ jobs:
       libraries: ${{ steps.plan.outputs.libraries }}
       sha: ${{ steps.plan.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The daily run tests develop; a pull request's diff needs its base.
           ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
@@ -790,7 +790,7 @@ jobs:
           echo "oidf-scope=$scope" >> "$GITHUB_OUTPUT"
           echo "clients=$(touches "^modules/tooling/interop-clients/|$shared")" >> "$GITHUB_OUTPUT"
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - run: pnpm install --frozen-lockfile
@@ -832,27 +832,27 @@ jobs:
             --arg kind "$KIND" --arg matrix "$MATRIX" \
             '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
             > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The commit interop-due fixed: on the daily run, develop as it found it.
           ref: ${{ needs.interop-due.outputs.sha }}
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       # The JDK and Maven's cache, for the adapters Maven builds; the jars are checked against their pins.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: '21'
           cache: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) && 'maven' || '' }}
           cache-dependency-path: modules/tooling/interop-clients/adapters/*/pom.xml
       # Python for the Authlib adapter's environment, at the version it names.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version-file: modules/tooling/interop-clients/adapters/authlib/.python-version
       # Go for the adapter `go build` makes, at the toolchain its go.mod pins.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           # Its cache is on unless turned off, and a run whose evidence a release may take restores none.
           cache: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
@@ -865,7 +865,7 @@ jobs:
       - name: Cache pnpm store
         # A run whose evidence a release may take restores no cache: whoever saved it is not known.
         if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
@@ -876,7 +876,7 @@ jobs:
           SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
       - name: Keep the evidence of the tests that ran
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: evidence-library-${{ matrix.library }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
@@ -907,15 +907,15 @@ jobs:
             --arg kind "$KIND" --arg matrix "$MATRIX" \
             '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
             > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.interop-due.outputs.sha }}
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       # The suite's scripts run on a Python of their own, made from this one.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
       - name: Get pnpm store path
@@ -925,7 +925,7 @@ jobs:
       - name: Cache pnpm store
         # A run whose evidence a release may take restores no cache: whoever saved it is not known.
         if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
@@ -944,7 +944,7 @@ jobs:
           done
       - name: Keep the evidence of the tests that ran
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: evidence-oidf-plan-${{ matrix.plan }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
@@ -955,7 +955,7 @@ jobs:
       # for the review a release needs.
       - name: Keep the run's records
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: oidf-records-${{ matrix.plan }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/oidf
@@ -1032,9 +1032,9 @@ jobs:
             --arg kind "$KIND" --arg matrix "$MATRIX" \
             '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
             > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - name: Get pnpm store path
@@ -1044,7 +1044,7 @@ jobs:
       - name: Cache pnpm store
         # A run whose evidence a release may take restores no cache: whoever saved it is not known.
         if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
@@ -1068,7 +1068,7 @@ jobs:
         run: pnpm --filter @mod/conformance-recipes run external
       - name: Keep the evidence of the tests that ran
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: evidence-release-check-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
@@ -1085,17 +1085,17 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The commit the conformance and interop jobs tested, where they ran; else the event's.
           ref: ${{ needs.conformance-plan.outputs.sha || needs.interop-due.outputs.sha || '' }}
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - run: pnpm install --frozen-lockfile
       # Each job's evidence in a directory of its own, so no two reports share a path.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: evidence-*
           path: ${{ runner.temp }}/evidence
@@ -1126,7 +1126,7 @@ jobs:
           exit "$status"
       - name: Keep the table
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: compliance
           # A re-run writes over the table an earlier attempt kept: an artifact's name is the run's.
@@ -1144,9 +1144,9 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - run: pnpm install --frozen-lockfile

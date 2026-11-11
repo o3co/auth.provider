@@ -91,7 +91,7 @@ public final class Main {
             .generateCertificate(new ByteArrayInputStream(pem.getBytes(StandardCharsets.US_ASCII))));
     TrustManagerFactory trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
     trust.init(store);
-    SSLContext context = SSLContext.getInstance("TLS");
+    SSLContext context = SSLContext.getInstance("TLSv1.3"); // TLS 1.3, or 1.2: Java 21 enables no version below
     context.init(null, trust.getTrustManagers(), null);
     return context;
   }

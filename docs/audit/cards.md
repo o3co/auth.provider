@@ -476,6 +476,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `order` (`src/release/order`): in what order the release packs and publishes what `pnpm bundles` built.
   - `packing` (`src/release/packing`): the release packed, the index sealed over every bundle before its own.
   - `workflow-caches` (`src/workflow-caches`): CI's and the release's workflows held to restoring no cache in a run a release takes evidence from.
+  - `workflow-pins` (`src/workflow-pins`): every workflow, and every action this repository holds, runs another repository's code only at a commit and an image only at its digest.
 - `@mod/docker-client` (assembly, `modules/tooling/docker-client`): Runs the docker client within a time, ending it past its time, and sorts how each command fails, once, for every package that drives Docker: the release's images and the conformance base.
 - `@mod/guard` (verification, `modules/tooling/guard`): Checks the workspace's invariants, each reported by its id, place and what went over:
   - `budget` (`src/budget`): G7, how much each unit may hold and make a reader read, with G9 and G17 on what it measures.
@@ -515,9 +516,10 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `suite` (`src/suite`): the suite at its pinned version, started and stopped.
 - `@mod/ledger-fakes` (verification, `modules/tooling/ledger-fakes`): Plays the operator's HTTP ledgers for tests and conformance scenes: the user ledger, and the witness ledgers of mfa and passkeys, each speaking the wire as `ledger-wire` words it.
 - `@mod/local-registry` (assembly, `modules/tooling/local-registry`): A registry of a check's own: serves the tarballs in the directories it is given, each at the publish time the caller gives, and forwards every other name to the upstream (under its path) within a limit.
-- `@mod/references` (assembly, `modules/tooling/references`): Generates the workspace's references from what each module declares: the configuration reference, each package's `reference.conf`, the audit event reference, the route reference, the attack surface reference (internal module `attack-surface`), and the audit index's generated parts, the cards and the dependencies (internal module `audit-index`).
+- `@mod/references` (assembly, `modules/tooling/references`): Generates the workspace's references from what each module declares: the configuration reference, each package's `reference.conf`, the audit event reference, the route reference, the attack surface reference (internal module `attack-surface`), the audit index's generated parts, the cards and the dependencies (internal module `audit-index`), and the wiring reference, the wiring to compose for the module a boot refusal names (internal module `wirings`).
   - `attack-surface` (`src/attack-surface`): the attack surface reference, what reaches the provider from outside and what it reaches out to.
   - `audit-index` (`src/audit-index`): the generated parts of the audit index, the cards and what each package depends on.
+  - `wirings` (`src/wirings`): the wiring reference, which wiring to compose for the module a boot refusal names.
 - `@mod/spec-checklist` (verification, `modules/tooling/spec-checklist`): Holds the checklist of the specifications this provider implements: each requirement on a role the server takes as an item, and, for each spec's version, a ledger tying every requirement keyword in its text to items or to the reason it is not one.
   - `evidence` (`src/evidence`): what a CI run's tests proved of the checklist's items.
   - `legs` (`src/evidence/legs`): Internal module of `spec-checklist`, inside `evidence`: a run's legs, each a shard of its files or the whole of them.
