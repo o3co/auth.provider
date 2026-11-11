@@ -63,7 +63,7 @@ async function opened() {
 
 it("holds the phase once read, reads again after a blip, and reads none without a control", async () => {
 	const { state, control: c } = control("indexed");
-	const phase = subjectRecordsPhase.held(c);
+	const phase = subjectRecordsPhase.once(c);
 	state.down = true;
 	await expect(phase.read()).rejects.toThrow(Unavailable);
 	await expect(phase.read()).rejects.toThrow(Unavailable);
@@ -71,14 +71,14 @@ it("holds the phase once read, reads again after a blip, and reads none without 
 	expect(await phase.read()).toBe("indexed");
 	expect(await phase.read()).toBe("indexed");
 	expect(state.reads).toBe(3);
-	expect(await subjectRecordsPhase.held(undefined).read()).toBe("reader");
+	expect(await subjectRecordsPhase.once(undefined).read()).toBe("reader");
 });
 
 it("starts over a store's blip, unready and unavailable until the phase reads, then routes every call through it", async () => {
 	const { place } = await opened();
 	const { state, control: c } = control("indexed");
 	state.down = true;
-	const records = await phasedRecordsIn<number>(place(), subjectRecordsPhase.held(c), "w", refuse);
+	const records = await phasedRecordsIn<number>(place(), subjectRecordsPhase.once(c), "w", refuse);
 	await expect(records.ready()).rejects.toThrow(Unavailable);
 	await expect(records.create("alice", 1, "endless", "alice")).rejects.toThrow(Unavailable);
 	state.down = false;
@@ -92,7 +92,7 @@ it("starts over a store's blip, unready and unavailable until the phase reads, t
 	expect(await records.read("alice")).toBeUndefined();
 	const sets = await phasedKeyedSetsIn(
 		{ ...place(), cap: 5, clock: { now: () => Date.now() } },
-		subjectRecordsPhase.held(c),
+		subjectRecordsPhase.once(c),
 		"w",
 		refuse,
 	);
@@ -106,11 +106,11 @@ it("refuses at build where the phase reads then, and where found late keeps read
 	const { batchAcross: _, ...lacking } = s;
 	const unpaired = place(lacking as Store);
 	const { state, control: c } = control("indexed");
-	await expect(phasedRecordsIn(unpaired, subjectRecordsPhase.held(c), "w", refuse)).rejects.toThrow(
+	await expect(phasedRecordsIn(unpaired, subjectRecordsPhase.once(c), "w", refuse)).rejects.toThrow(
 		"refused at build",
 	);
 	state.down = true;
-	const records = await phasedRecordsIn<number>(unpaired, subjectRecordsPhase.held(c), "w", refuse);
+	const records = await phasedRecordsIn<number>(unpaired, subjectRecordsPhase.once(c), "w", refuse);
 	state.down = false;
 	await expect(records.ready()).rejects.toThrow(
 		"w: its store writes no records of two partitions as one",
@@ -118,4 +118,23 @@ it("refuses at build where the phase reads then, and where found late keeps read
 	await expect(records.create("alice", 1, "endless", "alice")).rejects.toThrow(Unavailable);
 	await expect(records.ready()).rejects.toThrow("two partitions");
 	expect(recorded.lines().filter((l) => l.event === "subject-records.refused")).toHaveLength(1);
+});
+
+it("erases and migrates the space at the phase read, unavailable until it reads, so the wiring never handles it", async () => {
+	const { place } = await opened();
+	const { state, control: c } = control("indexed");
+	state.down = true;
+	const records = await phasedRecordsIn<number>(place(), subjectRecordsPhase.once(c), "w", refuse);
+	const signal = new AbortController().signal;
+	await expect(records.erase("alice", signal)).rejects.toThrow(Unavailable);
+	state.down = false;
+	expect(await records.create("alice", 1, "endless", "alice")).toBe("created");
+	expect(await records.erase("alice", signal)).toMatchObject({ kind: "erased", removed: 1 });
+	expect(await records.create("alice", 2, "endless", "alice")).toBe("erased");
+	const walk = { sweep: async () => ({ keys: [], server: "one" }) };
+	expect(await records.migrate(walk, async () => ({ kind: "orphan" }), signal)).toMatchObject({
+		kind: "migrated",
+		indexed: 0,
+		removed: 0,
+	});
 });
