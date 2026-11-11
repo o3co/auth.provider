@@ -122,6 +122,7 @@ export {
 	type Target,
 } from "./together/together.ts";
 
+/** Records under a name made per space from an unguessable secret; the store never receives it. */
 export function secretRecordsIn<T extends Json>(place: Place) {
 	plainDoor(place);
 	claim(place, "secret records");
