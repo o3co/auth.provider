@@ -1,0 +1,44 @@
+name: OSV-Scanner
+
+# OSV-Scanner: the dependencies every lockfile in the repository names,
+# development ones included, checked against the OSV database. Runs on pushes
+# to develop that change a lockfile, and daily, since a new advisory arrives
+# without a change to the code (a `schedule` event runs only from the default
+# branch, main). It reports to code scanning and fails on no vulnerability; a
+# scan that writes no results fails the run. The daily `pnpm audit` in ci.yml
+# is the check that fails.
+on:
+  push:
+    branches: [develop]
+    # Every kind of lockfile the recursive scan reads, so an update to any one
+    # is scanned on the push, not the next day.
+    paths:
+      - pnpm-lock.yaml
+      - '**/go.mod'
+      - '**/go.sum'
+      - '**/requirements*.txt'
+      - '**/pom.xml'
+      - .github/workflows/osv-scanner.yml
+  schedule:
+    - cron: '7 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: OSV-Scanner
+    permissions:
+      contents: read
+      # Reads the run for the SARIF upload.
+      actions: read
+      # Uploads the SARIF to code scanning.
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+    with:
+      # Every lockfile under the checkout, the .gitignore'd ones aside.
+      scan-args: |-
+        -r
+        ./
+      fail-on-vuln: false
