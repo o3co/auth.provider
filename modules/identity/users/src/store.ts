@@ -100,7 +100,7 @@ export type LinkStore = SubjectRecordStore<StoredLink> & {
 	/**
 	 * Removes the record where `when`, given the record held, answers true, in the write that removes
 	 * it: `removed`, `left` (it answered false) or `missing`. Offered with `erase` and `migrate`, or
-	 * none of them; without it, an unlink leaves a record holding no subject.
+	 * none of them; required in 0.22. A store without it has unlink release a link to no subject.
 	 */
 	readonly remove?: (
 		key: string,

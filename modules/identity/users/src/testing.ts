@@ -431,9 +431,9 @@ export interface UsersStorePlace<T> {
 
 /**
  * What users needs from any implementation of one of its store interfaces: records kept whole and
- * once, changed only from what they hold, never ended, through faults.
+ * once, changed only from what they hold, never ended, through faults. Each record is saved for a
+ * subject named as its key: a store keyed by its subject takes that, as one that is not does.
  */
-/** Each record is saved for a subject named as its key: a store keyed by its subject takes that, as one that is not does. */
 function recordTests<T>(open: () => Promise<UsersStorePlace<T>>): void {
 	let n = 0;
 	const fresh = () => `k-${++n}-${Math.random().toString(36).slice(2)}`;
