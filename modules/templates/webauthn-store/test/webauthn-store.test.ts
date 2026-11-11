@@ -25,15 +25,15 @@ const opened = async () => {
 };
 
 /**
- * One race at a time, run before the next batch across, whichever of the two spaces it starts with:
- * a batch across is told by its first key's space. Each space's hook is armed once and shared, so one
- * left armed by an earlier race runs the next race, never a stale one.
+ * One race at a time, run before the next batch, across or within one partition, whichever of the
+ * two spaces it starts with: a batch is told by its first key's space. Each hook is armed once and
+ * shared, so one left armed by an earlier race runs the next race, never a stale one.
  */
 function racing(simulated: ReturnType<typeof simulatedStore>) {
 	let pending: (() => Promise<void>) | undefined;
 	const armed = new Set<string>();
-	const dispatch = (space: string) => async () => {
-		armed.delete(space);
+	const dispatch = (hook: string) => async () => {
+		armed.delete(hook);
 		const race = pending;
 		pending = undefined;
 		await race?.();
@@ -41,9 +41,12 @@ function racing(simulated: ReturnType<typeof simulatedStore>) {
 	return (race: () => Promise<void>) => {
 		pending = race;
 		for (const space of ["webauthn-store.credentials", "webauthn-store.subjects"]) {
-			if (armed.has(space)) continue;
-			armed.add(space);
-			simulated.beforeNext("batchAcross", space, dispatch(space));
+			for (const operation of ["batch", "batchAcross"] as const) {
+				const hook = `${operation} ${space}`;
+				if (armed.has(hook)) continue;
+				armed.add(hook);
+				simulated.beforeNext(operation, space, dispatch(hook));
+			}
 		}
 	};
 }

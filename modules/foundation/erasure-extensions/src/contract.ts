@@ -31,6 +31,23 @@ export type MigrationReport = ReportMade &
 		| { readonly kind: "stopped"; readonly space: string; readonly reason: string }
 	);
 
+/**
+ * Whose a record written before indexing is, as its owner reads it: a subject's; an orphan, which
+ * the owner proves has none, and which a migration removes; or unreadable, which proves nothing,
+ * so the migration stops that space with `reason` and removes nothing.
+ */
+export type SubjectOf =
+	| { readonly kind: "subject"; readonly subject: string }
+	| { readonly kind: "orphan" }
+	| { readonly kind: "unreadable"; readonly reason: string };
+
+/**
+ * The owner's reading of a record's subject from its key and its value as stored, so the store
+ * holding it never opens the owner's value. It writes nothing; a lookup it makes may fail, and a
+ * failure is `unreadable`, never `orphan`.
+ */
+export type SubjectReading = (key: string, value: unknown) => Promise<SubjectOf>;
+
 /** An eraser's answer: its spaces' reports, and the logout notices it could not tell were delivered. */
 export interface Erased {
 	readonly reports: readonly SpaceReport[];
@@ -60,6 +77,14 @@ export interface Walk {
  */
 export interface Eraser {
 	readonly name: string;
+	/**
+	 * Whether every space this eraser erases is held by a store with the erase ports: a statement
+	 * of the stores behind it, known at build, not of a run. One that is not answers empty reports.
+	 * Required in 0.20; optional, read as true, in 0.22; removed after.
+	 */
+	readonly erasable: boolean;
+	/** The erasers, by name, whose runs this one's follow: for account erasure to order them by. */
+	readonly after?: readonly string[];
 	/** While the provider serves: writes the subject's tombstones and removes its records. */
 	online(subject: string, signal: AbortSignal): Promise<Erased>;
 	/** Under the maintenance key: the same for each subject, walking where an index cannot reach. */

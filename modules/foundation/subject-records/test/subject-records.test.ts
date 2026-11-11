@@ -105,7 +105,7 @@ it("opens an envelope by its exact shape alone, and refuses an owner's value hol
 it("writes raw, and no index, while records are only read as they were", async () => {
 	const { build, raw, indexOf } = await opened_();
 	const records = build<number>("reader");
-	expect(await records.create("k", "alice", 1, 60_000)).toBe("created");
+	expect(await records.create("k", 1, 60_000, "alice")).toBe("created");
 	expect(await raw("k")).toBe(1);
 	expect(await indexOf("alice")).toEqual({});
 });
@@ -113,8 +113,8 @@ it("writes raw, and no index, while records are only read as they were", async (
 it("keeps a record in its subject's envelope and its key in the subject's bucket, no subject in a key", async () => {
 	const { build, raw, indexOf } = await opened_();
 	const records = build<{ n: number }>("indexed");
-	expect(await records.create("a", "alice", { n: 1 }, 60_000)).toBe("created");
-	expect(await records.create("a", "alice", { n: 2 }, 60_000)).toBe("exists");
+	expect(await records.create("a", { n: 1 }, 60_000, "alice")).toBe("created");
+	expect(await records.create("a", { n: 2 }, 60_000, "alice")).toBe("exists");
 	expect(await raw("a")).toEqual(envelope("alice", { n: 1 }));
 	expect(await records.read("a")).toEqual({ n: 1 });
 	expect(await indexOf("alice")).toEqual({ [bucketOf("a")]: [["a", "record"]] });
@@ -125,7 +125,7 @@ it("puts every key a subject's racing creates make into its index", async () => 
 	const { build, indexOf } = await opened_();
 	const records = build<number>("indexed");
 	const keys = Array.from({ length: 12 }, (_, i) => `k${i}`);
-	expect(await Promise.all(keys.map((k) => records.create(k, "alice", 1, 60_000)))).toEqual(
+	expect(await Promise.all(keys.map((k) => records.create(k, 1, 60_000, "alice")))).toEqual(
 		keys.map(() => "created"),
 	);
 	const listed = (Object.values(await indexOf("alice")).flat() as string[][]).map(([key]) => key);
@@ -135,22 +135,22 @@ it("puts every key a subject's racing creates make into its index", async () => 
 it("writes nothing past a subject's tombstone: a create answers erased, a change nothing, while a removal goes", async () => {
 	const { build, raw, indexOf, erase } = await opened_();
 	const records = build<number>("indexed");
-	await records.create("kept", "alice", 1, 60_000);
+	await records.create("kept", 1, 60_000, "alice");
 	await erase("alice");
-	expect(await records.create("new", "alice", 1, 60_000)).toBe("erased");
+	expect(await records.create("new", 1, 60_000, "alice")).toBe("erased");
 	expect(await raw("new")).toBeUndefined();
 	expect(await records.change("kept", (n) => ({ value: n + 1 }))).toBeUndefined();
 	expect(await raw("kept")).toEqual(envelope("alice", 1));
 	await records.remove("kept");
 	expect(await raw("kept")).toBeUndefined();
 	expect(Object.keys(await indexOf("alice"))).toEqual(["tomb"]);
-	expect(await records.create("other", "bob", 1, 60_000)).toBe("created");
+	expect(await records.create("other", 1, 60_000, "bob")).toBe("created");
 });
 
 it("changes a record in its envelope from its attempt, leaving the index as it was", async () => {
 	const { build, raw, indexOf } = await opened_();
 	const records = build<number>("indexed");
-	await records.create("a", "alice", 1, 60_000);
+	await records.create("a", 1, 60_000, "alice");
 	const before = await indexOf("alice");
 	let deadline = 0;
 	const changed = await records.change("a", (n, attempt) => {
@@ -166,8 +166,8 @@ it("changes a record in its envelope from its attempt, leaving the index as it w
 it("removes a key from its bucket with its record, and the bucket with its last key", async () => {
 	const { build, indexOf } = await opened_();
 	const records = build<number>("indexed");
-	await records.create("a", "alice", 1, 60_000);
-	await records.create("b", "alice", 1, 60_000);
+	await records.create("a", 1, 60_000, "alice");
+	await records.create("b", 1, 60_000, "alice");
 	await records.remove("a");
 	expect(Object.values(await indexOf("alice")).flat()).toEqual([["b", "record"]]);
 	await records.remove("b");
@@ -184,15 +184,26 @@ it("changes a record kept raw, from before records were indexed, raw", async () 
 	expect(await raw("old")).toBe(2);
 });
 
-it("keeps only the tombstone for records keyed by their subject itself: no bucket, no other key, and nothing past it", async () => {
-	const { build, indexOf, erase } = await opened_();
+it("keeps for records keyed by their subject itself only the witness and the tombstone: no bucket, no other key, and nothing past it", async () => {
+	const { s, build, indexOf, erase } = await opened_();
 	const records = build<number>("indexed", keyedSpace);
-	expect(await records.create("alice", "alice", 1, "endless")).toBe("created");
-	await expect(records.create("s-bob", "bob", 1, "endless")).rejects.toThrow(TypeError);
-	expect(await indexOf("alice", keyedSpace)).toEqual({});
+	expect(await records.create("alice", 1, "endless", "alice")).toBe("created");
+	await expect(records.create("s-bob", 1, "endless", "bob")).rejects.toThrow(TypeError);
+	// The envelope's witness is written with it: a migration tells it from a raw value of its shape.
+	expect(await indexOf("alice", keyedSpace)).toEqual({ "witness.record": 1 });
+	// An envelope with no witness gets one from the change that rewrites it.
+	await s.putIfAbsent(
+		{ space: keyedSpace, partition: "carol", name: "record" },
+		envelope("carol", 1),
+		{
+			expiry: { kind: "never" },
+		},
+	);
+	expect(await records.change("carol", (n) => ({ value: n + 1 }))).toEqual({ before: 1, after: 2 });
+	expect(await indexOf("carol", keyedSpace)).toEqual({ "witness.record": 1 });
 	await erase("alice", keyedSpace);
 	await records.remove("alice");
-	expect(await records.create("alice", "alice", 1, "endless")).toBe("erased");
+	expect(await records.create("alice", 1, "endless", "alice")).toBe("erased");
 });
 
 it("refuses to build without a batch across, over an index not the space's, or a space of another category", async () => {

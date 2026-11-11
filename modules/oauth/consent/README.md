@@ -13,11 +13,11 @@
 ## Offers
 - `grantedFor`: the range a subject agreed to that counts for a client now, from a confirmed read.
 - `coversFor`: whether a grant that counts holds the range; an empty range still needs one.
-- `grantFor`: widens the grant to the union, or replaces one that does not count, answering after a confirmed write.
+- `grantFor`: widens the grant to the union, or replaces one that does not count, answering once the write is confirmed. For an erased subject it is unavailable, for good, as the subject's tombstone stays: a stopgap giving `Unavailable` a second, lasting meaning; consent gains a refusal answer, its callers switch, and the throw goes.
 - A grant counts for a client the operator registered whatever it holds under, and for a client from another source only under its section's `under` now (`grants`' card).
 - `askFor`: parks a request for the session's subject and a client and answers the consent page URL with a `challenge` query parameter; only while `asking`, which a set page makes true. The pending consent holds a client's `under`.
 - `askFor` refuses with `TypeError` a destination that is not an https URL on the `http` public origin, or holds whitespace or a control character.
-- `askFor` refuses with `TypeError` a range entry that is empty, repeated, or holds whitespace or a control character.
+- `askFor` refuses with `TypeError` a range entry that is empty, repeated, or holds whitespace or a control character; it is unavailable where the ask store answers the subject erased, reached only in a race with its erasure, as an erased subject's sessions end: the same stopgap and exit as `grantFor`'s.
 - Routes `GET` and `POST /oauth/consent`, answering the consent page (`page`'s card).
 - Audit events, with the subject: declared in `./audit-events`, listed in the audit event reference.
 - Client metadata section `consent`: `first-party` (default false), `name` (trimmed, cut to 200 characters), `uri` (an https URL), `host` and `under`.
@@ -25,12 +25,13 @@
 - `isFirstParty`: true only for a client the operator registered with `first-party` set; every start warns `consent.first_party` for each such client.
 - `canBeAgreed`: whether a grant can ever count for a client: false for one from another source whose section says no `under`, which no answer could cover.
 - Operator section: `page` (an https URL without userinfo or fragment, or plain http on a loopback host outside production, as `authorize`'s login page; unset by default, so nobody is asked) and `challenge-lifetime` (written with its unit, `1m` to `1h` in whole seconds, default `10m`).
-- Store interfaces for grants and asks: save once, read, and update from what the record holds.
+- Store interfaces for grants and asks: save once for its subject (last: `created`, `exists`, or `erased`, taken as refused), read, and update from what the record holds; optional `erase` and `migrate` (a `Walk`, consent's `SubjectReading`), required in 0.22. `askLifetimeMaxMs` (1 hour) bounds an ask, for a Store that fences asks by it.
+- The eraser `consent`, contributed to `erasure-extensions`' `erasers`, as its Stores' spaces' `erasedBy` name it: grants erased and asks fenced through the Stores' `erase`, a window doing the same for each subject, and `migrate` reading a grant's subject from its key (never an orphan); `erasable` only where both Stores offer `erase` and `migrate`, empty reports where not. Its build takes only its Stores, collecting no `probes`.
 - `./testing`: configuration builders, both store interfaces on `records` stand-ins, and the store contract tests.
 
 ## Invariants
 - A grant is to the client for the scopes: it holds at every audience the client may be issued, and the page is not told the audiences.
-- A grant has no end of its own, and the user has no way to withdraw it. A client gone keeps it for when it is back; a subject's revocation ends what the subject holds, never the grant, so the next login is not asked again.
+- A grant has no end of its own, and the user has no way to withdraw it. A client gone keeps it for when it is back; a subject's revocation ends what the subject holds, never the grant, so the next login is not asked again. Erasing the subject removes its grants (the eraser `consent`).
 - For a client from another source, a grant counts only under what its source says of it now: while it says another value the user is asked again, and a value said again counts again.
 - A deadline counts on `kernel`'s clock, whatever the store still holds.
 - Without a public origin, the module refuses to start.
@@ -42,7 +43,7 @@
 - The ask store needs the same except confirmed reads, and must not keep the key in clear.
 
 ## Depends on
-- `kernel`, `http`, `url-setting`, `request-source`, `session`, `csrf`, `clients`, `client-documents`, `redirect-uris`, `audit`
+- `kernel`, `http`, `url-setting`, `request-source`, `session`, `csrf`, `clients`, `client-documents`, `redirect-uris`, `audit`, `erasure-extensions` (the reports and the migration's reading)
 
 ## Vocabulary
 - Consent range: a set of strings from the caller; a grant widens by their union, and under another `under` starts anew.

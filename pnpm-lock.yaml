@@ -1421,6 +1421,9 @@ importers:
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
@@ -4082,12 +4085,12 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/records':
-        specifier: workspace:*
-        version: link:../../foundation/records
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
 
   modules/templates/device-grant-store:
     dependencies:

@@ -98,6 +98,14 @@ export function indexOver(place: Place, space: Space, index: Space) {
 			place: indexPlace,
 			key: `${subjects(subject)}.m${createHash("sha256").update(key).digest("hex")[0]}`,
 		}),
+		/**
+		 * The witness that subject-records wrote the envelope of the subject's record or set in an
+		 * `online-keyed` space: `<part>.witness.record` or `<part>.witness.set`, holding `witnessed`.
+		 */
+		witnessOf: (subject: string, name: "record" | "set"): Target => ({
+			place: indexPlace,
+			key: `${subjects(subject)}.witness.${name}`,
+		}),
 		/** An entry of the index by its partition, as a scan of the index space finds it. */
 		entryAt: (partition: string): Target => ({ place: indexPlace, key: partition }),
 		/** Every bucket of a subject, as erasing it reads them. */
@@ -105,6 +113,9 @@ export function indexOver(place: Place, space: Space, index: Space) {
 			bucketNames.map((name) => ({ place: indexPlace, key: `${subjects(subject)}.${name}` })),
 	};
 }
+
+/** What a witness holds, fixed: a later version reads it as written. */
+export const witnessed: Next<Json> = { value: 1, lifetimeMs: "endless" };
 
 /** Whether records are only read as they were (`reader`) or kept indexed by their subject (`indexed`). */
 export type Phase = "reader" | "indexed";
@@ -115,7 +126,7 @@ export interface SubjectPlace extends Place {
 	readonly phase: Phase;
 }
 
-/** The checks every builder makes at build: a batch across, the space's own index, a category it writes. */
+/** The checks every builder makes at build: a batch across once indexed, the space's own index, a category it writes. */
 export function checkedSubjectPlace(
 	place: SubjectPlace,
 	categories: readonly string[],
@@ -123,7 +134,8 @@ export function checkedSubjectPlace(
 	refuse: (where: string, reason: string) => never,
 ) {
 	const category = place.space.subjectData;
-	if (!changesTogether(place.store)) {
+	// Only an indexed write spans two partitions (the record, its bucket, the tombstone it watches).
+	if (place.phase === "indexed" && !changesTogether(place.store)) {
 		refuse(where, "its store writes no records of two partitions as one");
 	}
 	if (category === undefined || !categories.includes(category)) {

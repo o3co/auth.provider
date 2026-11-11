@@ -1,5 +1,5 @@
 import { Unavailable } from "@mod/kernel";
-import type { BatchWrite, Json, Key, Store } from "@mod/store";
+import type { BatchWrite, Condition, Json, Key, Store, WriteOptions } from "@mod/store";
 import {
 	type Attempt,
 	again,
@@ -98,12 +98,28 @@ export interface ChangedRecord<T = Json> {
 }
 
 /**
+ * The write an attempt sends, chosen from the keys it sends alone (conditions and writes, the
+ * settled mark among them): the store's `batch` where they share one space and partition, its
+ * batch across where they span two. A resend sends the same keys, so it takes the same write.
+ */
+function writtenBy(target: Store, conditions: readonly Condition[], writes: readonly BatchWrite[]) {
+	const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
+	const one = new Set(keys.map((k) => JSON.stringify([k.space.name, k.partition]))).size === 1;
+	if (one)
+		return (marked: Omit<WriteOptions, "expiry">) => target.batch(conditions, writes, marked);
+	const batchAcross = target.batchAcross?.bind(target);
+	if (!batchAcross) throw new Error("the store writes no records of two partitions as one");
+	return (marked: Omit<WriteOptions, "expiry">) => batchAcross(conditions, writes, marked);
+}
+
+/**
  * Changes records as one: the targets, and the records `watch` names from what they hold. `decide`
  * runs on what was read and answers the next of each, by naming (the targets', then the watched
  * ones'); everything read is held by a condition of the one write, so another writer of any of them
  * first makes it read all again, `watch` too, and decide again; it must be pure. A record named
- * twice is read once, held once, and written from one naming at most. Every place is on one store
- * that writes as one (`changesTogether`); the records sit in spaces of one guarantee.
+ * twice is read once, held once, and written from one naming at most. Every place is on one store;
+ * an attempt whose keys span two partitions needs one that writes across them (`changesTogether`),
+ * one within a partition does not. The records sit in spaces of one guarantee.
  */
 export async function changeRecords(p: {
 	readonly targets: readonly Target[];
@@ -121,8 +137,6 @@ export async function changeRecords(p: {
 	const [anchor] = p.targets;
 	if (!anchor) throw new Error("records changed together name one at least");
 	const target = anchor.place.store;
-	const batchAcross = target.batchAcross?.bind(target);
-	if (!batchAcross) throw new Error("the store writes no records of two partitions as one");
 	// A space is named one way in one call: plainly or by secret. A record and a set never share a name.
 	const namedAs = new Map<string, "records" | "secret records">();
 	const checked = (one: Target) => {
@@ -195,7 +209,7 @@ export async function changeRecords(p: {
 							expiry: { kind: "after", ms: 1 },
 						} as const,
 					];
-		const written = await untilAnswered(() => batchAcross(conditions, sent, marked));
+		const written = await untilAnswered(() => writtenBy(target, conditions, sent)(marked));
 		if (written.kind === "late" || written.kind === "reused") throw new Unavailable("records");
 		if (written.kind === "conflict") return again;
 		const changedAt = (at: number): ChangedRecord => {

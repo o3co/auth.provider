@@ -8,7 +8,8 @@
 
 ## Offers
 - The extension point `erasers`, keyed by an eraser's name, which a space's `erasedBy` gives.
-- `Eraser`: `online` (one subject, while serving), `window` (subjects, under the maintenance key) and `migrate` (once, under the maintenance key), each taking an `AbortSignal`; `window` and `migrate` take a `Walk` the tool hands in.
+- `Eraser`: `online` (one subject, while serving), `window` (subjects, under the maintenance key) and `migrate` (once, under the maintenance key), each taking an `AbortSignal`; `window` and `migrate` take a `Walk` the tool hands in. `erasable` (required in 0.20, optional and read as true in 0.22, removed after): whether every space it erases is held by a store with the erase ports. `after`: the erasers, by name, it follows.
+- `SubjectOf` (`subject`, `orphan`, `unreadable` with why) and `SubjectReading`: an owner's reading of a record's subject from its key and stored value, for a migration.
 - `Erased`: an eraser's `SpaceReport`s and `logoutGaps`, the logout notices it could not tell were delivered, 0 for an eraser with no notices to lose.
 - `SpaceReport` (`erased`, `fenced` with its `until`, `stopped` with why) and `MigrationReport` (`migrated` with what was indexed and removed, `stopped`), each naming its space by its declared name.
 - `Walk`: a walk of a space by name, removing what expired, each page naming its server.
@@ -19,6 +20,9 @@
 - A report is made by `subject-records` alone, which erases and so can tell what it wrote; an eraser passes reports on and never writes one. The types carry `ReportMade`, a brand only a visible cast gives.
 - An `erased` or `fenced` report means the subject's tombstone is written in that space.
 - A run cut short answers `stopped` (`aborted`) for each space it did not finish.
+- An eraser that is not `erasable` answers empty reports: the field carries the fact, known at build.
+- An eraser's build collects no `probes`, directly or through what it takes: a module that collects `erasers` may be one a probe takes.
+- Only `orphan` lets a migration remove a record; `unreadable`, a failed lookup among them, stops the space and removes nothing.
 - Spaces are named by their declared names, so nothing here depends on `store`.
 - `enabled` holds `true` and counts in any epoch it was written in; only its presence is read, so no value written later weakens it.
 

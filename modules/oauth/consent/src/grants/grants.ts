@@ -1,4 +1,5 @@
 import type { Client } from "@mod/clients";
+import type { SubjectReading } from "@mod/erasure-extensions";
 import { type BuildContext, Unavailable } from "@mod/kernel";
 import { underOf } from "../client-section.ts";
 import { type GrantStore, grantStore, type StoredGrant } from "../store.ts";
@@ -34,6 +35,29 @@ const written = (range: readonly string[], under: string | undefined) =>
 const grantKey = (clientId: string, subject: string) => JSON.stringify([subject, clientId]);
 
 /**
+ * A grant's subject, from its key (`[subject, clientId]`, as `grantKey` makes it): consent's reading, so the
+ * Store never opens a grant. A key in another shape proves nothing: unreadable, never an orphan,
+ * as consent cannot tell an account gone from one it does not hold.
+ */
+export const grantSubjectOf: SubjectReading = async (key) => {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(key);
+	} catch {
+		return { kind: "unreadable", reason: "a grant key that is no JSON" };
+	}
+	if (
+		Array.isArray(parsed) &&
+		parsed.length === 2 &&
+		typeof parsed[0] === "string" &&
+		typeof parsed[1] === "string"
+	) {
+		return { kind: "subject", subject: parsed[0] };
+	}
+	return { kind: "unreadable", reason: "a grant key of another shape" };
+};
+
+/**
  * Whether a grant held counts for the client now: for one the operator registered, whatever it is
  * under; for any other, only under what the client's source says now, which it must say.
  */
@@ -58,30 +82,40 @@ export function grantsWith({ store }: GrantsParts) {
 		const known = new Set(held.range);
 		return range.every((r) => known.has(r));
 	};
-	/** Under what the agreement was shown under; a range under another description is not kept beside it. */
+	/**
+	 * Under what the agreement was shown under; a range under another description is not kept beside
+	 * it. `refused` where the Store answers the subject erased: nothing kept, never read as held.
+	 */
 	const keep = async (
 		clientId: string,
 		subject: string,
 		range: readonly string[],
 		under: string | undefined,
-	) => {
+	): Promise<"kept" | "refused"> => {
 		const key = grantKey(clientId, subject);
 		const change = (record: StoredGrant) => {
 			const held = heldIn(record);
 			const stays = under === undefined || held?.under === under ? (held?.range ?? []) : [];
 			return { value: written([...stays, ...range], under) };
 		};
-		if (await store.update(key, change)) return;
-		if ((await store.save(key, written(range, under), "endless")) === "created") return;
+		if (await store.update(key, change)) return "kept";
+		const saved = await store.save(key, written(range, under), "endless", subject);
+		if (saved === "created") return "kept";
+		if (saved === "erased") return "refused";
 		// Another request saved it first: change what it saved.
 		if (!(await store.update(key, change))) throw new Unavailable("consent");
+		return "kept";
 	};
 	return {
 		rangeFor,
 		covers,
 		keep,
-		grant: (client: Client, subject: string, range: readonly string[]) =>
-			keep(client.id, subject, range, underOf(client)),
+		/** `grantFor`: unavailable for an erased subject, the stopgap the card states. */
+		grant: async (client: Client, subject: string, range: readonly string[]) => {
+			if ((await keep(client.id, subject, range, underOf(client))) === "refused") {
+				throw new Unavailable("consent");
+			}
+		},
 	};
 }
 

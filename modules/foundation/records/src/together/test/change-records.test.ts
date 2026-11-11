@@ -138,7 +138,8 @@ it("reads the watch again after a race on what it watched, and holds what nothin
 	expect(await itemRecords.read("e2")).toEqual({ owner: "eve", gone: true });
 	// Deciding to write nothing still holds what was read: a race first makes it decide again.
 	await itemRecords.create("e3", { owner: "fay" }, "endless");
-	simulated.beforeNext("batchAcross", items.name, async () => {
+	// One record in one partition: the store's batch writes it.
+	simulated.beforeNext("batch", items.name, async () => {
 		await itemRecords.change("e3", () => ({ value: { owner: "gus" } }));
 	});
 	const seen: unknown[] = [];
@@ -178,15 +179,15 @@ it("reads a record named twice once, writing it from one naming, and refuses two
 	const { s, itemPlace, itemRecords, at } = await open();
 	await itemRecords.create("j1", { owner: "jo" }, "endless");
 	const sent: number[] = [];
-	const batchAcross = s.batchAcross?.bind(s);
+	const batch = s.batch.bind(s);
 	const counting: Place = {
 		...itemPlace,
 		store: new Proxy(s, {
 			get: (target, name) =>
-				name === "batchAcross"
-					? (...args: Parameters<NonNullable<Store["batchAcross"]>>) => {
+				name === "batch"
+					? (...args: Parameters<Store["batch"]>) => {
 							sent.push(args[0].length);
-							return batchAcross?.(...args);
+							return batch(...args);
 						}
 					: Reflect.get(target, name),
 		}),
@@ -216,6 +217,106 @@ it("reads a record named twice once, writing it from one naming, and refuses two
 		changeRecords({ targets: [at(itemPlace, "a"), at(itemPlace, "a")], decide: () => ({}) }),
 	).rejects.toThrow();
 	await expect(changeRecords({ targets: [], decide: () => ({}) })).rejects.toThrow();
+});
+
+/** The store as one without a batch across, its calls by name. */
+const without = (s: Store, calls: string[]): Store => {
+	const { batchAcross: _, ...lacking } = s;
+	return new Proxy(lacking as Store, {
+		get: (target, name) => {
+			const got = Reflect.get(target, name);
+			if (typeof got !== "function") return got;
+			return (...args: unknown[]) => {
+				calls.push(String(name));
+				return got.apply(target, args);
+			};
+		},
+	});
+};
+
+it("writes a change held in one partition through the store's batch, a store without a batch across too", async () => {
+	const { simulated, s, itemPlace, itemRecords, at } = await open();
+	const calls: string[] = [];
+	const lone: Place = { ...itemPlace, store: without(s, calls) };
+	await itemRecords.create("p1", { owner: "pat" }, "endless");
+	// Another writer first: the condition fails, so it reads again and decides again.
+	simulated.beforeNext("batch", items.name, async () => {
+		await itemRecords.change("p1", () => ({ value: { owner: "quinn" } }));
+	});
+	const seen: unknown[] = [];
+	const changed = await changeRecords({
+		targets: [at(lone, "p1")],
+		watch: () => [],
+		decide: ([item]) => {
+			seen.push(item);
+			return { targets: [{ value: { ...(item as Item), gone: true as const } }] };
+		},
+	});
+	expect(seen).toEqual([{ owner: "pat" }, { owner: "quinn" }]);
+	expect(changed.targets).toEqual([
+		{ before: { owner: "quinn" }, after: { owner: "quinn", gone: true } },
+	]);
+	expect(calls.filter((c) => c === "batch")).toHaveLength(2);
+	// A record created, and one removed, alike.
+	await changeRecords({
+		targets: [at(lone, "p2")],
+		decide: () => ({ targets: [{ value: { owner: "rae" } }] }),
+	});
+	await changeRecords({
+		targets: [at(lone, "p1")],
+		decide: () => ({ targets: [{ remove: true }] }),
+	});
+	expect([await itemRecords.read("p2"), await itemRecords.read("p1")]).toEqual([
+		{ owner: "rae" },
+		undefined,
+	]);
+});
+
+it("takes effect once where a one-partition answer was lost and is sent again under its mark", async () => {
+	const { simulated, itemPlace, itemRecords, at } = await open();
+	await itemRecords.create("r1", { owner: "sam" }, "endless");
+	simulated.loseNextReply();
+	let decisions = 0;
+	const changed = await changeRecords({
+		targets: [at(itemPlace, "r1")],
+		decide: () => {
+			decisions += 1;
+			return { targets: [{ value: { owner: "sam", gone: true as const } }] };
+		},
+	});
+	expect(decisions).toBe(1);
+	expect(changed.targets).toEqual([
+		{ before: { owner: "sam" }, after: { owner: "sam", gone: true } },
+	]);
+});
+
+it("chooses each attempt's write by the partitions it sends, and throws where a store without a batch across is sent two", async () => {
+	const { simulated, s, listPlace, itemPlace, listRecords, itemRecords, at } = await open();
+	await listRecords.create("tia", { ids: [] }, "endless");
+	await itemRecords.create("t1", { owner: "tia" }, "endless");
+	// The first attempt watches nothing; a race makes the list name an item, so the next sends two.
+	simulated.beforeNext("batch", lists.name, async () => {
+		await listRecords.change("tia", () => ({ value: { ids: ["t1"] } }));
+	});
+	const { watch, decide } = clearing("tia");
+	await changeRecords({
+		targets: [at(listPlace, "tia")],
+		watch: (read) => watch(read).map((key) => at(itemPlace, key)),
+		decide,
+	});
+	expect(await itemRecords.read("t1")).toEqual({ owner: "tia", gone: true });
+	// The same partition string in another space is another partition: two, so a batch across.
+	const lacking = without(s, []);
+	const lone = (place: Place): Place => ({ ...place, store: lacking });
+	await listRecords.create("uma", { ids: ["uma"] }, "endless");
+	await itemRecords.create("uma", { owner: "uma" }, "endless");
+	const across = changeRecords({
+		targets: [at(lone(listPlace), "uma")],
+		watch: (read) => watch(read).map((key) => at(lone(itemPlace), key)),
+		decide: clearing("uma").decide,
+	});
+	await expect(across).rejects.toThrow("the store writes no records of two partitions as one");
+	expect(await itemRecords.read("uma")).toEqual({ owner: "uma" });
 });
 
 it("pairs records of two places to change as one, apart by place, and refuses through the caller where the store cannot", async () => {
