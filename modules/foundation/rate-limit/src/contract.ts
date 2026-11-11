@@ -1,5 +1,5 @@
 import { policy } from "@mod/http";
-import { contract } from "@mod/kernel";
+import { contract, extensionPoint } from "@mod/kernel";
 
 export interface Window {
 	readonly limit: number;
@@ -96,9 +96,9 @@ export type Released =
 	| { readonly kind: "unchanged"; readonly fixedAt?: number };
 
 export interface Lockouts {
-	/** Throws Unavailable when it cannot tell. */
+	/** Throws Unavailable when it cannot tell, and on a dropped key. */
 	check(name: string, key: string, policy: LockoutPolicy): Promise<Lockout>;
-	/** Records a failure, always writing; answers the state it leaves. */
+	/** Records a failure, always writing but on a dropped key, which is unavailable; answers the state it leaves. */
 	failed(name: string, key: string, policy: LockoutPolicy): Promise<Lockout>;
 	/**
 	 * Takes one attempt before a guess is judged, as one write: a key already held stays held and
@@ -109,8 +109,12 @@ export interface Lockouts {
 	succeeded(name: string, key: string, policy: LockoutPolicy, reservation?: number): Promise<void>;
 	/** Hands back an attempt reserved for a guess that was never judged; the run goes on without it. */
 	abandoned(name: string, key: string, policy: LockoutPolicy, reservation: number): Promise<void>;
+	/** Throws Unavailable on a dropped key. */
 	standing(name: string, key: string, policy: LockoutPolicy): Promise<Standing>;
-	/** Releases in one write, judged when written, advancing the generation; the caller decides when that is allowed. */
+	/**
+	 * Releases in one write, judged when written, advancing the generation; the caller decides when
+	 * that is allowed. A dropped key is unavailable and never released, `whole` included.
+	 */
 	releaseUnder(
 		name: string,
 		key: string,
@@ -120,6 +124,17 @@ export interface Lockouts {
 }
 
 export const lockouts = contract<Lockouts>("rate-limit.lockouts");
+
+/** A lockout name whose keys are subject ids: erasing a subject drops its key under each one. */
+export interface SubjectLockout {
+	readonly name: string;
+}
+
+/** Contributed by the module locking by subject; a name contributed twice refuses the boot. */
+export const subjectLockouts = extensionPoint<SubjectLockout>("rate-limit.subject-lockouts", {
+	multiplicity: "keyed",
+	keyOf: (lockout) => lockout.name,
+});
 
 /** Why a policy cannot be used, or nothing. */
 export function lockoutProblem(policy: LockoutPolicy): string | undefined {

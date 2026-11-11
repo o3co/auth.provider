@@ -122,7 +122,7 @@ flowchart LR
 | `@mod/metrics` | foundation | `@mod/kernel` |
 | `@mod/outbound` | foundation | `@mod/address-reach`, `@mod/host-entries`, `@mod/kernel`, `@mod/outbound-policy`, `@mod/tls-options`, `@mod/url-setting`, `@mod/x509-path` |
 | `@mod/outbound-policy` | foundation | `@mod/address-reach`, `@mod/host-entries`, `@mod/kernel`, `@mod/url-setting` |
-| `@mod/rate-limit` | foundation | `@mod/audit`, `@mod/http`, `@mod/http-server`, `@mod/kernel`, `@mod/metrics`, `@mod/request-source`, `@mod/store` |
+| `@mod/rate-limit` | foundation | `@mod/audit`, `@mod/erasure-extensions`, `@mod/http`, `@mod/http-server`, `@mod/kernel`, `@mod/metrics`, `@mod/request-source`, `@mod/store` |
 | `@mod/records` | capability | `@mod/kernel`, `@mod/store` |
 | `@mod/request-source` | foundation | `@mod/address-reach`, `@mod/client-certificate`, `@mod/kernel` |
 | `@mod/seal` | foundation | `@mod/kernel`, `@mod/keys` |

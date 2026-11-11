@@ -1,8 +1,11 @@
 import { expect, it } from "vitest";
 import {
+	type Erased,
 	type Eraser,
 	erasers,
 	erasureMarks,
+	type ForgottenReport,
+	forgottenIn,
 	type SpaceReport,
 	type SubjectOf,
 	type SubjectReading,
@@ -51,4 +54,14 @@ it("reads a record's subject three ways, an unreadable one with why", async () =
 	// @ts-expect-error An unreadable record says why: it stops its space, proving nothing.
 	const silent: SubjectOf = { kind: "unreadable" };
 	expect(silent.kind).toBe("unreadable");
+});
+
+it("makes a pseudonymous space's report with no brand, beside the branded ones in an answer", () => {
+	const forgotten: ForgottenReport = forgottenIn("rate-limit.lockouts", 2);
+	expect(forgotten).toEqual({ kind: "forgotten", space: "rate-limit.lockouts", removed: 2 });
+	const answer: Erased = { reports: [forgotten], logoutGaps: 0 };
+	expect(answer.reports).toEqual([forgotten]);
+	// @ts-expect-error The owner's claim is no tombstone: a brand-free object is never a SpaceReport.
+	const stretched: SpaceReport = forgotten;
+	expect(stretched.kind).toBe("forgotten");
 });

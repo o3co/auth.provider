@@ -9,10 +9,12 @@
 
 ## Offers
 - `mfaReset.run(subject, { requestedBy? })`, for an embedder that has verified who asks, answering how the run ended (`ResetOutcome`): `done` with `removed` (how many factors went), their `kinds` and `parts` (each part's count by name, none where none is composed), or `stopped` with `at` (`sessions`, `factors`, `parts` or `lock`) where a step was unavailable, which running it again finishes; a failure not unavailable, at any step, is thrown.
+  - `erased`: a boundary step read the subject as erased, and the run was refused; a fault met earlier in the run is still thrown instead, after the refused record is written.
 - `resetCandidates.unclaimed(subject)`, for an operator finding whom to reset: how many of the subject's counting factors are written and stand for nothing (a unique value's claim missing or another's), beside one that stands included, as `factorReading` reads them; it changes nothing.
 - Extension point `resetParts` (`ResetPart`: `name`, `remove(subject)` answering done with how many went or stopped), one per name: two of one name refuse boot.
   - A stopped run carries `removed` (`count`, `kinds`) where the factors' removal answered before it stopped: never at `factors`, always at `parts` and `lock`, and at `sessions` only when the second boundary stopped it. Without it, whether the factors went is not known: a removal that failed after `mfa` removed the records (a witness that could not clear its mark) has taken them.
-- Audit event (declared in `./audit-events`): `mfa.reset` once a run gets past its input, finished or not: `by` `operator`, `kinds` and `count` once the factors went, `parts` (each part done, as `name=count`) and `partsStopped` (each part stopped or failed, by name) where there are any, `sessions`, `sessionsAgain` once it ran, `complete`, and `requestedBy` when given.
+- Audit event `mfa.reset.refused` (declared in `./audit-events`) for a run refused as erased, naming no subject: `by` `operator`, `complete` (as that boundary step's `record` answered it: false means running it again finishes what this run left), and `requestedBy` when given.
+- Audit event `mfa.reset` once any other run gets past its input, finished or not, with `withheld` `unread` in place of the subject where no boundary step answered: `by` `operator`, `kinds` and `count` once the factors went, `parts` (each part done, as `name=count`) and `partsStopped` (each part stopped or failed, by name) where there are any, `sessions`, `sessionsAgain` once it ran, `complete`, and `requestedBy` when given.
 
 ## Invariants
 - A subject that is not a non-empty string, or a requester that is not 1 to 256 UTF-16 code units, well-formed, is refused with a RangeError before anything is done.
@@ -23,7 +25,8 @@
 - Otherwise a failed removal, of the factors or a part, skips the release, and the second boundary moves whatever failed. The run answers `stopped` at the first failure's step, unless a failure at any step is not unavailable: that one is thrown.
 - Under an enrollment witness, removing the factors (`mfa`'s `clear`) clears the witness's mark after them; a mark it cannot clear, or whose answer was lost, fails the run at `factors`, the subject left unable to log in, and the run must be made again.
 - Only a reset clears that mark, and it may run only while the embedder keeps the subject isolated: no new login, session or enrollment, the running ones finished, and every earlier uncertain write to the witness settled.
-- A finished run logs `mfa-flows.reset`, an unfinished one `mfa-flows.reset_incomplete` (`stoppedAt`: `sessions`, `factors`, `parts` or `lock`; `error`: the error's type); the names stay `mfa-flows`' as operators know them.
+- The audit names the subject only where some boundary step answered that it is not erased and none that it is. Either boundary step reading it erased, the second too, refuses the run, answering `erased`: at the first, nothing else is done; at the second, the factors, the parts and the lockout may already be gone. A reset of an erased account is an operator acting on erased data. Each step reads `erased` before `complete`.
+- A finished run logs `mfa-flows.reset`, a refused one `mfa-flows.reset_refused` with nothing else, an unfinished one `mfa-flows.reset_incomplete` (`stoppedAt`: `sessions`, `factors`, `parts` or `lock`; `error`: the error's type); the names stay `mfa-flows`' as operators know them.
 
 ## Depends on
 - `kernel`, `audit`, `mfa` (composed with it), `mfa-managing` (`clear`), `mfa-reading` (`unclaimedWritten`), `rate-limit` (lockouts), `subject-revocation` (boundaries), `mfa-flows` (its lockout, through `flowParts`).

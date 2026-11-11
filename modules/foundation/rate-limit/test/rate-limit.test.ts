@@ -21,7 +21,7 @@ import {
 	rateLimit,
 	requestsPerSource,
 } from "../src/contract.ts";
-import { lockoutSpace } from "../src/lockout.ts";
+import { lockoutSpace } from "../src/lockout/lockout.ts";
 import rateLimitModule from "../src/module.ts";
 import { partitionOf } from "../src/partition.ts";
 

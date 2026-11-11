@@ -13,7 +13,12 @@ export default auditEvents({
 			"sessionsAgain",
 			"complete",
 			"requestedBy",
+			"withheld",
 		],
-		when: "an operator's reset gets past its input, finished or not (`complete`)",
+		when: "an operator's reset gets past its input, finished or not (`complete`); without the subject, `withheld` `unread`, where no boundary step answered",
+	},
+	"mfa.reset.refused": {
+		attributes: ["by", "complete", "requestedBy"],
+		when: "an operator's reset of a subject a boundary step read as erased, naming no subject; `complete` as that step's `record` answered it, false meaning running it again finishes what this run left",
 	},
 });

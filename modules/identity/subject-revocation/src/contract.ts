@@ -13,11 +13,15 @@ export const subjectRevocation = contract<SubjectRevocation>("subject-revocation
 export type BoundaryKind = "sessions" | "delegations";
 
 export interface Revocations {
-	/** Moves `sessions` to the present time on `kernel`'s clock, and `delegations` too unless kept; neither moves back. Complete when every follower finished all its work, none left for later. */
+	/**
+	 * Moves `sessions` to the present time on `kernel`'s clock, and `delegations` too unless kept;
+	 * neither moves back. Complete when every follower finished all its work, none left for later;
+	 * `erased` where the record the write read carried a mark of erasure, the key absent otherwise.
+	 */
 	record(
 		subject: string,
 		options?: { readonly keepDelegations?: boolean },
-	): Promise<{ readonly complete: boolean }>;
+	): Promise<{ readonly complete: boolean; readonly erased?: true }>;
 	/** Whether something of the subject started at `time` (epoch ms) is still valid against the kind's boundary, widened by `allowanceMs` (none by default). */
 	compare(
 		subject: string,
@@ -32,8 +36,14 @@ export const revocations = contract<Revocations>("subject-revocation.revocations
 /** Work that follows a recorded revocation, contributed by the module that owns it. */
 export interface RevocationFollower {
 	readonly name: string;
-	/** Called once the boundary is written; whether `delegations` stayed where it was. Fails when it leaves any work for later. */
-	follow(subject: string, revocation: { readonly keepDelegations: boolean }): Promise<void>;
+	/**
+	 * Called once the boundary is written; whether `delegations` stayed where it was, and `erased`
+	 * as `record` answers it. Fails when it leaves any work for later.
+	 */
+	follow(
+		subject: string,
+		revocation: { readonly keepDelegations: boolean; readonly erased?: true },
+	): Promise<void>;
 }
 
 export const revocationFollowers = extensionPoint<RevocationFollower>(
