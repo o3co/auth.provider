@@ -23,8 +23,8 @@
 - A boundary is compared with times from the hosts' clocks, so the store's clock joins them: a host ahead of the store by d leaves d of a window, one behind refuses d more, and no interface moves a boundary back. Keeping clocks right is the operator's job.
 - A failing follower is logged by name and kind and does not stop the rest; the boundary stays, nothing here retries it, and `record` answers incomplete.
 - Comparison is in seconds; what started up to the second of the boundary plus the allowance is revoked. An allowance below zero is none, and one that is no number revokes. Comparison is done only through the offered interface and is not reimplemented by callers.
-- An erased subject is revoked by every comparison, whatever the time, kind or allowance; the mark is never moved or dropped. Where erasure is enabled and the mark is read, a composition without a fence or a guard does not start; unread, it starts unready, and traffic must reach only ready instances; a store that cannot tell is the stated exclusion. A guarded one starts whatever the store answers.
-- When it cannot be read, it is unavailable, not "no boundary". A record that holds no time is unavailable too, and a revocation over it moves both kinds.
+- An erased subject is revoked by every comparison, whatever the time, kind or allowance; the mark is never moved or dropped. Where erasure is enabled and the mark is read, a composition not covered does not start, naming the owners that cannot erase; unread, it starts unready, and traffic must reach only ready instances; a store that cannot tell is the stated exclusion. A covered one starts whatever the store answers.
+- When it cannot be read, it is unavailable, not "no boundary". A record that holds no time is unavailable too, and a revocation over it moves both kinds. A record with a mark of erasure that is a time is revoked, and fenced as erased, whatever else it holds.
 
 ## Data
 - One record per subject: `sessions`, and `delegations` once a revocation moved it; a record of a single time is read as that time for both.
@@ -33,11 +33,11 @@
 - A `BoundaryStore` without `erasureEnabled`: warned at every start (`subject-revocation.erasure_unknown`), and where it fences, every bundle of a guarded composition is fenced (+1 write) until it tells; 0.22 refuses it.
 
 ## Depends on
-- `kernel`
+- `kernel`, `erasure-extensions` (the erasers the gate reads `erasable` of)
 
 ## Vocabulary
 - boundary: the time at or before which what started is invalid. `sessions` covers authentications; `delegations` covers upstream credentials held for clients.
-- follower: a contribution that does closing work once a revocation is recorded, such as telling others; the boundary alone already refuses what it covers.
+- follower: a contribution that does closing work once a revocation is recorded, such as telling others; the boundary alone already refuses what it covers. covered: the store fences, a module guards erasure (`erasureGuards`), and every composed eraser is `erasable`.
 
 ## Rules for callers
 - Record `complete: false` in the audit. The operator converges by calling `record` again; that moves the boundary to its write's deadline, so it only refuses more.

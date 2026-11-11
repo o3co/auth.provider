@@ -1,5 +1,5 @@
 import { isUnavailable, Unavailable } from "@mod/kernel";
-import { opened } from "../boundaries/written.ts";
+import { markIn, opened } from "../boundaries/written.ts";
 import type { ErasureFence } from "../contract.ts";
 import type { BoundaryStore, StoredBoundary, StoredReceipt } from "../store.ts";
 
@@ -63,6 +63,8 @@ export function fenceOver(
 			}
 			const allowed = (record: StoredBoundary | undefined) => {
 				if (record === undefined) return receipt(receiptId);
+				// A mark of a time is erased, whatever else the record holds, as marking answers it.
+				if (typeof markIn(record) === "number") return undefined;
 				const held = opened(record);
 				if (held === undefined) throw new Unavailable("subject-revocation");
 				return held.erasedAt === undefined ? receipt(receiptId) : undefined;
