@@ -23,7 +23,7 @@ async function phased<B extends Methods>(
 	build: (phase: Phase, refuse: Refuse) => B,
 	refuse: Refuse,
 	place: Omit<SubjectPlace, "phase">,
-	names: readonly (keyof B & string)[],
+	names: Readonly<Record<keyof B & string, true>>,
 ): Promise<B & { readonly ready: () => Promise<void> }> {
 	let built: B | undefined;
 	let refused: string | undefined;
@@ -50,7 +50,7 @@ async function phased<B extends Methods>(
 		}
 	};
 	const methods = Object.fromEntries(
-		names.map((name) => [
+		(Object.keys(names) as (keyof B & string)[]).map((name) => [
 			name,
 			async (...args: unknown[]) =>
 				((await current())[name] as unknown as (...a: unknown[]) => Promise<unknown>)(...args),
@@ -80,7 +80,15 @@ export const phasedRecordsIn = <T extends Json>(
 		(phase, told) => subjectRecordsIn<T>({ ...place, phase }, where, told, options),
 		refuse,
 		place,
-		["create", "read", "change", "remove", "move", "scan"],
+		// Every method the builder has, or the typecheck fails: none is left unrouted.
+		{
+			create: true,
+			read: true,
+			change: true,
+			remove: true,
+			move: true,
+			scan: true,
+		} satisfies Record<keyof ReturnType<typeof subjectRecordsIn<T>>, true>,
 	);
 
 /** `subjectKeyedSetsIn` over the phase the process holds (see `phased`). */
@@ -95,5 +103,8 @@ export const phasedKeyedSetsIn = (
 		(phase, told) => subjectKeyedSetsIn({ ...place, phase }, where, told),
 		refuse,
 		place,
-		["add", "members", "remove", "awaiting", "settled"],
+		{ add: true, members: true, remove: true, awaiting: true, settled: true } satisfies Record<
+			keyof ReturnType<typeof subjectKeyedSetsIn>,
+			true
+		>,
 	);
