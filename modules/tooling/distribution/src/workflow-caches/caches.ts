@@ -66,36 +66,36 @@ const absent =
 const known: Readonly<
 	Record<string, { readonly refs: readonly string[]; readonly rules: readonly Rule[] }>
 > = {
-	"actions/checkout": { refs: ["v4", "11d5960a326750d5838078e36cf38b85af677262"], rules: [] },
+	"actions/checkout": { refs: ["11d5960a326750d5838078e36cf38b85af677262"], rules: [] },
 	"actions/upload-artifact": {
-		refs: ["v4", "ea165f8d65b6e75b540449e92b4886f43607fa02"],
+		refs: ["ea165f8d65b6e75b540449e92b4886f43607fa02"],
 		rules: [],
 	},
 	"actions/download-artifact": {
-		refs: ["v4", "d3f86a106a0bac45b974a628896c90dbdf5c8093"],
+		refs: ["d3f86a106a0bac45b974a628896c90dbdf5c8093"],
 		rules: [absent("run-id", "github-token")],
 	},
-	"actions/cache": { refs: ["v4", "0057852bfaa89a56745cba8c7296529d2fc39830"], rules: [restores] },
+	"actions/cache": { refs: ["0057852bfaa89a56745cba8c7296529d2fc39830"], rules: [restores] },
 	"actions/cache/restore": {
-		refs: ["v4", "0057852bfaa89a56745cba8c7296529d2fc39830"],
+		refs: ["0057852bfaa89a56745cba8c7296529d2fc39830"],
 		rules: [restores],
 	},
 	// v5 and later cache on their own (package-manager-cache): not taken.
 	"actions/setup-node": {
-		refs: ["v4", "49933ea5288caeca8642d1e84afbd3f7d6820020"],
+		refs: ["49933ea5288caeca8642d1e84afbd3f7d6820020"],
 		rules: [onlyAs("cache", [""])],
 	},
 	"actions/setup-python": {
-		refs: ["v5", "a26af69be951a213d495a4c3e4e4022e16d87065"],
+		refs: ["a26af69be951a213d495a4c3e4e4022e16d87065"],
 		rules: [onlyAs("cache", [""])],
 	},
 	"actions/setup-java": {
-		refs: ["v4", "cf277c60eb25467037889841efdb72551f06f6c3"],
+		refs: ["cf277c60eb25467037889841efdb72551f06f6c3"],
 		rules: [onlyAs("cache", [""], [mavenOffInEvidence])],
 	},
 	// Its cache is on unless written off.
 	"actions/setup-go": {
-		refs: ["v5", "40f1582b2485089dde7abd97c1529aa768e1baff"],
+		refs: ["40f1582b2485089dde7abd97c1529aa768e1baff"],
 		rules: [
 			(inputs, _, runs) =>
 				written(inputs, "cache") &&
