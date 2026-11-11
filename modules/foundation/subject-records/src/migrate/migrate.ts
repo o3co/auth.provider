@@ -1,4 +1,4 @@
-import type { MigrationReport, SubjectReading, Walk } from "@mod/erasure-extensions";
+import type { Elsewhere, MigrationReport, SubjectReading, Walk } from "@mod/erasure-extensions";
 import { Unavailable } from "@mod/kernel";
 import { changeRecords, type Target } from "@mod/records";
 import { canonicalJson, type Json } from "@mod/store";
@@ -36,13 +36,16 @@ type Outcome = { readonly kind: Done } | { readonly kind: "stopped"; readonly re
  * only where its envelope is listed or witnessed, never by its shape alone, so a rerun, a key a
  * walk meets twice, and two runs at once each index or remove a record once. Each write holds the
  * record as read. A `bounded` space has nothing to index. It migrates records only: a keyed set kept raw stays raw.
- * Stops between records where `signal` aborts; running again finishes.
+ * Stops between records where `signal` aborts; running again finishes. Where `elsewhere` is given,
+ * it runs for each orphan on the value a confirmed change held, before the removal, which still
+ * holds that value: a record changed meanwhile is read again and the step run again; a throw stops
+ * the space, removing nothing more.
  */
 export async function migrateRecords(
 	place: SubjectPlace,
 	walk: Walk,
 	subjectOf: SubjectReading,
-	options: { readonly signal?: AbortSignal } = {},
+	options: { readonly signal?: AbortSignal; readonly elsewhere?: Elsewhere } = {},
 ): Promise<MigrationReport> {
 	const category = checkedSubjectPlace(
 		place,
@@ -144,6 +147,14 @@ export async function migrateRecords(
 			if (keyed && subject !== undefined && subject !== key) {
 				return { kind: "stopped", reason: "a record keyed by another subject" };
 			}
+			// An orphan's owner keeps what it holds elsewhere first, from the value the first change confirmed.
+			if (subject === undefined && options.elsewhere !== undefined) {
+				try {
+					await options.elsewhere(key, value);
+				} catch (error) {
+					return { kind: "stopped", reason: `elsewhere: ${typeOf(error)}` };
+				}
+			}
 			// Then the owner's answer, the envelope's own provenance held too: a run that migrated it meanwhile wins.
 			const outcome = await decided(key, value, [subject, shaped], (found) => {
 				if (isOurs(found)) return { outcome: "already" };
@@ -193,6 +204,8 @@ export async function migrateRecords(
 	}
 	return report({ kind: "migrated", space, indexed, removed });
 }
+
+const typeOf = (error: unknown) => (error instanceof Error ? error.name : typeof error);
 
 /** The key of a space's record a walk hands back, or none for another space, name or shape. */
 function recordKeyIn(found: unknown, space: string, name: string): string | undefined {

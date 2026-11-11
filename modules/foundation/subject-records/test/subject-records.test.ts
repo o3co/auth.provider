@@ -174,6 +174,48 @@ it("removes a key from its bucket with its record, and the bucket with its last 
 	expect(await indexOf("alice")).toEqual({});
 });
 
+it("removes only a record its check answers true for, in the change that removes it, answering removed, left or missing", async () => {
+	const { build, indexOf, raw } = await opened_();
+	const records = build<{ holder: string }>("indexed");
+	const holds = (who: string) => (value: { holder: string }) => value.holder === who;
+	await records.create("a", { holder: "alice" }, 60_000, "alice");
+	const listed = await indexOf("alice");
+	expect(await records.remove("a", holds("bob"))).toBe("left");
+	expect(await indexOf("alice")).toEqual(listed);
+	expect(await raw("a")).toEqual(envelope("alice", { holder: "alice" }));
+	expect(await records.remove("a", holds("alice"))).toBe("removed");
+	expect(await indexOf("alice")).toEqual({});
+	expect(await records.remove("a", holds("alice"))).toBe("missing");
+	// A removal checked against one holder leaves the record another holder made since.
+	await records.create("a", { holder: "bob" }, 60_000, "bob");
+	expect(await records.remove("a", holds("alice"))).toBe("left");
+	expect(await raw("a")).toEqual(envelope("bob", { holder: "bob" }));
+	expect(await records.remove("a")).toBe("removed");
+});
+
+it("checks a record kept raw by its raw value, and removes it raw", async () => {
+	const { build, raw } = await opened_();
+	const records = build<{ holder: string | null }>("reader");
+	await records.create("a", { holder: null }, 60_000, "alice");
+	expect(await raw("a")).toEqual({ holder: null });
+	expect(await records.remove("a", (value) => value.holder === "alice")).toBe("left");
+	expect(await records.remove("a", (value) => value.holder === null)).toBe("removed");
+	expect(await raw("a")).toBeUndefined();
+});
+
+it("saves a record holding no subject raw while records are not indexed, and answers closed once they are, writing nothing", async () => {
+	const { build, raw, indexOf } = await opened_();
+	const reading = build<Json>("reader");
+	expect(await reading.unowned('{"idp":"a"}', { issuer: "x" }, "endless")).toBe("created");
+	expect(await reading.unowned('{"idp":"a"}', { issuer: "y" }, "endless")).toBe("exists");
+	expect(await raw('{"idp":"a"}')).toEqual({ issuer: "x" });
+	expect(await reading.read('{"idp":"a"}')).toEqual({ issuer: "x" });
+	const indexedRecords = build<Json>("indexed");
+	expect(await indexedRecords.unowned('{"idp":"b"}', { issuer: "x" }, "endless")).toBe("closed");
+	expect(await raw('{"idp":"b"}')).toBeUndefined();
+	expect(await indexOf("nobody")).toEqual({});
+});
+
 it("changes a record kept raw, from before records were indexed, raw", async () => {
 	const { s, build, raw } = await opened_();
 	await s.putIfAbsent({ space: indexedSpace, partition: "old", name: "record" }, 1, {

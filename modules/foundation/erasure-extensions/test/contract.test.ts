@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import {
+	type Elsewhere,
 	type Erased,
 	type Eraser,
 	erasers,
@@ -64,4 +65,14 @@ it("makes a pseudonymous space's report with no brand, beside the branded ones i
 	// @ts-expect-error The owner's claim is no tombstone: a brand-free object is never a SpaceReport.
 	const stretched: SpaceReport = forgotten;
 	expect(stretched.kind).toBe("forgotten");
+});
+
+it("takes an owner's step for an orphan: what a record holds, kept outside the space before it goes", async () => {
+	const kept = new Map<string, unknown>();
+	const elsewhere: Elsewhere = async (key, value) => {
+		kept.set(key, value);
+	};
+	await elsewhere("k", { issuer: "https://idp.example" });
+	await elsewhere("k", { issuer: "https://idp.example" });
+	expect([...kept]).toEqual([["k", { issuer: "https://idp.example" }]]);
 });

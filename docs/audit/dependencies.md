@@ -149,7 +149,7 @@ flowchart LR
 | `@mod/session-requirements` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/subject-attributes` | feature | `@mod/kernel`, `@mod/login-attributes`, `@mod/session`, `@mod/users` |
 | `@mod/subject-revocation` | feature | `@mod/erasure-extensions`, `@mod/kernel` |
-| `@mod/users` | feature | `@mod/kernel`, `@mod/mail-address`, `@mod/secret-hash` |
+| `@mod/users` | feature | `@mod/erasure-extensions`, `@mod/kernel`, `@mod/mail-address`, `@mod/secret-hash` |
 
 ### log-sinks
 
@@ -295,7 +295,7 @@ flowchart LR
 | `@mod/tokens-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/tokens` |
 | `@mod/upstream-handoff-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/upstream-handoff` |
 | `@mod/upstream-round-trip-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/upstream-round-trip` |
-| `@mod/users-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/users` |
+| `@mod/users-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-records`, `@mod/users` |
 | `@mod/webauthn-store` | wiring | `@mod/kernel`, `@mod/passkeys`, `@mod/records`, `@mod/store` |
 
 ### tooling

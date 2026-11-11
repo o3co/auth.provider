@@ -1,14 +1,20 @@
+import { erasers } from "@mod/erasure-extensions";
 import { defineModule } from "@mod/kernel";
 import { secretCheckers } from "@mod/secret-hash";
 import { z } from "zod";
 import { ledgers, type UpstreamNames, upstreamNames, users } from "./contract.ts";
 import { contributedSource } from "./ledger/contributed.ts";
-import { ledgerUsers } from "./ledger.ts";
+import { contactSubjectOf, ledgerUsers } from "./ledger.ts";
 import { keptLinks } from "./links/kept.ts";
 import { ledgerLinks } from "./links/ledger.ts";
+import { linkSubjectOf } from "./links/reading.ts";
+import { isNameKey, nameSubjectOf, namesKept } from "./names/elsewhere.ts";
 import { issuersJudged, namesRefused } from "./names/names.ts";
+import { nameRecordsOver } from "./names/records.ts";
 import { keyOf, record, registeredUsers } from "./registered.ts";
 import { contactStore, linkStore } from "./store.ts";
+import { type ErasureReadings, usersEraser } from "./stores/eraser.ts";
+import { portsRefused } from "./stores/ports.ts";
 
 /** Identifiers match exactly; this form, folding case fully ("straße", "STRASSE", "STRAẞE"), only finds look-alikes. */
 const confusable = (identifier: string) =>
@@ -68,6 +74,13 @@ function undeclaredLinks(
 	);
 }
 
+/** Each space's reading by the module that owns its records: a name's key is names', any other the link's. */
+const erasureReadings: ErasureReadings = {
+	links: async (key, value) => (isNameKey(key) ? nameSubjectOf(value) : linkSubjectOf(value)),
+	contacts: async (key, value) => contactSubjectOf(key, value),
+	namesKept,
+};
+
 export default defineModule(
 	{
 		name: "users",
@@ -78,6 +91,12 @@ export default defineModule(
 		takes: [secretCheckers, contactStore, ledgers, linkStore, upstreamNames],
 	},
 	(m) => [
+		// Its build takes only its stores and collects no `probes`, as an eraser's must (erasure-extensions).
+		m
+			.contribute(erasers)
+			.by(async (c) =>
+				usersEraser(await c.get(linkStore), await c.get(contactStore), erasureReadings),
+			),
 		m.provide(users).by(async (c) => {
 			const declarations = await c.collect(upstreamNames);
 			const refused = namesRefused(declarations);
@@ -98,8 +117,11 @@ export default defineModule(
 				? contributedSource(ledger, c.log)
 				: registeredUsers(c.section.registered, (inUse) => checkers.checkerOf(inUse));
 			const links = await c.get(linkStore);
+			const contacts = await c.get(contactStore);
+			const ports = portsRefused(links, contacts);
+			if (ports !== undefined) return c.refuse("users", ports);
 			const moved = c.section["issuer-moved"];
-			const across = await issuersJudged(declarations, moved, links, c.log);
+			const across = await issuersJudged(declarations, moved, nameRecordsOver(links), c.log);
 			if (across.refusals.length > 0) return c.refuseAll(across.refusals);
 			// Written only once no module refuses this boot, so a refused one changes nothing kept.
 			c.onBuilt(async () => {
@@ -108,7 +130,7 @@ export default defineModule(
 			});
 			// A ledger that looks users up by upstream identity has the last word on links: none is written.
 			const linking = ledger?.byUpstream ? ledgerLinks(source) : keptLinks(source, links);
-			return ledgerUsers(source, linking, await c.get(contactStore));
+			return ledgerUsers(source, linking, contacts);
 		}),
 	],
 );

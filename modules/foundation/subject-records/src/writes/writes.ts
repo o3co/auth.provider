@@ -106,6 +106,34 @@ export function subjectRecordsIn<T extends Json>(
 			});
 			return answer;
 		},
+		/**
+		 * Saves a record that holds no subject's data, raw, in an `online-*` space, unless the key holds
+		 * one (`exists`); `closed` once this builder's phase is `indexed`, where no raw record is
+		 * written: the owner keeps such records elsewhere then. The phase is the one the builder was
+		 * built with (`phased`'s `once`); a writer whose phase is stale is stopped by the maintenance
+		 * window's fence, epoch and restarts (account erasure §5.1). Its records read as orphans to
+		 * the one migration, through the owner's `Elsewhere`. It has no read, removal or scan of its
+		 * own: the builder's `read`, `change` and `remove` reach them.
+		 * @deprecated Raw records of a space from before its non-subject records moved out; removed in
+		 * 0.22.
+		 */
+		unowned: async (
+			key: string,
+			value: Json,
+			lifetimeMs: number | "endless",
+		): Promise<"created" | "exists" | "closed"> => {
+			if (bounded) throw new TypeError("subject-records: a bounded space keeps no unowned record");
+			if (indexed) return "closed";
+			let answer: "created" | "exists" | "closed" = "created";
+			await changeRecords({
+				targets: [recordOf(key)],
+				decide: ([held]) => {
+					answer = held === undefined ? "created" : "exists";
+					return held === undefined ? { targets: [{ value, lifetimeMs }] } : {};
+				},
+			});
+			return answer;
+		},
 		read: async (key: string): Promise<T | undefined> => {
 			const { entry } = await place.store.get(changeRecords.keyOf(recordOf(key)));
 			return open(entry?.value).value as T | undefined;
@@ -153,9 +181,15 @@ export function subjectRecordsIn<T extends Json>(
 		},
 		/**
 		 * Removes the record, and its entry from its subject's bucket as one; a set under the key
-		 * keeps its own. No tombstone stops it.
+		 * keeps its own. No tombstone stops it. Where `when` is given, only a record whose value, raw
+		 * or opened from its envelope, it answers true for: checked in the same change that removes,
+		 * so the record removed is the one checked. `removed`, `left` (`when` said no) or `missing`.
 		 */
-		remove: async (key: string): Promise<void> => {
+		remove: async (
+			key: string,
+			when?: (value: T) => boolean,
+		): Promise<"removed" | "left" | "missing"> => {
+			let answer: "removed" | "left" | "missing" = "removed";
 			await changeRecords({
 				targets: [recordOf(key)],
 				watch: ([held]) => {
@@ -163,15 +197,19 @@ export function subjectRecordsIn<T extends Json>(
 					return subject !== undefined && byKeys ? [bucketOf(subject, key)] : [];
 				},
 				decide: ([held], [bucket]) => {
-					if (held === undefined) return {};
-					const { subject } = open(held);
-					if (subject === undefined || !byKeys) return { targets: [{ remove: true }] };
+					const found = open(held);
+					if (held === undefined) answer = "missing";
+					else if (when !== undefined && !when(found.value as T)) answer = "left";
+					else answer = "removed";
+					if (answer !== "removed") return {};
+					if (found.subject === undefined || !byKeys) return { targets: [{ remove: true }] };
 					return {
 						targets: [{ remove: true }],
 						watched: [listedWithout(bucket, place.space.name, isRecord(key))],
 					};
 				},
 			});
+			return answer;
 		},
 		/**
 		 * Moves the record from one subject to another as one (account erasure §3.5): its envelope's

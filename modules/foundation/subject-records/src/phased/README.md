@@ -10,7 +10,7 @@ Internal module of `subject-records`: the builders over the phase a process hold
 
 ## Offers
 - `phasedRecordsIn` and `phasedKeyedSetsIn` (a place with no phase, the phase read once, where, the builder's `refuse`, as the builders take them) → the builder's methods, each answering through that phase, and `ready`, the template's probe check.
-- `phasedRecordsIn` also answers the space's `erase` (a subject, a signal) and `migrate` (a walk, the owner's `SubjectReading`, a signal) at that phase, in the order an owner's store ports take them, so the wiring maps them with no arrow and never handles the phase.
+- `phasedRecordsIn` also answers the space's `erase` (a subject, a signal) and `migrate` (a walk, the owner's `SubjectReading`, a signal, and optionally the owner's `Elsewhere`) at that phase, in the order an owner's store ports take them, so the wiring maps them with no arrow and never handles the phase. `unowned`'s `closed` answers that phase as captured, not the mark at the write.
 
 ## Invariants
 - Where the phase reads at build, the builder is built at once and refuses as it does, refusing the start.
@@ -19,4 +19,4 @@ Internal module of `subject-records`: the builders over the phase a process hold
 - A process may hold `reader` for one space and `indexed` for another where the mark is written between their reads; every node restarts after the mark (account erasure §5.1).
 
 ## Depends on
-- `kernel` (Unavailable), `store`, `erasure-extensions` (`Walk`, `SubjectReading`); internal modules `phase`, `sets`, `erase`, `migrate`, and the package's `subjectRecordsIn`
+- `kernel` (Unavailable), `store`, `erasure-extensions` (`Walk`, `SubjectReading`, `Elsewhere`); internal modules `phase`, `sets`, `erase`, `migrate`, and the package's `subjectRecordsIn`

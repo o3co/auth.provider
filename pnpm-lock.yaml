@@ -987,6 +987,9 @@ importers:
 
   modules/identity/users:
     dependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -4483,9 +4486,19 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
       '@mod/users':
         specifier: workspace:*
         version: link:../../identity/users
+    devDependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
 
   modules/templates/webauthn-store:
     dependencies:
