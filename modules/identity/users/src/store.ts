@@ -1,3 +1,10 @@
+import type {
+	Elsewhere,
+	MigrationReport,
+	SpaceReport,
+	SubjectReading,
+	Walk,
+} from "@mod/erasure-extensions";
 import { contract, Unavailable } from "@mod/kernel";
 
 declare const storedLink: unique symbol;
@@ -35,13 +42,33 @@ export interface RecordStore<T> {
  * not may ignore it.
  */
 export interface SubjectRecordStore<T> extends Omit<RecordStore<T>, "save"> {
-	/** Keeps a new record for its subject, unless the key holds one. */
+	/**
+	 * Keeps a new record for its subject, unless the key holds one (`exists`) or, where the store
+	 * fences saves past a subject's erasure, the subject is erased there (`erased`), which users
+	 * takes as unavailable.
+	 */
 	save(
 		key: string,
 		record: T,
 		lifetimeMs: "endless",
 		subject: string,
-	): Promise<"created" | "exists">;
+	): Promise<"created" | "exists" | "erased">;
+	/**
+	 * Erases a subject's records here, where the store can: optional in 0.20, required in 0.22; a
+	 * store without it holds records users' eraser cannot erase. Offered with `migrate`, or neither.
+	 */
+	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
+	/**
+	 * Once, under the maintenance key: puts the records written before indexing into the index, each
+	 * read by `subjectOf`, users', with `elsewhere` keeping what an orphan holds that users still
+	 * needs, so the store never opens a record.
+	 */
+	migrate?(
+		walk: Walk,
+		subjectOf: SubjectReading,
+		signal: AbortSignal,
+		elsewhere?: Elsewhere,
+	): Promise<MigrationReport>;
 }
 
 /**
@@ -64,7 +91,20 @@ export async function written<T>(
 	return again;
 }
 
+/**
+ * Links by upstream identity. Its `remove`, `erase`, `migrate` and `names` (with `unowned`) come as
+ * one set, or none: a part of the set refuses the boot.
+ */
 export type LinkStore = SubjectRecordStore<StoredLink> & {
+	/**
+	 * Removes the record where `when`, given the record held, answers true, in the write that removes
+	 * it: `removed`, `left` (it answered false) or `missing`. Offered with `erase` and `migrate`, or
+	 * none of them; without it, an unlink leaves a record holding no subject.
+	 */
+	readonly remove?: (
+		key: string,
+		when: (record: StoredLink) => boolean,
+	) => Promise<"removed" | "left" | "missing">;
 	/**
 	 * The IdP names' own records, apart from the links: offered with `unowned`, or neither. Optional
 	 * in 0.20, without it names keeping their records in the link space alone; required in 0.22.

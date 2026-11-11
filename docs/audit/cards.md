@@ -145,6 +145,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `ledger` (`src/ledger`): Reads a contributed user ledger's answers into users' own: verification, a user by subject or unanswerable, and a user by upstream identity where the ledger looks users up so.
   - `links` (`src/links`): Answers by upstream identity, and links and unlinks, in one of two ways users chooses at boot: through users' link store, or as a ledger that looks users up by upstream identity holds them.
   - `names` (`src/names`): what an IdP name stands for, within one boot and across boots.
+  - `stores` (`src/stores`): how users writes through its store interfaces (declared in `store.ts`, the contract), and which of their optional ports may be offered together. This module is the mechanics; `store.ts` is the interface.
 
 ## log-sinks
 

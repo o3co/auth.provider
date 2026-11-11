@@ -10,6 +10,7 @@ import { issuersJudged, namesRefused } from "./names/names.ts";
 import { nameRecordsOver } from "./names/records.ts";
 import { keyOf, record, registeredUsers } from "./registered.ts";
 import { contactStore, linkStore } from "./store.ts";
+import { portsRefused } from "./stores/ports.ts";
 
 /** Identifiers match exactly; this form, folding case fully ("straße", "STRASSE", "STRAẞE"), only finds look-alikes. */
 const confusable = (identifier: string) =>
@@ -99,6 +100,9 @@ export default defineModule(
 				? contributedSource(ledger, c.log)
 				: registeredUsers(c.section.registered, (inUse) => checkers.checkerOf(inUse));
 			const links = await c.get(linkStore);
+			const contacts = await c.get(contactStore);
+			const ports = portsRefused(links, contacts);
+			if (ports !== undefined) return c.refuse("users", ports);
 			if ((links.names === undefined) !== (links.unowned === undefined)) {
 				return c.refuse(
 					"users",
@@ -115,7 +119,7 @@ export default defineModule(
 			});
 			// A ledger that looks users up by upstream identity has the last word on links: none is written.
 			const linking = ledger?.byUpstream ? ledgerLinks(source) : keptLinks(source, links);
-			return ledgerUsers(source, linking, await c.get(contactStore));
+			return ledgerUsers(source, linking, contacts);
 		}),
 	],
 );

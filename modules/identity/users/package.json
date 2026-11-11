@@ -18,6 +18,7 @@
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/mail-address": "workspace:*",
 		"@mod/secret-hash": "workspace:*",

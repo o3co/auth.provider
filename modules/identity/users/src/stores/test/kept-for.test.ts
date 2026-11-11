@@ -2,11 +2,11 @@ import { assemble, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { expect, it, vi } from "vitest";
-import { users } from "../src/contract.ts";
-import { keptFor } from "../src/kept-for.ts";
-import usersModule from "../src/module.ts";
-import type { SubjectRecordStore } from "../src/store.ts";
-import { memoryUsersStores, testUser, usersConfig } from "../src/testing.ts";
+import { users } from "../../contract.ts";
+import usersModule from "../../module.ts";
+import type { SubjectRecordStore } from "../../store.ts";
+import { memoryUsersStores, testUser, usersConfig } from "../../testing.ts";
+import { keptFor } from "../kept-for.ts";
 
 it("saves a link and a verified contact with the subject they are kept for", async () => {
 	const stores = memoryUsersStores();

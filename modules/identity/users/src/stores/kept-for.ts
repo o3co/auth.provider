@@ -1,5 +1,5 @@
 import { Unavailable } from "@mod/kernel";
-import type { Changed, SubjectRecordStore } from "./store.ts";
+import type { Changed, SubjectRecordStore } from "../store.ts";
 
 /** Attempts at a record a create met and a read then found gone, before it is unavailable. */
 const attempts = 8;
@@ -19,9 +19,10 @@ export async function keptFor<T>(
 	for (let attempt = 0; attempt < attempts; attempt += 1) {
 		const changed = await store.update(key, change);
 		if (changed) return changed;
-		if ((await store.save(key, first, "endless", subject)) === "created") {
-			return { before: undefined, after: first };
-		}
+		const saved = await store.save(key, first, "endless", subject);
+		if (saved === "created") return { before: undefined, after: first };
+		// Past the subject's erasure nothing is created: unavailable, never another's answer.
+		if (saved === "erased") throw new Unavailable("users");
 	}
 	throw new Unavailable("users");
 }

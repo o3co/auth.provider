@@ -1,9 +1,9 @@
 import { deepFreeze } from "@mod/kernel";
 import { canonicalAddress } from "@mod/mail-address";
 import { type Contact, isWellFormedSubject, type Users, userAttribute } from "./contract.ts";
-import { keptFor } from "./kept-for.ts";
 import { none, type UserSource, unanswerable } from "./registered.ts";
 import type { ContactStore, StoredContacts } from "./store.ts";
+import { keptFor } from "./stores/kept-for.ts";
 
 const maxPasswordBytes = 1024;
 const maxContacts = 20;
