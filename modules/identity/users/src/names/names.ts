@@ -1,6 +1,7 @@
 import { isUnavailable, type Log, type Refusal } from "@mod/kernel";
 import type { UpstreamNames } from "../contract.ts";
 import type { StoredName } from "../store.ts";
+import { isNameRecord } from "./elsewhere.ts";
 import type { NameRecords } from "./records.ts";
 
 /** A name's issuer moved, as the operator states it. */
@@ -37,10 +38,8 @@ export function namesRefused(declarations: readonly UpstreamNames[]): string[] {
 const keyOf = (name: string) => JSON.stringify({ idp: name });
 const recordOf = (issuer: string) => ({ issuer }) as unknown as StoredName;
 /** The issuer a record keeps; of another shape, an empty one, which no declared issuer equals. */
-const issuerIn = (record: StoredName) => {
-	const { issuer } = (record ?? {}) as { issuer?: unknown };
-	return typeof issuer === "string" ? issuer : "";
-};
+const issuerIn = (record: StoredName) =>
+	isNameRecord(record) ? (record as unknown as { issuer: string }).issuer : "";
 
 /** What a boot read of the names: what it refuses, and what to write once no module refuses it. */
 export interface IssuersJudged {

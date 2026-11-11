@@ -63,12 +63,22 @@ function split(links: LinkStore, unowned: NonNullable<LinkStore["unowned"]>, nam
 		change as unknown as (record: StoredLink) => Changed<StoredLink> | undefined;
 	/** The copy made what the link space keeps: saved where absent, else rewritten to it. */
 	const copyOf = async (key: string, kept: StoredName) => {
-		// A record of another shape is never copied: it is judged a difference, and the copy kept.
 		if (!isNameRecord(kept)) return;
 		const same = JSON.stringify(kept);
 		const align = (record: StoredName) =>
 			JSON.stringify(record) === same ? undefined : { value: kept };
 		await written(names, key, kept, align);
+	};
+	/** The copy in step: copied, then the link space read again until it holds what was copied. */
+	const inStep = async (key: string, kept: StoredName): Promise<StoredName> => {
+		let copying = kept;
+		for (let attempt = 0; attempt < attempts; attempt += 1) {
+			await copyOf(key, copying);
+			const now = await fromLinks(key);
+			if (now === undefined || JSON.stringify(now) === JSON.stringify(copying)) return copying;
+			copying = now;
+		}
+		throw new Unavailable("users");
 	};
 	const records: NameRecords = {
 		stores: "the link store or the name store",
@@ -80,28 +90,21 @@ function split(links: LinkStore, unowned: NonNullable<LinkStore["unowned"]>, nam
 			for (let attempt = 0; attempt < attempts; attempt += 1) {
 				const inLinksNow = await links.update(key, asLinks(change));
 				if (inLinksNow) {
-					const after = inLinksNow.after as unknown as StoredName;
-					await copyOf(key, after);
-					return { after };
+					return { after: await inStep(key, inLinksNow.after as unknown as StoredName) };
 				}
 				// Kept in the name store alone: read as kept, and no record made again in the link space.
 				const inNames = await names.update(key, change);
 				if (inNames) return { after: inNames.after };
 				const saved = await unowned(key, first, "endless");
 				if (saved === "closed") return written(names, key, first, change);
-				if (saved === "created") {
-					await copyOf(key, first);
-					return { after: first };
-				}
+				if (saved === "created") return { after: await inStep(key, first) };
 				// Another instance saved it first: changed from what it holds, at the next attempt.
 			}
 			throw new Unavailable("users");
 		},
 		copied: async (key) => {
 			const kept = await fromLinks(key);
-			if (kept === undefined) return names.read(key);
-			await copyOf(key, kept);
-			return kept;
+			return kept === undefined ? names.read(key) : inStep(key, kept);
 		},
 	};
 	return records;
@@ -109,11 +112,7 @@ function split(links: LinkStore, unowned: NonNullable<LinkStore["unowned"]>, nam
 
 /** Names' records over the link store: its `issuers` and `unowned` where offered, else the link space alone. */
 export function nameRecordsOver(links: LinkStore): NameRecords {
-	const { issuers: names } = links;
-	if (names === undefined || links.unowned === undefined) return inLinks(links);
-	const unowned: NonNullable<LinkStore["unowned"]> = async (key, record, lifetimeMs) => {
-		if (links.unowned === undefined) throw new TypeError("users: the link store's unowned went");
-		return links.unowned(key, record, lifetimeMs);
-	};
-	return split(links, unowned, names);
+	const { issuers: names, unowned } = links;
+	if (names === undefined || unowned === undefined) return inLinks(links);
+	return split(links, unowned.bind(links), names);
 }
