@@ -26,12 +26,12 @@
 - Keys of any length are taken; a name keeps its windows apart, where names hold no line feed (a name and a key are joined by one).
 - A wait is a hint: at least a second, or the whole window where it is shorter, and never longer than the window, which the store's clock judges.
 - How a lockout holds, counts, hands back and releases, and how its state is kept: internal module `lockout`.
-- A dropped key is unavailable at every entry point, `failed` and `releaseUnder` (`whole` included) among them, and none writes it again. Only a request racing its subject's erasure meets one: that 503 is not an outage. A subject id is never issued again, so a key stays dropped for good. Only the names composed at erasure are dropped.
+- A dropped key is unavailable at every entry point, `failed` and `releaseUnder` (`whole` included) among them, and none writes it again. Only a request racing its subject's erasure meets one: that 503 is not an outage. A subject id is never issued again, so a key stays dropped for good. Only keys under the names composed at erasure are dropped.
 
 ## Data
 - Limit windows: no eviction, so a flood cannot reset a count; not replicated, as no credential depends on them.
 - Attempt windows: no eviction and replicated, so a failover cannot lift a limit on guesses.
-- Lockouts: one state per name and key, `pseudonymous`, erased by `rate-limit` (internal module `lockout`).
+- Lockouts: one state per name and key, `pseudonymous`, erased by `rate-limit` (internal module `lockout`). A state expires unless its hold is fixed or it counted a release; a dropped key never does.
 
 ## Depends on
 - `kernel`, `store`, `http`, `http-server` (the policies' rules and marks), `request-source`, `audit`, `metrics`, `erasure-extensions` (the eraser)

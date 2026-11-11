@@ -14,8 +14,8 @@ Internal module of `rate-limit`: its eraser, dropping a subject's lockout keys.
 ## Invariants
 - Each key is written `dropped` with expiry `never`, whatever it held: absent, expired, a state, dropped already or another shape, so a write that lands later meets it and writes nothing.
 - One report, `forgotten` for `rate-limit.lockouts`: `removed` counts the keys that held a state in this run; absent, expired, dropped and other values count 0, so a run after a partial one counts only what it dropped.
-- Names go in sorted order; a run cut short throws the signal's reason between keys, and the keys already dropped stay. Run again, it finishes.
-- It covers the names composed at erasure: a name composed later starts empty for a subject already erased.
+- Names go in sorted order; a run cut short throws the signal's reason, before its first key or between keys, with no report, and the keys already dropped stay. Run again, it finishes. `migrate` throws it too.
+- It covers keys under the names composed at erasure: a name composed later starts empty for a subject already erased.
 - In a fleet of mixed versions a node from before `dropped` was read fails closed on one: a 0.20 node throws Unavailable, reading it as a state of another shape; v0.19.1 throws a TypeError.
 
 ## Depends on

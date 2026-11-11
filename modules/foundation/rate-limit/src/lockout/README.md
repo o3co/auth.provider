@@ -17,7 +17,7 @@ Internal module of `rate-limit`: the lockout counter, over the states one store 
 - Attempt times are unique within a key and never go back, so a reservation names one attempt.
 - A success ends the run but keeps failures in the budget; the budget's window is the caller's.
 - A lockout that keeps losing races is unavailable; a reservation it cannot hand back stays a failure, the safe side. A stored lockout state of another shape is unavailable, never read as no hold.
-- Every entry point, for input it takes, reads the key through the one parse, inside its read or inside the decision `mutate` runs: absent is no hold, a state is judged, and a dropped key or another shape is unavailable, a throw that writes nothing. A release's terms it refuses are refused before the read, writing nothing.
+- Every entry point, for input it takes, reads the key through the one parse, inside its read or inside the decision `mutate` runs: absent is no hold, a state is judged, and a dropped key or another shape is unavailable, a throw that writes nothing. A release's terms it refuses write nothing either: a `keepMs` of no positive whole number is refused before the read, an `until` past the safe range inside the decision.
 
 ## Data
 - Lockouts: one state per name and key, rewritten whole, under a one-way hash of both; no eviction, durable, replicated, and confirmed reads, as a release is read by another request; declared `pseudonymous`, erased by `rate-limit`. A state expires unless its hold is fixed or it counted a release. A dropped key holds `{ "dropped": 1 }` and never expires.

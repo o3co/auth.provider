@@ -298,3 +298,27 @@ it("refuses the boot where a lockout name is contributed twice", async () => {
 	});
 	await expect(booted).rejects.toBeInstanceOf(BootRefused);
 });
+
+it("throws the signal's reason for a run cut short before it starts, with no names, no subjects, or a migration", async () => {
+	const { store: s } = await stored();
+	const controller = new AbortController();
+	const reason = new Error("stopped before it began");
+	controller.abort(reason);
+	const walk = { sweep: async () => ({ keys: [], server: "s" }) };
+	const none = lockoutEraser(storedStates(s), []);
+	await expect(none.online("alice", controller.signal)).rejects.toBe(reason);
+	await expect(none.window([], walk, controller.signal)).rejects.toBe(reason);
+	await expect(none.migrate(walk, controller.signal)).rejects.toBe(reason);
+});
+
+it("counts a state past its expiry as gone, on the real module and the stand-in alike", async () => {
+	const [real, standIn] = await both(["mfa"], async (app) => {
+		const l = app.get(lockouts);
+		await l.failed("mfa", "alice", policy);
+		// Past the longer of the budget window and the memory, a state no hold fixed has expired.
+		now += policy.budgetWindowMs + policy.memoryMs;
+		return eraserIn(app).online("alice", signal());
+	});
+	expect(standIn).toEqual(real);
+	expect(real?.reports).toEqual([{ kind: "forgotten", space: "rate-limit.lockouts", removed: 0 }]);
+});

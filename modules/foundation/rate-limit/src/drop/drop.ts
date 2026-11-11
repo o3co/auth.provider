@@ -18,6 +18,8 @@ export function lockoutEraser(states: LockoutStates, composed: readonly SubjectL
 		return held ? 1 : 0;
 	};
 	const dropAll = async (subjects: readonly string[], signal: AbortSignal) => {
+		// Checked first too, so a run cut short before it starts throws, whatever it has to drop.
+		signal.throwIfAborted();
 		let removed = 0;
 		for (const subject of subjects) {
 			for (const name of names) {
@@ -32,6 +34,9 @@ export function lockoutEraser(states: LockoutStates, composed: readonly SubjectL
 		erasable: true,
 		online: (subject, signal) => dropAll([subject], signal),
 		window: (subjects, _walk, signal) => dropAll(subjects, signal),
-		migrate: async () => [],
+		migrate: async (_walk, signal) => {
+			signal.throwIfAborted();
+			return [];
+		},
 	};
 }
