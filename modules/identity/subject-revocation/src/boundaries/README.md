@@ -14,7 +14,7 @@ Internal module of `subject-revocation`: a subject's boundaries, how they are wr
 - `recorded`: the boundaries after a revocation at a time, the deadline of the write that records them, the erasure's mark kept; `comparedTo`: `compared` against a subject's boundaries, revoked where it is erased; `compared`: valid or revoked, in seconds, with the boundary widened by an allowance.
 - `writtenTo`: the store → the write `record` makes before its followers, at each attempt's deadline; a write handed no deadline, or one of no number, is unavailable.
 - `opened`: the boundaries a stored record holds, or none when it holds no time, or a mark that is no time; `markIn`: the mark a record carries as stored, readable or not; `stored`, `timeOf`.
-- An unreadable mark of erasure is never rewritten: the write is unavailable, as the read is. A record that holds no time and no mark is written over by the next revocation, as in 0.19.
+- An unreadable mark of erasure is never rewritten: the write is unavailable, as the read is. A record that holds no time and no mark reads unavailable, and is written over by the next revocation, which moves both kinds, as in 0.19. A record with a mark of erasure that is a time is revoked, and fenced as erased, whatever else it holds.
 - `subjectRevocationOf`: the single-boundary interface over `revocations`.
 - `erasedIn`: the store → `erasedSubjects`' `erased`: whether the subject's record carries a mark of a time, read through `markIn` on every call, with no cache and never through the enabled reading. For choosing what a module writes about a subject; not an authorization check: `compare` is the only read that decides access, and the fence the only write.
 
