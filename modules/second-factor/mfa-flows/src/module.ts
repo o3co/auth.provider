@@ -12,6 +12,7 @@ import {
 	gatingTakes,
 	handlersOver,
 	handlersTakes,
+	naming,
 	partsIn,
 	partsTakes,
 	policyOf,
@@ -57,6 +58,7 @@ export default defineModule({ name: "mfa-flows", section, replicaSafe: true, tak
 		return partsIn(c);
 	}),
 	gating(m),
+	naming(m),
 	...table.map(([method, path, name]) =>
 		m.contribute(routes).by(async (c): Promise<Route> => {
 			const policy = policyOf(c.section);

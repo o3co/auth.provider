@@ -2,7 +2,7 @@ import { audit } from "@mod/audit";
 import type { BuildContext, Parts } from "@mod/kernel";
 import { loginGates, logins } from "@mod/login-gates";
 import { factorReading } from "@mod/mfa-reading";
-import { type LockoutPolicy, lockouts } from "@mod/rate-limit";
+import { type LockoutPolicy, lockouts, subjectLockouts } from "@mod/rate-limit";
 import { longestRecentMs, sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { type EnrollmentFlow, enrollmentFlow } from "../contract.ts";
@@ -10,7 +10,7 @@ import { permitsOver } from "../permits/permits.ts";
 import { gateOver, proofOver, resumeOver } from "../proof/proof.ts";
 import { releaseOver } from "../release/release.ts";
 import { flowPartsOf } from "../seams/seams.ts";
-import type { Settings } from "../section.ts";
+import { lockoutName, type Settings } from "../section.ts";
 import { transactionStore } from "../store.ts";
 import { transactionsIn, transactionsTakes } from "../transactions/transactions.ts";
 
@@ -23,6 +23,10 @@ export const policyOf = (s: Settings): LockoutPolicy => ({
 	hardLimit: s.lockout["hard-limit"],
 	memoryMs: s.lockout.memory * 1000,
 });
+
+/** The package's lockout, keyed by subject, named to `rate-limit` so erasing a subject drops it there. */
+export const naming = (m: Parts<Settings>) =>
+	m.contribute(subjectLockouts).by(() => ({ name: lockoutName }));
 
 /** What `gating`'s gate takes from the build context. */
 export const gatingTakes = [factorReading, ...transactionsTakes] as const;

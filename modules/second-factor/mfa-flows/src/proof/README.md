@@ -21,7 +21,7 @@ Internal module of `mfa-flows`: holding a login or a session until a factor is p
 - Verify takes only login and step-up transactions, a step-up one only from the session that started it. Challenge takes these and an enrollment's, which the enrollment flow answers.
 - A challenge is asked with the transaction's deadline as its latest end, for whom `transactions` names (`askedFrom`), and asking voids the challenge before, unavailable included. A sent one is kept sealed; the next attempt takes it, and passes it to the proof only for the factor it was sent for.
 - A challenge sent is answered `200` with what to show, recorded as `mfa.challenge.sent` with `kind` and `purpose`. A factor whose kind sends none is answered `200` with nothing; limited is `429 rate_limited`; refused is `403 mfa_factor_refused`, recorded as `mfa.email_address_mismatch` with `kind` and `purpose` only when the kind says the factor's contact changed.
-- Only kinds where guessing works count toward lockout.
+- Only kinds where guessing works count toward lockout. Once erasure dropped the subject's lockout, a proof of such a kind answers `503`, and no hold is recorded.
   - They reserve one unit with `rate-limit` before the decision.
   - Only a proof judged wrong is kept as a failure.
   - Success (after taking the transaction), attempts that were not judged, and correct proofs that lost to reuse or a conflict return the reservation.

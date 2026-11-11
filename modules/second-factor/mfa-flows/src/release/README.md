@@ -21,5 +21,7 @@ Internal module of `mfa-flows`: a user's own release of their second-factor lock
 - `mfa.lock.recovered` is recorded only when a release is applied: `operation` `recover`, `generation`, and `week` (the budget, by 0.17's name), `run` and `hard` as `true` or `false`. Each answer past entry logs `mfa-flows.lock_release` (`outcome`: `released`, `held`, `repeated` or `refused`); `rebind_after` goes to neither.
 - A part that cannot answer fails the release as unavailable.
 
+- On a lockout erasure dropped, `503`, nothing released or recorded; for an erased subject the revocation check refuses first, so only a request racing the erasure meets it.
+
 ## Depends on
 - `audit`; `mfa-reading` (factor reading); `rate-limit` (lockouts); `session` (entry, the longest recent window); `subject-revocation` (check); `requests`; the package's section (the lockout's name); `recording`
