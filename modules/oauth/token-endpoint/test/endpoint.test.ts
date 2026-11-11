@@ -17,7 +17,7 @@ import { type AddedClaims, type IssuanceRequest, issuancePolicies } from "@mod/t
 import { afterEach, describe, expect, it } from "vitest";
 import declared from "../src/audit-events.ts";
 import { tokenEndpointLocation } from "../src/contract.ts";
-import { basicOf, endpointConfig, endpointModules } from "./deployment.ts";
+import { answered, basicOf, endpointConfig, endpointModules } from "./deployment.ts";
 
 const logged = recordingLog();
 const quiet = quietRuntime({
@@ -206,10 +206,8 @@ describe("the audience a request asks for", () => {
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
-				handle: async () => ({
-					kind: "issued",
-					body: { access_token: "contributed-token", token_type: "Bearer" },
-				}),
+				handle: async (input) =>
+					answered(input, { access_token: "contributed-token", token_type: "Bearer" }),
 			})),
 		]);
 		const post = await serve([exchanging], { clients: [echoClients.echo()] });
@@ -227,18 +225,18 @@ describe("the audience a request asks for", () => {
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
-				handle: async () => {
+				handle: async (input) => {
 					handled.push("echo");
-					return { kind: "issued", body: { by: "echo" } };
+					return answered(input, { by: "echo" });
 				},
 			})),
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:other",
 				readsAmbient: "none",
 				targets: true,
-				handle: async () => {
+				handle: async (input) => {
 					handled.push("other");
-					return { kind: "issued", body: { by: "other" } };
+					return answered(input, { by: "other" });
 				},
 			})),
 		]);
@@ -292,7 +290,7 @@ describe("the audience a request asks for", () => {
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
-				handle: async () => ({ kind: "issued", body: { by: "echo" } }),
+				handle: async (input) => answered(input, { by: "echo" }),
 			})),
 		]);
 		const post = await serve([echo, narrowing()], { clients: [echoClients.echo()] });
@@ -517,9 +515,9 @@ describe("token endpoint", () => {
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
-				handle: async () => {
+				handle: async (input) => {
 					ran++;
-					return { kind: "issued", body: {} };
+					return answered(input, {});
 				},
 			})),
 		]);
@@ -798,7 +796,7 @@ describe("token endpoint", () => {
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
-				handle: async ({ client }) => ({ kind: "issued", body: { echo: client.id } }),
+				handle: async (input) => answered(input, { echo: input.client.id }),
 			})),
 		]);
 		const post = await serve([extra], { clients: [echoClients.echo()] });
@@ -1178,10 +1176,11 @@ describe("token endpoint", () => {
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
 				bodies: ["json"],
-				handle: async ({ param, value }) => ({
-					kind: "issued",
-					body: { scope: param("scope") ?? "absent", assertion: value("assertion") ?? "absent" },
-				}),
+				handle: async ({ param, value, ...input }) =>
+					answered(input, {
+						scope: param("scope") ?? "absent",
+						assertion: value("assertion") ?? "absent",
+					}),
 			})),
 		]);
 		const post = await serve([declared], { clients: [echoClients.echo()] });
@@ -1224,14 +1223,12 @@ describe("token endpoint", () => {
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
 				bodies: ["form", "json"],
-				handle: async ({ param, value }) => ({
-					kind: "issued",
-					body: {
+				handle: async ({ param, value, ...input }) =>
+					answered(input, {
 						n: param("n") ?? "absent",
 						value: value("n") ?? "absent",
 						absent: value("x") ?? "absent",
-					},
-				}),
+					}),
 			})),
 		]);
 		const post = await serve([both], { clients: [echoClients.echo()] });
@@ -1248,10 +1245,11 @@ describe("token endpoint", () => {
 			grantType,
 			readsAmbient: "none",
 			...(bodies ? { bodies } : {}),
-			handle: async ({ param, value }) => ({
-				kind: "issued",
-				body: { scope: param("scope") ?? "absent", assertion: value("assertion") ?? "absent" },
-			}),
+			handle: async ({ param, value, ...input }) =>
+				answered(input, {
+					scope: param("scope") ?? "absent",
+					assertion: value("assertion") ?? "absent",
+				}),
 		});
 		const echoes = defineModule({ name: "echoes", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => echoing("urn:test:echo", ["json"])),
@@ -1294,7 +1292,7 @@ describe("token endpoint", () => {
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
-				handle: async ({ binding }) => ({ kind: "issued", body: { binding: binding ?? "none" } }),
+				handle: async (input) => answered(input, { binding: input.binding ?? "none" }),
 			})),
 			m.contribute(senderBindings).by(() => ({
 				member: "test",

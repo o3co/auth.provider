@@ -1,10 +1,11 @@
-import { assemble, isUnavailable, kernelConfig } from "@mod/kernel";
+import { erasureMarks } from "@mod/erasure-extensions";
+import { assemble, contract, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { simulatedStore } from "@mod/store/testing";
-import { subjectRevocation } from "@mod/subject-revocation";
+import { subjectErasure, subjectRevocation } from "@mod/subject-revocation";
 import revocationModule from "@mod/subject-revocation/module";
 import revocationStore from "@mod/subject-revocation-store/module";
-import { tokens } from "@mod/tokens";
+import { type IssuanceFence, issuanceFences, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { beforeEach, expect, it } from "vitest";
 import subjectTokens from "../src/module.ts";
@@ -85,4 +86,30 @@ it("is unavailable, never valid or revoked, while the revocation cannot be read"
 it("takes all its module names", async () => {
 	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
 	expect((await takesUnused(assembly().input))["subject-tokens"]).toBeUndefined();
+});
+
+it("fences a bundle for its subject: refused once the subject is erased, and lets an erasing composition start", async () => {
+	const simulated = simulatedStore();
+	simulated.mark(erasureMarks.enabled, true);
+	const fenced = contract<readonly IssuanceFence[]>("test.fences");
+	const app = await assemble({
+		modules: [
+			tokensStandIn(),
+			revocationModule,
+			revocationStore,
+			simulated.module,
+			subjectTokens,
+			defineModule({ name: "fences", replicaSafe: false, takes: [issuanceFences] }, (m) => [
+				m.provide(fenced).by((c) => c.collect(issuanceFences)),
+			]),
+		],
+		config: kernelConfig(),
+		runtime,
+	});
+	const [fence] = app.get(fenced);
+	expect(fence?.name).toBe("subject-tokens");
+	expect(await fence?.fence({ subject: "alice", receiptId: "r1" })).toBe("passed");
+	await app.get(subjectErasure).markErased("alice");
+	expect(await fence?.fence({ subject: "alice", receiptId: "r2" })).toBe("refused");
+	expect(await fence?.fence({ subject: "bob", receiptId: "r3" })).toBe("passed");
 });

@@ -8,11 +8,14 @@ import {
 	type AccessGrant,
 	type Actor,
 	accessConditions,
+	issuanceFences,
+	issuanceFencing,
 	issuancePolicies,
 	subjectChecks,
 	type Tokens,
 	tokens,
 } from "./contract.ts";
+import { fencingOver } from "./fencing/fencing.ts";
 import { type IssueAccess, issuing, judging } from "./issuance/issuance.ts";
 import { expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
@@ -58,6 +61,7 @@ export default defineModule(
 			accessConditions,
 			issuer,
 			issuancePolicies,
+			issuanceFences,
 			...(denylisted(s) ? [revokedTokens] : []),
 		],
 	},
@@ -68,6 +72,9 @@ export default defineModule(
 			const path = (await c.get(keys)).keySetPath();
 			return { name: "jwks_uri", value: new URL(path, origin).href };
 		}),
+		m
+			.provide(issuanceFencing)
+			.by(async (c) => fencingOver(await c.collect(issuanceFences), c.random)),
 		m.provide(tokens).by(async (c) => {
 			const signing = await c.get(accessTokenSigning);
 			const bindings = await c.get(senderBinding);

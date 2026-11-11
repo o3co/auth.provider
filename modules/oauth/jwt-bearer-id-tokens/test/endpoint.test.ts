@@ -202,12 +202,12 @@ async function serve(
 ): Promise<Served> {
 	const store = settings.on?.store ?? simulatedStore();
 	const shared = settings.on;
-	// The store the simulated one provides, by its own handle: a feature names no capability.
-	const provided = store.module.provides?.[0]?.contract as Contract<object>;
+	// What the simulated store provides, by their own handles: a feature names no capability.
+	const provided = (store.module.provides ?? []).map((p) => p.contract as Contract<object>);
 	const storeModule = shared
-		? defineModule({ name: "store", replicaSafe: false, takes: [] }, (m) => [
-				m.provide(provided).by(() => shared.app.get(provided)),
-			])
+		? defineModule({ name: "store", replicaSafe: false, takes: [] }, (m) =>
+				provided.map((handle) => m.provide(handle).by(() => shared.app.get(handle))),
+			)
 		: store.module;
 	const watched = watchedTokens();
 	const checks = watchedChecks();

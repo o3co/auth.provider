@@ -13,13 +13,14 @@
 - `SpaceReport` (`erased`, `fenced` with its `until`, `stopped` with why) and `MigrationReport` (`migrated` with what was indexed and removed, `stopped`), each naming its space by its declared name.
 - `Walk`: a walk of a space by name, removing what expired, each page naming its server.
 - `erasureMarks` (`account-erasure.enabled`, `account-erasure.journal`) and `JournalMark`, the journal's header id and last number as the control record keeps them.
+- `erasureEnabledFrom` (a control record read for its marks, or none) → `erasureEnabled`, the `enabled` mark's presence in any epoch, read when asked; nothing where no control record is offered, so a store wiring needs no branch of its own.
 
 ## Invariants
 - A report is made by `subject-records` alone, which erases and so can tell what it wrote; an eraser passes reports on and never writes one. The types carry `ReportMade`, a brand only a visible cast gives.
 - An `erased` or `fenced` report means the subject's tombstone is written in that space.
 - A run cut short answers `stopped` (`aborted`) for each space it did not finish.
 - Spaces are named by their declared names, so nothing here depends on `store`.
-- `enabled` holds `true` and counts in any epoch it was written in.
+- `enabled` holds `true` and counts in any epoch it was written in; only its presence is read, so no value written later weakens it.
 
 ## Depends on
 - `kernel` (extension points)

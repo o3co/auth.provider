@@ -10,9 +10,9 @@ Internal module of `token-endpoint`: the handler of `POST /oauth/token`, from th
 - The composed rule for the audience (`built-in`). Authenticating the client and the shapes of an error answer (`answers`). Taking the contracts below from the assembly (`endpoint-in`). The route's declaration, its limit and the metadata items (the package's module).
 
 ## Offers
-- `tokenEndpoint` (its parts: clients, tokens, session issuances, binding readers, required bindings, grants by type, the audience rule, audit) → the handler and its answer to Unavailable; `tokenPath`.
+- `tokenEndpoint` (its parts: clients, tokens, issuance fencing, session issuances, binding readers, required bindings, grants by type, the audience rule, audit) → the handler and its answer to Unavailable; `tokenPath`.
 - `grantInputOf` (what a grant is handed: its parameters' reader, the audience rule, `admits` and `issue`), `readerOf` and `mistypedRefusal`, which the internal module `caller` uses too.
-- `issuanceFor` (tokens, grant type, binding, session issuances, a sink for the names of added claims) → a grant's `admits` and `issue`, which tells the sink the names `tokens` answers for each token issued, never the grant read again; `refusedAnswer`, the one answer to a refused issuance.
+- `issuanceFor` (tokens, grant type, binding, session issuances, a bundle, `bundleOf`) → a grant's `admits` and `issue`, which notes in the bundle each token's subject as handed to `tokens` and the added claims' names `tokens` answers, never the grant read again; `refusedAnswer`, the one answer to a refused issuance.
 - `answeredBody` (a grant's issued body as answered).
 - A refused authentication is answered as `authenticateClient` answers it (`refusedAuthenticationAnswer`, the one mapping), and recorded only where no grant identifies the client.
 

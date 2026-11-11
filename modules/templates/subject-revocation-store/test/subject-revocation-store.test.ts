@@ -1,7 +1,24 @@
-import { assemble, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { erasureMarks } from "@mod/erasure-extensions";
+import {
+	assemble,
+	BootRefused,
+	defineModule,
+	isUnavailable,
+	kernelConfig,
+	type Module,
+	type Provision,
+} from "@mod/kernel";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { type Store, store, storeControl } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
-import { boundaryStore, revocations } from "@mod/subject-revocation";
+import {
+	boundaryStore,
+	erasureFence,
+	erasureGuards,
+	revocations,
+	subjectErasure,
+	subjectRevocation,
+} from "@mod/subject-revocation";
 import revocationModule from "@mod/subject-revocation/module";
 import { boundaryStoreContract } from "@mod/subject-revocation/testing";
 import { describe, expect, it } from "vitest";
@@ -32,6 +49,11 @@ boundaryStoreContract(
 			failover: () => simulated.failover(),
 			restart: () => simulated.restart(),
 			pressMemory: () => simulated.pressMemory(),
+			raceNextFence: (subject, change) =>
+				simulated.beforeNext("batchAcross", "subject-revocation-store.receipts", async () => {
+					await boundaries.update(subject, change);
+				}),
+			enableErasure: async () => simulated.mark(erasureMarks.enabled, true),
 		};
 	},
 );
@@ -69,4 +91,118 @@ describe("subject-revocation over the wiring", () => {
 		await r.record("bob");
 		expect(await r.compare("bob", now + 11_000, "sessions")).toBe("revoked");
 	});
+});
+
+describe("subject-revocation's erasure over the wiring", () => {
+	const guard = defineModule({ name: "guard", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(erasureGuards).by(() => ({ name: "guard" })),
+	]);
+	async function composed(
+		guarded: boolean,
+		before: (s: ReturnType<typeof simulatedStore>) => void,
+	) {
+		const simulated = simulatedStore();
+		before(simulated);
+		const app = await assemble({
+			modules: [simulated.module, wiring, revocationModule, ...(guarded ? [guard] : [])],
+			config: kernelConfig(),
+			runtime,
+		});
+		return { simulated, app };
+	}
+
+	it("fences against the mark of erasure: a receipt of a minute where none stands, none where it does", async () => {
+		const { simulated, app } = await composed(true, () => {});
+		simulated.mark(erasureMarks.enabled, true);
+		await app.get(subjectErasure).markErased("alice");
+		const fence = app.get(erasureFence);
+		expect(await fence.fence("alice", "r1")).toBe("erased");
+		expect(await fence.fence("bob", "r2")).toBe("passed");
+		const kept = await app.get(store).get({
+			space: { name: "subject-revocation-store.receipts", guarantees: [] },
+			partition: "r2",
+			name: "record",
+		});
+		expect(kept.entry?.value).toEqual({ id: "r2" });
+		simulated.shiftClock(61_000);
+		expect(
+			(
+				await app.get(store).get({
+					space: { name: "subject-revocation-store.receipts", guarantees: [] },
+					partition: "r2",
+					name: "record",
+				})
+			).entry,
+		).toBeNull();
+	});
+
+	it("starts a guarded and an unguarded composition with the store unreachable, refusing neither", async () => {
+		const guarded = await composed(true, (s) => s.unreachable(true));
+		expect(guarded.app).toBeDefined();
+		const unguarded = await composed(false, (s) => s.unreachable(true));
+		expect(unguarded.app).toBeDefined();
+	});
+});
+
+it("boots over a store that offers no control record, erasure unknown: it warns at every start and fences every bundle", async () => {
+	const simulated = simulatedStore();
+	// A store adapter of 0.19: the simulated store's own provisions but its control record.
+	const uncontrolled = {
+		...simulated.module,
+		provides: (simulated.module.provides ?? []).filter((p) => p.contract !== storeControl),
+	};
+	const recorded = recordingLog();
+	const app = await assemble({
+		modules: [uncontrolled, wiring, revocationModule],
+		config: kernelConfig(),
+		runtime: quietRuntime({ clock: { now: () => 1_800_000_000_000 }, log: recorded.log }),
+	});
+	expect(app.get(boundaryStore).erasureEnabled).toBeUndefined();
+	expect(recorded.lines().map((line) => line.event)).toContain(
+		"subject-revocation.erasure_unknown",
+	);
+	expect(await app.get(erasureFence).fence("alice", "r1")).toBe("passed");
+	await app.get(subjectErasure).markErased("alice");
+	expect(await app.get(erasureFence).fence("alice", "r2")).toBe("erased");
+});
+
+/** The simulated store, its batch across partitions taken away: a store that writes none as one. */
+function storeWithin() {
+	const simulated = simulatedStore();
+	const module: Module = {
+		...simulated.module,
+		provides: (simulated.module.provides ?? []).map(
+			(p): Provision<unknown> =>
+				p.contract === store
+					? {
+							...p,
+							create: async (c) => {
+								const { batchAcross: _, ...within } = (await p.create(c)) as Store;
+								return within;
+							},
+						}
+					: p,
+		),
+	};
+	return { simulated, module };
+}
+
+it("boots over a store that writes no two partitions as one, offering no fence, refused only where erasure is enabled", async () => {
+	const off = storeWithin();
+	const app = await assemble({
+		modules: [off.module, wiring, revocationModule],
+		config: kernelConfig(),
+		runtime,
+	});
+	expect(app.get(boundaryStore).fence).toBeUndefined();
+	expect(await app.get(subjectRevocation).check("alice", 1)).toBe("valid");
+	expect(await app.get(erasureFence).fence("alice", "r1")).toBe("passed");
+	const on = storeWithin();
+	on.simulated.mark(erasureMarks.enabled, true);
+	const refused = await assemble({
+		modules: [on.module, wiring, revocationModule],
+		config: kernelConfig(),
+		runtime,
+	}).catch((error: unknown) => (error instanceof BootRefused ? error.refusals : [error]));
+	expect(JSON.stringify(refused)).toContain("the boundary store does not fence");
 });

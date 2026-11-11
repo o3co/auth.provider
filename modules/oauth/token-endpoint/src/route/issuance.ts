@@ -2,16 +2,24 @@ import type { GrantInput, Refused, SessionIssuance } from "@mod/grants";
 import type { Binding } from "@mod/sender-binding";
 import { type AccessGrant, type IssuanceRequest, referenceOf, type Tokens } from "@mod/tokens";
 
+/** What a request's grant issued through `issue`: the subjects it issued under, and the names of the claims it added. */
+export interface IssuedBundle {
+	readonly subjects: Set<string>;
+	readonly added: Set<string>;
+}
+
+export const bundleOf = (): IssuedBundle => ({ subjects: new Set(), added: new Set() });
+
 /**
  * A grant's `admits` and `issue`, with the binding; `issue` tells `told` of a token from a session,
- * and `added` of the names of the claims the grant added to each token issued.
+ * and notes in `bundle` each token's subject and the names of the claims the grant added to it.
  */
 export function issuanceFor(
 	tokens: Tokens,
 	grantType: string,
 	binding: Binding | undefined,
 	told: readonly SessionIssuance[] = [],
-	added: (names: readonly string[]) => void = () => {},
+	bundle: IssuedBundle = bundleOf(),
 ) {
 	const bound = binding ? { binding } : {};
 	const requestOf = (
@@ -27,12 +35,16 @@ export function issuanceFor(
 		const judged = await tokens.admits(requestOf(grant, from));
 		return judged.kind === "allowed" ? judged : { kind: "refused", refusal: judged };
 	};
-	const issue: GrantInput["issue"] = async (grant, from = {}) => {
+	const issue: GrantInput["issue"] = async (given, from = {}) => {
 		const { session, continuing: _, ...limits } = from;
+		// Read once: tokens signs the subject the bundle notes, whatever the grant answers later.
+		const grant = { ...given };
+		const { subject } = grant;
 		const issued = await tokens.issue(requestOf(grant, from), { ...limits, ...bound });
 		if (issued.kind !== "issued") return { kind: "refused", refusal: issued };
+		bundle.subjects.add(subject);
 		// Named from what tokens judged and signed, never the grant read again.
-		if (issued.access.addedClaims) added(issued.access.addedClaims);
+		for (const name of issued.access.addedClaims ?? []) bundle.added.add(name);
 		if (session === undefined) return issued;
 		const { id, expiresAt } = issued.access;
 		try {

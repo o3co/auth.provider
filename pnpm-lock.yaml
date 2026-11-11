@@ -2342,6 +2342,9 @@ importers:
         specifier: workspace:*
         version: link:../tokens
     devDependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
@@ -4357,6 +4360,9 @@ importers:
 
   modules/templates/subject-revocation-store:
     dependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel

@@ -15,7 +15,7 @@ import {
 	subjectRevocation,
 } from "./contract.ts";
 import { followedBy, type Write } from "./followers.ts";
-import type { BoundaryStore, BoundaryWrite, StoredBoundary } from "./store.ts";
+import type { BoundaryStore, BoundaryWrite, StoredBoundary, StoredReceipt } from "./store.ts";
 
 /** A composition that offers subject revocation, as one implementation of the contract does. */
 export interface RevocationComposition {
@@ -193,6 +193,13 @@ export interface BoundaryPlace {
 	readonly restart?: () => Promise<void>;
 	/** Where memory can run short: it does, keeping only what is kept from eviction. */
 	readonly pressMemory?: () => Promise<void>;
+	/** Where it fences: before the next fence of `subject` writes, another writer changes its boundary. */
+	readonly raceNextFence?: (
+		subject: string,
+		change: (record: StoredBoundary) => StoredBoundary,
+	) => void;
+	/** Where it tells whether erasure is enabled: enables it, as the erasure's tool does. */
+	readonly enableErasure?: () => Promise<void>;
 }
 
 /**
@@ -256,6 +263,51 @@ export function boundaryStoreContract(name: string, open: () => Promise<Boundary
 			place.advance(10 * 365 * 86_400_000);
 			expect(await place.boundaries.read(saved)).toEqual(stored({ n: 1 }));
 			expect(await place.boundaries.read(changed)).toEqual(stored({ n: 2 }));
+		});
+
+		// The fence and the mark are optional until 0.22: their cases run where the implementation has them.
+		it("fences: keeps the receipt allowed makes from the boundary as read, none where it makes none", async (context) => {
+			const place = await open();
+			const fence = place.boundaries.fence?.bind(place.boundaries);
+			if (!fence) return context.skip();
+			const made = (id: string) => ({ id }) as unknown as StoredReceipt;
+			const write = (id: string) => ({ value: made(id), lifetimeMs: 60_000 });
+			const subject = fresh();
+			const seen: unknown[] = [];
+			const allowing = (record: StoredBoundary | undefined) => {
+				seen.push(record);
+				return write("r1");
+			};
+			expect(await fence(subject, fresh(), allowing)).toEqual({
+				before: undefined,
+				after: made("r1"),
+			});
+			expect(seen).toEqual([undefined]);
+			await place.boundaries.save(subject, () => stored({ n: 1 }), "endless");
+			expect((await fence(subject, fresh(), () => undefined)).after).toBeUndefined();
+			// A receipt already under the id is answered as `before`, and kept where `allowed` makes none.
+			const taken = fresh();
+			await fence(fresh(), taken, () => write("r2"));
+			expect(await fence(subject, taken, () => undefined)).toEqual({
+				before: made("r2"),
+				after: made("r2"),
+			});
+			if (place.raceNextFence) {
+				seen.length = 0;
+				place.raceNextFence(subject, (record) => stored({ n: counted(record) + 1 }));
+				await fence(subject, fresh(), allowing);
+				expect(seen.at(-1)).toEqual(stored({ n: 2 }));
+			}
+		});
+
+		it("tells whether erasure is enabled, and enabled once it is", async (context) => {
+			const place = await open();
+			const enabled = place.boundaries.erasureEnabled?.bind(place.boundaries);
+			if (!enabled) return context.skip();
+			expect(typeof (await enabled())).toBe("boolean");
+			if (!place.enableErasure) return;
+			await place.enableErasure();
+			expect(await enabled()).toBe(true);
 		});
 
 		it("keeps boundaries through lost answers, a failover, a restart and memory pressure", async (context) => {
