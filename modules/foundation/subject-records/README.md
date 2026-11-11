@@ -11,11 +11,11 @@
   - `online-indexed`: each record's key in its subject's index; `move` gives a record to another subject.
   - `online-keyed`: each record's key its subject itself, one per subject (any other key, TypeError); the index keeps only the subject's tombstone and, once indexed, the witness of its envelopes.
   - `bounded`: each record written raw, fenced at creation by its subject's tombstone, gone by its end, at most the space's `boundedMs`.
-- `secret` (bounded only) keys records by secrets, as records under a secret are.
+- `secret` (bounded only) keys records by secrets, as records under a secret are. `phasedRecordsIn`, `phasedKeyedSetsIn` (internal module `phased`): the builders over the held phase.
 - `subjectKeyedSetsIn` (internal module `sets`) → keyed sets of `online-indexed` and `online-keyed` spaces.
 - `migrateRecords` (internal module `migrate`: a place, a walk, the owner's `SubjectReading`, a signal) → the space's `MigrationReport`, once indexed.
 - `eraseSubject` (internal module `erase`: a place, a subject) → the space's `SpaceReport`; `sweepIndex` → a page of the index swept of entries whose records or sets are gone.
-- `subjectRecordsPhase` (internal module `phase`): its mark, `read` (the store's control, once as a process starts, monotone), `readFrom` (a control or none: `reader`) and `write` (a control, its store: the mark turning records indexed, `not-in-maintenance`, then `not-paired`; `reader` is its absence).
+- `subjectRecordsPhase` (internal module `phase`): its mark, `read` (the store's control, once as a process starts, monotone), `readFrom` (a control or none: `reader`), `held` and `write` (a control, its store: the mark turning records indexed, `not-in-maintenance`, then `not-paired`; `reader` is its absence).
 - `indexSpaceOf` (a space) → its index space: `.index` after its name, its guarantees, `internal`. The wiring declares it beside the space.
 - `Phase`: `reader`, records written raw with no index or tombstone, as they were; `indexed`, the rest below, from the mark `subject-records.phase`.
 
@@ -31,7 +31,7 @@
 - A removal takes the record and its entry from the bucket as one, the bucket going with its last entry, a set under the key keeping its own; no tombstone stops it.
 - A move holds both subjects' tombstones absent and rewrites the envelope and both buckets as one: `moved`, `missing`, `not-from` or `erased`.
 - A record or set physically held is listed in its subject's bucket, expired or not: an entry leaves a bucket only with what it lists. A set never changes subject.
-- A bounded record lives 1 ms to `boundedMs`, never endless (TypeError), and keeps its end on a change; a tombstone fences only its creation. Erasing reports it `fenced` until the tombstone's deadline, `boundedMs` and 5 minutes: the tombstone commits by its deadline on the store clock, so every record created before it ends by then, the 5 minutes allowing for a store clock stepped back, as hosts keep synchronized clocks (security model, what the deployment does).
+- A bounded record lives 1 ms to `boundedMs`, never endless (TypeError), and keeps its end on a change; a tombstone fences only its creation. Erasing reports it `fenced` until the tombstone's deadline, `boundedMs` and 5 minutes for a store clock stepped back (internal module `erase`).
 - With secret keys, a bounded record created before erasure may be used after it until its end: an auth code redeemed so has its tokens refused at token-endpoint's fence.
 - A record kept raw, from before records were indexed, is changed raw, with no tombstone condition. That is safe: records turn indexed only under the maintenance key, and the one migration indexes or removes every raw record of such a space before erasure can be enabled, so none remains when a tombstone can exist (account erasure §3.3, §5.1).
 - Cost: a create or removal rewrites one bucket whole, its size growing with the subject's records (about a sixteenth of them); fine for what an owner keeps per subject, and not capped.

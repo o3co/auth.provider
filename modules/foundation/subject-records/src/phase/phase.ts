@@ -4,6 +4,11 @@ import type { Phase } from "../index/index.ts";
 
 const mark = "subject-records.phase";
 
+/** The phase a process holds, as `subjectRecordsPhase.held` gives it. */
+export interface HeldPhase {
+	read(): Promise<Phase>;
+}
+
 const read = async (control: StoreControl): Promise<Phase> =>
 	(await control.control()).marks[mark]?.value === "indexed" ? "indexed" : "reader";
 
@@ -16,6 +21,20 @@ const read = async (control: StoreControl): Promise<Phase> =>
 export const subjectRecordsPhase = Object.freeze({
 	mark,
 	read,
+	/**
+	 * The phase as a process holds it: read once and held, monotone; while the store cannot answer,
+	 * `read` throws Unavailable and the next call reads again, so a store's blip refuses no start.
+	 * With no control (a store adapter that offers none), `reader`.
+	 */
+	held: (control: StoreControl | undefined): HeldPhase => {
+		let phase: Phase | undefined;
+		return {
+			read: async () => {
+				phase ??= control === undefined ? "reader" : await read(control);
+				return phase;
+			},
+		};
+	},
 	/** As `read`, where a store adapter may offer no control: none is `reader`; a read that fails, fails. */
 	readFrom: async (control: StoreControl | undefined): Promise<Phase> =>
 		control === undefined ? "reader" : read(control),

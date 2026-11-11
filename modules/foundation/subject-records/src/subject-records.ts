@@ -13,7 +13,8 @@ import {
 export { eraseSubject, sweepIndex } from "./erase/erase.ts";
 export { indexSpaceOf, type Phase, type SubjectPlace } from "./index/index.ts";
 export { migrateRecords } from "./migrate/migrate.ts";
-export { subjectRecordsPhase } from "./phase/phase.ts";
+export { type HeldPhase, subjectRecordsPhase } from "./phase/phase.ts";
+export { phasedKeyedSetsIn, phasedRecordsIn } from "./phased/phased.ts";
 export { type SubjectKeyedSets, subjectKeyedSetsIn } from "./sets/sets.ts";
 
 /**

@@ -9,7 +9,7 @@ Internal module of `subject-records`: the phase records are in, as the store's c
 - Writing the mark, and when: the wiring holding the store's upkeep (`account-erasure-store`). What each phase writes: the package's builders.
 
 ## Offers
-- `subjectRecordsPhase`: `mark` (`subject-records.phase`); `read` (the store's control) → the phase; `readFrom` (a control, or none where the store adapter offers none) → the phase, `reader` for none, a failed read failing; `write` (a control record, the store it is of) → the mark to write, or `not-in-maintenance`, then `not-paired`.
+- `subjectRecordsPhase`: `mark` (`subject-records.phase`); `read` (the store's control) → the phase; `readFrom` (a control, or none where the store adapter offers none) → the phase, `reader` for none, a failed read failing; `held` (a control or none) → `HeldPhase`, read once and held for the process, unavailable while the store cannot answer and read again at the next call; `write` (a control record, the store it is of) → the mark to write, or `not-in-maintenance`, then `not-paired`.
 
 ## Invariants
 - The read is monotone: a mark of `indexed`, in any epoch, reads `indexed`; anything else, or none, `reader`.

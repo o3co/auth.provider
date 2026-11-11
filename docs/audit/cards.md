@@ -106,6 +106,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `index` (`src/index`): where a space keeps its subjects' index, and how it is named.
   - `migrate` (`src/migrate`): the one migration of a space's records written before they were indexed.
   - `phase` (`src/phase`): the phase records are in, as the store's control record keeps it.
+  - `phased` (`src/phased`): the builders over the phase a process holds, so a store's blip at start refuses no start.
   - `sets` (`src/sets`): keyed sets in a space holding subjects' data.
 - `@mod/tls-options` (foundation, `modules/foundation/tls-options`): Owns the floor of the provider's own TLS connections as a client: the least version and the suites they take, and that each checks its peer's certificate.
 - `@mod/url-setting` (foundation, `modules/foundation/url-setting`): Decides which configured URLs boot, for every module that takes one by `urlSetting`, and when a section's own check of the URLs it holds may read them.
