@@ -3,6 +3,7 @@ import {
 	type Changed,
 	type LinkStore,
 	type NameStore,
+	type RecordStore,
 	type StoredLink,
 	type StoredName,
 	written,
@@ -26,12 +27,24 @@ export interface NameRecords {
 /** Reads of a record kept between attempts, before a write that keeps meeting another's is unavailable. */
 const attempts = 8;
 
-/** Names' records in the link space alone, as before the name store: no copy. */
+/**
+ * Names' records in the link space alone, as before `names`: no copy. `saveName` is users' view of
+ * the link store's `save` called without a subject, as before 0.20, for a name holds none: a type
+ * over the same method, never one an implementation writes.
+ */
 function inLinks(links: LinkStore): NameRecords {
-	const asNames = links as unknown as Parameters<typeof written<StoredName>>[0];
+	// Called on the store, as before, so an implementation keeps its own `this`.
+	const viewed = links as unknown as RecordStore<StoredName>;
+	const saveName: RecordStore<StoredName>["save"] = (key, record, lifetimeMs) =>
+		viewed.save(key, record, lifetimeMs);
+	const asNames: RecordStore<StoredName> = {
+		save: saveName,
+		read: (key) => viewed.read(key),
+		update: (key, change) => viewed.update(key, change),
+	};
 	return {
 		stores: "the link store",
-		read: async (key) => (await links.read(key)) as unknown as StoredName | undefined,
+		read: asNames.read,
 		written: (key, first, change) => written(asNames, key, first, change),
 		copied: async () => {},
 	};
@@ -88,10 +101,15 @@ function split(links: LinkStore, unowned: NonNullable<LinkStore["unowned"]>, nam
 
 /** Names' records over the link store: its `names` and `unowned` where offered, else the link space alone. */
 export function nameRecordsOver(links: LinkStore): NameRecords {
-	const { names, unowned } = links;
-	if (names === undefined && unowned === undefined) return inLinks(links);
-	if (names === undefined || unowned === undefined) {
+	const { names } = links;
+	if (names === undefined && links.unowned === undefined) return inLinks(links);
+	if (names === undefined || links.unowned === undefined) {
 		throw new TypeError("users: the link store offers names and unowned together, or neither");
 	}
+	// Called on the store, so an implementation keeps its own `this`.
+	const unowned: NonNullable<LinkStore["unowned"]> = async (key, record, lifetimeMs) => {
+		if (links.unowned === undefined) throw new TypeError("users: the link store's unowned went");
+		return links.unowned(key, record, lifetimeMs);
+	};
 	return split(links, unowned, names);
 }

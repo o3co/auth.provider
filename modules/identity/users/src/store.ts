@@ -30,6 +30,21 @@ export interface RecordStore<T> {
 }
 
 /**
+ * Records of subjects by key, as `RecordStore`, each saved with the subject it is kept for, last: a
+ * store that keeps the subject apart (to find and erase a subject's records) takes it; one that does
+ * not may ignore it.
+ */
+export interface SubjectRecordStore<T> extends Omit<RecordStore<T>, "save"> {
+	/** Keeps a new record for its subject, unless the key holds one. */
+	save(
+		key: string,
+		record: T,
+		lifetimeMs: "endless",
+		subject: string,
+	): Promise<"created" | "exists">;
+}
+
+/**
  * Changes the record, or saves `first` where there is none; one saved meanwhile is changed from what it holds.
  * @deprecated A helper the package writes its own stores with, exported by mistake; nothing replaces it, copy it. A later release removes it.
  */
@@ -49,7 +64,7 @@ export async function written<T>(
 	return again;
 }
 
-export type LinkStore = RecordStore<StoredLink> & {
+export type LinkStore = SubjectRecordStore<StoredLink> & {
 	/**
 	 * The IdP names' own records, apart from the links: offered with `unowned`, or neither. Optional
 	 * in 0.20, without it names keeping their records in the link space alone; required in 0.22.
@@ -68,7 +83,7 @@ export type LinkStore = RecordStore<StoredLink> & {
 		lifetimeMs: "endless",
 	) => Promise<"created" | "exists" | "closed">;
 };
-export type ContactStore = RecordStore<StoredContacts>;
+export type ContactStore = SubjectRecordStore<StoredContacts>;
 /** IdP names' records, apart from the links. */
 export type NameStore = RecordStore<StoredName>;
 

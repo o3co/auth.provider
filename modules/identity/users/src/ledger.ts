@@ -1,8 +1,9 @@
 import { deepFreeze } from "@mod/kernel";
 import { canonicalAddress } from "@mod/mail-address";
 import { type Contact, isWellFormedSubject, type Users, userAttribute } from "./contract.ts";
+import { keptFor } from "./kept-for.ts";
 import { none, type UserSource, unanswerable } from "./registered.ts";
-import { type ContactStore, type StoredContacts, written } from "./store.ts";
+import type { ContactStore, StoredContacts } from "./store.ts";
 
 const maxPasswordBytes = 1024;
 const maxContacts = 20;
@@ -50,7 +51,7 @@ export function ledgerUsers(source: UserSource, linking: Linking, contacts: Cont
 				if (holds(held) || held.length >= maxContacts) return undefined;
 				return { value: contactsRecord([...held, kept]) };
 			};
-			const { after } = await written(contacts, subject, contactsRecord([kept]), add);
+			const { after } = await keptFor(contacts, subject, contactsRecord([kept]), add, subject);
 			if (!holds(contactsIn(after))) {
 				throw new RangeError(`users: a subject keeps at most ${maxContacts} contacts`);
 			}
