@@ -42,6 +42,7 @@
 
 ## Data
 - None of its own: the attempts per source and per identifier (a hash, never the identifier) are `rate-limit`'s.
+- An identifier's lockout is not erased with an account: keyed by the identifier, not the subject, it gives `rate-limit`'s `subjectLockouts` no name, and a name not given there is not dropped. It never holds for good and takes no release, so by `rate-limit`'s rule it expires: `account-window` after its last attempt at most.
 
 ## Depends on
 - `kernel`, `http`, `request-source`, `users`, `login-attributes` (the source name), `login-gates`, `csrf`, `rate-limit`, `audit`
