@@ -12,7 +12,7 @@ Internal module of `upstream-handoff`: the logins a gate held, kept sealed until
 - `heldOver` (the seal, the held login store) → `keep` (carry, held login, lifetime) and `take` (carry, subject, what uses the login).
 
 ## Invariants
-- A held login is sealed with its IdP, local subject, hold time and tokens, bound to its carry, and kept for the lifetime given; if it cannot be kept, that is unavailable.
+- A held login is sealed with its IdP, local subject, hold time and tokens, bound to its carry, and kept for the lifetime given, saved for its subject; if it cannot be kept, that is unavailable, as is a save the store answers `erased`, which a retry never passes.
 - It is taken once, in one rewrite, then removed after its use, which runs even where that use fails.
 - It is handed only as a login of the subject asked; any other is handed as none.
 

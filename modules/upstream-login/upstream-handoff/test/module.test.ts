@@ -1,4 +1,11 @@
-import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	defineModule,
+	kernelConfig,
+	type Module,
+	Unavailable,
+} from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import type { Seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
@@ -86,6 +93,34 @@ it("seals a held login's tokens with the sealing contributed, asking for no seal
 		.of("corp", "alice", tokens, 1000)
 		?.after({ kind: "held" } as never);
 	expect(sealed).toEqual(["upstream-handoff.held-login"]);
+});
+
+it("keeps a held login for its subject, and keeps nothing where the store answers erased: unavailable", async () => {
+	const subjects: string[] = [];
+	const answering = (answer: "created" | "erased") =>
+		defineModule({ name: "held", replicaSafe: true, takes: [] }, (m) => [
+			m.provide(heldLoginStore).by(() => ({
+				save: async (_carry: string, _record: unknown, _ms: number, subject: string) => {
+					subjects.push(subject);
+					return answer;
+				},
+				update: async () => undefined,
+				remove: async () => {},
+			})),
+		]);
+	const held = async (answer: "created" | "erased") => {
+		const app = await assemble({
+			...composition([receiving(), sealing("sealing", recording([]))]),
+			modules: [answering(answer), receiving(), sealing("sealing", recording([])), handoffModule],
+		});
+		return app
+			.get(handoff)
+			.of("corp", "alice", tokens, 1000)
+			?.after({ kind: "held" } as never);
+	};
+	await held("created");
+	await expect(held("erased")).rejects.toBeInstanceOf(Unavailable);
+	expect(subjects).toEqual(["alice", "alice"]);
 });
 
 it("refuses to boot a module receiving upstream tokens with no sealing, though a seal is composed", async () => {

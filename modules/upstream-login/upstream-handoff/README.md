@@ -16,7 +16,7 @@
 - `noHandoff`, where no module receives upstream tokens.
 - Extension point `handoffSealing`: the seal a held login's tokens are kept under. Where some module receives upstream tokens, none or two refuse boot.
 - Composition definition (`./module`): provides `handoff` over the receivers in name order, taking the held login store and the sealing contributed in every assembly, used only where some module receives upstream tokens. `upstream-handoff-seal` contributes the composed `seal`.
-- Store interface for held logins, its needs (survives failover, names from the secret) and contract test (`./testing`).
+- Store interface for held logins, each saved for its subject (`erased` where the Store fenced the subject's erasure), with `erase` and `migrate` optional in 0.20 and required in 0.22; its needs (survives failover, names from the secret), `heldLoginLifetimeMaxMs` (an hour, `transaction-lifetime`'s ceiling: a Store fencing held logins by a bound declares it) and contract test (`./testing`).
 
 ## Invariants
 - Only a login whose upstream gave tokens carries anything; any other keeps nothing.
@@ -33,7 +33,7 @@
 - The held login record: the internal module `held`'s.
 
 ## Depends on
-- `kernel`, `upstreams` (the receivers, the tokens), `seal` (the sealing's interface), `login-gates` (a login's outcome), `session` (the session)
+- `kernel`, `erasure-extensions` (the store's erasure ports' reports), `upstreams` (the receivers, the tokens), `seal` (the sealing's interface), `login-gates` (a login's outcome), `session` (the session)
 
 ## Vocabulary
 - held login: a login a gate held, its tokens sealed until it opens.
