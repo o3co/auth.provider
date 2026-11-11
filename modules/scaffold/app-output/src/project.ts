@@ -46,9 +46,51 @@ const oneDocument = `# Keeps pnpm-lock.yaml one YAML document. Otherwise pnpm wr
 pmOnFail: ignore
 `;
 
-/** The project's `pnpm-workspace.yaml`: the settings given, and the one keeping the lockfile one document. */
-export const workspaceFile = (settings: object) =>
-	`${Object.keys(settings).length === 0 ? "" : stringify(settings)}${oneDocument}`;
+/**
+ * The settings every app installs under, each with why and what to do when it refuses, for the
+ * operator who reads it; a value the caller gives for one of them is taken in its place.
+ */
+const hardening = [
+	{
+		key: "minimumReleaseAge",
+		value: 1440,
+		why: `# A version is installed only once it has been public for these minutes (1440 is
+# a day), so a hijacked release can be caught before it reaches this app. A day is
+# pnpm's default today; stated, so a pnpm whose default differs keeps it.
+`,
+	},
+	{
+		key: "trustPolicy",
+		value: "no-downgrade",
+		why: `# A version whose trust evidence is weaker than an earlier version's (published
+# without the provenance or trusted publisher it had before) is refused: a sign of
+# a hijacked account. pnpm reads each package's metadata from the registry for it,
+# some seconds more per install. A registry mirror that drops part of that
+# evidence can make pnpm refuse a sound version: install from a mirror that keeps
+# it. Where a refusal stays, hold the update and look at the package first;
+# trustPolicyExclude, which names a package it lets through, is the last resort.
+`,
+	},
+	{
+		key: "blockExoticSubdeps",
+		value: true,
+		why: `# A dependency of a dependency may come from the registry alone, never from a git
+# repository or a tarball URL, which no registry check or release age covers. A
+# package you add, one outside the release among them, that brings such a
+# dependency is refused: replace that package.
+`,
+	},
+] as const;
+
+/** The project's `pnpm-workspace.yaml`: the settings given, those every app installs under, and the one keeping the lockfile one document. */
+export const workspaceFile = (settings: object) => {
+	const given: Record<string, unknown> = { ...settings };
+	const held = hardening.map(
+		({ key, value, why }) => `${why}${stringify({ [key]: key in given ? given[key] : value })}`,
+	);
+	for (const { key } of hardening) delete given[key];
+	return `${Object.keys(given).length === 0 ? "" : `${stringify(given)}\n`}${held.join("\n")}\n${oneDocument}`;
+};
 
 /** The zod the packages take, so a section the app writes is read by the same copy. */
 export const zod = "4.6.7";
