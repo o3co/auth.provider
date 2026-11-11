@@ -108,7 +108,19 @@ type Op =
 	  }
 	| { readonly kind: "guarded" }
 	| { readonly kind: "stop" }
-	| { readonly kind: "touch"; readonly account: number };
+	| { readonly kind: "touch"; readonly account: number }
+	// Changes held in one partition, through the store's `batch`: a counter alone, and a pointer turned.
+	| { readonly kind: "bump" }
+	| { readonly kind: "aim" }
+	// Counts on the pointer; pointing far, it watches the stop across spaces, so a race with `aim`
+	// moves it from `batch` to the batch across, or back, between attempts.
+	| { readonly kind: "pointed" };
+/** The pointer's record: its count, where it points, and which change wrote it last. */
+interface Pointer {
+	readonly n: number;
+	readonly far: boolean;
+	readonly last: "aim" | "pointed" | "opening";
+}
 type Step =
 	| Op
 	| { readonly kind: "together"; readonly ops: readonly Op[] }
@@ -130,7 +142,23 @@ const op: fc.Arbitrary<Op> = fc.oneof(
 	{ arbitrary: fc.record({ kind: fc.constant("guarded" as const) }), weight: 2 },
 	{ arbitrary: fc.record({ kind: fc.constant("stop" as const) }), weight: 1 },
 	{ arbitrary: fc.record({ kind: fc.constant("touch" as const), account }), weight: 2 },
+	{ arbitrary: fc.record({ kind: fc.constant("bump" as const) }), weight: 2 },
+	{ arbitrary: fc.record({ kind: fc.constant("aim" as const) }), weight: 1 },
+	{ arbitrary: fc.record({ kind: fc.constant("pointed" as const) }), weight: 2 },
 );
+/** Three operations at once, in a generated order. */
+const raced = (three: fc.Arbitrary<readonly [Op, Op, Op]>): fc.Arbitrary<Step> =>
+	fc.tuple(three, fc.nat({ max: 5 })).map(([ops, order]): Step => {
+		const [first, second, third] = [
+			[0, 1, 2],
+			[0, 2, 1],
+			[1, 0, 2],
+			[1, 2, 0],
+			[2, 0, 1],
+			[2, 1, 0],
+		][order] as [number, number, number];
+		return { kind: "together", ops: [ops[first], ops[second], ops[third]] as Op[] };
+	});
 const step: fc.Arbitrary<Step> = fc.oneof(
 	{ arbitrary: op, weight: 4 },
 	{
@@ -142,24 +170,19 @@ const step: fc.Arbitrary<Step> = fc.oneof(
 	},
 	// The narrow race: a guarded count, the stop it watches and a transfer, all at once, in any order.
 	{
-		arbitrary: fc
-			.tuple(
-				op.filter((o) => o.kind === "transfer"),
-				fc.nat({ max: 5 }),
-			)
-			.map(([transfer, order]): Step => {
-				const ops: Op[] = [{ kind: "guarded" }, { kind: "stop" }, transfer];
-				const [first, second, third] = [
-					[0, 1, 2],
-					[0, 2, 1],
-					[1, 0, 2],
-					[1, 2, 0],
-					[2, 0, 1],
-					[2, 1, 0],
-				][order] as [number, number, number];
-				return { kind: "together", ops: [ops[first], ops[second], ops[third]] as Op[] };
-			}),
+		arbitrary: raced(
+			op
+				.filter((o) => o.kind === "transfer")
+				.map((transfer) => [{ kind: "guarded" }, { kind: "stop" }, transfer] as const),
+		),
 		weight: 3,
+	},
+	// The race across paths: the pointer turned while it counts, and the stop it may watch.
+	{
+		arbitrary: raced(
+			fc.constant([{ kind: "aim" }, { kind: "stop" }, { kind: "pointed" }] as const),
+		),
+		weight: 2,
 	},
 	{
 		arbitrary: fc.record({
@@ -232,7 +255,7 @@ async function ledger(s: fc.Scheduler, seed: number) {
 		});
 	};
 	for (const space of [left.name, right.name]) {
-		for (const name of ["get", "putIfAbsent", "replaceIf", "batchAcross"] as const) {
+		for (const name of ["get", "putIfAbsent", "replaceIf", "batch", "batchAcross"] as const) {
 			arm("before", name, space);
 			if (name !== "get") arm("confirm", name, space);
 		}
@@ -253,6 +276,9 @@ async function ledger(s: fc.Scheduler, seed: number) {
 	}
 	await records.left.create("moves", 0, "endless");
 	await records.left.create("guarded", 0, "endless");
+	await records.left.create("bumps", 0, "endless");
+	const pointer: Pointer = { n: 0, far: false, last: "opening" };
+	await records.left.create("pointer", pointer as unknown as Json, "endless");
 	const scheduled = async <T>(run: () => Promise<T>) => {
 		live = true;
 		try {
@@ -276,7 +302,7 @@ async function ledger(s: fc.Scheduler, seed: number) {
 const runs = Number(process.env.FC_RUNS ?? 200);
 const seed = Number(process.env.FC_SEED ?? 20261111);
 
-it("changes records of two spaces as one under any order of their store calls: every change applies once and whole, and none applies on a watched record that changed before it committed", async () => {
+it("changes records as one, within one partition or across two spaces, under any order of their store calls: every change applies once and whole, and none applies on a watched record that changed before it committed", async () => {
 	await fc.assert(
 		fc.asyncProperty(
 			fc.scheduler(),
@@ -285,7 +311,10 @@ it("changes records of two spaces as one under any order of their store calls: e
 			async (s, randomSeed, steps) => {
 				const l = await ledger(s, randomSeed);
 				let ids = 0;
-				const answered = { moved: 0, counted: 0, unknownMoves: 0, unknownCounts: 0 };
+				const answered = {
+					...{ moved: 0, counted: 0, unknownMoves: 0, unknownCounts: 0 },
+					...{ bumped: 0, unknownBumps: 0, pointed: 0, unknownPoints: 0 },
+				};
 				const counted: number[] = [];
 
 				const exec = async (o: Op) => {
@@ -348,6 +377,46 @@ it("changes records of two spaces as one under any order of their store calls: e
 									value: v,
 								}));
 							}
+							case "bump": {
+								const [bumps] = (
+									await l.paired.changeRecords(
+										{ first: ["bumps"], second: [] },
+										{ decide: (read) => ({ first: [{ value: (read.first[0] as number) + 1 }] }) },
+									)
+								).first;
+								return bumps?.after !== bumps?.before ? "bumped" : "unbumped";
+							}
+							case "aim":
+								return l.paired.changeRecords(
+									{ first: ["pointer"], second: [] },
+									{
+										decide: (read) => {
+											const p = read.first[0] as unknown as Pointer;
+											const next: Pointer = { ...p, far: !p.far, last: "aim" };
+											return { first: [{ value: next as unknown as Json }] };
+										},
+									},
+								);
+							case "pointed": {
+								const [turned] = (
+									await l.paired.changeRecords(
+										{ first: ["pointer"], second: [] },
+										{
+											watch: (read) =>
+												(read.first[0] as unknown as Pointer).far ? { second: ["stop"] } : {},
+											decide: (read) => {
+												const p = read.first[0] as unknown as Pointer;
+												if (p.far && read.second[0] !== undefined) return {};
+												const next: Pointer = { ...p, n: p.n + 1, last: "pointed" };
+												return { first: [{ value: next as unknown as Json }] };
+											},
+										},
+									)
+								).first;
+								const before = turned?.before as unknown as Pointer | undefined;
+								const after = turned?.after as unknown as Pointer | undefined;
+								return after?.n !== before?.n ? "pointed" : "unpointed";
+							}
 						}
 					};
 					try {
@@ -357,10 +426,14 @@ it("changes records of two spaces as one under any order of their store calls: e
 							answered.counted++;
 							counted.push(id);
 						}
+						if (answer === "bumped") answered.bumped++;
+						if (answer === "pointed") answered.pointed++;
 					} catch (error) {
 						if (!isUnavailable(error)) throw error;
 						if (o.kind === "transfer") answered.unknownMoves++;
 						if (o.kind === "guarded") answered.unknownCounts++;
+						if (o.kind === "bump") answered.unknownBumps++;
+						if (o.kind === "pointed") answered.unknownPoints++;
 					}
 				};
 
@@ -402,6 +475,30 @@ it("changes records of two spaces as one under any order of their store calls: e
 							expect(c.version, `count by operation ${c.by} after the stop`).toBeLessThan(
 								stop.version,
 							);
+						}
+					}
+					// The same, for changes held in one partition: once each, and a count pointing far
+					// committed before the stop it watched was written.
+					const bumps = (await l.raw(left, "bumps")).entry?.value as number;
+					expect(bumps).toBeGreaterThanOrEqual(answered.bumped);
+					expect(bumps).toBeLessThanOrEqual(answered.bumped + answered.unknownBumps);
+					const p = (await l.raw(left, "pointer")).entry?.value as unknown as Pointer;
+					expect(p.n).toBeGreaterThanOrEqual(answered.pointed);
+					expect(p.n).toBeLessThanOrEqual(answered.pointed + answered.unknownPoints);
+					if (stop) {
+						for (const call of l.calls) {
+							if (call.op !== "batch" && call.op !== "batchAcross") continue;
+							if (call.answer?.kind !== "committed") continue;
+							const writes = call.args[1] as readonly { key: Key; put?: unknown }[];
+							for (const [i, w] of writes.entries()) {
+								const put = w.put as Pointer | undefined;
+								if (!isRecord(w.key, left, "pointer") || put?.last !== "pointed" || !put.far)
+									continue;
+								expect(
+									Number(call.answer.versions?.[i]),
+									`a count pointing far by operation ${call.by} after the stop`,
+								).toBeLessThan(stop.version);
+							}
 						}
 					}
 					const held = new Map<string, string | undefined>();
