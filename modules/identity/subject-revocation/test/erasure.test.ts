@@ -384,5 +384,7 @@ it("refuses the start of an eraser whose build reaches the gate, collecting prob
 		() => [],
 		(error: unknown) => (error instanceof BootRefused ? error.refusals : [error]),
 	);
-	expect(refused).toEqual([{ where: expect.any(String), reason: expect.stringContaining("cycle") }]);
+	expect(refused).toEqual([
+		{ where: expect.any(String), reason: expect.stringContaining("cycle") },
+	]);
 });
