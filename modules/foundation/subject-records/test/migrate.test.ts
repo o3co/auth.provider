@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { SubjectReading, Walk } from "@mod/erasure-extensions";
+import type { Elsewhere, SubjectReading, Walk } from "@mod/erasure-extensions";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { type Json, type Key, type Space, type Store, spaces, store } from "@mod/store";
@@ -235,4 +235,69 @@ it("removes as an orphan no record another run migrated meanwhile: the removal h
 	expect(report).toMatchObject({ kind: "migrated", removed: 0 });
 	expect((await raw(indexed, "k0"))?.value).toEqual(envelope("alice", value));
 	expect(await index(indexed, "alice", bucketOf("k0"))).toEqual([["k0", "record"]]);
+});
+
+it("runs the owner's step for each orphan before removing it, on the value it confirmed, counting it removed; none for a subject's record", async () => {
+	const { at, walk, put, raw } = await opened();
+	await put(indexed, "a", { owner: "alice" });
+	await put(indexed, "o", { owner: "nobody", issuer: "x" });
+	const kept: [string, unknown, boolean][] = [];
+	const elsewhere: Elsewhere = async (key, value) => {
+		// The source is still there while the step runs: the removal comes after it.
+		kept.push([key, value, (await raw(indexed, key)) !== null]);
+	};
+	expect(await migrateRecords(at(indexed), walk(), owners, { elsewhere })).toEqual({
+		kind: "migrated",
+		space: indexed.name,
+		indexed: 1,
+		removed: 1,
+	});
+	expect(kept).toEqual([["o", { owner: "nobody", issuer: "x" }, true]]);
+	expect(await raw(indexed, "o")).toBeNull();
+});
+
+it("stops the space where the owner's step throws, removing that orphan and nothing more", async () => {
+	const { at, walk, put, raw } = await opened();
+	await put(indexed, "o", { owner: "nobody" });
+	const elsewhere: Elsewhere = async () => {
+		throw new TypeError("no room");
+	};
+	expect(await migrateRecords(at(indexed), walk(), owners, { elsewhere })).toEqual({
+		kind: "stopped",
+		space: indexed.name,
+		reason: "elsewhere: TypeError",
+	});
+	expect((await raw(indexed, "o"))?.value).toEqual({ owner: "nobody" });
+});
+
+it("runs the owner's step again on a record changed before its removal, removing the value it kept last", async () => {
+	const { s, at, walk, put, raw } = await opened();
+	await put(indexed, "o", { owner: "nobody", issuer: "old" });
+	let changedOnce = false;
+	const kept: unknown[] = [];
+	const elsewhere: Elsewhere = async (_key, value) => {
+		kept.push(value);
+		if (changedOnce) return;
+		changedOnce = true;
+		// Another writer changes the record after the step read it, before the removal.
+		const key = { space: indexed, partition: "o", name: "record" };
+		const { entry } = await s.get(key);
+		await s.replaceIf(
+			key,
+			entry?.version ?? "",
+			{ owner: "nobody", issuer: "new" },
+			{
+				expiry: { kind: "never" },
+			},
+		);
+	};
+	expect(await migrateRecords(at(indexed), walk(), owners, { elsewhere })).toMatchObject({
+		kind: "migrated",
+		removed: 1,
+	});
+	expect(kept).toEqual([
+		{ owner: "nobody", issuer: "old" },
+		{ owner: "nobody", issuer: "new" },
+	]);
+	expect(await raw(indexed, "o")).toBeNull();
 });

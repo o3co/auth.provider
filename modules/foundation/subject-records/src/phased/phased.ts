@@ -1,4 +1,4 @@
-import type { SubjectReading, Walk } from "@mod/erasure-extensions";
+import type { Elsewhere, SubjectReading, Walk } from "@mod/erasure-extensions";
 import { type Clock, isUnavailable, Unavailable } from "@mod/kernel";
 import type { Json } from "@mod/store";
 import { eraseSubject } from "../erase/erase.ts";
@@ -89,8 +89,12 @@ export const phasedRecordsIn = <T extends Json>(
 			return {
 				...subjectRecordsIn<T>(at, where, told, options),
 				erase: (subject: string, signal: AbortSignal) => eraseSubject(at, subject, { signal }),
-				migrate: (walk: Walk, subjectOf: SubjectReading, signal: AbortSignal) =>
-					migrateRecords(at, walk, subjectOf, { signal }),
+				migrate: (
+					walk: Walk,
+					subjectOf: SubjectReading,
+					signal: AbortSignal,
+					elsewhere?: Elsewhere,
+				) => migrateRecords(at, walk, subjectOf, elsewhere ? { signal, elsewhere } : { signal }),
 			};
 		},
 		refuse,
