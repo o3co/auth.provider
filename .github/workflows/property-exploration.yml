@@ -1,0 +1,117 @@
+name: Property exploration
+
+# The property tests (`*.properties.test.ts`) run in every pull request's checks with a fixed seed
+# and run count (FC_SEED and FC_RUNS left at each file's defaults), so no pull request passes or
+# fails by luck. This workflow looks further: on a schedule, and by hand, it runs every property
+# test under a seed of its own and many more runs. It runs on no pull request.
+#
+# A failing seed is never retried. It opens an issue with the seed, the run count and the
+# counterexample; the fix keeps that counterexample as an explicit example beside its property,
+# so every pull request runs it from then on.
+#
+# A `schedule` runs only from the default branch, so the schedule starts once this file reaches
+# main; `workflow_dispatch` runs it on any branch meanwhile.
+on:
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: 'The seed to run (digits); empty draws a new one'
+        required: false
+        default: ''
+      runs:
+        description: 'Runs of each property (digits)'
+        required: false
+        default: '2000'
+
+permissions:
+  contents: read
+
+# One exploration at a time; a scheduled one never cancels another under way.
+concurrency:
+  group: property-exploration
+  cancel-in-progress: false
+
+jobs:
+  explore:
+    name: Explore the properties
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      # Opens the issue for a failing seed.
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # The lowest version engines admits, as CI's first.
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      # The inputs are read as data and must be digits: nothing typed reaches the shell as code.
+      - name: Choose the seed and the runs
+        id: chosen
+        env:
+          ASKED_SEED: ${{ inputs.seed }}
+          ASKED_RUNS: ${{ inputs.runs }}
+        run: |
+          seed="$ASKED_SEED"
+          if [ -z "$seed" ]; then
+            seed=$(( $(od -An -N4 -tu4 /dev/urandom) % 2147483647 ))
+          fi
+          runs="${ASKED_RUNS:-2000}"
+          case "$seed$runs" in
+            *[!0-9]*) echo "::error::the seed and the runs are digits"; exit 1 ;;
+          esac
+          echo "seed=$seed" >> "$GITHUB_OUTPUT"
+          echo "runs=$runs" >> "$GITHUB_OUTPUT"
+          echo "Seed \`$seed\`, \`$runs\` runs of each property, at \`$GITHUB_SHA\`." >> "$GITHUB_STEP_SUMMARY"
+      - name: Run every property test
+        id: explored
+        env:
+          FC_SEED: ${{ steps.chosen.outputs.seed }}
+          FC_RUNS: ${{ steps.chosen.outputs.runs }}
+        run: |
+          set +e
+          pnpm vitest run properties.test 2>&1 | tee "$RUNNER_TEMP/properties.log"
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+      - name: Keep the log
+        if: failure() && steps.explored.outputs.status != '' && steps.explored.outputs.status != '0'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: properties-log
+          path: ${{ runner.temp }}/properties.log
+          retention-days: 30
+      - name: Open an issue for the failing seed
+        if: failure() && steps.explored.outputs.status != '' && steps.explored.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SEED: ${{ steps.chosen.outputs.seed }}
+          RUNS: ${{ steps.chosen.outputs.runs }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # What the log says of the failure, the generated values among it (the line closing a
+          # scheduler's order); none found still opens the issue.
+          grep -E 'FAIL |Property failed|Counterexample|resolved`,|Shrunk|Caused by' "$RUNNER_TEMP/properties.log" \
+            > "$RUNNER_TEMP/failure.txt" || true
+          {
+            echo "A property test fails under seed \`$SEED\` with \`$RUNS\` runs, at \`$GITHUB_SHA\` ($GITHUB_REF_NAME)."
+            echo
+            echo "- Run: $RUN_URL (its artifact \`properties-log\` holds the whole log)"
+            echo "- Again, locally: \`FC_SEED=$SEED FC_RUNS=$RUNS pnpm vitest run properties.test\`"
+            echo
+            echo "Not to be retried. The fix keeps this counterexample as an explicit example beside its property."
+            echo
+            echo '```'
+            head -40 "$RUNNER_TEMP/failure.txt" | cut -c1-3000
+            echo '```'
+          } > "$RUNNER_TEMP/issue.md"
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Property exploration: seed $SEED fails" \
+            --body-file "$RUNNER_TEMP/issue.md"
