@@ -12,7 +12,13 @@ import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { upstreamLoginReceivers } from "@mod/upstreams";
 import { expect, it } from "vitest";
-import { handoff, handoffSealing, heldLoginStore, noHandoff } from "../src/contract.ts";
+import {
+	handoff,
+	handoffSealing,
+	heldLoginLifetimeMaxMs,
+	heldLoginStore,
+	noHandoff,
+} from "../src/contract.ts";
 import handoffModule from "../src/module.ts";
 
 const runtime = quietRuntime({ clock: { now: () => 0 } });
@@ -93,6 +99,14 @@ it("seals a held login's tokens with the sealing contributed, asking for no seal
 		.of("corp", "alice", tokens, 1000)
 		?.after({ kind: "held" } as never);
 	expect(sealed).toEqual(["upstream-handoff.held-login"]);
+});
+
+it("refuses a held login's lifetime past heldLoginLifetimeMaxMs, or none", async () => {
+	const app = await boot([receiving(), sealing("sealing", recording([]))]);
+	for (const lifetimeMs of [heldLoginLifetimeMaxMs + 1, 0]) {
+		expect(() => app.get(handoff).of("corp", "alice", tokens, lifetimeMs)).toThrow(TypeError);
+	}
+	expect(app.get(handoff).of("corp", "alice", tokens, heldLoginLifetimeMaxMs)).toBeDefined();
 });
 
 it("keeps a held login for its subject, and keeps nothing where the store answers erased: unavailable", async () => {

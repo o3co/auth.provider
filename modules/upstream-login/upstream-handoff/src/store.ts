@@ -34,7 +34,7 @@ export interface HeldLoginStore {
 	migrate?(walk: Walk, subjectOf: SubjectReading, signal: AbortSignal): Promise<MigrationReport>;
 }
 
-/** The longest a held login is kept (federation's `transaction-lifetime` at most): a Store fencing held logins by a bound declares it. */
+/** The longest a held login may be kept: `handoff.of` refuses longer, and a Store fencing held logins by a bound declares it. */
 export const heldLoginLifetimeMaxMs = 3_600_000;
 
 export const heldLoginStore = contract<HeldLoginStore>("upstream-handoff.held-login-store");
