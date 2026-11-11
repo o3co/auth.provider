@@ -2,6 +2,7 @@ import { audit } from "@mod/audit";
 import { documentCopies } from "@mod/client-documents";
 import { clients, metadataSections } from "@mod/clients";
 import { csrfChecked } from "@mod/csrf";
+import { erasers } from "@mod/erasure-extensions";
 import { routes, site, use } from "@mod/http";
 import { defineModule, Unavailable } from "@mod/kernel";
 import { sessions } from "@mod/session";
@@ -9,6 +10,7 @@ import { loopbackPagesRefused } from "@mod/url-setting";
 import { askKey, storedOf } from "./ask.ts";
 import { clientCopy, clientSection, isFirstParty, underOf } from "./client-section.ts";
 import { consents } from "./contract.ts";
+import { consentEraser } from "./eraser.ts";
 import { grantsOver } from "./grants/grants.ts";
 import { answerOver, path, showOver } from "./page/page.ts";
 import { section } from "./section.ts";
@@ -33,6 +35,10 @@ export default defineModule(
 	},
 	(m) => [
 		m.contribute(metadataSections).by(() => clientSection),
+		// Its build takes only its Stores, collecting no probes: the erasure gate collects erasers.
+		m
+			.contribute(erasers)
+			.by(async (c) => consentEraser(await c.get(grantStore), await c.get(askStore))),
 		m.contribute(documentCopies).by(() => clientCopy),
 		m.provide(consents).by(async (c) => {
 			const grants = await grantsOver(c);

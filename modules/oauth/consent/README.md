@@ -26,6 +26,7 @@
 - `canBeAgreed`: whether a grant can ever count for a client: false for one from another source whose section says no `under`, which no answer could cover.
 - Operator section: `page` (an https URL without userinfo or fragment, or plain http on a loopback host outside production, as `authorize`'s login page; unset by default, so nobody is asked) and `challenge-lifetime` (written with its unit, `1m` to `1h` in whole seconds, default `10m`).
 - Store interfaces for grants and asks: save once for its subject (last: `created`, `exists`, or `erased`, taken as refused), read, and update from what the record holds; optional `erase` and `migrate` (a `Walk`, consent's `SubjectReading`), required in 0.22. `askLifetimeMaxMs` (1 hour) bounds an ask, for a Store that fences asks by it.
+- The eraser `consent`, contributed to `erasure-extensions`' `erasers`, as its Stores' spaces' `erasedBy` name it: grants erased and asks fenced through the Stores' `erase`, a window doing the same for each subject, and `migrate` reading a grant's subject from its key (never an orphan); `erasable` only where both Stores offer `erase` and `migrate`, empty reports where not. Its build takes only its Stores, collecting no `probes`.
 - `./testing`: configuration builders, both store interfaces on `records` stand-ins, and the store contract tests.
 
 ## Invariants
