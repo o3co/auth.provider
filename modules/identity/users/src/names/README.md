@@ -13,7 +13,7 @@ Internal module of `users`: what an IdP name stands for, within one boot and acr
 - `namesRefused` (the declarations) → reasons, for one boot.
 - `nameRecordsOver` (the link store) → where names are kept: its `names` and `unowned`, or the link space alone; `issuersJudged` (the declarations, `issuer-moved`, those records, the log) → refusals, across boots, reading alone, and `settle`: what to write once no module refuses the boot, answering what is refused of what it finds written.
 
-- `isNameKey`, `nameSubjectOf` (a name's record) → no subject's, an orphan by its key (unreadable where it holds no issuer); `namesKept` (the name store) → names' `Elsewhere`: before the migration removes a name's record from the link space, it is kept in the name store as the link space holds it, rewritten where it differs, and read back confirmed, or the step throws and the space stops; nothing for any other key.
+- `isNameKey`, `nameSubjectOf` (a name's record) → no subject's, an orphan by its key where it holds exactly `{ issuer }`, a string; anything more or else is unreadable, as it may hold a subject's data; `namesKept` (the name store) → names' `Elsewhere`: before the migration removes a name's record from the link space, it is kept in the name store as the link space holds it, rewritten where it differs, and read back confirmed, or the step throws and the space stops; nothing for any other key.
 
 ## Invariants
 - A name's issuer is compared as written.
@@ -21,6 +21,7 @@ Internal module of `users`: what an IdP name stands for, within one boot and acr
 - A name not written is read again then, so a move another instance made during this build is judged. Writes are per name: where a later one cannot answer, the boot is refused and what was written of an earlier one stays.
 - One name is one record, saved if absent, so of instances starting at once the first writer's issuer is what the rest are judged by. It is kept once no module refuses the boot. A store that does not keep it across a restart says so at every start (`store.volatile_accepted`, `redis.durability_none`), and a change of issuer then goes unseen.
 - With a name store, the link space keeps the record until the one migration takes names out of it: every write goes there first (a first save through `unowned`, a move as an update), and the name store is a copy, brought in step at each write and at every boot, so a write cut short between the two heals at the next.
+- A name's record in the link space of another shape, `null` included, is the record, judged a difference: never read past to its copy, and never copied. A settle copies and judges the one record it read, so another instance's move during it is judged.
 - Where `unowned` answers `closed`, the link space keeping no names any more, the name store is the record. A name kept in the name store alone is read as kept, and no record is made in the link space again.
 - A store that cannot answer, at the read or the write, is a refusal, as is a record of another shape; neither reads as no record.
 - An entry passes where the kept issuer is its `from` and the declared one its `to`, rewriting the record over that `from` alone, or where both are its `to`; any other, no record kept or no such name among them, is refused at its key.

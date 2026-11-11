@@ -83,6 +83,9 @@ it("reads a link as its subject's, a trace and a name's record as orphans, a con
 	expect(await inLinks?.(name, { issuer: "https://a.example" })).toEqual({ kind: "orphan" });
 	expect((await inLinks?.(link, { subject: 7 }))?.kind).toBe("unreadable");
 	expect((await inLinks?.(name, { issuer: 7 }))?.kind).toBe("unreadable");
+	// A name's key holding more than its issuer may hold a subject's data: it proves nothing, so nothing is copied out.
+	const carrying = { issuer: "A", subject: "s-a", email: "a@example.com" };
+	expect((await inLinks?.(name, carrying))?.kind).toBe("unreadable");
 	expect(await inContacts?.("s-a", [])).toEqual({ kind: "subject", subject: "s-a" });
 	expect((await inContacts?.("s-a", { list: [] }))?.kind).toBe("unreadable");
 });

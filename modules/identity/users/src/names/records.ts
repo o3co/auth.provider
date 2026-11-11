@@ -8,6 +8,7 @@ import {
 	type StoredName,
 	written,
 } from "../store.ts";
+import { isNameRecord } from "./elsewhere.ts";
 
 /** Where a name's record is kept, as names reads and writes it. */
 export interface NameRecords {
@@ -20,8 +21,8 @@ export interface NameRecords {
 		first: StoredName,
 		change: (record: StoredName) => Changed<StoredName> | undefined,
 	): Promise<{ readonly after: StoredName }>;
-	/** Brings the copy in step with the record kept, where there is a copy. */
-	copied(key: string): Promise<void>;
+	/** Brings the copy in step with the record kept, where there is a copy; answers the record kept, as read. */
+	copied(key: string): Promise<StoredName | undefined>;
 }
 
 /** Reads of a record kept between attempts, before a write that keeps meeting another's is unavailable. */
@@ -46,7 +47,7 @@ function inLinks(links: LinkStore): NameRecords {
 		stores: "the link store",
 		read: asNames.read,
 		written: (key, first, change) => written(asNames, key, first, change),
-		copied: async () => {},
+		copied: (key) => asNames.read(key),
 	};
 }
 
@@ -62,6 +63,8 @@ function split(links: LinkStore, unowned: NonNullable<LinkStore["unowned"]>, nam
 		change as unknown as (record: StoredLink) => Changed<StoredLink> | undefined;
 	/** The copy made what the link space keeps: saved where absent, else rewritten to it. */
 	const copyOf = async (key: string, kept: StoredName) => {
+		// A record of another shape is never copied: it is judged a difference, and the copy kept.
+		if (!isNameRecord(kept)) return;
 		const same = JSON.stringify(kept);
 		const align = (record: StoredName) =>
 			JSON.stringify(record) === same ? undefined : { value: kept };
@@ -69,7 +72,10 @@ function split(links: LinkStore, unowned: NonNullable<LinkStore["unowned"]>, nam
 	};
 	const records: NameRecords = {
 		stores: "the link store or the name store",
-		read: async (key) => (await fromLinks(key)) ?? (await names.read(key)),
+		read: async (key) => {
+			const kept = await fromLinks(key);
+			return kept === undefined ? names.read(key) : kept;
+		},
 		written: async (key, first, change) => {
 			for (let attempt = 0; attempt < attempts; attempt += 1) {
 				const inLinksNow = await links.update(key, asLinks(change));
@@ -93,7 +99,9 @@ function split(links: LinkStore, unowned: NonNullable<LinkStore["unowned"]>, nam
 		},
 		copied: async (key) => {
 			const kept = await fromLinks(key);
-			if (kept !== undefined) await copyOf(key, kept);
+			if (kept === undefined) return names.read(key);
+			await copyOf(key, kept);
+			return kept;
 		},
 	};
 	return records;

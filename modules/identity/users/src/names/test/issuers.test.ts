@@ -481,3 +481,62 @@ describe("an IdP name's issuer, with a name store", () => {
 		expect(await neither.links.store.read(nameKey("corp"))).toEqual({ issuer: issuerA });
 	});
 });
+
+describe("an IdP name's issuer, judged as the copy follows it", () => {
+	/** users' stores with names, the link store's reads of the name's key passed through `hook` first. */
+	const hooked = (
+		hook: (stores: ReturnType<typeof memoryUsersStores>, read: number) => Promise<void>,
+	) => {
+		const stores = memoryUsersStores({ names: true });
+		let reads = 0;
+		const links: LinkStore = {
+			...stores.links.store,
+			names: stores.names.store,
+			unowned: async (key, record) => stores.links.store.save(key, record as never, "endless"),
+			read: async (key) => {
+				if (key === nameKey("corp")) await hook(stores, ++reads);
+				return stores.links.store.read(key);
+			},
+		};
+		const module = defineModule({ name: "users-stores", replicaSafe: false, takes: [] }, (m) => [
+			m.provide(linkStore).by(() => links),
+			m.provide(contactStore).by(() => stores.contacts.store),
+		]);
+		return { stores, module, reads: () => reads };
+	};
+
+	it("settles an unchanged name on one read, which it both copies and judges, leaving no window between them", async () => {
+		const { stores, module, reads } = hooked(async () => {});
+		await stores.links.store.save(nameKey("corp"), { issuer: issuerA } as never, "endless");
+		expect((await boot(stores, { stores: module })).refusals).toBeUndefined();
+		// One read to judge at build, one to settle: the copy is made from the record judged.
+		expect(reads()).toBe(2);
+		expect(await stores.names.store.read(nameKey("corp"))).toEqual({ issuer: issuerA });
+	});
+
+	it("refuses a boot whose name another instance moved while it settled: what is copied is what is judged", async () => {
+		const { stores, module } = hooked(async (s, read) => {
+			// Judged on the first read; moved before the settle's read, which copies it.
+			if (read === 2)
+				await s.links.store.update(nameKey("corp"), () => ({
+					value: { issuer: issuerB } as never,
+				}));
+		});
+		await stores.links.store.save(nameKey("corp"), { issuer: issuerA } as never, "endless");
+		await stores.names.store.save(nameKey("corp"), { issuer: issuerA } as never, "endless");
+		expect((await boot(stores, { stores: module })).refusals).toEqual(
+			refusedAs("federation declares"),
+		);
+		expect(await stores.names.store.read(nameKey("corp"))).toEqual({ issuer: issuerB });
+	});
+
+	it("reads a record of another shape in the link space as the record, never its copy, and never copies it", async () => {
+		const { stores, module } = hooked(async () => {});
+		await stores.links.store.save(nameKey("corp"), null as never, "endless");
+		await stores.names.store.save(nameKey("corp"), { issuer: issuerA } as never, "endless");
+		expect((await boot(stores, { stores: module })).refusals).toEqual(
+			refusedAs("federation declares"),
+		);
+		expect(await stores.names.store.read(nameKey("corp"))).toEqual({ issuer: issuerA });
+	});
+});

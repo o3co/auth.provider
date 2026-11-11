@@ -38,7 +38,7 @@ const keyOf = (name: string) => JSON.stringify({ idp: name });
 const recordOf = (issuer: string) => ({ issuer }) as unknown as StoredName;
 /** The issuer a record keeps; of another shape, an empty one, which no declared issuer equals. */
 const issuerIn = (record: StoredName) => {
-	const { issuer } = record as { issuer?: unknown };
+	const { issuer } = (record ?? {}) as { issuer?: unknown };
 	return typeof issuer === "string" ? issuer : "";
 };
 
@@ -110,14 +110,10 @@ export async function issuersJudged(
 		for (const [name, held] of kept) {
 			const issuer = issuerOf(name) as string;
 			if (held === issuer) {
-				// Not written, so read again: another instance may have moved it during this build.
-				const now = await records.read(keyOf(name));
+				// Not written: read again as it is copied, every boot, so another instance's move is judged.
+				const now = await records.copied(keyOf(name));
 				if (now !== undefined && issuerIn(now) !== issuer) refusals.push(differs(name));
-				if (now !== undefined) {
-					// The copy follows what is kept, every boot: a write cut short between the two heals here.
-					await records.copied(keyOf(name));
-					continue;
-				}
+				if (now !== undefined) continue;
 			}
 			const move = moving.get(name);
 			// Another instance may keep or move it first: what it wrote is judged as read here.

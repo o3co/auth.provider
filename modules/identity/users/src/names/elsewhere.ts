@@ -18,13 +18,18 @@ export const isNameKey = (key: string): boolean => {
 	}
 };
 
-/** A name's record in the link space is no subject's: an orphan by its key, kept by `namesKept` first. */
-export const nameSubjectOf = (value: unknown): SubjectOf => {
-	const issuer = (value as { readonly issuer?: unknown } | null)?.issuer;
-	return typeof issuer === "string"
+/** A name's record exactly: `{ issuer }`, a string, and nothing else, which could be a subject's data. */
+export const isNameRecord = (value: unknown): boolean =>
+	value !== null &&
+	typeof value === "object" &&
+	!Array.isArray(value) &&
+	Object.keys(value).length === 1 &&
+	typeof (value as { issuer?: unknown }).issuer === "string";
+
+export const nameSubjectOf = (value: unknown): SubjectOf =>
+	isNameRecord(value)
 		? { kind: "orphan" }
 		: { kind: "unreadable", reason: "a name's record of another shape" };
-};
 
 /**
  * names' `Elsewhere`: a name's record kept in the name store as the link space, the authority, holds
