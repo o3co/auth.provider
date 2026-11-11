@@ -80,7 +80,7 @@ func random() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// trusting is an HTTP client whose TLS trusts the front's certificate alone, and that follows a
+// trusting is an HTTP client whose TLS (1.2 at least) trusts the front's certificate alone, and that follows a
 // redirect only to https, as many as Go's default (10): one to plain http would send the request's
 // body and Authorization again in clear, past the endpoints discovered() checks.
 func trusting(pem string) *http.Client {
@@ -88,7 +88,7 @@ func trusting(pem string) *http.Client {
 	pool.AppendCertsFromPEM([]byte(pem))
 	return &http.Client{
 		Timeout:   30 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}},
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if req.URL.Scheme != "https" {
 				return fmt.Errorf("refused a redirect to %s, not https", req.URL.Redacted())
