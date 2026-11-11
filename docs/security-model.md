@@ -285,7 +285,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Setting `federation-grants.keep-on-subject-revocation` only where an established grant may outlive a subject's revocation that keeps delegations: every start warns `federation-grants.kept_on_subject_revocation`.
   - Stating a move in `users.issuer-moved` only where the same people hold the same subjects at the new issuer: an existing link then lets in whoever holds that subject there. Every assembly no module refuses applies it and warns `users.issuer_moved` while it is listed, naming the IdP, an entry that never starts, such as `reseal`, too.
   - An issuer changed under a name before this version cannot be detected: what is kept from the first start on is the issuer declared then. Check each name's issuer before that start.
-  - On a store that does not keep what it holds across a restart (`store.accept-volatile`), a crash (`redis.durability = none`) or a failover (`redis.replication = none`), the kept issuer goes too, and a change then goes unseen; each start warns (`store.volatile_accepted`, `redis.durability_none`, `redis.replication_none`), naming `users-store.links`.
+  - On a store that does not keep what it holds across a restart (`store.accept-volatile`), a crash (`redis.durability = none`) or a failover (`redis.replication = none`), the kept issuer goes too, and a change then goes unseen; each start warns (`store.volatile_accepted`, `redis.durability_none`, `redis.replication_none`), naming `users-store.links` and `users-store.names`.
 
 ## Outbound requests
 
