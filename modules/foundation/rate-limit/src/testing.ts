@@ -32,6 +32,8 @@ function memoryCounter(now: () => number): RateLimit {
 	};
 }
 
+// Provisional: store's expiry rules, copied; when store's `./testing` offers its memory store (after G),
+// the stand-in takes it and this goes.
 /** When a write's expiry ends it, as the store judges it from the entry's own: `null` never. */
 function endOf(expiry: Expiry, held: number | null | undefined, at: number): number | null {
 	switch (expiry.kind) {
