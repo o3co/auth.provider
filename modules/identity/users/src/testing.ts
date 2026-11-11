@@ -431,6 +431,7 @@ export interface UsersStorePlace<T> {
  * What users needs from any implementation of one of its store interfaces: records kept whole and
  * once, changed only from what they hold, never ended, through faults.
  */
+/** Each record is saved for a subject named as its key: a store keyed by its subject takes that, as one that is not does. */
 function recordTests<T>(open: () => Promise<UsersStorePlace<T>>): void {
 	let n = 0;
 	const fresh = () => `k-${++n}-${Math.random().toString(36).slice(2)}`;
@@ -442,8 +443,8 @@ function recordTests<T>(open: () => Promise<UsersStorePlace<T>>): void {
 		const { records } = await open();
 		const key = fresh();
 		const odd = held({ state: "unheard-of", nested: { list: [1, "two"] } });
-		expect(await records.save(key, odd, "endless", "s-1")).toBe("created");
-		expect(await records.save(key, held({ n: 1 }), "endless", "s-1")).toBe("exists");
+		expect(await records.save(key, odd, "endless", key)).toBe("created");
+		expect(await records.save(key, held({ n: 1 }), "endless", key)).toBe("exists");
 		expect(await records.read(key)).toEqual(odd);
 		expect(await records.update(key, () => undefined)).toEqual({ before: odd, after: odd });
 		expect(await records.read(fresh())).toBeUndefined();
@@ -453,7 +454,7 @@ function recordTests<T>(open: () => Promise<UsersStorePlace<T>>): void {
 	it("changes a record only from what it holds, again after a racing writer", async () => {
 		const place = await open();
 		const key = fresh();
-		await place.records.save(key, held({ n: 1 }), "endless", "s-1");
+		await place.records.save(key, held({ n: 1 }), "endless", key);
 		expect(await place.records.update(key, plus)).toEqual({
 			before: held({ n: 1 }),
 			after: held({ n: 2 }),
@@ -468,8 +469,8 @@ function recordTests<T>(open: () => Promise<UsersStorePlace<T>>): void {
 	it("never ends a record, saved or changed", async () => {
 		const place = await open();
 		const [saved, changed] = [fresh(), fresh()];
-		await place.records.save(saved, held({ n: 1 }), "endless", "s-1");
-		await place.records.save(changed, held({ n: 1 }), "endless", "s-1");
+		await place.records.save(saved, held({ n: 1 }), "endless", saved);
+		await place.records.save(changed, held({ n: 1 }), "endless", changed);
 		await place.records.update(changed, plus);
 		place.advance(10 * 365 * 86_400_000);
 		expect(await place.records.read(saved)).toEqual(held({ n: 1 }));
@@ -482,8 +483,8 @@ function recordTests<T>(open: () => Promise<UsersStorePlace<T>>): void {
 		if (!lose || !failover || !restart || !pressMemory) return context.skip();
 		const [saved, changed] = [fresh(), fresh()];
 		lose();
-		expect(await place.records.save(saved, held({ n: 1 }), "endless", "s-1")).toBe("created");
-		await place.records.save(changed, held({ n: 1 }), "endless", "s-1");
+		expect(await place.records.save(saved, held({ n: 1 }), "endless", saved)).toBe("created");
+		await place.records.save(changed, held({ n: 1 }), "endless", changed);
 		lose();
 		expect((await place.records.update(changed, plus))?.after).toEqual(held({ n: 2 }));
 		await failover();
@@ -512,7 +513,7 @@ export function linkStoreContract(
 			const { stallReplicas: stall } = place;
 			if (!stall) return context.skip();
 			const key = `confirmed-${Math.random().toString(36).slice(2)}`;
-			await place.records.save(key, {} as StoredLink, "endless", "s-1");
+			await place.records.save(key, {} as StoredLink, "endless", key);
 			stall(true);
 			await expect(place.records.read(key)).rejects.toSatisfy(isUnavailable);
 			stall(false);
