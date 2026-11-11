@@ -1,6 +1,7 @@
 import type { MigrationReport, SpaceReport, Walk } from "@mod/erasure-extensions";
 import { describe, expect, it } from "vitest";
-import { consentEraser, grantSubjectOf } from "../src/eraser.ts";
+import { consentEraser } from "../src/eraser.ts";
+import { grantSubjectOf } from "../src/grants/grants.ts";
 import type { AskStore, GrantStore } from "../src/store.ts";
 
 const signal = new AbortController().signal;
@@ -40,7 +41,11 @@ describe("consent's eraser", () => {
 				return reported(space);
 			},
 			migrate: async (_walk: Walk, reading: typeof grantSubjectOf) => {
-				asked.push(`${space} ${(await reading(JSON.stringify(["bob", "app"]), {})).kind}`);
+				const read = await reading(JSON.stringify(["bob", "app"]), {}).then(
+					(one) => one.kind,
+					() => "refused to read",
+				);
+				asked.push(`${space} ${read}`);
 				return { kind: "migrated", space, indexed: 0, removed: 0 } as unknown as MigrationReport;
 			},
 		});
@@ -60,7 +65,7 @@ describe("consent's eraser", () => {
 			"grants carol",
 			"asks carol",
 			"grants subject",
-			"asks unreadable",
+			"asks refused to read",
 		]);
 	});
 });

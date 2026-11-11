@@ -1,4 +1,5 @@
 import type { Client } from "@mod/clients";
+import type { SubjectReading } from "@mod/erasure-extensions";
 import { type BuildContext, Unavailable } from "@mod/kernel";
 import { underOf } from "../client-section.ts";
 import { type GrantStore, grantStore, type StoredGrant } from "../store.ts";
@@ -32,6 +33,29 @@ const written = (range: readonly string[], under: string | undefined) =>
 
 /** One key per subject and client, whatever either holds. */
 const grantKey = (clientId: string, subject: string) => JSON.stringify([subject, clientId]);
+
+/**
+ * A grant's subject, from its key (`[subject, clientId]`, as `grantKey` makes it): consent's reading, so the
+ * Store never opens a grant. A key in another shape proves nothing: unreadable, never an orphan,
+ * as consent cannot tell an account gone from one it does not hold.
+ */
+export const grantSubjectOf: SubjectReading = async (key) => {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(key);
+	} catch {
+		return { kind: "unreadable", reason: "a grant key that is no JSON" };
+	}
+	if (
+		Array.isArray(parsed) &&
+		parsed.length === 2 &&
+		typeof parsed[0] === "string" &&
+		typeof parsed[1] === "string"
+	) {
+		return { kind: "subject", subject: parsed[0] };
+	}
+	return { kind: "unreadable", reason: "a grant key of another shape" };
+};
 
 /**
  * Whether a grant held counts for the client now: for one the operator registered, whatever it is
@@ -86,11 +110,7 @@ export function grantsWith({ store }: GrantsParts) {
 		rangeFor,
 		covers,
 		keep,
-		/**
-		 * `grantFor`: unavailable where the subject is erased, which only a race with its erasure
-		 * reaches. A stopgap: consent's contract gains a refusal answer, its callers switch, and the
-		 * throw goes.
-		 */
+		/** `grantFor`: unavailable for an erased subject, the stopgap the card states. */
 		grant: async (client: Client, subject: string, range: readonly string[]) => {
 			if ((await keep(client.id, subject, range, underOf(client))) === "refused") {
 				throw new Unavailable("consent");

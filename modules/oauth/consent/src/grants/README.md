@@ -9,7 +9,7 @@ Internal module of `consent`: each subject's grants, per client, as the grant st
 - Whether to ask, and the consent page (the package and `page`). What a client's source says of its description (the source, through the section's `under`).
 
 ## Offers
-- `grantsOver` (the build context) → `grantsWith` (the grant store) → `rangeFor`, `covers` and `grant` (a client, a subject, a range), and `keep` (a client's id, a subject, a range, what it is agreed under).
+- `grantsOver` (the build context) → `grantsWith` (the grant store) → `rangeFor`, `covers` and `grant` (a client, a subject, a range: unavailable where the store refuses the subject as erased), and `keep` (a client's id, a subject, a range, what it is agreed under: `kept`, or `refused` where the store answers the subject erased). `grantSubjectOf`: a grant's subject read from its key, for a migration.
 
 ## Invariants
 - A grant counts for a client the operator registered whatever it holds under; for any other client, only where it holds under the value that client's section says now.
@@ -17,10 +17,10 @@ Internal module of `consent`: each subject's grants, per client, as the grant st
 - A grant that does not count answers an empty range and covers nothing, an empty range included; `covers` needs a record that counts.
 - `keep` under a value the record does not hold replaces the range rather than adding to it, so no range agreed under another description comes back. Under no value it adds, and leaves the record under none.
 - A record of a format this module does not read is no grant: it counts for no client, and the next write replaces it.
-- A write is an update from what the record holds, or a save; another request's save between them is changed in turn, and one gone by then is `Unavailable`.
+- A write is an update from what the record holds, or a save; another request's save between them is changed in turn, and one gone by then is `Unavailable`. A save the store answers `erased` keeps nothing: `refused`, never read as held.
 
 ## Data
-- Grants: one record per subject and client, kept without end, with a range distinct and sorted.
+- Grants: one record per subject and client, kept with no end of its own until its subject is erased, with a range distinct and sorted.
 - Format 2, written: `{ format: 2, range, under? }`. Format 1, read: the range alone, which holds under no value.
 - A client registered again under the same id keeps its grants.
 

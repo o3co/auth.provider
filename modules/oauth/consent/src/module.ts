@@ -35,7 +35,7 @@ export default defineModule(
 	},
 	(m) => [
 		m.contribute(metadataSections).by(() => clientSection),
-		// Its build takes only its Stores, collecting no probes: the erasure gate collects erasers.
+		// Its build takes only its Stores and collects no `probes`, as an eraser's must (erasure-extensions).
 		m
 			.contribute(erasers)
 			.by(async (c) => consentEraser(await c.get(grantStore), await c.get(askStore))),
