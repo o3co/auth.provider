@@ -1,7 +1,7 @@
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { type FactorManaging, factorManaging } from "@mod/mfa-managing";
-import { revocations } from "@mod/subject-revocation";
+import { revocations, subjectErasure } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { expect, it } from "vitest";
 import bridge from "../src/module.ts";
@@ -26,6 +26,17 @@ it("moves the subject's fence before a revocation is complete", async () => {
 	const app = await boot(async (subject) => {
 		fenced.push(subject);
 	});
+	expect(await app.get(revocations).record("ann")).toEqual({ complete: true });
+	expect(fenced).toEqual(["ann"]);
+});
+
+it("moves no fence for a subject it is told is erased, creating no factor list under it", async () => {
+	const fenced: string[] = [];
+	const app = await boot(async (subject) => {
+		fenced.push(subject);
+	});
+	await app.get(subjectErasure).markErased("cy");
+	expect(await app.get(revocations).record("cy")).toEqual({ complete: true, erased: true });
 	expect(await app.get(revocations).record("ann")).toEqual({ complete: true });
 	expect(fenced).toEqual(["ann"]);
 });
