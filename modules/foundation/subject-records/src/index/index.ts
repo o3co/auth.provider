@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { changesTogether, type Next, type Place, type Target } from "@mod/records";
-import { codePointOrder, type Json, type Space } from "@mod/store";
+import { codePointOrder, type Guarantee, type Json, type Space } from "@mod/store";
+
+/**
+ * What a space holding a subject's data declares beside its own needs: its index keeps the
+ * subject's tombstone with the space's guarantees, and a tombstone lost lets an erased subject's
+ * records back. A template spreads it into the space's guarantees.
+ */
+export const tombstoneFloor: readonly Guarantee[] = ["no-eviction", "durable", "replicated"];
 
 /** The space a space of subjects' records keeps its subjects' index in: `.index` after its name, its guarantees, records' own. */
 export function indexSpaceOf(space: Space): Space {
