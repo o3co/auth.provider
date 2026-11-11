@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { workspacePackages } from "@mod/workspace-packages";
 
 export interface Pkg {
 	readonly name: string;
@@ -52,23 +52,18 @@ function walk(dir: string, base = dir): string[] {
 	});
 }
 
-/** Workspace packages as pnpm sees them, minus the root, however the root is named (pnpm gives real paths). */
+/** Workspace packages as `workspace-packages` lists them: the root left out, each directory a real path. */
 export function readWorkspace(root: string): Pkg[] {
-	const listed = JSON.parse(
-		execFileSync("pnpm", ["ls", "-r", "--json", "--depth", "-1"], { cwd: root, encoding: "utf8" }),
-	) as { name: string; path: string }[];
-	return listed
-		.filter((entry) => realpathSync(entry.path) !== realpathSync(root))
-		.map((entry) => {
-			const files = walk(entry.path);
-			return {
-				name: entry.name,
-				dir: entry.path,
-				manifest: JSON.parse(readFileSync(join(entry.path, "package.json"), "utf8")),
-				card: files.includes("README.md")
-					? readFileSync(join(entry.path, "README.md"), "utf8")
-					: undefined,
-				files,
-			};
-		});
+	return workspacePackages(root).map((entry) => {
+		const files = walk(entry.dir);
+		return {
+			name: entry.name,
+			dir: entry.dir,
+			manifest: JSON.parse(readFileSync(join(entry.dir, "package.json"), "utf8")),
+			card: files.includes("README.md")
+				? readFileSync(join(entry.dir, "README.md"), "utf8")
+				: undefined,
+			files,
+		};
+	});
 }

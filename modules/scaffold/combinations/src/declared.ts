@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { workspacePackages } from "@mod/workspace-packages";
 
 /** What one package declares that composing reads. */
 export interface Package {
@@ -77,11 +77,10 @@ const ofDependencies = (value: unknown, m: Manifest) =>
  * code point order of name.
  */
 export function declaredIn(root: string): Declared {
-	const listed = JSON.parse(
-		execFileSync("pnpm", ["ls", "-r", "--json", "--depth", "-1"], { cwd: root, encoding: "utf8" }),
-	) as { path: string }[];
 	return declaredOf(
-		listed.map(({ path }) => JSON.parse(readFileSync(join(path, "package.json"), "utf8"))),
+		workspacePackages(root).map(({ dir }) =>
+			JSON.parse(readFileSync(join(dir, "package.json"), "utf8")),
+		),
 	);
 }
 

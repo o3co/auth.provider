@@ -9,7 +9,7 @@ import { generateFull } from "../src/full.ts";
 import { generateListed } from "../src/listed.ts";
 import { generatePattern } from "../src/pattern.ts";
 import { patternNamed } from "../src/patterns/patterns.ts";
-import { workspacePackages } from "../src/project.ts";
+import { packageDirsIn } from "../src/project.ts";
 import { root } from "./full-app.ts";
 
 // Composing reads the whole workspace, and reading a package asks pnpm, slow on a loaded machine.
@@ -24,7 +24,7 @@ const sealed = {
 /** An index as distribution writes it, every module of the workspace in one bundle at 0.19.0, sealed as given. */
 function indexOfWorkspace(seal: Record<string, unknown> = sealed): string {
 	const file = join(mkdtempSync(join(tmpdir(), "index-")), "index.json");
-	const packages = [...workspacePackages(root).keys()]
+	const packages = [...packageDirsIn(root).keys()]
 		.filter((name) => name.startsWith("@mod/"))
 		.map((name) => ({
 			name,

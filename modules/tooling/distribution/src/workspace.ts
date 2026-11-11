@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { workspacePackages } from "@mod/workspace-packages";
 import type { Release } from "./publish.ts";
 
 /** The repository URL the workspace's package.json states, as a string or as `{ url }`. */
@@ -59,22 +59,16 @@ function shippedOf(dir: string): boolean | undefined {
 
 /** Bundles are the parent directories of the packages the workspace definition places. */
 export function readBundles(root: string): Bundle[] {
-	const listed = JSON.parse(
-		execFileSync("pnpm", ["ls", "-r", "--json", "--depth", "-1"], { cwd: root, encoding: "utf8" }),
-	) as { name: string; path: string }[];
-	const groups = Map.groupBy(
-		listed.filter((entry) => entry.path !== root),
-		(entry) => dirname(entry.path),
-	);
+	const groups = Map.groupBy(workspacePackages(root), (entry) => dirname(entry.dir));
 	return [...groups].map(([dir, entries]) => {
 		return {
 			dir,
 			shipped: shippedOf(dir),
 			members: entries.map((entry) => ({
 				name: entry.name,
-				dir: entry.path,
+				dir: entry.dir,
 				dependencies: Object.keys(
-					JSON.parse(readFileSync(join(entry.path, "package.json"), "utf8")).dependencies ?? {},
+					JSON.parse(readFileSync(join(entry.dir, "package.json"), "utf8")).dependencies ?? {},
 				),
 			})),
 		};

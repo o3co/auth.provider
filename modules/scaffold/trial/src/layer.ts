@@ -1,8 +1,8 @@
 /** The local layer that boots a generated app for a test or a conformance run, from its modules' trial files. */
-import { execFileSync } from "node:child_process";
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { workspacePackages } from "@mod/workspace-packages";
 import { parse } from "@o3co/ts.hocon";
 
 /** The file beside a package's manifest that holds the values a trial boots its module on. */
@@ -119,16 +119,7 @@ const ownWorkspace = join(import.meta.dirname, "..", "..", "..", "..");
 let packages: Map<string, string> | undefined;
 /** Package directories by name, as the workspace definition places them. */
 const workspace = () => {
-	packages ??= new Map(
-		(
-			JSON.parse(
-				execFileSync("pnpm", ["ls", "-r", "--json", "--depth", "-1"], {
-					cwd: ownWorkspace,
-					encoding: "utf8",
-				}),
-			) as { name: string; path: string }[]
-		).map((entry) => [entry.name, entry.path]),
-	);
+	packages ??= new Map(workspacePackages(ownWorkspace).map((p) => [p.name, p.dir]));
 	return packages;
 };
 

@@ -24,7 +24,7 @@
 - Reads the workspace's package list, and the manifests, trial files and section examples of the packages an app composes; writes nothing.
 
 ## Depends on
-- The HOCON library, to read the trial files and section examples.
+- `workspace-packages` (its own workspace's packages); the HOCON library, to read the trial files and section examples.
 
 ## Vocabulary
 - trial file: a module's values that boot it for a test or a conformance run, beside its section's example.

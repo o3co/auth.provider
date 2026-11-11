@@ -8,6 +8,7 @@
 		".": "./src/contract.ts"
 	},
 	"dependencies": {
+		"@mod/workspace-packages": "workspace:*",
 		"typescript": "6.0.3"
 	},
 	"devDependencies": {

@@ -226,10 +226,10 @@ flowchart LR
 |---|---|---|
 | `@mod/app-entries` | assembly | none |
 | `@mod/app-output` | assembly | `@mod/app-entries` |
-| `@mod/combinations` | assembly | `@mod/kinds` |
-| `@mod/create-app` | assembly | `@mod/app-output`, `@mod/combinations` |
+| `@mod/combinations` | assembly | `@mod/kinds`, `@mod/workspace-packages` |
+| `@mod/create-app` | assembly | `@mod/app-output`, `@mod/combinations`, `@mod/workspace-packages` |
 | `@mod/kinds` | assembly | none |
-| `@mod/trial` | assembly | none |
+| `@mod/trial` | assembly | `@mod/workspace-packages` |
 | `@mod/workspace-packages` | assembly | none |
 
 ### second-factor
@@ -319,10 +319,10 @@ flowchart LR
 | `@mod/conformance-recipes` | verification | `@mod/conformance`, `@mod/create-app` |
 | `@mod/conformance-second-factor` | verification | `@mod/conformance`, `@mod/conformance-legacy` |
 | `@mod/conformance-tunnel` | verification | none |
-| `@mod/distribution` | assembly | `@mod/combinations`, `@mod/create-app`, `@mod/docker-client`, `@mod/local-registry`, `@mod/trial` |
+| `@mod/distribution` | assembly | `@mod/combinations`, `@mod/create-app`, `@mod/docker-client`, `@mod/local-registry`, `@mod/trial`, `@mod/workspace-packages` |
 | `@mod/docker-client` | assembly | none |
 | `@mod/guard` | verification | `@mod/guard-imports`, `@mod/kinds` |
-| `@mod/guard-imports` | verification | none |
+| `@mod/guard-imports` | verification | `@mod/workspace-packages` |
 | `@mod/interop-clients` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-device`, `@mod/conformance-exchange`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/conformance-tunnel`, `@mod/spec-checklist` |
 | `@mod/interop-oidf` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-federation`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/conformance-tunnel`, `@mod/spec-checklist` |
 | `@mod/ledger-fakes` | verification | `@mod/ledger-wire` |

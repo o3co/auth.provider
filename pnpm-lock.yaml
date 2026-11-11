@@ -3053,6 +3053,9 @@ importers:
       '@mod/kinds':
         specifier: workspace:*
         version: link:../kinds
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../workspace-packages
     devDependencies:
       vitest:
         specifier: 5.0.5
@@ -3066,6 +3069,9 @@ importers:
       '@mod/combinations':
         specifier: workspace:*
         version: link:../combinations
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../workspace-packages
       semver:
         specifier: 7.8.5
         version: 7.8.5
@@ -3103,6 +3109,9 @@ importers:
 
   modules/scaffold/trial:
     dependencies:
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../workspace-packages
       '@o3co/ts.hocon':
         specifier: 1.14.3
         version: 1.14.3(yaml@2.9.1)(zod@4.6.7)
@@ -4913,6 +4922,9 @@ importers:
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../../scaffold/workspace-packages
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -4950,6 +4962,9 @@ importers:
 
   modules/tooling/guard-imports:
     dependencies:
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../../scaffold/workspace-packages
       typescript:
         specifier: 6.0.3
         version: 6.0.3
