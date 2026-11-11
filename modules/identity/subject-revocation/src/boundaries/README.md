@@ -19,7 +19,7 @@ Internal module of `subject-revocation`: a subject's boundaries, how they are wr
 - `erasedIn`: the store → `erasedSubjects`' `erased`: whether the subject's record carries a mark of a time, read through `markIn` on every call, with no cache and never through the enabled reading. For choosing what a module writes about a subject; not an authorization check: `compare` is the only read that decides access, and the fence the only write.
 
 ## Invariants
-- Each `record` writes the boundary, even one already far enough, so a write not yet confirmed is confirmed by the next. An update through the store interface writes the larger value. A subject's first boundary is saved, and updated when another request saved one first.
+- Each `record` writes the boundary, even one already far enough, so a write not yet confirmed is confirmed by the next: a retry after `complete: false` or unavailable moves the boundary to its write's deadline, and only refuses more. An update through the store interface writes the larger value. A subject's first boundary is saved, and updated when another request saved one first.
 - A recorded boundary is reported only after its confirmed write; an instance still on the old primary after a failover reads it as it stands there until it reconnects, the deployment's fence (security model, revocation delays).
 - `erased` answers true for a mark of a time, whatever else the record holds; false with no record or no mark; a mark of no time, or a read the store cannot answer, is unavailable, never false. It reads as `compare` reads, as of the read: a module calling or following `record` reads `erased` there instead, as of its write.
 
