@@ -21,7 +21,7 @@ Internal module of `subject-records`: erasing a subject from one space, and swee
 - A record or set is removed only where it reads absent or its envelope names the subject; another subject's, moved or created there, stays, the entry leaving this subject's bucket. A race makes the write read again.
 - A bounded space is `fenced` until the tombstone's deadline, `boundedMs` and 5 minutes, fixed: hosts keep synchronized clocks (docs/security-model.md, what the deployment does), so a store clock stepping back further is the operator's fault.
 - `sweepIndex` drops an entry only where what it lists reads absent, removing it, so no expired one stays held.
-- Reports are made here alone, by one cast.
+- Erasing's reports are made here, by one cast; this package makes reports nowhere else but internal module `migrate`.
 
 ## Depends on
 - `erasure-extensions` (the report), `kernel` (Unavailable), `records` (`changeRecords`), `store`

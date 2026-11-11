@@ -1,8 +1,8 @@
 /**
  * The one migration of records written before indexing, under the concurrency account erasure
- * admits (§5.1, plans/account-erasure.md :400–:414; once, :96; every value then predates `indexed`,
- * :538): no owner writes beside it (providers locked out, the epoch moved on), no erasure (enabled
- * only after it, step 4), and each run one tool process, so an operator running it twice is the
+ * admits (account erasure §5.1: once, in the maintenance window; every value then predates `indexed`):
+ * no owner writes beside it (providers locked out, the epoch moved on), no erasure (enabled only
+ * after it), and each run one tool process, so an operator running it twice is the
  * one race. Two runs at once, walks meeting a key twice or starting over, and runs that lose
  * replies, die, or see a failover or a restart all converge: every record its owner reads as a
  * subject's is kept whole in an envelope, listed once in that subject's bucket or witnessed, every
@@ -500,7 +500,7 @@ it("migrates every record written before indexing once, whole, into its subject'
 	}
 }, 300_000);
 
-// The counterexamples the property found on row 3, kept as examples whatever the seed.
+// The counterexamples the property found in the migration (F1, F2), kept as examples whatever the seed.
 
 /** One walk of a whole space, in its scan's order. */
 const whole: WalkShape = { page: 6, from: 0, again: [], switchAt: undefined };

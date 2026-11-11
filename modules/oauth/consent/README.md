@@ -13,11 +13,11 @@
 ## Offers
 - `grantedFor`: the range a subject agreed to that counts for a client now, from a confirmed read.
 - `coversFor`: whether a grant that counts holds the range; an empty range still needs one.
-- `grantFor`: widens the grant to the union, or replaces one that does not count, answering once the write is confirmed; unavailable where the store answers the subject erased, which only a race with its erasure reaches. A stopgap, giving `Unavailable` a second meaning: consent gains a refusal answer, its callers switch, and the throw goes.
+- `grantFor`: widens the grant to the union, or replaces one that does not count, answering once the write is confirmed. For an erased subject it is unavailable, for good, as the subject's tombstone stays: a stopgap giving `Unavailable` a second, lasting meaning; consent gains a refusal answer, its callers switch, and the throw goes.
 - A grant counts for a client the operator registered whatever it holds under, and for a client from another source only under its section's `under` now (`grants`' card).
 - `askFor`: parks a request for the session's subject and a client and answers the consent page URL with a `challenge` query parameter; only while `asking`, which a set page makes true. The pending consent holds a client's `under`.
 - `askFor` refuses with `TypeError` a destination that is not an https URL on the `http` public origin, or holds whitespace or a control character.
-- `askFor` refuses with `TypeError` a range entry that is empty, repeated, or holds whitespace or a control character; it is unavailable where the ask store answers the subject erased, only in a race with its erasure.
+- `askFor` refuses with `TypeError` a range entry that is empty, repeated, or holds whitespace or a control character; it is unavailable where the ask store answers the subject erased, reached only in a race with its erasure, as an erased subject's sessions end: the same stopgap and exit as `grantFor`'s.
 - Routes `GET` and `POST /oauth/consent`, answering the consent page (`page`'s card).
 - Audit events, with the subject: declared in `./audit-events`, listed in the audit event reference.
 - Client metadata section `consent`: `first-party` (default false), `name` (trimmed, cut to 200 characters), `uri` (an https URL), `host` and `under`.
@@ -31,7 +31,7 @@
 
 ## Invariants
 - A grant is to the client for the scopes: it holds at every audience the client may be issued, and the page is not told the audiences.
-- A grant has no end of its own, and the user has no way to withdraw it. A client gone keeps it for when it is back; a subject's revocation ends what the subject holds, never the grant, so the next login is not asked again.
+- A grant has no end of its own, and the user has no way to withdraw it. A client gone keeps it for when it is back; a subject's revocation ends what the subject holds, never the grant, so the next login is not asked again. Erasing the subject removes its grants (the eraser `consent`).
 - For a client from another source, a grant counts only under what its source says of it now: while it says another value the user is asked again, and a value said again counts again.
 - A deadline counts on `kernel`'s clock, whatever the store still holds.
 - Without a public origin, the module refuses to start.

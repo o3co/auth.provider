@@ -1,9 +1,12 @@
+import type { SubjectReading, Walk } from "@mod/erasure-extensions";
 import { type Clock, isUnavailable, Unavailable } from "@mod/kernel";
 import type { Json } from "@mod/store";
+import { eraseSubject } from "../erase/erase.ts";
 import type { Phase, SubjectPlace } from "../index/index.ts";
-import type { HeldPhase } from "../phase/phase.ts";
+import { migrateRecords } from "../migrate/migrate.ts";
+import type { PhaseOnce } from "../phase/phase.ts";
 import { subjectKeyedSetsIn } from "../sets/sets.ts";
-import { subjectRecordsIn } from "../subject-records.ts";
+import { subjectRecordsIn } from "../writes/writes.ts";
 
 type Refuse = (where: string, reason: string) => never;
 /** A builder's methods, each answering a promise. */
@@ -13,13 +16,13 @@ type Methods = Record<string, (...args: never[]) => Promise<unknown>>;
 class Late extends Error {}
 
 /**
- * A builder over the phase the process holds, so a store's blip at start refuses no start: built
+ * A builder over the phase the process reads once, so a store's blip at start refuses no start: built
  * at once where the phase reads at build, refusing as the builder does; else at the first call
  * that reads it, each call unavailable until then. A refusal found then keeps `ready` failing, with
  * its reason, logged once, and every call unavailable. `ready` is the template's probe check.
  */
 async function phased<B extends Methods>(
-	held: HeldPhase,
+	phase: PhaseOnce,
 	build: (phase: Phase, refuse: Refuse) => B,
 	refuse: Refuse,
 	place: Omit<SubjectPlace, "phase">,
@@ -31,16 +34,16 @@ async function phased<B extends Methods>(
 		throw new Late(`${where}: ${reason}`);
 	};
 	try {
-		built = build(await held.read(), refuse);
+		built = build(await phase.read(), refuse);
 	} catch (error) {
 		if (!isUnavailable(error)) throw error;
 	}
 	const current = async (): Promise<B> => {
 		if (built) return built;
 		if (refused !== undefined) throw new Unavailable("subject-records");
-		const phase = await held.read();
+		const read = await phase.read();
 		try {
-			built = build(phase, late);
+			built = build(read, late);
 			return built;
 		} catch (error) {
 			if (!(error instanceof Late)) throw error;
@@ -67,17 +70,29 @@ async function phased<B extends Methods>(
 	};
 }
 
-/** `subjectRecordsIn` over the phase the process holds (see `phased`). */
+/**
+ * `subjectRecordsIn` over the phase the process reads once (see `phased`), with the space's
+ * `erase` and `migrate` at that phase, as an owner's store ports take them: the wiring never
+ * handles the phase.
+ */
 export const phasedRecordsIn = <T extends Json>(
 	place: Omit<SubjectPlace, "phase">,
-	held: HeldPhase,
+	phase: PhaseOnce,
 	where: string,
 	refuse: Refuse,
 	options: { readonly secret?: true } = {},
 ) =>
 	phased(
-		held,
-		(phase, told) => subjectRecordsIn<T>({ ...place, phase }, where, told, options),
+		phase,
+		(read, told) => {
+			const at = { ...place, phase: read };
+			return {
+				...subjectRecordsIn<T>(at, where, told, options),
+				erase: (subject: string, signal: AbortSignal) => eraseSubject(at, subject, { signal }),
+				migrate: (walk: Walk, subjectOf: SubjectReading, signal: AbortSignal) =>
+					migrateRecords(at, walk, subjectOf, { signal }),
+			};
+		},
 		refuse,
 		place,
 		// Every method the builder has, or the typecheck fails: none is left unrouted.
@@ -88,19 +103,21 @@ export const phasedRecordsIn = <T extends Json>(
 			remove: true,
 			move: true,
 			scan: true,
-		} satisfies Record<keyof ReturnType<typeof subjectRecordsIn<T>>, true>,
+			erase: true,
+			migrate: true,
+		} satisfies Record<keyof ReturnType<typeof subjectRecordsIn<T>> | "erase" | "migrate", true>,
 	);
 
-/** `subjectKeyedSetsIn` over the phase the process holds (see `phased`). */
+/** `subjectKeyedSetsIn` over the phase the process reads once (see `phased`). */
 export const phasedKeyedSetsIn = (
 	place: Omit<SubjectPlace, "phase"> & { readonly cap: number; readonly clock: Clock },
-	held: HeldPhase,
+	phase: PhaseOnce,
 	where: string,
 	refuse: Refuse,
 ) =>
 	phased(
-		held,
-		(phase, told) => subjectKeyedSetsIn({ ...place, phase }, where, told),
+		phase,
+		(read, told) => subjectKeyedSetsIn({ ...place, phase: read }, where, told),
 		refuse,
 		place,
 		{ add: true, members: true, remove: true, awaiting: true, settled: true } satisfies Record<

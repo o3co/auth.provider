@@ -13,7 +13,7 @@ import {
 	witnessed,
 } from "../index/index.ts";
 
-/** The one place a migration's report is made; nothing outside this package makes one. */
+/** Where a migration makes its report; only this package makes one, here and in internal module `erase`. */
 const report = (made: { kind: string; space: string } & Record<string, unknown>) =>
 	made as unknown as MigrationReport;
 
@@ -35,7 +35,7 @@ type Outcome = { readonly kind: Done } | { readonly kind: "stopped"; readonly re
  * removed; one it cannot read stops the space, removing nothing more. A record is already migrated
  * only where its envelope is listed or witnessed, never by its shape alone, so a rerun, a key a
  * walk meets twice, and two runs at once each index or remove a record once. Each write holds the
- * record as read. A `bounded` space has nothing to index. Keyed sets wait for their own migration.
+ * record as read. A `bounded` space has nothing to index. It migrates records only: a keyed set kept raw stays raw.
  * Stops between records where `signal` aborts; running again finishes.
  */
 export async function migrateRecords(
@@ -59,16 +59,16 @@ export async function migrateRecords(
 	const keyed = category === "online-keyed";
 	const { bucketOf, witnessOf } = indexOver(place, place.space, place.index);
 	const name = changeRecords.keyOf({ place, key: "" }).name;
-	/** Where an envelope of `subject` at `key` is shown to be subject-records' own. */
-	const markOf = (subject: string, key: string): Target =>
+	/** What proves an envelope of `subject` at `key` this package's own: its bucket entry, or its witness. */
+	const provenanceOf = (subject: string, key: string): Target =>
 		keyed ? witnessOf(subject, "record") : bucketOf(subject, key);
-	const listedIn = (mark: Json | undefined, key: string) =>
+	const provenIn = (proof: Json | undefined, key: string) =>
 		keyed
-			? mark !== undefined
-			: entriesIn(mark, space).some((e) => e.key === key && e.name === "record");
+			? proof !== undefined
+			: entriesIn(proof, space).some((e) => e.key === key && e.name === "record");
 
 	/**
-	 * One record decided in one change, holding it as read beside the marks named: never on reads
+	 * One record decided in one change, holding it as read beside the provenance named: never on reads
 	 * alone, which a failover can take back, so a skip and an absence are confirmed as a write is.
 	 * `changed` where the record holds another value than `value`, to be read again.
 	 */
@@ -76,7 +76,7 @@ export async function migrateRecords(
 		key: string,
 		value: Json | undefined,
 		subjects: readonly (string | undefined)[],
-		decide: (marks: ReadonlyMap<string, Json | undefined>) => {
+		decide: (proofs: ReadonlyMap<string, Json | undefined>) => {
 			readonly outcome: Done | "todo";
 			readonly next?: readonly [Json, string] | "remove";
 		},
@@ -85,7 +85,7 @@ export async function migrateRecords(
 		const named = [...new Set(subjects.filter((one): one is string => one !== undefined))];
 		let answer: Done | "todo" | "changed" = "changed";
 		await changeRecords({
-			targets: [target, ...named.map((one) => markOf(one, key))],
+			targets: [target, ...named.map((one) => provenanceOf(one, key))],
 			decide: ([held, ...read]) => {
 				if (
 					held === undefined
@@ -99,18 +99,18 @@ export async function migrateRecords(
 					answer = "gone";
 					return {};
 				}
-				const marks = new Map(named.map((one, at) => [one, read[at]] as const));
-				const { outcome, next } = decide(marks);
+				const proofs = new Map(named.map((one, at) => [one, read[at]] as const));
+				const { outcome, next } = decide(proofs);
 				answer = outcome;
 				if (next === undefined) return {};
 				if (next === "remove") return { targets: [{ remove: true }] };
 				const subject = next[1];
-				const mark = marks.get(subject);
+				const proof = proofs.get(subject);
 				const shown = keyed
-					? mark === undefined
+					? proof === undefined
 						? witnessed
 						: undefined
-					: listedWith(mark, space, { key, name: "record" });
+					: listedWith(proof, space, { key, name: "record" });
 				// The raw value whole, whatever its shape; no lifetime, so it keeps its end.
 				return {
 					targets: [
@@ -129,8 +129,8 @@ export async function migrateRecords(
 			const value = entry?.value;
 			const { subject: shaped } = value === undefined ? {} : opened(value, true);
 			/** Whether the record as read is an envelope this package wrote: listed or witnessed. */
-			const isOurs = (marks: ReadonlyMap<string, Json | undefined>) =>
-				shaped !== undefined && listedIn(marks.get(shaped), key);
+			const isOurs = (proofs: ReadonlyMap<string, Json | undefined>) =>
+				shaped !== undefined && provenIn(proofs.get(shaped), key);
 			// First, with no owner's reading: a record migrated already, or gone, is decided here.
 			const first = await decided(key, value, [shaped], (found) => ({
 				outcome: isOurs(found) ? "already" : "todo",
@@ -144,7 +144,7 @@ export async function migrateRecords(
 			if (keyed && subject !== undefined && subject !== key) {
 				return { kind: "stopped", reason: "a record keyed by another subject" };
 			}
-			// Then the owner's answer, the envelope's own mark held too: a run that migrated it meanwhile wins.
+			// Then the owner's answer, the envelope's own provenance held too: a run that migrated it meanwhile wins.
 			const outcome = await decided(key, value, [subject, shaped], (found) => {
 				if (isOurs(found)) return { outcome: "already" };
 				if (subject === undefined) return { outcome: "removed", next: "remove" };

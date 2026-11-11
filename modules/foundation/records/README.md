@@ -21,10 +21,8 @@
 - `overCap` and `checkedCap`: exported, unused outside records; the set's format is `keyedSetsIn.codec`. A later release (0.22) removes them.
 
 ## Invariants
-- A change runs again on what is there after a lost race, so it must be pure; after 8 lost races it is unavailable, a fixed margin against contention.
-- A write whose answer was lost is resent under the same unguessable mark, so it takes effect once, for up to 10 seconds of pauses (from 50 ms, doubling to 1 second), fixed to stay within the store's idempotency window, where a resend still gets its first answer; a send past its deadline is refused, and any error but unavailable is thrown at once.
-- Records changed together are read, the watched ones with them, and held by one write's conditions (the ones kept unchanged too); another writer of any of them first makes it read all again, the watch too, and decide again. A record named twice is read once, held once, and written from one naming at most. Nothing written is confirmed the same way. Two stores, or a target named twice, are refused.
-- Each attempt of records changed together sends one write, chosen by its keys (conditions and writes, the settled mark among them) by space and partition: the store's batch where they are one, its batch across where more, which a store without one refuses at that attempt. One call may take each on two attempts; a resend takes the one it took.
+- A write is retried after a lost race (8 times, then unavailable) and resent under its mark after a lost answer (10 seconds of pauses), as internal module `writing` states.
+- Records changed together are read and held by one write, its routing chosen per attempt, as internal module `together` states.
 - Every answer is confirmed: a rewrite that writes nothing (no change, no record, a set gone), a create that finds a record, and a remove that finds none confirm what they read with a write of their own.
 - Reads are confirmed only in a space that declares confirmed reads; a feature that decides on them states it among its needs.
 - Records and deferred work leave expiry to the store; keyed sets read only `kernel`'s clock; no two clocks are compared.
@@ -32,7 +30,6 @@
 - A conditional removal is a change: where the record holds what the caller expects, it changes it to a 1 ms lifetime, and from a millisecond later it is read no more.
 - Deferred work is split over shards of a size the wiring decides; a full shard refuses an add as unavailable and logs it with the space, and nothing kept is pushed out.
 - Work stays until done; adding listed work writes again, as the listing may be another request's not yet confirmed.
-- A secret's name is `1.` and the base64url SHA-256 of the space's name, a line feed and the secret; the store never receives the secret.
 - A space holds records or records under a secret, never both: opening it for the other kind on the same store refuses the boot (`kernel`'s `BuildRefused`: `<space>`, `a space holds records or secret records, not both`), as the records' scan would list the names kept under secrets. A space declared to hold a subject's data (`online-indexed`, `online-keyed`, `bounded`) opens through no builder but `changeRecords`, refusing the boot the same way: subject-records writes it.
 - A name never changes within its version (a new way raises it, and the old is read for the records' lifetime); short codes a person types never go through it.
 - Changing the interface shape changes every wired feature's contract, so it goes through a human gate.
@@ -41,4 +38,7 @@
 - `kernel`, `store`
 
 ## Vocabulary
-- record: one value per key. deferred work: work named by a string, kept until done. place: the store and space the wiring gives, with `kernel`'s randomness and log. secret: an unguessable value (at least 128 random bits) its holder presents to reach its record. name: the key it is kept under, from which the secret cannot be had.
+- record: one value per key.
+- deferred work: work named by a string, kept until done.
+- place: the store and space the wiring gives, with `kernel`'s randomness and log.
+- secret: an unguessable value (at least 128 random bits) its holder presents to reach its record. name: the key it is kept under, from which the secret cannot be had.

@@ -2,6 +2,7 @@ import { askStore, grantStore, type StoredAsk, type StoredGrant } from "@mod/con
 import { askStoreContract, grantStoreContract } from "@mod/consent/testing";
 import { assemble, type BuildContext, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
+import { store } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import wiring from "../src/module.ts";
@@ -103,4 +104,35 @@ it("starts over a store's blip unready, out of traffic, and turns ready once the
 	expect(await ready()).toBe("unready");
 	simulated.unreachable(false);
 	expect(await ready()).toBe("ready");
+});
+
+it("works over a store adapter that offers no control: records only read as they were, ready, nothing to erase yet", async () => {
+	// The spaces declared on a simulated store, then the wiring over that store alone, with no control.
+	const { app: declared } = await opened();
+	const bare = defineModule({ name: "bare-store", replicaSafe: false, takes: [] }, (m) => [
+		m.provide(store).by(() => declared.get(store)),
+	]);
+	let context: BuildContext<unknown> | undefined;
+	const app = await assemble({
+		modules: [
+			bare,
+			wiring,
+			defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
+				m.provide(contract<object>("asker")).by((c) => {
+					context = c;
+					return {};
+				}),
+			]),
+		],
+		config: kernelConfig(),
+		runtime,
+	});
+	expect(await context?.readinessReport(1000).then((r) => r.answer)).toBe("ready");
+	const grants = app.get(grantStore);
+	expect(await grants.save("g", {} as StoredGrant, "endless", "alice")).toBe("created");
+	expect(await grants.read("g")).toEqual({});
+	expect(await grants.erase?.("alice", new AbortController().signal)).toMatchObject({
+		kind: "stopped",
+		reason: "not-indexed",
+	});
 });

@@ -10,15 +10,7 @@ import {
 } from "@mod/consent";
 import { contract, defineModule, optional, probes } from "@mod/kernel";
 import { type Guarantee, type Space, spaces, store, storeControl } from "@mod/store";
-import {
-	eraseSubject,
-	type HeldPhase,
-	indexSpaceOf,
-	migrateRecords,
-	phasedRecordsIn,
-	type SubjectPlace,
-	subjectRecordsPhase,
-} from "@mod/subject-records";
+import { indexSpaceOf, phasedRecordsIn, subjectRecordsPhase } from "@mod/subject-records";
 
 /** Each need consent states for its grants, as the guarantee a space declares for it. */
 const guaranteeFor: Record<keyof typeof grantStoreNeeds, Guarantee> = {
@@ -28,7 +20,7 @@ const guaranteeFor: Record<keyof typeof grantStoreNeeds, Guarantee> = {
 	confirmedReads: "confirmed-reads",
 };
 /** Each need consent states for its asks, as what meets it: a guarantee its space declares, or records under a secret. */
-const { namesFromSecret: askRecordsFor, ...askGuaranteeFor } = {
+const { namesFromSecret: askRecordsUnder, ...askGuaranteeFor } = {
 	neverEvicted: guaranteeFor.neverEvicted,
 	survivesCrash: guaranteeFor.survivesCrash,
 	survivesFailover: guaranteeFor.survivesFailover,
@@ -50,33 +42,22 @@ const asks: Space = {
 	erasedBy: "consent",
 };
 
-/** A space's place, the phase the process holds, and its records over that phase. */
-const placed = contract<{
-	readonly held: HeldPhase;
-	readonly grants: {
-		readonly at: Omit<SubjectPlace, "phase">;
-		readonly records: PhasedOf<StoredGrant>;
-	};
-	readonly asks: {
-		readonly at: Omit<SubjectPlace, "phase">;
-		readonly records: PhasedOf<StoredAsk>;
-	};
-}>("consent-store.placed");
-type PhasedOf<T extends StoredGrant | StoredAsk> = Awaited<ReturnType<typeof phasedRecordsIn<T>>>;
-
-/** consent's store interface over a space's records, erasing and migrating through subject-records. */
+/** consent's store interface over a space's records over the phase read once: the builder's own ports. */
 const portsOf = <T extends StoredGrant | StoredAsk>(
-	held: HeldPhase,
-	{ at, records }: { readonly at: Omit<SubjectPlace, "phase">; readonly records: PhasedOf<T> },
+	records: Awaited<ReturnType<typeof phasedRecordsIn<T>>>,
 ): RecordStore<T> => ({
 	save: records.create,
 	read: records.read,
 	update: records.change,
-	erase: async (subject, signal) =>
-		eraseSubject({ ...at, phase: await held.read() }, subject, { signal }),
-	migrate: async (walk, subjectOf, signal) =>
-		migrateRecords({ ...at, phase: await held.read() }, walk, subjectOf, { signal }),
+	erase: records.erase,
+	migrate: records.migrate,
 });
+
+/** Both spaces' records over the one phase this process reads. */
+const placed = contract<{
+	readonly grants: Awaited<ReturnType<typeof phasedRecordsIn<StoredGrant>>>;
+	readonly asks: Awaited<ReturnType<typeof phasedRecordsIn<StoredAsk>>>;
+}>("consent-store.placed");
 
 export default defineModule(
 	{ name: "consent-store", replicaSafe: true, takes: [store, optional(storeControl)] },
@@ -86,7 +67,7 @@ export default defineModule(
 		m.contribute(spaces).by(() => asks),
 		m.contribute(spaces).by(() => indexSpaceOf(asks)),
 		m.provide(placed).by(async (c) => {
-			const held = subjectRecordsPhase.held(await c.getOptional(storeControl));
+			const phase = subjectRecordsPhase.once(await c.getOptional(storeControl));
 			const at = async (space: Space) => ({
 				store: await c.get(store),
 				space,
@@ -94,41 +75,32 @@ export default defineModule(
 				log: c.log,
 				random: c.random,
 			});
-			const [grantsAt, asksAt] = [await at(grants), await at(asks)];
 			return {
-				held,
-				grants: {
-					at: grantsAt,
-					records: await phasedRecordsIn<StoredGrant>(grantsAt, held, "consent-store", c.refuse),
-				},
-				asks: {
-					at: asksAt,
-					records: await phasedRecordsIn<StoredAsk>(
-						asksAt,
-						held,
-						"consent-store",
-						c.refuse,
-						askRecordsFor,
-					),
-				},
+				grants: await phasedRecordsIn<StoredGrant>(
+					await at(grants),
+					phase,
+					"consent-store",
+					c.refuse,
+				),
+				asks: await phasedRecordsIn<StoredAsk>(
+					await at(asks),
+					phase,
+					"consent-store",
+					c.refuse,
+					askRecordsUnder,
+				),
 			};
 		}),
-		m.provide(grantStore).by(async (c) => {
-			const { held, grants: kept } = await c.get(placed);
-			return portsOf(held, kept);
-		}),
-		m.provide(askStore).by(async (c) => {
-			const { held, asks: kept } = await c.get(placed);
-			return portsOf(held, kept);
-		}),
+		m.provide(grantStore).by(async (c) => portsOf((await c.get(placed)).grants)),
+		m.provide(askStore).by(async (c) => portsOf((await c.get(placed)).asks)),
 		// Out of traffic until the phase reads: no call is judged on a phase not read.
 		m.contribute(probes).by(async (c) => {
 			const { grants: g, asks: a } = await c.get(placed);
 			return {
 				name: "consent-store.phase",
 				check: async () => {
-					await g.records.ready();
-					await a.records.ready();
+					await g.ready();
+					await a.ready();
 				},
 			};
 		}),

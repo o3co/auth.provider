@@ -75,10 +75,10 @@ const fresh = () => `k-${++n}-${Math.random().toString(36).slice(2)}`;
 
 /**
  * What consent needs from any implementation of one of its store interfaces: records kept whole
- * and once, read back, changed only from what they hold, ended at exactly their lifetime or never,
- * through lost answers, restarts, memory pressure and failovers.
+ * and once, read back, changed only from what they hold, ended at exactly their lifetime or, where
+ * `endless` (grants, not asks, which end by their challenge), never, through lost answers,
+ * restarts, memory pressure and failovers.
  */
-/** `endless`: whether consent keeps such records with no end, grants, and not asks, which end by their challenge. */
 function recordTests<T>(open: () => Promise<ConsentPlace<T>>, endless: boolean): void {
 	const held = (value: object) => value as unknown as T;
 	const counted = (record: T) => (record as unknown as { n: number }).n;

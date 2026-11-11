@@ -1,34 +1,11 @@
 import type { Eraser, MigrationReport, SpaceReport, SubjectReading } from "@mod/erasure-extensions";
+import { grantSubjectOf } from "./grants/grants.ts";
 import type { AskStore, GrantStore } from "./store.ts";
 
-/**
- * A grant's subject, from its key (`[subject, clientId]`, grants.ts): consent's reading, so the
- * Store never opens a grant. A key in another shape proves nothing: unreadable, never an orphan,
- * as consent cannot tell an account gone from one it does not hold.
- */
-export const grantSubjectOf: SubjectReading = async (key) => {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(key);
-	} catch {
-		return { kind: "unreadable", reason: "a grant key that is no JSON" };
-	}
-	if (
-		Array.isArray(parsed) &&
-		parsed.length === 2 &&
-		typeof parsed[0] === "string" &&
-		typeof parsed[1] === "string"
-	) {
-		return { kind: "subject", subject: parsed[0] };
-	}
-	return { kind: "unreadable", reason: "a grant key of another shape" };
+/** Asks are bounded: a migration indexes none, and reads none; one asked to read is a defect. */
+const askSubjectOf: SubjectReading = async () => {
+	throw new Error("consent: an ask is bounded, so no migration reads one");
 };
-
-/** Asks are bounded: a migration indexes none, so it reads none. */
-const askSubjectOf: SubjectReading = async () => ({
-	kind: "unreadable",
-	reason: "an ask is bounded",
-});
 
 /**
  * consent's eraser, `consent`, as its spaces' `erasedBy` names it: its grants erased and its asks

@@ -18,7 +18,7 @@ export interface Changed<T> {
 export interface RecordStore<T> {
 	/**
 	 * Keeps a new record (for its lifetime, or without end) for its subject, unless the key holds one
-	 * (`exists`) or, where the Store fences erasure, the subject is erased there (`erased`), which
+	 * (`exists`) or, where the Store fences saves past a subject's erasure, the subject is erased there (`erased`), which
 	 * consent takes as refused. The subject comes last: keep this value, this long, for this subject.
 	 */
 	save(
@@ -34,7 +34,8 @@ export interface RecordStore<T> {
 		change: (record: T) => Changed<T> | undefined,
 	): Promise<{ readonly before: T; readonly after: T } | undefined>;
 	/**
-	 * Erases a subject's records here, where the Store can: optional in 0.20, required in 0.22. A
+	 * Erases a subject's records here, where the Store can: optional in 0.20, required in 0.22, as an
+	 * owner store not built through `subject-records` cannot be erased. A
 	 * Store without it holds records consent's eraser cannot erase.
 	 */
 	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;

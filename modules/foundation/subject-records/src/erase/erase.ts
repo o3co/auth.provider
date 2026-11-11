@@ -24,7 +24,7 @@ const perBatch = 32;
  */
 export const clockAllowanceMs = 5 * 60_000;
 
-/** The one place a report is made; nothing outside this package makes one. */
+/** Where erasing makes its report; only this package makes one, here and in internal module `migrate`. */
 const report = (made: { kind: string; space: string } & Record<string, unknown>) =>
 	made as unknown as SpaceReport;
 

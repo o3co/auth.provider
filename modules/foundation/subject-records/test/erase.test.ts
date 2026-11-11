@@ -127,15 +127,6 @@ it("reads the phase from its mark in any epoch, and writes only indexed, only un
 	});
 });
 
-it("reads the phase from a control that may be missing: none is reader, a failed read fails", async () => {
-	expect(await subjectRecordsPhase.readFrom(undefined)).toBe("reader");
-	expect(
-		await subjectRecordsPhase.readFrom({ control: async () => control(false, "indexed") }),
-	).toBe("indexed");
-	const down = { control: async () => Promise.reject(new Unavailable("store")) };
-	await expect(subjectRecordsPhase.readFrom(down)).rejects.toThrow(Unavailable);
-});
-
 it("erases a subject's records and sets its index lists, past a tombstone no create crosses, leaving another's", async () => {
 	const { at, indexOf, raw } = await opened();
 	const records = subjectRecordsIn<number>(at(indexed), "w", refuse);
