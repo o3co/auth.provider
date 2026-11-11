@@ -90,6 +90,13 @@ describe("cacheProblems", () => {
 		expect(step("actions/checkout@v3")).toEqual([expect.stringContaining("a ref not taken")]);
 	});
 
+	it("takes an action at the commit it is pinned to, and refuses another commit", () => {
+		expect(step("actions/checkout@11d5960a326750d5838078e36cf38b85af677262")).toEqual([]);
+		expect(step("actions/checkout@0000000000000000000000000000000000000000")).toEqual([
+			expect.stringContaining("a ref not taken"),
+		]);
+	});
+
 	it("passes a cache step only with the condition set out, written exactly, nothing evaluated", () => {
 		expect(step("actions/cache@v4", "", offInEvidence)).toEqual([]);
 		for (const condition of [
