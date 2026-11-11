@@ -36,7 +36,12 @@ it("writes the deployment of the modules from the packages given", async () => {
 		].sort(),
 	);
 	// The lockfile stays one document, whatever the app composes.
-	expect(parse(await read(target, "pnpm-workspace.yaml"))).toEqual({ pmOnFail: "ignore" });
+	expect(parse(await read(target, "pnpm-workspace.yaml"))).toEqual({
+		minimumReleaseAge: 1440,
+		trustPolicy: "no-downgrade",
+		blockExoticSubdeps: true,
+		pmOnFail: "ignore",
+	});
 	const manifest = JSON.parse(await read(target, "package.json"));
 	// The kernel and its configuration files come first, whether or not listed, and no reseal without seal.
 	expect(Object.keys(manifest.dependencies)).toEqual([
@@ -415,6 +420,12 @@ it("records the packages outside the release and checks the lockfile against the
 	const workspace = parse(await read(target, "pnpm-workspace.yaml"));
 	expect(workspace.pmOnFail).toBe("ignore");
 	expect(workspace.overrides).toEqual({ zod: "4.6.7" });
+	// Its release age, which `outside` gives, written once beside the settings every app has.
+	expect(await read(target, "pnpm-workspace.yaml")).toMatch(/^minimumReleaseAge: 1440$/m);
+	expect((await read(target, "pnpm-workspace.yaml")).match(/^minimumReleaseAge:/gm)).toHaveLength(
+		1,
+	);
+	expect(workspace).toMatchObject({ trustPolicy: "no-downgrade", blockExoticSubdeps: true });
 	// What the release recorded of the packages held to one copy reaches the record.
 	expect(JSON.parse(await read(target, "outside-modules.json")).held).toEqual({
 		zod: "sha512-ZOD",
