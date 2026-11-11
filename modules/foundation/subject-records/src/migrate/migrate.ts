@@ -22,10 +22,10 @@ const rereads = 8;
 /** Times a walk starts over, its server changing, before the space stops. */
 const restarts = 8;
 
+/** What a decision on one record came to. */
+type Done = "indexed" | "removed" | "already" | "gone";
 /** What one record came to. */
-type Outcome =
-	| { readonly kind: "indexed" | "removed" | "already" | "gone" }
-	| { readonly kind: "stopped"; readonly reason: string };
+type Outcome = { readonly kind: Done } | { readonly kind: "stopped"; readonly reason: string };
 
 /**
  * Puts the records of one space written before indexing into its index, once records are indexed
@@ -62,67 +62,97 @@ export async function migrateRecords(
 	/** Where an envelope of `subject` at `key` is shown to be subject-records' own. */
 	const markOf = (subject: string, key: string): Target =>
 		keyed ? witnessOf(subject, "record") : bucketOf(subject, key);
-	const marks = (mark: Json | undefined, key: string) =>
+	const listedIn = (mark: Json | undefined, key: string) =>
 		keyed
 			? mark !== undefined
 			: entriesIn(mark, space).some((e) => e.key === key && e.name === "record");
-	const isMigrated = (held: Json, mark: Json | undefined, key: string) => {
-		const { subject } = opened(held, true);
-		return subject !== undefined && marks(mark, key);
+
+	/**
+	 * One record decided in one change, holding it as read beside the marks named: never on reads
+	 * alone, which a failover can take back, so a skip and an absence are confirmed as a write is.
+	 * `changed` where the record holds another value than `value`, to be read again.
+	 */
+	const decided = async (
+		key: string,
+		value: Json | undefined,
+		subjects: readonly (string | undefined)[],
+		decide: (marks: ReadonlyMap<string, Json | undefined>) => {
+			readonly outcome: Done | "todo";
+			readonly next?: readonly [Json, string] | "remove";
+		},
+	): Promise<Done | "todo" | "changed"> => {
+		const target: Target = { place, key };
+		const named = [...new Set(subjects.filter((one): one is string => one !== undefined))];
+		let answer: Done | "todo" | "changed" = "changed";
+		await changeRecords({
+			targets: [target, ...named.map((one) => markOf(one, key))],
+			decide: ([held, ...read]) => {
+				if (
+					held === undefined
+						? value !== undefined
+						: canonicalJson(held) !== canonicalJson(value ?? null)
+				) {
+					answer = "changed";
+					return {};
+				}
+				if (held === undefined) {
+					answer = "gone";
+					return {};
+				}
+				const marks = new Map(named.map((one, at) => [one, read[at]] as const));
+				const { outcome, next } = decide(marks);
+				answer = outcome;
+				if (next === undefined) return {};
+				if (next === "remove") return { targets: [{ remove: true }] };
+				const subject = next[1];
+				const mark = marks.get(subject);
+				const shown = keyed
+					? mark === undefined
+						? witnessed
+						: undefined
+					: listedWith(mark, space, { key, name: "record" });
+				// The raw value whole, whatever its shape; no lifetime, so it keeps its end.
+				return {
+					targets: [
+						{ value: next[0] },
+						...named.map((one) => (one === subject ? shown : undefined)),
+					],
+				};
+			},
+		});
+		return answer;
 	};
 
 	const migrated = async (key: string): Promise<Outcome> => {
-		const target: Target = { place, key };
 		for (let read = 0; read < rereads; read += 1) {
-			const { entry } = await place.store.get(changeRecords.keyOf(target));
-			if (!entry) return { kind: "gone" };
-			const value = entry.value;
-			const { subject: shaped } = opened(value, true);
-			if (shaped !== undefined) {
-				const { entry: mark } = await place.store.get(changeRecords.keyOf(markOf(shaped, key)));
-				if (marks(mark?.value, key)) return { kind: "already" };
-			}
-			const whose = await subjectOf(key, value);
+			const { entry } = await place.store.get(changeRecords.keyOf({ place, key }));
+			const value = entry?.value;
+			const { subject: shaped } = value === undefined ? {} : opened(value, true);
+			/** Whether the record as read is an envelope this package wrote: listed or witnessed. */
+			const isOurs = (marks: ReadonlyMap<string, Json | undefined>) =>
+				shaped !== undefined && listedIn(marks.get(shaped), key);
+			// First, with no owner's reading: a record migrated already, or gone, is decided here.
+			const first = await decided(key, value, [shaped], (found) => ({
+				outcome: isOurs(found) ? "already" : "todo",
+			}));
+			if (first === "changed") continue;
+			if (first !== "todo") return { kind: first };
+			const whose = await subjectOf(key, value as Json);
 			if (whose.kind === "unreadable")
 				return { kind: "stopped", reason: `unreadable: ${whose.reason}` };
 			const subject = whose.kind === "subject" ? whose.subject : undefined;
 			if (keyed && subject !== undefined && subject !== key) {
 				return { kind: "stopped", reason: "a record keyed by another subject" };
 			}
-			let outcome: Outcome["kind"] = "gone";
-			let changed = false;
-			await changeRecords({
-				targets: subject === undefined ? [target] : [target, markOf(subject, key)],
-				decide: ([held, mark]) => {
-					if (held === undefined) {
-						outcome = "gone";
-						return {};
-					}
-					if (canonicalJson(held) !== canonicalJson(value)) {
-						changed = true;
-						return {};
-					}
-					changed = false;
-					if (subject === undefined) {
-						outcome = "removed";
-						return { targets: [{ remove: true }] };
-					}
-					if (isMigrated(held, mark, key)) {
-						outcome = "already";
-						return {};
-					}
-					outcome = "indexed";
-					// The raw value whole, whatever its shape; no lifetime, so it keeps its end.
-					const enveloped = { value: kept(value, subject) };
-					const shown = keyed
-						? mark === undefined
-							? witnessed
-							: undefined
-						: listedWith(mark, space, { key, name: "record" });
-					return { targets: [enveloped, shown] };
-				},
+			// Then the owner's answer, the envelope's own mark held too: a run that migrated it meanwhile wins.
+			const outcome = await decided(key, value, [subject, shaped], (found) => {
+				if (isOurs(found)) return { outcome: "already" };
+				if (subject === undefined) return { outcome: "removed", next: "remove" };
+				return { outcome: "indexed", next: [kept(value as Json, subject), subject] };
 			});
-			if (!changed) return { kind: outcome };
+			if (outcome === "changed") continue;
+			if (outcome === "todo") throw new Error("subject-records: a migration decided nothing");
+			return { kind: outcome };
 		}
 		throw new Unavailable("subject-records");
 	};

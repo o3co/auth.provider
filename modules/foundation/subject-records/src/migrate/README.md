@@ -13,7 +13,7 @@ Internal module of `subject-records`: the one migration of a space's records wri
 
 ## Invariants
 - A record is migrated already only where its envelope is listed in its subject's bucket (`online-indexed`) or witnessed (`online-keyed`), never by its shape alone: a raw value of an envelope's shape is wrapped whole.
-- Each record is written as one with its bucket entry or witness, held as read, its value and end kept; one that changed meanwhile is read again, up to 8 times, then unavailable. So a rerun, a key a walk meets twice, and two runs at once each index or remove a record once.
+- Every outcome, a skip and an absence included, is decided in one confirmed change holding the record as read, never on reads alone, which a failover can take back: first whether it is migrated already or gone, then the owner's answer, with the envelope's own listing or witness held too, so a removal never takes what another run migrated meanwhile. A record written is written with its bucket entry or witness, its value and end kept; one changed is read again, up to 8 times, then unavailable.
 - Only `orphan` removes a record. `unreadable`, a failed lookup among them, stops the space and removes nothing more; so does a record of an `online-keyed` space read as another subject's than its key.
 - A `bounded` space has nothing to index; a walk whose server changes starts over, at most 8 times.
 - It runs in the maintenance window after `indexed` and before erasure is enabled (account erasure §5.1): no owner writes and no erasure run beside it.

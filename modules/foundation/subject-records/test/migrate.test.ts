@@ -184,3 +184,55 @@ it("stops where aborted and finishes when run again; two runs at once index each
 	expect([one, two].map((r) => (r as { indexed: number }).indexed).reduce((x, y) => x + y)).toBe(4);
 	expect(await migrateRecords(at(indexed), walk(), owners)).toMatchObject({ indexed: 0 });
 });
+
+it("decides a record already migrated in one confirmed change, never on reads alone, which a failover could take back", async () => {
+	const { s, at, walk, put } = await opened();
+	await put(indexed, "k", { owner: "alice" });
+	expect(await migrateRecords(at(indexed), walk(), owners)).toMatchObject({ indexed: 1 });
+	// A rerun reads k migrated: it confirms that with a write of its own, as records does.
+	const sent: string[] = [];
+	const counting = new Proxy(s, {
+		get: (target, name) => {
+			const got = Reflect.get(target, name);
+			if ((name !== "batch" && name !== "batchAcross") || typeof got !== "function") return got;
+			return (...args: unknown[]) => {
+				sent.push(String(name));
+				return got.apply(target, args);
+			};
+		},
+	});
+	expect(await migrateRecords({ ...at(indexed), store: counting }, walk(), owners)).toMatchObject({
+		indexed: 0,
+		removed: 0,
+	});
+	expect(sent.length).toBeGreaterThan(0);
+});
+
+it("removes as an orphan no record another run migrated meanwhile: the removal holds its envelope's listing", async () => {
+	const { s, at, walk, put, raw, index } = await opened();
+	const value = { owner: "alice" };
+	// An envelope no bucket lists, as a failover leaves a migration it took back half seen.
+	await put(indexed, "k0", envelope("alice", value));
+	let raced = false;
+	// An owner whose reading takes what it cannot tell for an orphan; while it reads, another run
+	// migrates k0 again, from the raw value the failover left, to the very same envelope.
+	const loose: SubjectReading = async (key, held) => {
+		if (!raced && (held as { "records:v"?: number })["records:v"] === 1) {
+			raced = true;
+			await s.replaceIf(
+				{ space: indexed, partition: key, name: "record" },
+				(await raw(indexed, key))?.version ?? "",
+				value,
+				{ expiry: { kind: "keep" } },
+			);
+			await migrateRecords(at(indexed), walk(), owners);
+			return { kind: "orphan" };
+		}
+		return owners(key, held);
+	};
+	const report = await migrateRecords(at(indexed), walk(), loose);
+	expect(raced).toBe(true);
+	expect(report).toMatchObject({ kind: "migrated", removed: 0 });
+	expect((await raw(indexed, "k0"))?.value).toEqual(envelope("alice", value));
+	expect(await index(indexed, "alice", bucketOf("k0"))).toEqual([["k0", "record"]]);
+});
