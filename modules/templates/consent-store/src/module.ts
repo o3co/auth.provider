@@ -1,14 +1,24 @@
 import {
+	askLifetimeMaxMs,
 	askStore,
 	type askStoreNeeds,
 	grantStore,
 	type grantStoreNeeds,
+	type RecordStore,
 	type StoredAsk,
 	type StoredGrant,
 } from "@mod/consent";
-import { defineModule } from "@mod/kernel";
-import { recordsIn, secretRecordsIn } from "@mod/records";
-import { type Guarantee, type Space, spaces, store } from "@mod/store";
+import { contract, defineModule, optional, probes } from "@mod/kernel";
+import { type Guarantee, type Space, spaces, store, storeControl } from "@mod/store";
+import {
+	eraseSubject,
+	type HeldPhase,
+	indexSpaceOf,
+	migrateRecords,
+	phasedRecordsIn,
+	type SubjectPlace,
+	subjectRecordsPhase,
+} from "@mod/subject-records";
 
 /** Each need consent states for its grants, as the guarantee a space declares for it. */
 const guaranteeFor: Record<keyof typeof grantStoreNeeds, Guarantee> = {
@@ -22,22 +32,105 @@ const { namesFromSecret: askRecordsFor, ...askGuaranteeFor } = {
 	neverEvicted: guaranteeFor.neverEvicted,
 	survivesCrash: guaranteeFor.survivesCrash,
 	survivesFailover: guaranteeFor.survivesFailover,
-	namesFromSecret: secretRecordsIn,
-} satisfies Record<keyof typeof askStoreNeeds, Guarantee | typeof secretRecordsIn>;
-const grants: Space = { name: "consent-store.grants", guarantees: Object.values(guaranteeFor) };
-const asks: Space = { name: "consent-store.asks", guarantees: Object.values(askGuaranteeFor) };
+	namesFromSecret: { secret: true } as const,
+} satisfies Record<keyof typeof askStoreNeeds, Guarantee | { readonly secret: true }>;
+/** Grants, each a subject's: kept indexed by it, erased by consent's eraser. */
+const grants: Space = {
+	name: "consent-store.grants",
+	guarantees: Object.values(guaranteeFor),
+	subjectData: "online-indexed",
+	erasedBy: "consent",
+};
+/** Asks, each a subject's for at most consent's bound: fenced by its tombstone, ending by then. */
+const asks: Space = {
+	name: "consent-store.asks",
+	guarantees: Object.values(askGuaranteeFor),
+	subjectData: "bounded",
+	boundedMs: askLifetimeMaxMs,
+	erasedBy: "consent",
+};
 
-export default defineModule({ name: "consent-store", replicaSafe: true, takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => grants),
-	m.contribute(spaces).by(() => asks),
-	m.provide(grantStore).by(async (c) => {
-		const place = { store: await c.get(store), space: grants, log: c.log, random: c.random };
-		const records = recordsIn<StoredGrant>(place);
-		return { save: records.create, read: records.read, update: records.change };
-	}),
-	m.provide(askStore).by(async (c) => {
-		const place = { store: await c.get(store), space: asks, log: c.log, random: c.random };
-		const records = askRecordsFor<StoredAsk>(place);
-		return { save: records.create, read: records.read, update: records.change };
-	}),
-]);
+/** A space's place, the phase the process holds, and its records over that phase. */
+const placed = contract<{
+	readonly held: HeldPhase;
+	readonly grants: {
+		readonly at: Omit<SubjectPlace, "phase">;
+		readonly records: PhasedOf<StoredGrant>;
+	};
+	readonly asks: {
+		readonly at: Omit<SubjectPlace, "phase">;
+		readonly records: PhasedOf<StoredAsk>;
+	};
+}>("consent-store.placed");
+type PhasedOf<T extends StoredGrant | StoredAsk> = Awaited<ReturnType<typeof phasedRecordsIn<T>>>;
+
+/** consent's store interface over a space's records, erasing and migrating through subject-records. */
+const portsOf = <T extends StoredGrant | StoredAsk>(
+	held: HeldPhase,
+	{ at, records }: { readonly at: Omit<SubjectPlace, "phase">; readonly records: PhasedOf<T> },
+): RecordStore<T> => ({
+	save: records.create,
+	read: records.read,
+	update: records.change,
+	erase: async (subject, signal) =>
+		eraseSubject({ ...at, phase: await held.read() }, subject, { signal }),
+	migrate: async (walk, subjectOf, signal) =>
+		migrateRecords({ ...at, phase: await held.read() }, walk, subjectOf, { signal }),
+});
+
+export default defineModule(
+	{ name: "consent-store", replicaSafe: true, takes: [store, optional(storeControl)] },
+	(m) => [
+		m.contribute(spaces).by(() => grants),
+		m.contribute(spaces).by(() => indexSpaceOf(grants)),
+		m.contribute(spaces).by(() => asks),
+		m.contribute(spaces).by(() => indexSpaceOf(asks)),
+		m.provide(placed).by(async (c) => {
+			const held = subjectRecordsPhase.held(await c.getOptional(storeControl));
+			const at = async (space: Space) => ({
+				store: await c.get(store),
+				space,
+				index: indexSpaceOf(space),
+				log: c.log,
+				random: c.random,
+			});
+			const [grantsAt, asksAt] = [await at(grants), await at(asks)];
+			return {
+				held,
+				grants: {
+					at: grantsAt,
+					records: await phasedRecordsIn<StoredGrant>(grantsAt, held, "consent-store", c.refuse),
+				},
+				asks: {
+					at: asksAt,
+					records: await phasedRecordsIn<StoredAsk>(
+						asksAt,
+						held,
+						"consent-store",
+						c.refuse,
+						askRecordsFor,
+					),
+				},
+			};
+		}),
+		m.provide(grantStore).by(async (c) => {
+			const { held, grants: kept } = await c.get(placed);
+			return portsOf(held, kept);
+		}),
+		m.provide(askStore).by(async (c) => {
+			const { held, asks: kept } = await c.get(placed);
+			return portsOf(held, kept);
+		}),
+		// Out of traffic until the phase reads: no call is judged on a phase not read.
+		m.contribute(probes).by(async (c) => {
+			const { grants: g, asks: a } = await c.get(placed);
+			return {
+				name: "consent-store.phase",
+				check: async () => {
+					await g.records.ready();
+					await a.records.ready();
+				},
+			};
+		}),
+	],
+);
