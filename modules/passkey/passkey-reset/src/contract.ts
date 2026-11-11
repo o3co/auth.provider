@@ -10,7 +10,9 @@ import { contract } from "@mod/kernel";
 export type PasskeyResetOutcome =
 	| { readonly kind: "done"; readonly removed: number }
 	| { readonly kind: "stopped"; readonly at: "sessions" | "passkeys"; readonly removed?: never }
-	| { readonly kind: "stopped"; readonly at: "sessions"; readonly removed: number };
+	| { readonly kind: "stopped"; readonly at: "sessions"; readonly removed: number }
+	/** A boundary step read the subject as erased: refused, the passkeys perhaps gone already. */
+	| { readonly kind: "erased" };
 
 /** An operator's reset of a subject's passkeys, for the embedder that has verified who asks. */
 export interface PasskeyReset {
