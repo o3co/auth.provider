@@ -26,6 +26,9 @@
 - Erasing writes the tombstone first, then removes only what reads absent or names the subject. A report is made by this package alone (internal modules `erase` and `migrate`).
 - Cost: a create or removal rewrites one bucket whole, its size growing with the subject's records (about a sixteenth of them); fine for what an owner keeps per subject, and not capped.
 
+## Deprecated
+- The builders' `unowned`: raw records of a space from before its non-subject records moved out (users' names), saved while the phase is `reader`, `closed` once `indexed`; removed in 0.22 (internal module `writes`).
+
 ## Depends on
 - `kernel`, `store`, `records` (`changeRecords`, its targets, keys and keyed sets' codec), `erasure-extensions` (the reports, `SubjectReading`, `Walk`)
 

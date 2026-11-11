@@ -102,6 +102,7 @@ export const phasedRecordsIn = <T extends Json>(
 		// Every method the builder has, or the typecheck fails: none is left unrouted.
 		{
 			create: true,
+			unowned: true,
 			read: true,
 			change: true,
 			remove: true,

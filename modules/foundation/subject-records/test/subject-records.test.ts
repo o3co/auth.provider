@@ -203,6 +203,19 @@ it("checks a record kept raw by its raw value, and removes it raw", async () => 
 	expect(await raw("a")).toBeUndefined();
 });
 
+it("saves a record holding no subject raw while records are not indexed, and answers closed once they are, writing nothing", async () => {
+	const { build, raw, indexOf } = await opened_();
+	const reading = build<Json>("reader");
+	expect(await reading.unowned('{"idp":"a"}', { issuer: "x" }, "endless")).toBe("created");
+	expect(await reading.unowned('{"idp":"a"}', { issuer: "y" }, "endless")).toBe("exists");
+	expect(await raw('{"idp":"a"}')).toEqual({ issuer: "x" });
+	expect(await reading.read('{"idp":"a"}')).toEqual({ issuer: "x" });
+	const indexedRecords = build<Json>("indexed");
+	expect(await indexedRecords.unowned('{"idp":"b"}', { issuer: "x" }, "endless")).toBe("closed");
+	expect(await raw('{"idp":"b"}')).toBeUndefined();
+	expect(await indexOf("nobody")).toEqual({});
+});
+
 it("changes a record kept raw, from before records were indexed, raw", async () => {
 	const { s, build, raw } = await opened_();
 	await s.putIfAbsent({ space: indexedSpace, partition: "old", name: "record" }, 1, {

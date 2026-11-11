@@ -301,3 +301,26 @@ it("runs the owner's step again on a record changed before its removal, removing
 	]);
 	expect(await raw(indexed, "o")).toBeNull();
 });
+
+it("stops a space holding a record saved as unowned where the owner reads it unreadable, removing nothing; with its step, keeps it elsewhere and removes it", async () => {
+	const { at, walk, raw } = await opened();
+	const writer = subjectRecordsIn<Json>(at(indexed, "reader"), "w", refuse);
+	expect(await writer.unowned("names", { issuer: "x" }, "endless")).toBe("created");
+	const unread: SubjectReading = async () => ({ kind: "unreadable", reason: "a name" });
+	expect(await migrateRecords(at(indexed), walk(), unread)).toMatchObject({
+		kind: "stopped",
+		reason: "unreadable: a name",
+	});
+	expect((await raw(indexed, "names"))?.value).toEqual({ issuer: "x" });
+	const kept = new Map<string, unknown>();
+	const orphan: SubjectReading = async () => ({ kind: "orphan" });
+	expect(
+		await migrateRecords(at(indexed), walk(), orphan, {
+			elsewhere: async (key, value) => {
+				kept.set(key, value);
+			},
+		}),
+	).toMatchObject({ kind: "migrated", removed: 1 });
+	expect([...kept]).toEqual([["names", { issuer: "x" }]]);
+	expect(await raw(indexed, "names")).toBeNull();
+});
