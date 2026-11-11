@@ -8,6 +8,8 @@ import {
 	subjectRevocationOf,
 } from "./boundaries/boundaries.ts";
 import {
+	type ErasedSubjects,
+	erasedSubjects,
 	type Revocations,
 	revocationFollowers,
 	revocations,
@@ -25,6 +27,8 @@ export interface RevocationComposition {
 	readonly revocations: Revocations;
 	/** Marks a subject erased, as account erasure will. */
 	readonly erasure: SubjectErasure;
+	/** Whether a subject is marked erased. */
+	readonly erasedSubjects: ErasedSubjects;
 	/** The time a revocation now takes. */
 	now(): number;
 	/** Moves that time on. */
@@ -88,6 +92,18 @@ export function subjectRevocationContract(
 			expect(await composition.revocations.compare("alice", later, "delegations")).toBe("revoked");
 			expect(await composition.revocation.check("carol", later)).toBe("revoked");
 			expect(await composition.revocation.check("bob", later)).toBe("valid");
+		});
+
+		it("tells whether a subject is marked erased, read on every call", async () => {
+			const composition = await open();
+			expect(await composition.erasedSubjects.erased("alice")).toBe(false);
+			await composition.revocations.record("alice");
+			expect(await composition.erasedSubjects.erased("alice")).toBe(false);
+			await composition.erasure.markErased("alice");
+			await composition.erasure.markErased("carol");
+			expect(await composition.erasedSubjects.erased("alice")).toBe(true);
+			expect(await composition.erasedSubjects.erased("carol")).toBe(true);
+			expect(await composition.erasedSubjects.erased("bob")).toBe(false);
 		});
 
 		it("moves sessions every time, and delegations unless kept", async () => {
@@ -180,6 +196,12 @@ const comparedIn =
 		return held === undefined ? "valid" : comparedTo(held, time, kind, allowanceMs);
 	};
 
+/** Whether a subject is marked erased in the stand-in's map, as the module reads its mark. */
+const erasedInto =
+	(boundaries: () => Map<string, Boundaries>): ErasedSubjects["erased"] =>
+	async (subject) =>
+		boundaries().get(subject)?.erasedAt !== undefined;
+
 /** One composition's boundaries, shared by its revocations and its marks. */
 const standInBoundaries = contract<Map<string, Boundaries>>("subject-revocation.stand-in");
 
@@ -207,6 +229,10 @@ export const subjectRevocationStandIn = defineModule(
 		m
 			.provide(subjectErasure)
 			.by(async (c) => ({ markErased: markedInto(await c.get(standInBoundaries), c.clock.now) })),
+		m.provide(erasedSubjects).by(async (c) => {
+			const boundaries = await c.get(standInBoundaries);
+			return { erased: erasedInto(() => boundaries) };
+		}),
 	],
 );
 
@@ -232,6 +258,8 @@ export function laggingRevocation() {
 			m.provide(subjectRevocation).by(async (c) => subjectRevocationOf(await c.get(revocations))),
 			// A mark goes to the boundaries as they are; a lagging read sees it once caught up.
 			m.provide(subjectErasure).by((c) => ({ markErased: markedInto(boundaries, c.clock.now) })),
+			// Read as a compare is: by the boundaries as they stood at `lag()` until caught up.
+			m.provide(erasedSubjects).by(() => ({ erased: erasedInto(() => behind ?? boundaries) })),
 		],
 	);
 	return {

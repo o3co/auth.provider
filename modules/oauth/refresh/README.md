@@ -14,7 +14,7 @@
 - `grants`' token tie `family`: a token's family, `ended` (`family has ended`) or held to its end, naming the family's session, if any, to issue from; a token issued from it is adopted.
 - Contract `lineage`: `start(...)` → a family's first refresh token, or nothing for a client not allowed to refresh.
 - Operator section `refresh`, with `lifetime` (written with its unit, in whole seconds) and `bind-confidential-clients` (false, as 0.17); its keys are in the configuration reference.
-- Audit event `refresh.family_revoked`, with the subject and the client, when a reuse revokes a family; never a token, its secret or the family's name: declared in `./audit-events`, listed in the audit event reference.
+- Audit event `refresh.family_revoked`, with the client, and the subject unless `withheld`, when a reuse revokes a family; never a token, its secret or the family's name: declared in `./audit-events`, listed in the audit event reference.
 - Store interfaces: families, redemptions, token links; their needs (never evicted, survives a crash, never rolled back by failover), contract test and configuration builders (`./testing`).
 
 ## Invariants

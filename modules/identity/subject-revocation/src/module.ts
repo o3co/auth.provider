@@ -1,8 +1,9 @@
 import { erasers } from "@mod/erasure-extensions";
 import { contract, defineModule, probes, Unavailable } from "@mod/kernel";
 import { comparedTo, subjectRevocationOf } from "./boundaries/boundaries.ts";
-import { markIn, opened, writtenTo } from "./boundaries/written.ts";
+import { erasedIn, markIn, opened, writtenTo } from "./boundaries/written.ts";
 import {
+	erasedSubjects,
 	erasureFence,
 	erasureGuards,
 	type Revocations,
@@ -93,6 +94,7 @@ export default defineModule(
 		m
 			.provide(subjectErasure)
 			.by(async (c) => ({ markErased: markedIn(await c.get(boundaryStore)) })),
+		m.provide(erasedSubjects).by(async (c) => ({ erased: erasedIn(await c.get(boundaryStore)) })),
 		m
 			.provide(erasureFence)
 			.by(async (c) => fenceOver(await c.get(boundaryStore), (await c.get(erasureReading)).read)),

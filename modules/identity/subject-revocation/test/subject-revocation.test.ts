@@ -1,7 +1,7 @@
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { revocations, subjectErasure, subjectRevocation } from "../src/contract.ts";
+import { erasedSubjects, revocations, subjectErasure, subjectRevocation } from "../src/contract.ts";
 import revocationModule from "../src/module.ts";
 import { type BoundaryStore, boundaryStore, type StoredBoundary } from "../src/store.ts";
 import {
@@ -55,6 +55,7 @@ async function boot(front: (boundaries: BoundaryStore) => BoundaryStore = (b) =>
 		revocation,
 		revocations: app.get(revocations),
 		erasure: app.get(subjectErasure),
+		erasedSubjects: app.get(erasedSubjects),
 	};
 }
 
@@ -219,9 +220,16 @@ it("is unavailable when another request's first boundary is gone before it moves
 });
 
 subjectRevocationContract("subject-revocation over the records stand-in", async () => {
-	const { adapter, revocation, revocations, erasure } = await boot();
+	const { adapter, revocation, revocations, erasure, erasedSubjects } = await boot();
 	// A boundary is its write's deadline: an authentication counts as after it a patience later.
-	return { revocation, revocations, erasure, ...adapter, settlesAfterMs: patience + 1000 };
+	return {
+		revocation,
+		revocations,
+		erasure,
+		erasedSubjects,
+		...adapter,
+		settlesAfterMs: patience + 1000,
+	};
 });
 
 subjectRevocationContract("the stand-in", async () => {
@@ -235,6 +243,7 @@ subjectRevocationContract("the stand-in", async () => {
 		revocation: app.get(subjectRevocation),
 		revocations: app.get(revocations),
 		erasure: app.get(subjectErasure),
+		erasedSubjects: app.get(erasedSubjects),
 		...adapter,
 	};
 });
@@ -250,6 +259,7 @@ subjectRevocationContract("the lagging stand-in, caught up", async () => {
 		revocation: app.get(subjectRevocation),
 		revocations: app.get(revocations),
 		erasure: app.get(subjectErasure),
+		erasedSubjects: app.get(erasedSubjects),
 		...adapter,
 	};
 });

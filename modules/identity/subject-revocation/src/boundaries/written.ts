@@ -1,4 +1,5 @@
 import { Unavailable } from "@mod/kernel";
+import type { ErasedSubjects } from "../contract.ts";
 import type { Write } from "../followers.ts";
 import type { BoundaryStore, BoundaryWrite, StoredBoundary } from "../store.ts";
 import { type Boundaries, recorded } from "./boundaries.ts";
@@ -32,8 +33,22 @@ export const markIn = (record: StoredBoundary): unknown => {
 };
 
 /** `erased` where the record the committed write read carried a mark of a time; none otherwise. */
-const erasedIn = (before: StoredBoundary): { readonly erased?: true } =>
+const erasedAnswer = (before: StoredBoundary): { readonly erased?: true } =>
 	typeof markIn(before) === "number" ? { erased: true } : {};
+
+/**
+ * Whether a subject is marked erased, by the mark its record carries, read on every call and never
+ * through the enabled reading: a mark of a time, whatever else the record holds, is erased.
+ */
+export function erasedIn(boundaries: BoundaryStore): ErasedSubjects["erased"] {
+	return async (subject) => {
+		const record = await boundaries.read(subject);
+		const mark = record === undefined ? undefined : markIn(record);
+		if (mark === undefined) return false;
+		if (typeof mark !== "number") throw new Unavailable("subject-revocation");
+		return true;
+	};
+}
 
 /** The deadline a store hands a write; one that hands none, or one of no number, has written nothing it can confirm. */
 export const timeOf = (write: BoundaryWrite | undefined) => {
@@ -61,12 +76,12 @@ export function writtenTo(boundaries: BoundaryStore): Write {
 		};
 		// Update first: a subject revoked before then costs one call.
 		const updated = await boundaries.update(subject, moved);
-		if (updated) return erasedIn(updated.before);
+		if (updated) return erasedAnswer(updated.before);
 		const first = (write: BoundaryWrite) => stored(recorded(undefined, timeOf(write), keep));
 		if ((await boundaries.save(subject, first, "endless")) === "created") return {};
 		// Another request saved the first boundary meanwhile: move it from what it holds.
 		const raced = await boundaries.update(subject, moved);
 		if (!raced) throw new Unavailable("subject-revocation");
-		return erasedIn(raced.before);
+		return erasedAnswer(raced.before);
 	};
 }
