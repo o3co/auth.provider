@@ -45,3 +45,29 @@ updates:
       - dependency-name: "typescript"
         update-types:
           - "version-update:semver-major"
+
+  # The actions the workflows use, each pinned to a commit with its version in
+  # a comment: Dependabot moves both together. A release is proposed only once
+  # it is two weeks old, the rule every pin follows. Updates go to develop.
+  #
+  # Two things such a PR may need beside the bump, before it is merged:
+  # - an action CI's or the release's runs use: its new commit in
+  #   distribution's workflow-caches list (how it caches is reviewed there);
+  # - OSV-Scanner's three actions or Scorecard's: the repository's Actions
+  #   allowed list moved to the new commit (by the Visioner), or the run fails
+  #   at startup. Those PRs go to the Visioner before merge.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 14
+    open-pull-requests-limit: 5
+    # Minor and patch updates in one PR; a major stays its own, a deliberate
+    # review (setup-node's next major caches on its own, for one).
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
