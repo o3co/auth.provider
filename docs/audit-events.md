@@ -160,7 +160,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `refresh.family_revoked` | `client` | a refresh token is used again (one already rotated, or the same one twice at once) and its family is revoked, with the subject |
+| `refresh.family_revoked` | `client`, `withheld` | a refresh token is used again (one already rotated, or the same one twice at once) and its family is revoked, with the subject; without it, `withheld` `erased` where the subject is erased, or `unread` where that could not be read |
 
 ## @mod/rp-logout
 

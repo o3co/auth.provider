@@ -34,7 +34,13 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, switchedModule, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
+import {
+	quietRuntime,
+	recordingLog,
+	switchedModule,
+	takesUnused,
+	unavailableSwitch,
+} from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
@@ -46,7 +52,12 @@ import { sessionTokens } from "@mod/session-tokens";
 import sessionTokensModule from "@mod/session-tokens/module";
 import { sessionTokensInMemory } from "@mod/session-tokens/testing";
 import { simulatedStore } from "@mod/store/testing";
-import { subjectRevocation } from "@mod/subject-revocation";
+import {
+	type ErasedSubjects,
+	erasedSubjects,
+	subjectErasure,
+	subjectRevocation,
+} from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { revocableKinds } from "@mod/token-control";
 import tokenControl from "@mod/token-control/module";
@@ -74,7 +85,12 @@ let shift = 0;
 let forced: Uint8Array | undefined;
 /** Every draw of 32 bytes the composition made, as base64url, so a test can tell what a secret was made from. */
 const drawn: string[] = [];
+/** The log, so a test can tell a reuse was recorded without its subject unread. */
+const logged = recordingLog();
+/** A fault the next read of whether a subject is erased throws, as a broken port would. */
+let portFault: Error | undefined;
 const runtime = quietRuntime({
+	log: logged.log,
 	clock: { now: () => Date.now() + shift },
 	random: {
 		bytes: (n) => {
@@ -89,6 +105,7 @@ const runtime = quietRuntime({
 let stop = async () => {};
 afterEach(async () => {
 	vi.useRealTimers();
+	portFault = undefined;
 	shift = 0;
 	forced = undefined;
 	drawn.length = 0;
@@ -135,7 +152,23 @@ function assembly(options: Options = {}) {
 	const audited = auditStandIn();
 	const stores = memoryStores();
 	const selections = selectionStores();
-	const down = { tokens: unavailableSwitch<Tokens>("tokens") };
+	const down = {
+		tokens: unavailableSwitch<Tokens>("tokens"),
+		erased: unavailableSwitch<ErasedSubjects>("subject-revocation"),
+	};
+	/** The port as the stand-in answers it, down on demand, or faulting once `portFault` is set. */
+	const reading = {
+		...down.erased,
+		wrap: (inner: ErasedSubjects): ErasedSubjects => {
+			const switched = down.erased.wrap(inner);
+			return {
+				erased: async (subject) => {
+					if (portFault) throw portFault;
+					return switched.erased(subject);
+				},
+			};
+		},
+	};
 	const both = ["authorization_code", "refresh_token"];
 	const input = {
 		modules: [
@@ -164,7 +197,7 @@ function assembly(options: Options = {}) {
 			sessionStandIn,
 			sessionRequirements,
 			sessionParticipants,
-			subjectRevocationStandIn,
+			switchedModule(subjectRevocationStandIn, erasedSubjects, reading),
 			simulated.module,
 			sessionTokensModule,
 			sessionTokensInMemory().module,
@@ -790,6 +823,61 @@ describe("refresh tokens", () => {
 		// A family a reuse already ended takes no more uses, and records nothing more.
 		await s.refresh(second.body.refresh_token);
 		expect(s.audited.filter((e) => e.kind === "refresh.family_revoked")).toHaveLength(1);
+	});
+
+	it("record a reuse of an erased subject's family without the subject, the family ended all the same", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const second = await s.refresh(first.refresh_token);
+		await s.app.get(subjectErasure).markErased("alice");
+		await s.refresh(first.refresh_token);
+		const revoked = s.audited.filter((e) => e.kind === "refresh.family_revoked");
+		expect(revoked.map(({ subject, attributes }) => ({ subject, attributes }))).toEqual([
+			{ subject: undefined, attributes: { client: "app", withheld: "erased" } },
+		]);
+		expect((await s.refresh(second.body.refresh_token)).body.error).toBe("invalid_grant");
+	});
+
+	it("record a reuse whose subject cannot be read without the subject, logged, the family ended and the answer as ever", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const second = await s.refresh(first.refresh_token);
+		s.down.erased.failNext("erased");
+		const answer = await s.refresh(first.refresh_token);
+		expect(answer.body.error).toBe("invalid_grant");
+		const revoked = s.audited.filter((e) => e.kind === "refresh.family_revoked");
+		expect(revoked.map(({ subject, attributes }) => ({ subject, attributes }))).toEqual([
+			{ subject: undefined, attributes: { client: "app", withheld: "unread" } },
+		]);
+		expect(logged.lines().filter((l) => l.event === "refresh.reuse_subject_unread")).toHaveLength(
+			1,
+		);
+		expect((await s.refresh(second.body.refresh_token)).body.error).toBe("invalid_grant");
+	});
+
+	it("record a reuse as unread when the read fails otherwise, then fail, the family ended", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const second = await s.refresh(first.refresh_token);
+		const broken = new TypeError("broken port");
+		portFault = broken;
+		await expect(s.refresh(first.refresh_token)).rejects.toBe(broken);
+		portFault = undefined;
+		const revoked = s.audited.filter((e) => e.kind === "refresh.family_revoked");
+		expect(revoked.map(({ attributes }) => attributes?.withheld)).toEqual(["unread"]);
+		expect((await s.refresh(second.body.refresh_token)).body.error).toBe("invalid_grant");
+	});
+
+	it("name a subject only revoked, not erased, in the reuse it records", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		await s.refresh(first.refresh_token);
+		await s.app.get(subjectRevocation).revoke("alice");
+		await s.refresh(first.refresh_token);
+		const revoked = s.audited.filter((e) => e.kind === "refresh.family_revoked");
+		expect(revoked.map(({ subject, attributes }) => ({ subject, attributes }))).toEqual([
+			{ subject: "alice", attributes: { client: "app" } },
+		]);
 	});
 
 	it("treat the loser of a race to rotate the same token as a reuse", async () => {

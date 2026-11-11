@@ -3,10 +3,15 @@ import { type ClaimsSelections, claimsSelections } from "@mod/claims-selection";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Grant, GrantOutcome } from "@mod/grants";
 import { issuer } from "@mod/issuer";
-import type { BuildContext } from "@mod/kernel";
+import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { sameBinding } from "@mod/sender-binding";
 import { type Sessions, sessions } from "@mod/session";
-import { type SubjectRevocation, subjectRevocation } from "@mod/subject-revocation";
+import {
+	type ErasedSubjects,
+	erasedSubjects,
+	type SubjectRevocation,
+	subjectRevocation,
+} from "@mod/subject-revocation";
 import events from "../audit-events.ts";
 import { refreshGrantType } from "../contract.ts";
 import { type Random, text } from "../founding/found.ts";
@@ -62,6 +67,9 @@ export interface GrantParts {
 	readonly now: () => number;
 	readonly recorder: Pick<Audit, "record">;
 	readonly selections: Pick<ClaimsSelections, "forRefreshed">;
+	/** Whether a family's subject is erased, read when a reuse is recorded. */
+	readonly subjects: Pick<ErasedSubjects, "erased">;
+	readonly log: Log;
 }
 
 export function refreshGrant({
@@ -73,15 +81,31 @@ export function refreshGrant({
 	now,
 	recorder,
 	selections,
+	subjects,
+	log,
 }: GrantParts): Grant {
 	const recorded = declaredAudit(recorder, events);
-	/** Ends the family a reuse showed, and records it. */
+	/**
+	 * Ends the family a reuse showed, then records it, naming the subject only where it is read as
+	 * not erased: erased, or not read, the record says why it is left out. A read that fails other
+	 * than unavailable is recorded as unread, then thrown.
+	 */
 	const reused = async (id: string, family: Family) => {
 		await revoker.revokeFamily(id);
+		let erased: boolean | undefined;
+		let fault: { readonly error: unknown } | undefined;
+		try {
+			erased = await subjects.erased(family.subject);
+		} catch (error) {
+			if (!isUnavailable(error)) fault = { error };
+		}
+		if (erased === undefined) log.warn("refresh.reuse_subject_unread", {});
+		const withheld = erased === undefined ? "unread" : erased ? "erased" : undefined;
 		recorded.record("refresh.family_revoked", {
-			subject: family.subject,
-			attributes: { client: family.clientId },
+			...(withheld === undefined ? { subject: family.subject } : {}),
+			attributes: { client: family.clientId, ...(withheld === undefined ? {} : { withheld }) },
 		});
+		if (fault !== undefined) throw fault.error;
 	};
 	return {
 		grantType: refreshGrantType,
@@ -191,7 +215,14 @@ export function refreshGrant({
 }
 
 /** What `grantOver` takes beside `settlingIn`'s. */
-export const grantTakes = [sessions, subjectRevocation, issuer, audit, claimsSelections];
+export const grantTakes = [
+	sessions,
+	subjectRevocation,
+	erasedSubjects,
+	issuer,
+	audit,
+	claimsSelections,
+];
 
 /** The refresh_token grant over the contracts the assembly gives. */
 export async function grantOver(c: BuildContext<Settings>) {
@@ -206,5 +237,7 @@ export async function grantOver(c: BuildContext<Settings>) {
 		now: c.clock.now,
 		recorder: await c.get(audit),
 		selections: await c.get(claimsSelections),
+		subjects: await c.get(erasedSubjects),
+		log: c.log,
 	});
 }
