@@ -387,16 +387,16 @@ function memoryStore<T>() {
 }
 
 /** users' store interfaces kept in memory, for tests that assemble users. */
-export function memoryUsersStores(options: { readonly names?: true } = {}) {
+export function memoryUsersStores(options: { readonly issuers?: true } = {}) {
 	const links = memoryStore<StoredLink>();
 	const contacts = memoryStore<StoredContacts>();
-	const names = memoryStore<StoredName>();
+	const issuers = memoryStore<StoredName>();
 	/** While on, the link space keeps no names' record: `unowned` answers `closed`, as once indexed. */
 	const linksClosed = { on: false };
-	const linkPorts: LinkStore = options.names
+	const linkPorts: LinkStore = options.issuers
 		? {
 				...links.store,
-				issuers: names.store,
+				issuers: issuers.store,
 				unowned: async (key, record) =>
 					linksClosed.on
 						? "closed"
@@ -407,7 +407,7 @@ export function memoryUsersStores(options: { readonly names?: true } = {}) {
 		m.provide(linkStore).by(() => linkPorts),
 		m.provide(contactStore).by(() => contacts.store),
 	]);
-	return { module, links, contacts, names, linksClosed };
+	return { module, links, contacts, issuers, linksClosed };
 }
 
 /** A place that keeps one of users' kinds of record, as one implementation of its store interfaces offers it. */
@@ -522,6 +522,20 @@ export function linkStoreContract(
 			expect(await links.remove(key, () => true)).toBe("missing");
 		});
 
+		it("removes nothing a racing writer replaced between the check and the removal", async (context) => {
+			const place = await open();
+			const links = place.records as LinkStore;
+			if (!links.remove) return context.skip();
+			const key = `raced-${Math.random().toString(36).slice(2)}`;
+			const holds = (who: string) => (record: StoredLink) =>
+				(record as unknown as { subject?: string }).subject === who;
+			await links.save(key, { subject: "s-a" } as unknown as StoredLink, "endless", key);
+			// Another writer gives the record to another subject before the removal's write lands.
+			place.raceNextUpdate(key, () => ({ subject: "s-b" }) as unknown as StoredLink);
+			expect(await links.remove(key, holds("s-a"))).toBe("left");
+			expect(await links.read(key)).toEqual({ subject: "s-b" });
+		});
+
 		it("keeps a name's record raw once through unowned, or answers closed and writes nothing, never throwing", async (context) => {
 			const links = (await open()).records as LinkStore;
 			if (!links.unowned) return context.skip();
@@ -533,7 +547,8 @@ export function linkStoreContract(
 				return;
 			}
 			expect(first).toBe("created");
-			expect(await links.unowned(key, record, "endless")).toBe("exists");
+			const other = { issuer: "https://b.example" } as unknown as StoredName;
+			expect(await links.unowned(key, other, "endless")).toBe("exists");
 			expect(await links.read(key)).toEqual({ issuer: "https://a.example" });
 		});
 

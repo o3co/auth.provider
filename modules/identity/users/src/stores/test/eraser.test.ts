@@ -19,7 +19,7 @@ const signal = new AbortController().signal;
 
 /** Stores offering every port, noting what each erase and migrate was given. */
 function ported() {
-	const memory = memoryUsersStores({ names: true });
+	const memory = memoryUsersStores({ issuers: true });
 	const seen: { erased: string[]; readings: SubjectReading[]; elsewhere?: Elsewhere } = {
 		erased: [],
 		readings: [],
@@ -27,7 +27,7 @@ function ported() {
 	const report = (space: string) => ({ kind: "erased", space, removed: 0 }) as never;
 	const links = {
 		...(memory.links.store as unknown as LinkStore),
-		issuers: memory.names.store,
+		issuers: memory.issuers.store,
 		unowned: async () => "created" as const,
 		remove: async () => "removed" as const,
 		erase: async (subject: string) => {
@@ -55,7 +55,7 @@ function ported() {
 }
 
 it("is erasable only where the link store offers its whole set and the contact store its erase and migrate", async () => {
-	const memory = memoryUsersStores({ names: true });
+	const memory = memoryUsersStores({ issuers: true });
 	const bare = usersEraser(
 		memory.links.store as unknown as LinkStore,
 		memory.contacts.store,
@@ -108,13 +108,13 @@ it("keeps a name's record in the name store before it goes, as the link space ho
 	const name = JSON.stringify({ idp: "corp" });
 	const kept = { issuer: "https://a.example" };
 	await seen.elsewhere?.(name, kept);
-	expect(await memory.names.store.read(name)).toEqual(kept);
+	expect(await memory.issuers.store.read(name)).toEqual(kept);
 	// The link space is the authority: a differing copy is rewritten to it.
-	await memory.names.store.update(name, () => ({ value: { issuer: "x" } as never }));
+	await memory.issuers.store.update(name, () => ({ value: { issuer: "x" } as never }));
 	await seen.elsewhere?.(name, kept);
-	expect(await memory.names.store.read(name)).toEqual(kept);
+	expect(await memory.issuers.store.read(name)).toEqual(kept);
 	await seen.elsewhere?.(JSON.stringify(["corp", "u-1"]), { subject: null });
-	expect(await memory.names.store.read(JSON.stringify(["corp", "u-1"]))).toBeUndefined();
+	expect(await memory.issuers.store.read(JSON.stringify(["corp", "u-1"]))).toBeUndefined();
 });
 
 it("does not let a name's record go where the name store does not read back what it kept", async () => {
