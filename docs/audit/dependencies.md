@@ -295,7 +295,7 @@ flowchart LR
 | `@mod/tokens-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/tokens` |
 | `@mod/upstream-handoff-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/upstream-handoff` |
 | `@mod/upstream-round-trip-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/upstream-round-trip` |
-| `@mod/users-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/users` |
+| `@mod/users-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-records`, `@mod/users` |
 | `@mod/webauthn-store` | wiring | `@mod/kernel`, `@mod/passkeys`, `@mod/records`, `@mod/store` |
 
 ### tooling

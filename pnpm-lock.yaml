@@ -4486,6 +4486,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
       '@mod/users':
         specifier: workspace:*
         version: link:../../identity/users
