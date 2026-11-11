@@ -3,6 +3,7 @@ import { contract, defineModule, probes, Unavailable } from "@mod/kernel";
 import { comparedTo, subjectRevocationOf } from "./boundaries/boundaries.ts";
 import { markIn, opened, writtenTo } from "./boundaries/written.ts";
 import {
+	erasedSubjects,
 	erasureFence,
 	erasureGuards,
 	type Revocations,
@@ -11,7 +12,7 @@ import {
 	subjectErasure,
 	subjectRevocation,
 } from "./contract.ts";
-import { markedIn } from "./erasure/erasure.ts";
+import { erasedIn, markedIn } from "./erasure/erasure.ts";
 import { type Enablement, erasureMark, fenceOver } from "./erasure/gate.ts";
 import { followedBy } from "./followers.ts";
 import { boundaryStore } from "./store.ts";
@@ -93,6 +94,7 @@ export default defineModule(
 		m
 			.provide(subjectErasure)
 			.by(async (c) => ({ markErased: markedIn(await c.get(boundaryStore)) })),
+		m.provide(erasedSubjects).by(async (c) => ({ erased: erasedIn(await c.get(boundaryStore)) })),
 		m
 			.provide(erasureFence)
 			.by(async (c) => fenceOver(await c.get(boundaryStore), (await c.get(erasureReading)).read)),

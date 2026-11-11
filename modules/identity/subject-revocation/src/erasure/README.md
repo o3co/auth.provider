@@ -10,6 +10,7 @@ Internal module of `subject-revocation`: marking a subject erased, the fence a b
 
 ## Offers
 - `markedIn` (the store) → `markErased`: the mark, at the deadline of the write that makes it.
+- `erasedIn` (the store) → `erasedSubjects`' `erased`: whether the subject's record carries a mark of a time, read through `markIn` on every call, with no cache and never through the enabled reading. For choosing what a module writes about a subject; not an authorization check: `compare` is the only read that decides access, and the fence the only write.
 - `erasureMark` (the store) → the one reading of whether erasure is enabled: on or off once read, held for the process; unread while the store cannot answer, read again next time; cannot tell where the store has no reading, known without it. The gate, the probe and the fence read its state, never the store's ports. `fenceOver` (the store, that reading) → the fence; `receiptLifetimeMs`.
 - The reading is a provision of its own, which the fence takes. The gate collects `erasers` and is taken by the probe alone, so no eraser's build may reach it, as one that collects `probes` does.
 
@@ -24,6 +25,7 @@ Internal module of `subject-revocation`: marking a subject erased, the fence a b
 - Where the store cannot tell whether erasure is enabled, start and readiness read it as off, with a warning at every start (`subject-revocation.erasure_unknown`, meaning cannot tell); a store that fences all the same fences every bundle in a guarded composition, as off cannot be known there.
 - A store that can neither tell nor fence passes bundles unwritten, an unguarded composition (no guard, as where `subject-check` is `none`) fences no issuance there, and an owner that cannot erase keeps what it holds: the stated exclusion, each named in its warning with the rule "this node must never serve a deployment where erasure is enabled". 0.22 refuses them.
 - The process reads the mark once: enabling erasure restarts every node.
+- `erased` answers true for a mark of a time, whatever else the record holds; false with no record or no mark; a mark of no time, or a read the store cannot answer, is unavailable, never false. A module calling or following `record` reads `erased` there, as of its write; the port is for a module that does neither, and what it reads is as of the read.
 
 ## Depends on
 - `kernel` (Unavailable, probes), `erasure-extensions` (`erasers`); internal module `boundaries`; `subject-revocation`'s contract and store interface.

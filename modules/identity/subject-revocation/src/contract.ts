@@ -63,6 +63,18 @@ export interface SubjectErasure {
 export const subjectErasure = contract<SubjectErasure>("subject-revocation.erasure", {
 	takenBy: [],
 });
+
+/**
+ * Whether a subject is marked erased, read on every call: for choosing what a module writes about
+ * it, by a module that neither calls nor follows `record` (those read `erased` there). Never an
+ * authorization check: `compare` is the only read that decides access, and the fence the only write.
+ */
+export interface ErasedSubjects {
+	/** True where its record carries a mark of a time; false with no record or no mark; a mark of no time is unavailable. */
+	erased(subject: string): Promise<boolean>;
+}
+
+export const erasedSubjects = contract<ErasedSubjects>("subject-revocation.erased-subjects");
 /** The fence a bundle of credentials passes before it is answered, one write per bundle. */
 export interface ErasureFence {
 	/**

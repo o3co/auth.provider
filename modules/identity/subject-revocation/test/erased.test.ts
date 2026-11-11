@@ -1,7 +1,12 @@
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { revocationFollowers, revocations, subjectErasure } from "../src/contract.ts";
+import {
+	erasedSubjects,
+	revocationFollowers,
+	revocations,
+	subjectErasure,
+} from "../src/contract.ts";
 import revocationModule from "../src/module.ts";
 import { type BoundaryStore, boundaryStore } from "../src/store.ts";
 import { memoryBoundaries } from "./stores.ts";
@@ -43,6 +48,7 @@ async function boot(wrap: (store: BoundaryStore) => BoundaryStore = (store) => s
 		told: follower.told,
 		revocations: app.get(revocations),
 		erasure: app.get(subjectErasure),
+		erasedSubjects: app.get(erasedSubjects),
 	};
 }
 
@@ -96,4 +102,21 @@ it("is unavailable, telling no follower, where the record carries a mark that is
 	await kept.records.create("alice", { sessions: now, erasedAt: "soon" } as never, "endless");
 	await expect(r.record("alice")).rejects.toSatisfy(isUnavailable);
 	expect(told).toEqual([]);
+});
+
+it("reads erased from the mark alone: a mark of a time beside a part that cannot be read is erased; none, or no record, is not", async () => {
+	const { erasedSubjects: port, kept } = await boot();
+	await kept.records.create("alice", { sessions: "soon", erasedAt: now } as never, "endless");
+	await kept.records.create("bob", { sessions: now } as never, "endless");
+	expect(await port.erased("alice")).toBe(true);
+	expect(await port.erased("bob")).toBe(false);
+	expect(await port.erased("carol")).toBe(false);
+});
+
+it("is unavailable where the record carries a mark that is no time, never not erased", async () => {
+	const { erasedSubjects: port, kept, down } = await boot();
+	await kept.records.create("alice", { sessions: now, erasedAt: "soon" } as never, "endless");
+	await expect(port.erased("alice")).rejects.toSatisfy(isUnavailable);
+	down.failNext("read");
+	await expect(port.erased("bob")).rejects.toSatisfy(isUnavailable);
 });

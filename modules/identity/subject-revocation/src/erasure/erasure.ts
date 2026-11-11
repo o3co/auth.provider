@@ -1,7 +1,7 @@
 import { Unavailable } from "@mod/kernel";
 import { recorded } from "../boundaries/boundaries.ts";
 import { markIn, opened, stored, timeOf } from "../boundaries/written.ts";
-import type { SubjectErasure } from "../contract.ts";
+import type { ErasedSubjects, SubjectErasure } from "../contract.ts";
 import type { BoundaryStore, BoundaryWrite, StoredBoundary } from "../store.ts";
 
 /** The erasure's mark, read from what a write answered; a store that answered no mark wrote none. */
@@ -10,6 +10,20 @@ const markOf = (record: StoredBoundary) => {
 	if (typeof erasedAt !== "number") throw new Unavailable("subject-revocation");
 	return erasedAt;
 };
+
+/**
+ * Whether a subject is marked erased, by the mark its record carries, read on every call and never
+ * through the enabled reading: a mark of a time, whatever else the record holds, is erased.
+ */
+export function erasedIn(boundaries: BoundaryStore): ErasedSubjects["erased"] {
+	return async (subject) => {
+		const record = await boundaries.read(subject);
+		const mark = record === undefined ? undefined : markIn(record);
+		if (mark === undefined) return false;
+		if (typeof mark !== "number") throw new Unavailable("subject-revocation");
+		return true;
+	};
+}
 
 /**
  * Marks subjects erased through the store at the deadline of the write that marks them, as
