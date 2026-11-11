@@ -1,0 +1,39 @@
+name: Semgrep
+
+# Semgrep Community Edition: static analysis of the TypeScript and the
+# workflows with rules apart from CodeQL's. Runs on pushes to develop and
+# weekly (a `schedule` event runs only from the default branch, main). It
+# reports to code scanning and fails nothing: `semgrep scan` without `--error`
+# exits 0 on findings. The rules come from the Semgrep registry when the job
+# runs; the image's digest fixes the engine, not the rule set.
+on:
+  push:
+    branches: [develop]
+  schedule:
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Uploads the SARIF to code scanning.
+      security-events: write
+    container:
+      image: semgrep/semgrep:1.182.0@sha256:4a34048c04fef049f71665047f074cffb00cc3d89482f965a5cd151d589237af
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Scan
+        run: semgrep scan --config p/default --config p/typescript --metrics=off --sarif --output semgrep.sarif
+      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
