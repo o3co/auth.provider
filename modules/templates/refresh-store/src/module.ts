@@ -1,4 +1,4 @@
-import { type BuildContext, defineModule } from "@mod/kernel";
+import { type BuildContext, contract, defineModule, optional, probes } from "@mod/kernel";
 import { deferredIn, keyedSetsIn, recordsIn } from "@mod/records";
 import {
 	familyStore,
@@ -12,7 +12,13 @@ import {
 	settleList,
 	tokenFamilies,
 } from "@mod/refresh";
-import { type Guarantee, type Space, spaces, store } from "@mod/store";
+import { type Guarantee, type Space, spaces, store, storeControl } from "@mod/store";
+import {
+	indexSpaceOf,
+	phasedRecordsIn,
+	subjectRecordsPhase,
+	tombstoneFloor,
+} from "@mod/subject-records";
 import { section } from "./section.ts";
 
 /** Each need refresh states, as the guarantee a space declares for it. */
@@ -22,12 +28,29 @@ const guaranteeFor: Record<keyof typeof refreshStoreNeeds, Guarantee> = {
 	survivesFailover: "replicated",
 };
 const guarantees = Object.values(guaranteeFor);
-const families: Space = { name: "refresh-store.families", guarantees };
-const redemptions: Space = { name: "refresh-store.redemptions", guarantees };
-const bySession: Space = { name: "refresh-store.session-families", guarantees };
-const byFamily: Space = { name: "refresh-store.issued-access", guarantees };
-const links: Space = { name: "refresh-store.token-families", guarantees };
-const settles: Space = { name: "refresh-store.settles", guarantees };
+/** Families, each a subject's: kept indexed by it, erased by refresh's eraser, at the tombstone's floor. */
+const families: Space = {
+	name: "refresh-store.families",
+	guarantees: [...new Set([...guarantees, ...tombstoneFloor])],
+	subjectData: "online-indexed",
+	erasedBy: "refresh",
+};
+/** What each redemption left (a family's name, or that none may start), by the redemption's name: no subject. */
+const redemptions: Space = { name: "refresh-store.redemptions", guarantees, subjectData: "none" };
+/** Each access token's family's name, by the token's id: no subject. */
+const links: Space = { name: "refresh-store.token-families", guarantees, subjectData: "none" };
+// Deprecated, neither read nor written by refresh: ids of sessions, families and tokens, no subject.
+const bySession: Space = {
+	name: "refresh-store.session-families",
+	guarantees,
+	subjectData: "none",
+};
+const byFamily: Space = { name: "refresh-store.issued-access", guarantees, subjectData: "none" };
+const settles: Space = { name: "refresh-store.settles", guarantees, subjectData: "none" };
+
+/** The families' records over the phase this process reads once. */
+const placed =
+	contract<Awaited<ReturnType<typeof phasedRecordsIn<StoredFamily>>>>("refresh-store.placed");
 
 /** A space's place: the composition's store, with its log and randomness. */
 const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">, space: Space) => ({
@@ -40,17 +63,40 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 // Safe on many instances: each record is in the shared store; the settle list's shards, deprecated, are
 // read by no one.
 export default defineModule(
-	{ name: "refresh-store", replicaSafe: true, section, takes: [store] },
+	{ name: "refresh-store", replicaSafe: true, section, takes: [store, optional(storeControl)] },
 	(m) => [
 		m.contribute(spaces).by(() => families),
+		m.contribute(spaces).by(() => indexSpaceOf(families)),
 		m.contribute(spaces).by(() => redemptions),
 		m.contribute(spaces).by(() => bySession),
 		m.contribute(spaces).by(() => byFamily),
 		m.contribute(spaces).by(() => links),
 		m.contribute(spaces).by(() => settles),
+		m
+			.provide(placed)
+			.by(async (c) =>
+				phasedRecordsIn<StoredFamily>(
+					{ ...(await placeIn(c, families)), index: indexSpaceOf(families) },
+					subjectRecordsPhase.once(await c.getOptional(storeControl)),
+					"refresh-store",
+					c.refuse,
+				),
+			),
 		m.provide(familyStore).by(async (c) => {
-			const records = recordsIn<StoredFamily>(await placeIn(c, families));
-			return { save: records.create, read: records.read, update: records.change };
+			const records = await c.get(placed);
+			return {
+				save: records.create,
+				read: records.read,
+				update: records.change,
+				erase: records.erase,
+				migrate: records.migrate,
+				unowned: records.unowned,
+			};
+		}),
+		// Out of traffic until the phase reads: no call is judged on a phase not read.
+		m.contribute(probes).by(async (c) => {
+			const records = await c.get(placed);
+			return { name: "refresh-store.phase", check: () => records.ready() };
 		}),
 		m.provide(redemptionStore).by(async (c) => {
 			const records = recordsIn<StoredRedemption>(await placeIn(c, redemptions));

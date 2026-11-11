@@ -129,9 +129,8 @@ async function boot() {
 it("rotates once through a lost answer to the rotation, and keeps the rotation through a failover", async () => {
 	const { simulated, start, refresh } = await boot();
 	const first = await start();
-	simulated.beforeNext("replaceIf", "refresh-store.families", async () =>
-		simulated.loseNextReply(),
-	);
+	// Records written raw, before indexing: one partition, a batch.
+	simulated.beforeNext("batch", "refresh-store.families", async () => simulated.loseNextReply());
 	const next = await refresh(first);
 	await simulated.failover();
 	expect(await refresh(first)).toBe("invalid_grant");

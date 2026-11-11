@@ -287,7 +287,7 @@ flowchart LR
 | `@mod/jwt-bearer-store` | wiring | `@mod/jwt-bearer`, `@mod/kernel`, `@mod/records`, `@mod/store` |
 | `@mod/mfa-flows-store` | wiring | `@mod/kernel`, `@mod/mfa-flows`, `@mod/records`, `@mod/store` |
 | `@mod/mfa-store` | wiring | `@mod/kernel`, `@mod/mfa`, `@mod/records`, `@mod/store` |
-| `@mod/refresh-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/refresh`, `@mod/store` |
+| `@mod/refresh-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/refresh`, `@mod/store`, `@mod/subject-records` |
 | `@mod/rp-logout-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/rp-logout`, `@mod/store` |
 | `@mod/session-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-lifecycle`, `@mod/store` |
 | `@mod/session-tokens-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-tokens`, `@mod/store` |
