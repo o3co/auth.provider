@@ -76,7 +76,7 @@ export function reportOf(read: readonly Read[], trivy: string, version: string):
 							`| \`${r.list}\` | ${f.severity} | ${cell(f.pkg)} | ${cell(f.installed)} | ${cell(f.fixed)} | ${cell(f.id)} |`,
 					),
 	);
-	return `# Known vulnerabilities in what auth-provider ${version} ships
+	return `# Known vulnerabilities in what auth-provider${version === "" ? "" : ` ${version}`} ships
 
 Found by Trivy (\`${trivy}\`) in the lists the release made (\`release-sbom\`), against its vulnerability database on the day of the release run. A report only: nothing here stopped or delayed the release. Each list's full findings are in \`<list>.trivy.json\` beside this file.
 

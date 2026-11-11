@@ -80,4 +80,6 @@ it("writes the counts per list, a list not scanned with its reason, and the fixa
 	const fixable = report.split("## Critical and high with a fix")[1] ?? "";
 	expect(fixable.match(/CVE-\d/g)).toEqual(["CVE-5", "CVE-3"]);
 	expect(reportOf([{ list: "a", findings: [] }], "t", "v")).toContain("with a fix\n\nNone.\n");
+	// No version known: the title reads whole.
+	expect(reportOf([], "t", "")).toContain("# Known vulnerabilities in what auth-provider ships\n");
 });
