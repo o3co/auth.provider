@@ -60,7 +60,10 @@ export function founding(
 			};
 			// Kept while what it issued lives, so revoking its token still revokes them once it expired.
 			const familyMs = Math.max(lifetimeMs, access.expiresAt - at) + allowanceMs;
-			if ((await stores.families.save(id, toStored(family), familyMs)) !== "created") {
+			// `erased` too: the subject's erasure fenced it, so no family starts, and a retry never does.
+			if (
+				(await stores.families.save(id, toStored(family), familyMs, family.subject)) !== "created"
+			) {
 				throw new Unavailable("refresh");
 			}
 			await revoker.recordAccess(id, access);

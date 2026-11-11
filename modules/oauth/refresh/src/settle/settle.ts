@@ -15,6 +15,7 @@ import {
 	familyStore,
 	type RedemptionStore,
 	redemptionStore,
+	type StoredFamily,
 	type TokenFamilies,
 	tokenFamilies,
 } from "../store.ts";
@@ -24,6 +25,9 @@ export interface Stores {
 	readonly redemptions: RedemptionStore;
 	readonly tokenFamilies: TokenFamilies;
 }
+
+/** A family store's save seen without a subject: a store offering no `unowned` keeps no subject, and a mark holds none. */
+type SaveUnowned = (id: string, record: StoredFamily, lifetimeMs: number) => Promise<string>;
 
 export function settling(stores: Stores, tokens: Tokens, now: () => number, lifetimeMs: number) {
 	/** Ties an access token to the family that issued it, so the family's mark refuses it. */
@@ -36,15 +40,18 @@ export function settling(stores: Stores, tokens: Tokens, now: () => number, life
 			if (!kept || fromStoredLink(kept)?.family !== id) throw new Unavailable("refresh");
 		}
 	};
-	// Revokes a family by its mark alone, which refuses every token of it from then; written even with
-	// no record, so a family being started now never comes alive.
+	// Revokes a family by its mark alone, which refuses every token of it from then. No record: gone by
+	// its end, by its subject's erasure, or never founded, each read as ended. Until 0.22 a mark is still
+	// saved there, for a 0.19 founder writing the redemption's link first; `closed` marks nothing.
 	const revokeFamily = async (id: string) => {
 		const revoked = toStored({ format: 1, revoked: true });
 		const marked = await stores.families.update(id, () => ({ value: revoked }));
 		if (marked) return;
-		const written = await stores.families.save(id, revoked, lifetimeMs);
+		const written = stores.families.unowned
+			? await stores.families.unowned(id, revoked, lifetimeMs)
+			: await (stores.families.save as unknown as SaveUnowned)(id, revoked, lifetimeMs);
 		// A family placed meanwhile is marked when the revocation is tried again.
-		if (written !== "created") throw new Unavailable("refresh");
+		if (written !== "created" && written !== "closed") throw new Unavailable("refresh");
 	};
 	/** Withdraws one access token issued in a round that then failed, so no one is handed it. */
 	const revokeIssued = async (access: { id: string; expiresAt: number }) => {

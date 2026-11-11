@@ -458,7 +458,7 @@ describe("a code's selection through its family", () => {
 		).toBeUndefined();
 	});
 
-	it("voids the code, revoking its token and ending its family, when the family's selection cannot be kept", async () => {
+	it("voids the code, revoking its token and starting no family, when the family's selection cannot be kept", async () => {
 		const s = await serve();
 		s.selections.state.failFamilies = true;
 		issuedTokens.length = 0;
@@ -467,9 +467,8 @@ describe("a code's selection through its family", () => {
 		expect(answer).toMatchObject({ error: "temporarily_unavailable" });
 		expect(issuedTokens).toHaveLength(1);
 		expect(await s.active(issuedTokens[0])).toBe(false);
-		const family = await familyOf(s, answer.redemption);
-		expect(family).toEqual(expect.any(String));
-		expect(liveFamily(await s.stores.kept.records.read(family ?? ""))).toBeUndefined();
+		// The selection is kept before the family's record and its redemption: neither is written.
+		expect(await familyOf(s, answer.redemption)).toBeUndefined();
 		expect(await answer.again()).toMatchObject({ error: "invalid_grant" });
 	});
 
