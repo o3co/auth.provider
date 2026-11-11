@@ -473,6 +473,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `order` (`src/release/order`): in what order the release packs and publishes what `pnpm bundles` built.
   - `packing` (`src/release/packing`): the release packed, the index sealed over every bundle before its own.
   - `workflow-caches` (`src/workflow-caches`): CI's and the release's workflows held to restoring no cache in a run a release takes evidence from.
+  - `workflow-pins` (`src/workflow-pins`): every workflow, and every action this repository holds, runs another repository's code only at a commit and an image only at its digest.
 - `@mod/docker-client` (assembly, `modules/tooling/docker-client`): Runs the docker client within a time, ending it past its time, and sorts how each command fails, once, for every package that drives Docker: the release's images and the conformance base.
 - `@mod/guard` (verification, `modules/tooling/guard`): Checks the workspace's invariants, each reported by its id, place and what went over:
   - `budget` (`src/budget`): G7, how much each unit may hold and make a reader read, with G9 and G17 on what it measures.
