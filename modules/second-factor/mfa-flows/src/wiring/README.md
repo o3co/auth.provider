@@ -13,7 +13,7 @@ Internal module of `mfa-flows`: what each of the package's internal modules is g
 - `policyOf` (the section) → the lockout policy `rate-limit` judges.
 - `partsIn` (the build context) → the parts the module binding factors takes (`seams`).
 - `gating` (the module's parts) → the gate `mfa` contributed to `login-gates`, over the factors and the transactions.
-- `naming` (the module's parts) → the lockout's name contributed to `rate-limit`'s `subjectLockouts`, its keys being subject ids: erasing a subject drops its lockout (what a proof and a release then answer: `proof`'s and `release`'s cards).
+- `naming` (the module's parts) → the lockout's name contributed to `rate-limit`'s `subjectLockouts`, its keys being subject ids: erasing a subject drops its key under that name (what a proof and a release then answer: `proof`'s and `release`'s cards).
 - What each helper takes from the build context (`gatingTakes`, `partsTakes`, `handlersTakes`, the transactions' included), which the module's takes gather.
 
 ## Invariants
