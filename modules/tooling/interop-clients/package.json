@@ -17,10 +17,10 @@
 		"@mod/conformance-oauth": "workspace:*",
 		"@mod/conformance-tunnel": "workspace:*",
 		"@mod/spec-checklist": "workspace:*",
-		"openid-client": "6.8.8",
-		"undici": "8.12.3"
+		"openid-client": "6.8.9",
+		"undici": "8.12.4"
 	},
 	"devDependencies": {
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	}
 }

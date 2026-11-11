@@ -44,6 +44,6 @@
 		"@mod/tokens-store": "workspace:*",
 		"@mod/users": "workspace:*",
 		"jose": "6.2.15",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	}
 }
