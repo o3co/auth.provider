@@ -1,29 +1,37 @@
-import type { Eraser, MigrationReport, SpaceReport, SubjectReading } from "@mod/erasure-extensions";
-import { contactSubjectOf } from "../ledger.ts";
-import { linkSubjectOf } from "../links/reading.ts";
-import { isNameKey, nameSubjectOf, namesKept } from "../names/elsewhere.ts";
-import type { ContactStore, LinkStore } from "../store.ts";
+import type {
+	Elsewhere,
+	Eraser,
+	MigrationReport,
+	SpaceReport,
+	SubjectReading,
+} from "@mod/erasure-extensions";
+import type { ContactStore, LinkStore, NameStore } from "../store.ts";
+import { everyPortOffered } from "./ports.ts";
 
-/** Whose a record of the link space is: a name's, by its key, no subject's; else a link's. */
-const linkSpaceSubjectOf: SubjectReading = async (key, value) =>
-	isNameKey(key) ? nameSubjectOf(value) : linkSubjectOf(value);
-const contactsSubjectOf: SubjectReading = async (key, value) => contactSubjectOf(key, value);
+/** How each space's records are read for the one migration, and names' step, as the package composes them. */
+export interface ErasureReadings {
+	readonly links: SubjectReading;
+	readonly contacts: SubjectReading;
+	readonly namesKept: (names: NameStore) => Elsewhere;
+}
 
 /**
  * users' eraser, `users`, as its spaces' `erasedBy` names it: links and contacts erased through the
- * stores' own ports. `erasable` only where the link store offers its whole set (`remove`, `erase`,
- * `migrate`, `names`, `unowned`) and the contact store its `erase` and `migrate`; one that does not
- * answers empty reports, the field carrying the fact.
+ * stores' own ports. `erasable` only where every port set is offered whole (`everyPortOffered`);
+ * one that is not answers empty reports, the field carrying the fact.
  */
-export function usersEraser(links: LinkStore, contacts: ContactStore): Eraser {
+export function usersEraser(
+	links: LinkStore,
+	contacts: ContactStore,
+	readings: ErasureReadings,
+): Eraser {
 	const { erase: eraseLinks, migrate: migrateLinks, names } = links;
 	const { erase: eraseContacts, migrate: migrateContacts } = contacts;
 	if (
+		!everyPortOffered(links, contacts) ||
 		!eraseLinks ||
 		!migrateLinks ||
-		!links.remove ||
 		!names ||
-		!links.unowned ||
 		!eraseContacts ||
 		!migrateContacts
 	) {
@@ -56,8 +64,8 @@ export function usersEraser(links: LinkStore, contacts: ContactStore): Eraser {
 		migrate: async (walk, signal) => {
 			const reports: MigrationReport[] = [
 				// A name's record goes to the name store before the link space lets it go.
-				await migrateLinks.call(links, walk, linkSpaceSubjectOf, signal, namesKept(names)),
-				await migrateContacts.call(contacts, walk, contactsSubjectOf, signal),
+				await migrateLinks.call(links, walk, readings.links, signal, readings.namesKept(names)),
+				await migrateContacts.call(contacts, walk, readings.contacts, signal),
 			];
 			return reports;
 		},

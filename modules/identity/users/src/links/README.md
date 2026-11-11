@@ -17,4 +17,4 @@
 - `ledgerLinks` reads and writes no link store.
 
 ## Depends on
-- None (users' contract)
+- users' contract and store interfaces; internal module `stores` (`keptFor`); `erasure-extensions` (`SubjectOf`, for its reading)

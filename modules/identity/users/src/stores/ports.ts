@@ -1,11 +1,16 @@
 import type { ContactStore, LinkStore } from "../store.ts";
 
 /**
- * Why a link and a contact store's ports cannot be used together, or none: `remove`, `erase` and
- * `migrate` come as one set on the link store, with `names`, and `erase` and `migrate` together on
- * the contact store; a part of a set would leave records users cannot find, erase or tell apart.
+ * Why a link and a contact store's ports cannot be used together, or none. The one statement of the
+ * sets: the link store's `names` and `unowned` come together or neither; its `remove`, `erase` and
+ * `migrate` come together or none, and only with `names`; the contact store's `erase` and
+ * `migrate` together or neither. A part of a set would leave records users cannot find, erase or
+ * tell apart.
  */
 export function portsRefused(links: LinkStore, contacts: ContactStore): string | undefined {
+	if ((links.names === undefined) !== (links.unowned === undefined)) {
+		return "the link store offers one of names and unowned: it offers both, for names to leave the link space, or neither";
+	}
 	const linkPorts = [links.remove, links.erase, links.migrate].filter((p) => p !== undefined);
 	if (linkPorts.length !== 0 && linkPorts.length !== 3) {
 		return "the link store offers part of remove, erase and migrate: it offers all three, or none";
@@ -18,3 +23,10 @@ export function portsRefused(links: LinkStore, contacts: ContactStore): string |
 	}
 	return undefined;
 }
+
+/** Whether the stores offer every set whole, as users' eraser needs to erase: none refused, none missing. */
+export const everyPortOffered = (links: LinkStore, contacts: ContactStore): boolean =>
+	portsRefused(links, contacts) === undefined &&
+	links.erase !== undefined &&
+	links.names !== undefined &&
+	contacts.erase !== undefined;

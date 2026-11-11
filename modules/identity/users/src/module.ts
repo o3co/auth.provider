@@ -4,14 +4,16 @@ import { secretCheckers } from "@mod/secret-hash";
 import { z } from "zod";
 import { ledgers, type UpstreamNames, upstreamNames, users } from "./contract.ts";
 import { contributedSource } from "./ledger/contributed.ts";
-import { ledgerUsers } from "./ledger.ts";
+import { contactSubjectOf, ledgerUsers } from "./ledger.ts";
 import { keptLinks } from "./links/kept.ts";
 import { ledgerLinks } from "./links/ledger.ts";
+import { linkSubjectOf } from "./links/reading.ts";
+import { isNameKey, nameSubjectOf, namesKept } from "./names/elsewhere.ts";
 import { issuersJudged, namesRefused } from "./names/names.ts";
 import { nameRecordsOver } from "./names/records.ts";
 import { keyOf, record, registeredUsers } from "./registered.ts";
 import { contactStore, linkStore } from "./store.ts";
-import { usersEraser } from "./stores/eraser.ts";
+import { type ErasureReadings, usersEraser } from "./stores/eraser.ts";
 import { portsRefused } from "./stores/ports.ts";
 
 /** Identifiers match exactly; this form, folding case fully ("straße", "STRASSE", "STRAẞE"), only finds look-alikes. */
@@ -72,6 +74,13 @@ function undeclaredLinks(
 	);
 }
 
+/** Each space's reading by the module that owns its records: a name's key is names', any other the link's. */
+const erasureReadings: ErasureReadings = {
+	links: async (key, value) => (isNameKey(key) ? nameSubjectOf(value) : linkSubjectOf(value)),
+	contacts: async (key, value) => contactSubjectOf(key, value),
+	namesKept,
+};
+
 export default defineModule(
 	{
 		name: "users",
@@ -85,7 +94,9 @@ export default defineModule(
 		// Its build takes only its stores and collects no `probes`, as an eraser's must (erasure-extensions).
 		m
 			.contribute(erasers)
-			.by(async (c) => usersEraser(await c.get(linkStore), await c.get(contactStore))),
+			.by(async (c) =>
+				usersEraser(await c.get(linkStore), await c.get(contactStore), erasureReadings),
+			),
 		m.provide(users).by(async (c) => {
 			const declarations = await c.collect(upstreamNames);
 			const refused = namesRefused(declarations);
@@ -109,12 +120,6 @@ export default defineModule(
 			const contacts = await c.get(contactStore);
 			const ports = portsRefused(links, contacts);
 			if (ports !== undefined) return c.refuse("users", ports);
-			if ((links.names === undefined) !== (links.unowned === undefined)) {
-				return c.refuse(
-					"users",
-					"the link store offers one of names and unowned: it offers both, for names to leave the link space, or neither",
-				);
-			}
 			const moved = c.section["issuer-moved"];
 			const across = await issuersJudged(declarations, moved, nameRecordsOver(links), c.log);
 			if (across.refusals.length > 0) return c.refuseAll(across.refusals);

@@ -92,8 +92,9 @@ export async function written<T>(
 }
 
 /**
- * Links by upstream identity. Its `remove`, `erase`, `migrate` and `names` (with `unowned`) come as
- * one set, or none: a part of the set refuses the boot.
+ * Links by upstream identity. Its `names` and `unowned` come together or neither; its `remove`,
+ * `erase` and `migrate` together or none, and only with `names`: a part of a set refuses the boot.
+ * Each is optional in 0.20 and required in 0.22, but `unowned`, which goes then.
  */
 export type LinkStore = SubjectRecordStore<StoredLink> & {
 	/**

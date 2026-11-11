@@ -1,11 +1,19 @@
 import type { Elsewhere, SubjectReading } from "@mod/erasure-extensions";
 import { isUnavailable } from "@mod/kernel";
 import { expect, it } from "vitest";
-import { namesKept } from "../../names/elsewhere.ts";
+import { contactSubjectOf } from "../../ledger.ts";
+import { linkSubjectOf } from "../../links/reading.ts";
+import { isNameKey, nameSubjectOf, namesKept } from "../../names/elsewhere.ts";
 import type { ContactStore, LinkStore, NameStore, StoredName } from "../../store.ts";
 import { memoryUsersStores } from "../../testing.ts";
-import { usersEraser } from "../eraser.ts";
+import { type ErasureReadings, usersEraser } from "../eraser.ts";
 
+/** The readings as the package composes them, each from the module owning its records. */
+const readings: ErasureReadings = {
+	links: async (key, value) => (isNameKey(key) ? nameSubjectOf(value) : linkSubjectOf(value)),
+	contacts: async (key, value) => contactSubjectOf(key, value),
+	namesKept,
+};
 const walk = { sweep: async () => ({ keys: [], server: "s" }) };
 const signal = new AbortController().signal;
 
@@ -48,18 +56,22 @@ function ported() {
 
 it("is erasable only where the link store offers its whole set and the contact store its erase and migrate", async () => {
 	const memory = memoryUsersStores({ names: true });
-	const bare = usersEraser(memory.links.store as unknown as LinkStore, memory.contacts.store);
+	const bare = usersEraser(
+		memory.links.store as unknown as LinkStore,
+		memory.contacts.store,
+		readings,
+	);
 	expect([bare.name, bare.erasable]).toEqual(["users", false]);
 	expect(await bare.online("s-a", signal)).toEqual({ reports: [], logoutGaps: 0 });
 	const { links, contacts } = ported();
-	expect(usersEraser(links, contacts).erasable).toBe(true);
+	expect(usersEraser(links, contacts, readings).erasable).toBe(true);
 	const { names: _dropped, ...withoutNames } = links;
-	expect(usersEraser(withoutNames, contacts).erasable).toBe(false);
+	expect(usersEraser(withoutNames, contacts, readings).erasable).toBe(false);
 });
 
 it("erases a subject's links and contacts through the stores' ports, for each subject of a window", async () => {
 	const { links, contacts, seen } = ported();
-	const eraser = usersEraser(links, contacts);
+	const eraser = usersEraser(links, contacts, readings);
 	expect((await eraser.online("s-a", signal)).reports).toHaveLength(2);
 	await eraser.window(["s-b", "s-c"], walk, signal);
 	expect(seen.erased).toEqual([
@@ -74,7 +86,7 @@ it("erases a subject's links and contacts through the stores' ports, for each su
 
 it("reads a link as its subject's, a trace and a name's record as orphans, a contact list as its key's, and any other shape as proving nothing", async () => {
 	const { links, contacts, seen } = ported();
-	await usersEraser(links, contacts).migrate(walk, signal);
+	await usersEraser(links, contacts, readings).migrate(walk, signal);
 	const [inLinks, inContacts] = seen.readings;
 	const link = JSON.stringify(["corp", "u-1"]);
 	const name = JSON.stringify({ idp: "corp" });
@@ -92,7 +104,7 @@ it("reads a link as its subject's, a trace and a name's record as orphans, a con
 
 it("keeps a name's record in the name store before it goes, as the link space holds it, and nothing for a trace", async () => {
 	const { links, contacts, seen, memory } = ported();
-	await usersEraser(links, contacts).migrate(walk, signal);
+	await usersEraser(links, contacts, readings).migrate(walk, signal);
 	const name = JSON.stringify({ idp: "corp" });
 	const kept = { issuer: "https://a.example" };
 	await seen.elsewhere?.(name, kept);

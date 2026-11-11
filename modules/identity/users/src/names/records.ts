@@ -110,10 +110,7 @@ function split(links: LinkStore, unowned: NonNullable<LinkStore["unowned"]>, nam
 /** Names' records over the link store: its `names` and `unowned` where offered, else the link space alone. */
 export function nameRecordsOver(links: LinkStore): NameRecords {
 	const { names } = links;
-	if (names === undefined && links.unowned === undefined) return inLinks(links);
-	if (names === undefined || links.unowned === undefined) {
-		throw new TypeError("users: the link store offers names and unowned together, or neither");
-	}
+	if (names === undefined || links.unowned === undefined) return inLinks(links);
 	const unowned: NonNullable<LinkStore["unowned"]> = async (key, record, lifetimeMs) => {
 		if (links.unowned === undefined) throw new TypeError("users: the link store's unowned went");
 		return links.unowned(key, record, lifetimeMs);
