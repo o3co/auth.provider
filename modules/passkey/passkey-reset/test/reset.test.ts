@@ -13,7 +13,7 @@ const answer = <T>(a: Answer<T> | undefined, fallback: T) => {
 /** A reset over scripted parts: each call takes the next scripted answer, recording what it was asked. */
 const place = (
 	script: {
-		readonly records?: Answer<{ complete: boolean }>[];
+		readonly records?: Answer<{ complete: boolean; erased?: true }>[];
 		readonly cleared?: Answer<{ removed: number }>[];
 	} = {},
 ) => {
@@ -90,7 +90,12 @@ describe("a passkey reset by an operator", () => {
 			const p = place({ records: [first] });
 			expect(await p.reset.reset("ann")).toEqual({ kind: "stopped", at: "sessions" });
 			expect(p.calls).toEqual(["record ann keep=true"]);
-			expect(p.attributes()).toEqual([{ by: "operator", sessions: "false", complete: "false" }]);
+			// A boundary that answered names the subject; one that did not leaves it out, saying why.
+			const unread = first instanceof Error ? { withheld: "unread" } : {};
+			expect(p.attributes()).toEqual([
+				{ by: "operator", ...unread, sessions: "false", complete: "false" },
+			]);
+			expect(p.events.map((e) => e.subject)).toEqual([first instanceof Error ? undefined : "ann"]);
 			expect(p.lines()).toEqual([
 				{
 					level: "warn",
@@ -105,7 +110,12 @@ describe("a passkey reset by an operator", () => {
 		const p = place({ records: [new TypeError("broken")] });
 		await expect(p.reset.reset("ann")).rejects.toThrow(TypeError);
 		expect(p.calls).toEqual(["record ann keep=true"]);
-		expect(p.attributes()).toEqual([{ by: "operator", sessions: "false", complete: "false" }]);
+		expect(p.events).toEqual([
+			{
+				kind: "passkey.reset",
+				attributes: { by: "operator", withheld: "unread", sessions: "false", complete: "false" },
+			},
+		]);
 	});
 
 	it("stops at the passkeys where their removal is unavailable, the second boundary moved all the same", async () => {
@@ -191,5 +201,53 @@ describe("the passkeys' step alone, for a reset that moves the boundaries itself
 		const p = place();
 		await expect(p.part.passkeys("")).rejects.toThrow(RangeError);
 		expect(p.calls).toEqual([]);
+	});
+});
+
+describe("a passkey reset of a subject a boundary step reads as erased", () => {
+	const refused = (complete: string, more: Record<string, string> = {}) => ({
+		kind: "passkey.reset.refused",
+		attributes: { by: "operator", complete, ...more },
+	});
+
+	it("is refused at the first boundary, doing nothing else and naming no subject", async () => {
+		const p = place({ records: [{ complete: true, erased: true }] });
+		expect(await p.reset.reset("ann", { requestedBy: "ticket-7" })).toEqual({ kind: "erased" });
+		expect(p.calls).toEqual(["record ann keep=true"]);
+		expect(p.events).toEqual([refused("true", { requestedBy: "ticket-7" })]);
+		expect(p.lines().map((l) => [l.event, l.fields])).toEqual([
+			["passkey-reset.reset_refused", {}],
+		]);
+	});
+
+	it("reads erased before complete: a step that left a session open is refused, not stopped at sessions", async () => {
+		const p = place({ records: [{ complete: false, erased: true }] });
+		expect(await p.reset.reset("ann")).toEqual({ kind: "erased" });
+		expect(p.events).toEqual([refused("false")]);
+	});
+
+	it("is refused at the second boundary, the passkeys gone already, naming no subject", async () => {
+		const p = place({ records: [{ complete: true }, { complete: true, erased: true }] });
+		expect(await p.reset.reset("ann")).toEqual({ kind: "erased" });
+		expect(p.calls).toEqual(steps);
+		expect(p.events).toEqual([refused("true")]);
+	});
+
+	it("throws a fault met earlier in the run, after the refused record is written with no subject", async () => {
+		const broken = new TypeError("broken");
+		const p = place({
+			records: [{ complete: true }, { complete: true, erased: true }],
+			cleared: [broken],
+		});
+		await expect(p.reset.reset("ann")).rejects.toBe(broken);
+		expect(p.events).toEqual([refused("true")]);
+	});
+
+	it("names the subject where a boundary step answered not erased and none erased, the second unavailable", async () => {
+		const p = place({ records: [{ complete: true }, down()] });
+		expect(await p.reset.reset("ann")).toEqual({ kind: "stopped", at: "sessions", removed: 2 });
+		expect(p.events.map((e) => [e.kind, e.subject, e.attributes?.withheld])).toEqual([
+			["passkey.reset", "ann", undefined],
+		]);
 	});
 });

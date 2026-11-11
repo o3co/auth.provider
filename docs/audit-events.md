@@ -52,7 +52,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | `federation.grant.request.denied` | `client`, `outcome`, `source` | a client's intent is refused, with why (`outcome`) |
 | `federation.grant.requested` | `client`, `connection`, `outcome`, `source` | a client lodges an intent, for a new grant (`initial`) or a renewal (`reauthorization`) |
 | `federation.grant.revoke.denied` | `client`, `reason`, `source` | a client's revoke is refused before the grant is found, with why (`reason`), by the client only |
-| `federation.grant.revoked` | `client`, `connection`, `outcome`, `source` | a grant ends, revoked by its client or by the subject's revocation (`outcome`) |
+| `federation.grant.revoked` | `client`, `connection`, `outcome`, `source`, `withheld` | a grant ends, revoked by its client or by the subject's revocation (`outcome`); without the subject, `withheld` `erased`, where the revocation said it is erased |
 | `federation.grant.token.denied` | `client`, `connection`, `reason`, `source` | a client is refused a grant's token or renewal, with why (`reason`); by the client only before the grant is found |
 | `federation.grant.token.success` | `client`, `connection`, `refreshed`, `source` | a client is handed a grant's upstream token, refreshed first or not (`refreshed`) |
 
@@ -142,7 +142,8 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `passkey.reset` | `by`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's passkey reset gets past its input, finished or not (`complete`) |
+| `passkey.reset` | `by`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy`, `withheld` | an operator's passkey reset gets past its input, finished or not (`complete`); without the subject, `withheld` `unread`, where no boundary step answered |
+| `passkey.reset.refused` | `by`, `complete`, `requestedBy` | an operator's passkey reset of a subject a boundary step read as erased, naming no subject; `complete` as that step's `record` answered it, false meaning running it again finishes what this run left |
 
 ## @mod/passkey-witnessing
 
@@ -175,7 +176,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | Kind | Attributes | Recorded when |
 |---|---|---|
 | `subject.revocation.denied` | `reason`, `source` | a request to revoke a subject was refused for its source, credential or body, or as a window could not count |
-| `subject.revocation.requested` | `delegations`, `outcome`, `source` | the ledger's revocation of a subject was recorded, or its recording failed or was not confirmed |
+| `subject.revocation.requested` | `delegations`, `outcome`, `source`, `withheld` | the ledger's revocation of a subject was recorded, or its recording failed or was not confirmed; without the subject, `withheld` `erased` where the revocation said it is erased, or `unread` where it did not answer (`unknown`, `failed`) |
 
 ## @mod/token-control
 
