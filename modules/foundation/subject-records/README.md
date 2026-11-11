@@ -7,20 +7,20 @@
 - What a record holds and how it changes: the feature's. Which feature it serves: the wiring's. How a record is written and kept: `records`, through `changeRecords`. When records are indexed: the phase the wiring reads.
 
 ## Offers
-- `subjectRecordsIn` (a place, its index space, the phase) → `create` (a key, its subject, a value or its maker, a lifetime: `created`, `exists` or `erased`), `read`, `change`, `remove`, `move`, `scan`, by the category the space declares:
+- `subjectRecordsIn` (a place, its index space, the phase) → `create` (a key, a value or its maker, a lifetime, its subject last: `created`, `exists` or `erased`), `read`, `change`, `remove`, `move`, `scan`, by the category the space declares:
   - `online-indexed`: each record's key in its subject's index; `move` gives a record to another subject.
   - `online-keyed`: each record's key its subject itself, one per subject (any other key, TypeError); the index keeps only the subject's tombstone.
   - `bounded`: each record written raw, fenced at creation by its subject's tombstone, gone by its end, at most the space's `boundedMs`.
 - `secret` (bounded only) keys records by secrets, as records under a secret are.
 - `subjectKeyedSetsIn` (internal module `sets`) → keyed sets of `online-indexed` and `online-keyed` spaces.
 - `eraseSubject` (internal module `erase`: a place, a subject) → the space's `SpaceReport`; `sweepIndex` → a page of the index swept of entries whose records or sets are gone.
-- `subjectRecordsPhase` (internal module `phase`): its mark, `read` (the store's control, once as a process starts, monotone) and `write` (the mark turning records indexed, only under maintenance; `reader` is its absence, which no write makes).
+- `subjectRecordsPhase` (internal module `phase`): its mark, `read` (the store's control, once as a process starts, monotone), `readFrom` (a control or none: none is `reader`) and `write` (a control, its store: the mark turning records indexed, `not-in-maintenance` outside maintenance, then `not-paired` for a store with no batch across; `reader` is its absence, which no write makes).
 - `indexSpaceOf` (a space) → its index space: `.index` after its name, its guarantees, `internal`. The wiring declares it beside the space.
 - `Phase`: `reader`, records written raw with no index or tombstone, as they were; `indexed`, the rest below, from the mark `subject-records.phase`.
 
 ## Invariants
-- Every write goes through `records`' `changeRecords`, the one door to a space holding a subject's data; a read goes to the store and writes nothing.
-- Once indexed, a record of an `online-*` space is kept in an envelope with its subject (internal module `envelope`), and an owner's value holding `records:v` at its top is refused. Before, every value is raw by the phase, whatever its shape, and the one migration reads every value it meets so.
+- Every write goes through `records`' `changeRecords`, the one door to a space holding a subject's data; a read goes to the store and writes nothing. In `reader`, each write is one record in one partition, which any store writes as one.
+- An owner's value holding `records:v` at its top is refused in both phases. Once indexed, a record of an `online-*` space is kept in an envelope with its subject (internal module `envelope`). Before, every value is raw by the phase, whatever its shape, and the one migration reads every value it meets so.
 - A subject's part of the index (internal module `index`) holds its tombstone and 16 buckets, each the sorted entries of the subject's records and sets whose key's SHA-256 starts with that hex digit: a key, and whether it lists the record or the set; no key holds a subject. A bucket in another shape is refused wherever it is read, never skipped.
 - A create holds the record absent, the subject's tombstone absent and the bucket as read, and writes the record and its entry in the bucket, as one.
 - A value may be made from the attempt's deadline: owners whose value bounds a time by the write, as subject-revocation's boundaries do, need it.
@@ -33,7 +33,7 @@
 - With secret keys, a bounded record created before erasure may be used after it until its end: an auth code redeemed so has its tokens refused at token-endpoint's fence.
 - A record kept raw, from before records were indexed, is changed raw, with no tombstone condition. That is safe: records turn indexed only under the maintenance key, and the one migration indexes or removes every raw record of such a space before erasure can be enabled, so none remains when a tombstone can exist (account erasure §3.3, §5.1).
 - Cost: a create or removal rewrites one bucket whole, its size growing with the subject's records (about a sixteenth of them); fine for what an owner keeps per subject, and not capped.
-- Refuses at build, through the builder's `refuse`, a store that writes no records of two partitions as one, an index that is not the space's, a space declaring another category, and secret keys outside `bounded`.
+- Refuses at build, through the builder's `refuse`, once indexed a store that writes no records of two partitions as one, an index that is not the space's, a space declaring another category, and secret keys outside `bounded`.
 - Erasing writes the tombstone first, then removes only what reads absent or names the subject (internal module `erase`).
 
 ## Depends on

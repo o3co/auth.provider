@@ -115,7 +115,7 @@ export interface SubjectPlace extends Place {
 	readonly phase: Phase;
 }
 
-/** The checks every builder makes at build: a batch across, the space's own index, a category it writes. */
+/** The checks every builder makes at build: a batch across once indexed, the space's own index, a category it writes. */
 export function checkedSubjectPlace(
 	place: SubjectPlace,
 	categories: readonly string[],
@@ -123,7 +123,8 @@ export function checkedSubjectPlace(
 	refuse: (where: string, reason: string) => never,
 ) {
 	const category = place.space.subjectData;
-	if (!changesTogether(place.store)) {
+	// Only an indexed write spans two partitions (the record, its bucket, the tombstone it watches).
+	if (place.phase === "indexed" && !changesTogether(place.store)) {
 		refuse(where, "its store writes no records of two partitions as one");
 	}
 	if (category === undefined || !categories.includes(category)) {

@@ -48,9 +48,9 @@ export function subjectKeyedSetsIn(
 		 */
 		add: async (
 			key: string,
-			subject: string,
 			member: string,
 			lifetimeMs: number,
+			subject: string,
 		): Promise<{ readonly pushedOut: readonly string[] } | "erased" | "another-subject"> => {
 			if (category === "online-keyed" && key !== subject) {
 				throw new TypeError("subject-records: an online-keyed set is keyed by its subject");

@@ -67,9 +67,9 @@ export function subjectRecordsIn<T extends Json>(
 		 */
 		create: async (
 			key: string,
-			subject: string,
 			value: T | ((attempt: Attempt) => T),
 			lifetimeMs: number | "endless",
+			subject: string,
 		): Promise<"created" | "exists" | "erased"> => {
 			const lifetime = bounded ? boundedLifetime(lifetimeMs) : lifetimeMs;
 			if (category === "online-keyed" && key !== subject) {
