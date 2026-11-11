@@ -106,6 +106,17 @@ Each instance walks every federation grant kept every `federation-grants.sweep-i
 
 Give every instance the same configuration, and keep their clocks in step: what that covers is in [Guarantees by deployment](deployment-guarantees.md#several-instances). Set `kernel.deployment = multi` when more than one instance runs. Which modules boot then refuses is [promise 5 of the security model](security-model.md#promises-across-modules); read it for your own modules. A pattern created with an in-memory store says in its README that it runs as one instance.
 
+#### Changing a shard count
+
+Four stores keep work for their sweeps in shards: code-grant-store's `void-shards`, session-store's `closing-shards`, rp-logout-store's `notice-shards` and session-tokens-store's `pending-shards`. A job's shard is found from the count, and a sweep walks only the shards the count names. So a count changed while jobs are kept loses them: lowered, the jobs in the shards past the new count are never walked again (a session's close its participants never hear of, a logout notice never sent, a code's tokens never revoked); raised, a job is looked for in another shard, and handled again at every sweep. While users are served the stores keep receiving work, so changing a count takes a short stop. Changing a `*-per-shard` limit needs none: it limits only what a shard takes in.
+
+1. **Stop user traffic** to every instance, at the load balancer. Keep the instances running: their sweeps go on with the kept work.
+2. **Let the sweeps finish the kept work.** Wait two of the longest sweep interval among `code-grant.sweep-interval`, `session-lifecycle.sweep-interval`, `rp-logout.sweep-interval` and `session-tokens.sweep-interval` (two minutes with the defaults). Work that keeps failing stays and is retried: a session's close after half its age, at most an hour; a notice until its logout token expires. If `session-lifecycle.sweep_failed`, `code-grant.void_retry_failed`, `rp-logout.notices_kept` or `session-tokens.revoke_retry_failed` was logged in the last hour, wait until an hour passes without them, or accept that the work they count is lost by the change.
+3. **Change the count on every instance at once**: stop them all, set the new count, start them all. Never run instances with two counts together: one keeps adding to shards the other no longer walks.
+4. **Resume user traffic.**
+
+Nothing checks a count against the one the kept work was written with: a count changed without these steps loses the work silently.
+
 ## Rotating the signing key
 
 Tokens name the key that signed them (`kid`). An instance verifies a token by the key it names and publishes the public keys as its key set (the `jwks_uri` its metadata names), which verifiers may cache for `keys.jwks-cache` (300 seconds by default).
