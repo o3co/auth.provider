@@ -64,12 +64,12 @@ export default defineModule(
 				});
 			}
 			if (!covered && (await mark.read()) === "on") {
-				return c.refuse(
-					"subject-revocation",
-					unerasable.length > 0
-						? `erasure is enabled, yet these cannot erase: ${unerasable.join(", ")}`
-						: "erasure is enabled, yet no module guards it or the boundary store does not fence",
-				);
+				// Every reason at once, so the operator is not refused again for the one left unnamed.
+				const reasons = [
+					...(guarded ? [] : ["no module guards it or the boundary store does not fence"]),
+					...(unerasable.length > 0 ? [`these cannot erase: ${unerasable.join(", ")}`] : []),
+				];
+				return c.refuse("subject-revocation", `erasure is enabled, yet ${reasons.join("; and ")}`);
 			}
 			return { covered, enabled: mark.read };
 		}),

@@ -322,6 +322,8 @@ it("covers erasure only where every owner erases: one that cannot is named, refu
 	const owners = { consent: true, legacy: false };
 	const refused = await gated(true, on, {}, owners);
 	expect(refused.refused).toMatch(/these cannot erase: legacy/);
+	const both = await gated(false, on, {}, owners);
+	expect(both.refused).toMatch(/no module guards it .*; and these cannot erase: legacy/);
 	const unread = await gated(
 		true,
 		(st) => {
@@ -378,5 +380,9 @@ it("refuses the start of an eraser whose build reaches the gate, collecting prob
 		config: kernelConfig(),
 		runtime: quietRuntime(),
 	});
-	await expect(assembled).rejects.toThrow();
+	const refused = await assembled.then(
+		() => [],
+		(error: unknown) => (error instanceof BootRefused ? error.refusals : [error]),
+	);
+	expect(refused).toEqual([{ where: expect.any(String), reason: expect.stringContaining("cycle") }]);
 });
