@@ -1,3 +1,4 @@
+import type { SubjectOf } from "@mod/erasure-extensions";
 import { deepFreeze } from "@mod/kernel";
 import { canonicalAddress } from "@mod/mail-address";
 import { type Contact, isWellFormedSubject, type Users, userAttribute } from "./contract.ts";
@@ -15,6 +16,12 @@ const contactsIn = (record: StoredContacts | undefined): Contact[] =>
 		.filter(isContact)
 		.map(({ kind, value }) => ({ kind, value }));
 const contactsRecord = (contacts: readonly Contact[]) => contacts as unknown as StoredContacts;
+
+/** Whose a contacts record written before indexing is: the subject it is keyed by, where it holds a list. */
+export const contactSubjectOf = (key: string, value: unknown): SubjectOf =>
+	Array.isArray(value)
+		? { kind: "subject", subject: key }
+		: { kind: "unreadable", reason: "a contacts record of another shape" };
 
 function required(...parts: string[]) {
 	if (parts.some((part) => part === "")) throw new TypeError("users: an empty part names no one");

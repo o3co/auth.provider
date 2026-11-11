@@ -8,6 +8,7 @@
 
 ## Offers
 - `keptLinks(source, links)`: links written through the link store, below the source's own.
+- `linkSubjectOf` (a link record as stored) → whose it is, for the one migration: the subject it holds; a trace an unlink left, holding no subject, an orphan by its shape; any other shape unreadable.
 - `ledgerLinks(source)`: the source's links alone; `link` answers already or conflict, and `unlink` fixed or none.
 
 ## Invariants

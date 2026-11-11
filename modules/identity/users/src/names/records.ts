@@ -106,7 +106,6 @@ export function nameRecordsOver(links: LinkStore): NameRecords {
 	if (names === undefined || links.unowned === undefined) {
 		throw new TypeError("users: the link store offers names and unowned together, or neither");
 	}
-	// Called on the store, so an implementation keeps its own `this`.
 	const unowned: NonNullable<LinkStore["unowned"]> = async (key, record, lifetimeMs) => {
 		if (links.unowned === undefined) throw new TypeError("users: the link store's unowned went");
 		return links.unowned(key, record, lifetimeMs);

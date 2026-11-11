@@ -1,3 +1,4 @@
+import { erasers } from "@mod/erasure-extensions";
 import { defineModule } from "@mod/kernel";
 import { secretCheckers } from "@mod/secret-hash";
 import { z } from "zod";
@@ -10,6 +11,7 @@ import { issuersJudged, namesRefused } from "./names/names.ts";
 import { nameRecordsOver } from "./names/records.ts";
 import { keyOf, record, registeredUsers } from "./registered.ts";
 import { contactStore, linkStore } from "./store.ts";
+import { usersEraser } from "./stores/eraser.ts";
 import { portsRefused } from "./stores/ports.ts";
 
 /** Identifiers match exactly; this form, folding case fully ("straße", "STRASSE", "STRAẞE"), only finds look-alikes. */
@@ -80,6 +82,10 @@ export default defineModule(
 		takes: [secretCheckers, contactStore, ledgers, linkStore, upstreamNames],
 	},
 	(m) => [
+		// Its build takes only its stores and collects no `probes`, as an eraser's must (erasure-extensions).
+		m
+			.contribute(erasers)
+			.by(async (c) => usersEraser(await c.get(linkStore), await c.get(contactStore))),
 		m.provide(users).by(async (c) => {
 			const declarations = await c.collect(upstreamNames);
 			const refused = namesRefused(declarations);

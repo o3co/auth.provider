@@ -13,6 +13,8 @@ Internal module of `users`: what an IdP name stands for, within one boot and acr
 - `namesRefused` (the declarations) → reasons, for one boot.
 - `nameRecordsOver` (the link store) → where names are kept: its `names` and `unowned`, or the link space alone; `issuersJudged` (the declarations, `issuer-moved`, those records, the log) → refusals, across boots, reading alone, and `settle`: what to write once no module refuses the boot, answering what is refused of what it finds written.
 
+- `isNameKey`, `nameSubjectOf` (a name's record) → no subject's, an orphan by its key (unreadable where it holds no issuer); `namesKept` (the name store) → names' `Elsewhere`: before the migration removes a name's record from the link space, it is kept in the name store as the link space holds it, rewritten where it differs, and read back confirmed, or the step throws and the space stops; nothing for any other key.
+
 ## Invariants
 - A name's issuer is compared as written.
 - Nothing is written while a boot is built: a boot refused by any module's build, this one's judgment among them, writes nothing and applies no stated move, and a new name beside a refused one is not kept either. A write is made once every build passed (`kernel`'s `onBuilt`), and is not taken back if a later such hook refuses, nor where `start` then fails.
