@@ -283,6 +283,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `patterns` (`src/patterns`): Holds the patterns: each a deployment's use and the selection that composes it, in one file (`<name>.ts`) with a card of at most 10 lines (`<name>.md`).
 - `@mod/kinds` (assembly, `modules/scaffold/kinds`): Names the kinds a package's manifest may be, and which way a dependency between kinds may point: the one place either is written. That the bottom level (common, protocol) depends on nothing at all is `guard-imports`' G2, beside `mayNeed`, which answers by level alone.
 - `@mod/trial` (assembly, `modules/scaffold/trial`): Builds the local layer that boots a generated app for a test or a conformance run, from the trial file of each module the app composes; it holds no module's values.
+- `@mod/workspace-packages` (assembly, `modules/scaffold/workspace-packages`): Lists the packages a workspace's definition places, each by name and directory: the one place a workspace is listed, for generating from it, its local layer and the checks over it.
 
 ## second-factor
 
