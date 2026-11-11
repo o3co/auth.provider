@@ -104,6 +104,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `envelope` (`src/envelope`): the envelope a subject's record is kept in, its subject beside its value.
   - `erase` (`src/erase`): erasing a subject from one space, and sweeping a space's index.
   - `index` (`src/index`): where a space keeps its subjects' index, and how it is named.
+  - `migrate` (`src/migrate`): the one migration of a space's records written before they were indexed.
   - `phase` (`src/phase`): the phase records are in, as the store's control record keeps it.
   - `sets` (`src/sets`): keyed sets in a space holding subjects' data.
 - `@mod/tls-options` (foundation, `modules/foundation/tls-options`): Owns the floor of the provider's own TLS connections as a client: the least version and the suites they take, and that each checks its peer's certificate.

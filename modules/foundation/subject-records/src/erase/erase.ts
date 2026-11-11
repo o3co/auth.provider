@@ -123,15 +123,24 @@ export async function eraseSubject(
 		}
 		if (options.signal?.aborted) return stopped("aborted");
 		if (category === "online-keyed") {
-			// Keyed by the subject itself, whatever is under it is the subject's.
-			const under: Entry[] = [
-				{ key: subject, name: "record" },
-				{ key: subject, name: "set" },
+			// Keyed by the subject itself, whatever is under it is the subject's; its witnesses go with it.
+			const { witnessOf } = indexOver(place, place.space, place.index);
+			const under: Target[] = [
+				targetOf(place, { key: subject, name: "record" }),
+				targetOf(place, { key: subject, name: "set" }),
+				witnessOf(subject, "record"),
+				witnessOf(subject, "set"),
 			];
-			const { removed } = await settled(place, undefined, under, () => ({
-				remove: true,
-				leaves: true,
-			}));
+			let removed = 0;
+			await changeRecords({
+				targets: under,
+				decide: (read) => {
+					removed = read.slice(0, 2).filter((held) => held !== undefined).length;
+					return {
+						targets: read.map((held) => (held === undefined ? undefined : { remove: true })),
+					};
+				},
+			});
 			return report({ kind: "erased", space, removed });
 		}
 		const theirs = (held: Json | undefined): Settled => ({

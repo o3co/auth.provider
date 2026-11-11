@@ -127,6 +127,7 @@ it("keeps a set keyed by its subject with no bucket, and a set written raw while
 	const sets = subjectKeyedSetsIn({ ...at(keyed), cap: 5, clock }, "w", refuse);
 	await sets.add("alice", "s1", 60_000, "alice");
 	expect(await indexEntry(keyed, "alice", bucketOf("alice"))).toBeUndefined();
+	expect(await indexEntry(keyed, "alice", "witness.set")).toBe(1);
 	const reading = subjectKeyedSetsIn({ ...at(keyed, "reader"), cap: 5, clock }, "w", refuse);
 	await reading.add("bob", "s2", 60_000, "bob");
 	expect((await raw(keyed, "bob", "set"))?.value).toMatchObject({

@@ -2,7 +2,13 @@ import type { Clock } from "@mod/kernel";
 import { changeRecords, keyedSetsIn, type Member, type Next, type Target } from "@mod/records";
 import type { Json } from "@mod/store";
 import { kept, opened } from "../envelope/envelope.ts";
-import { checkedSubjectPlace, indexOver, listedWith, type SubjectPlace } from "../index/index.ts";
+import {
+	checkedSubjectPlace,
+	indexOver,
+	listedWith,
+	type SubjectPlace,
+	witnessed,
+} from "../index/index.ts";
 
 /**
  * Keyed sets in a space holding subjects' data, in the format `records`' keyed sets keep
@@ -22,7 +28,9 @@ export function subjectKeyedSetsIn(
 	const codec = keyedSetsIn.codec(place);
 	const indexed = place.phase === "indexed";
 	const byKeys = indexed && category === "online-indexed";
-	const { tombOf, bucketOf } = indexOver(place, place.space, place.index);
+	// A set's envelope keyed by its subject is written with its witness, which no raw value has.
+	const witnessing = indexed && category === "online-keyed";
+	const { tombOf, bucketOf, witnessOf } = indexOver(place, place.space, place.index);
 	const setOf = (key: string): Target => ({ place, key, set: true });
 	const open = (held: Json | undefined) => opened(held, indexed);
 	const heldValue = async (key: string) =>
@@ -31,12 +39,18 @@ export function subjectKeyedSetsIn(
 	const rewritten = (key: string, decide: (current: Json | undefined) => Next<Json>) =>
 		changeRecords({
 			targets: [setOf(key)],
-			decide: ([held]) => {
+			watch: ([held]) => {
+				const { subject } = open(held);
+				return witnessing && subject !== undefined ? [witnessOf(subject, "set")] : [];
+			},
+			decide: ([held], [witness]) => {
 				if (held === undefined) return {};
 				const found = open(held);
 				const next = decide(found.value);
 				if (next === undefined || "remove" in next) return { targets: [next] };
-				return { targets: [{ ...next, value: kept(next.value, found.subject) }] };
+				const targets = [{ ...next, value: kept(next.value, found.subject) }];
+				if (!witnessing || found.subject === undefined) return { targets };
+				return { targets, watched: [witness === undefined ? witnessed : undefined] };
 			},
 		});
 	return {
@@ -62,7 +76,11 @@ export function subjectKeyedSetsIn(
 				| "erased"
 				| "another-subject";
 			await changeRecords({
-				targets: byKeys ? [setOf(key), bucketOf(subject, key)] : [setOf(key)],
+				targets: byKeys
+					? [setOf(key), bucketOf(subject, key)]
+					: witnessing
+						? [setOf(key), witnessOf(subject, "set")]
+						: [setOf(key)],
 				watch: () => (indexed ? [tombOf(subject)] : []),
 				decide: ([held, bucket], [tomb]) => {
 					if (tomb !== undefined) {
@@ -81,6 +99,7 @@ export function subjectKeyedSetsIn(
 						value: indexed ? kept(added.next.value, subject) : added.next.value,
 						lifetimeMs: added.next.lifetimeMs,
 					};
+					if (witnessing) return { targets: [set, bucket === undefined ? witnessed : undefined] };
 					if (!byKeys) return { targets: [set] };
 					return { targets: [set, listedWith(bucket, place.space.name, { key, name: "set" })] };
 				},

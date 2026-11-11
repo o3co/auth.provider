@@ -7,10 +7,12 @@ import {
 	listedWith,
 	listedWithout,
 	type SubjectPlace,
+	witnessed,
 } from "./index/index.ts";
 
 export { eraseSubject, sweepIndex } from "./erase/erase.ts";
 export { indexSpaceOf, type Phase, type SubjectPlace } from "./index/index.ts";
+export { migrateRecords } from "./migrate/migrate.ts";
 export { subjectRecordsPhase } from "./phase/phase.ts";
 export { type SubjectKeyedSets, subjectKeyedSetsIn } from "./sets/sets.ts";
 
@@ -43,7 +45,9 @@ export function subjectRecordsIn<T extends Json>(
 	// Bounded records are found by no subject, so they are kept raw and indexed by no bucket.
 	const enveloped = indexed && !bounded;
 	const byKeys = indexed && category === "online-indexed";
-	const { tombOf, bucketOf } = indexOver(place, place.space, place.index);
+	// An envelope keyed by its subject is written with its witness, which no raw value has.
+	const witnessing = enveloped && category === "online-keyed";
+	const { tombOf, bucketOf, witnessOf } = indexOver(place, place.space, place.index);
 	const recordOf = (key: string): Target =>
 		options.secret ? { place, secret: key } : { place, key };
 	const open = (held: Json | undefined) => opened(held, enveloped);
@@ -77,7 +81,11 @@ export function subjectRecordsIn<T extends Json>(
 			}
 			let answer: "created" | "exists" | "erased" = "created";
 			await changeRecords({
-				targets: byKeys ? [recordOf(key), bucketOf(subject, key)] : [recordOf(key)],
+				targets: byKeys
+					? [recordOf(key), bucketOf(subject, key)]
+					: witnessing
+						? [recordOf(key), witnessOf(subject, "record")]
+						: [recordOf(key)],
 				watch: () => (indexed ? [tombOf(subject)] : []),
 				decide: ([held, bucket], [tomb], attempt) => {
 					if (tomb !== undefined) {
@@ -94,6 +102,8 @@ export function subjectRecordsIn<T extends Json>(
 						value: enveloped ? kept(made, subject) : made,
 						lifetimeMs: lifetime,
 					};
+					if (witnessing)
+						return { targets: [record, bucket === undefined ? witnessed : undefined] };
 					if (!byKeys) return { targets: [record] };
 					return {
 						targets: [record, listedWith(bucket, place.space.name, { key, name: "record" })],
@@ -124,9 +134,10 @@ export function subjectRecordsIn<T extends Json>(
 				targets: [recordOf(key)],
 				watch: ([held]) => {
 					const { subject } = open(held);
-					return subject !== undefined ? [tombOf(subject)] : [];
+					if (subject === undefined) return [];
+					return witnessing ? [tombOf(subject), witnessOf(subject, "record")] : [tombOf(subject)];
 				},
-				decide: ([held], [tomb], attempt) => {
+				decide: ([held], [tomb, witness], attempt) => {
 					const found = open(held);
 					if (held === undefined || tomb !== undefined) {
 						answer = undefined;
@@ -138,7 +149,10 @@ export function subjectRecordsIn<T extends Json>(
 					if (!changed) return {};
 					const value = kept(ownersValue(changed.value), found.subject);
 					const keepsEnd = bounded || changed.lifetimeMs === undefined;
-					return { targets: [keepsEnd ? { value } : { value, lifetimeMs: changed.lifetimeMs }] };
+					const targets = [keepsEnd ? { value } : { value, lifetimeMs: changed.lifetimeMs }];
+					// An envelope rewritten keyed by its subject has its witness, written where it is missing.
+					if (!witnessing || found.subject === undefined) return { targets };
+					return { targets, watched: [undefined, witness === undefined ? witnessed : undefined] };
 				},
 			});
 			return answer;

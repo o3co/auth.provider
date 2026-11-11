@@ -98,6 +98,14 @@ export function indexOver(place: Place, space: Space, index: Space) {
 			place: indexPlace,
 			key: `${subjects(subject)}.m${createHash("sha256").update(key).digest("hex")[0]}`,
 		}),
+		/**
+		 * The witness that subject-records wrote the envelope of the subject's record or set in an
+		 * `online-keyed` space: `<part>.witness.record` or `<part>.witness.set`, holding `witnessed`.
+		 */
+		witnessOf: (subject: string, name: "record" | "set"): Target => ({
+			place: indexPlace,
+			key: `${subjects(subject)}.witness.${name}`,
+		}),
 		/** An entry of the index by its partition, as a scan of the index space finds it. */
 		entryAt: (partition: string): Target => ({ place: indexPlace, key: partition }),
 		/** Every bucket of a subject, as erasing it reads them. */
@@ -105,6 +113,9 @@ export function indexOver(place: Place, space: Space, index: Space) {
 			bucketNames.map((name) => ({ place: indexPlace, key: `${subjects(subject)}.${name}` })),
 	};
 }
+
+/** What a witness holds, fixed: a later version reads it as written. */
+export const witnessed: Next<Json> = { value: 1, lifetimeMs: "endless" };
 
 /** Whether records are only read as they were (`reader`) or kept indexed by their subject (`indexed`). */
 export type Phase = "reader" | "indexed";

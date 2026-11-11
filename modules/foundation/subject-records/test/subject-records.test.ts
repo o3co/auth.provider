@@ -184,12 +184,23 @@ it("changes a record kept raw, from before records were indexed, raw", async () 
 	expect(await raw("old")).toBe(2);
 });
 
-it("keeps only the tombstone for records keyed by their subject itself: no bucket, no other key, and nothing past it", async () => {
-	const { build, indexOf, erase } = await opened_();
+it("keeps for records keyed by their subject itself only the witness and the tombstone: no bucket, no other key, and nothing past it", async () => {
+	const { s, build, indexOf, erase } = await opened_();
 	const records = build<number>("indexed", keyedSpace);
 	expect(await records.create("alice", 1, "endless", "alice")).toBe("created");
 	await expect(records.create("s-bob", 1, "endless", "bob")).rejects.toThrow(TypeError);
-	expect(await indexOf("alice", keyedSpace)).toEqual({});
+	// The envelope's witness is written with it: a migration tells it from a raw value of its shape.
+	expect(await indexOf("alice", keyedSpace)).toEqual({ "witness.record": 1 });
+	// An envelope with no witness gets one from the change that rewrites it.
+	await s.putIfAbsent(
+		{ space: keyedSpace, partition: "carol", name: "record" },
+		envelope("carol", 1),
+		{
+			expiry: { kind: "never" },
+		},
+	);
+	expect(await records.change("carol", (n) => ({ value: n + 1 }))).toEqual({ before: 1, after: 2 });
+	expect(await indexOf("carol", keyedSpace)).toEqual({ "witness.record": 1 });
 	await erase("alice", keyedSpace);
 	await records.remove("alice");
 	expect(await records.create("alice", 1, "endless", "alice")).toBe("erased");

@@ -189,15 +189,28 @@ it("leaves another subject's record created at a listed key between the erase's 
 });
 
 it("erases the record and the set keyed by the subject itself, no keys asked", async () => {
-	const { at, raw } = await opened();
+	const { at, raw, indexOf, simulated } = await opened();
 	const records = subjectRecordsIn<number>(at(keyed), "w", refuse);
 	const sets = subjectKeyedSetsIn({ ...at(keyed), cap: 5, clock }, "w", refuse);
 	await records.create("alice", 1, "endless", "alice");
 	await sets.add("alice", "m", 60_000, "alice");
 	await expect(sets.add("u:alice", "m", 60_000, "alice")).rejects.toThrow(TypeError);
+	expect(Object.keys(await indexOf(keyed, "alice")).sort()).toEqual([
+		"witness.record",
+		"witness.set",
+	]);
 	expect(await eraseSubject(at(keyed), "alice")).toMatchObject({ kind: "erased", removed: 2 });
 	expect(await raw(keyed, "alice")).toBeUndefined();
 	expect(await raw(keyed, "alice", "set")).toBeUndefined();
+	// The witnesses go with what they witness; only the tombstone stays.
+	expect(Object.keys(await indexOf(keyed, "alice"))).toEqual(["tomb"]);
+	// A record gone by its end before the erasure still has its witness removed.
+	await records.create("dan", 1, 1, "dan");
+	simulated.shiftClock(10);
+	expect(await raw(keyed, "dan")).toBeUndefined();
+	expect(Object.keys(await indexOf(keyed, "dan"))).toEqual(["witness.record"]);
+	expect(await eraseSubject(at(keyed), "dan")).toMatchObject({ kind: "erased", removed: 0 });
+	expect(Object.keys(await indexOf(keyed, "dan"))).toEqual(["tomb"]);
 	expect(await sets.add("alice", "m", 60_000, "alice")).toBe("erased");
 });
 
