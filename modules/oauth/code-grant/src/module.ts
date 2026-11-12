@@ -14,14 +14,18 @@ import {
 	codes,
 	idTokens,
 	redemptionHooks,
+	redemptionRecords,
 	sessionRedemptions,
 	voidList,
 } from "./contract.ts";
-import { answerFields, codeGrant, voiding } from "./grant.ts";
+import { answerFields, codeGrant } from "./grant.ts";
+import { portsRefused } from "./ports.ts";
 import { section } from "./section.ts";
+import { voiding } from "./voiding/voiding.ts";
 
 const takes = [
 	codeStore,
+	redemptionRecords,
 	voidList,
 	sessions,
 	clients,
@@ -35,7 +39,7 @@ const takes = [
 ];
 
 // Safe on many instances: every instance runs the sweep over the shared void list, and settling a void twice
-// does no harm (test/voids.test.ts).
+// does no harm (voiding/test/voids.test.ts).
 export default defineModule({ name: "code-grant", replicaSafe: true, section, takes }, (m) => [
 	m.provide(codes).by(async (c) => {
 		const store = await c.get(codeStore);
@@ -106,17 +110,21 @@ export default defineModule({ name: "code-grant", replicaSafe: true, section, ta
 		const taken = contributed.find((a) => answerFields.has(a.field));
 		if (taken) return c.refuse("code-grant", `the response field ${taken.field} already exists`);
 		const store = await c.get(codeStore);
+		const kept = await c.get(redemptionRecords);
+		const ports = portsRefused({ codes: store, kept });
+		if (ports) return c.refuse("code-grant", ports);
 		const voids = voiding({
 			store,
+			kept,
 			voids: await c.get(voidList),
 			tokens: issuing,
 			log: c.log,
-			now: c.clock.now,
 			additions: contributed,
 		});
 		c.every(c.section["sweep-interval"] * 1000, () => voids.sweep());
 		return codeGrant({
 			store,
+			kept,
 			sessions: await c.get(sessions),
 			settle: voids.settle,
 			now: c.clock.now,

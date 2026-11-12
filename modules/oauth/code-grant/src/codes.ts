@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { StoredCode } from "./store.ts";
+import type { StoredCode, StoredRedemptionRecord } from "./store.ts";
 
 /** What a code keeps from its issuing to its end. */
 export interface CodeRecord {
@@ -48,6 +48,30 @@ export const toStored = (record: CodeRecord) => record as unknown as StoredCode;
 export const fromStored = (kept: StoredCode): CodeRecord | undefined => {
 	const read = recordShape.safeParse(kept);
 	return read.success ? (read.data as CodeRecord) : undefined;
+};
+
+/** What a redemption keeps: its token, once published, and whether a reuse voided it. */
+export interface RedemptionRecord {
+	readonly format: 1;
+	readonly token?: { readonly reference: string; readonly expiresAt: number };
+	readonly void?: true;
+}
+
+const redemptionShape = z.strictObject({
+	format: z.literal(1),
+	token: z.strictObject({ reference: z.string(), expiresAt: z.number() }).optional(),
+	void: z.literal(true).optional(),
+});
+
+/** A redemption's record as the store keeps it; only code-grant reads what it holds. */
+export const toStoredRedemption = (record: RedemptionRecord) =>
+	record as unknown as StoredRedemptionRecord;
+/** A kept value's redemption record, checked on every read; nothing for another shape. */
+export const fromStoredRedemption = (
+	kept: StoredRedemptionRecord | undefined,
+): RedemptionRecord | undefined => {
+	const read = redemptionShape.safeParse(kept);
+	return read.success ? (read.data as RedemptionRecord) : undefined;
 };
 
 export const s256 = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");

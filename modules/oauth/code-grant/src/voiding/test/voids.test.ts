@@ -2,12 +2,15 @@ import { recordingLog } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import type { Tokens } from "@mod/tokens";
 import { expect, it } from "vitest";
-import { type CodeRecord, fromStored, toStored } from "../src/codes.ts";
-import type { Addition } from "../src/contract.ts";
-import { voiding } from "../src/grant.ts";
-import type { StoredCode } from "../src/store.ts";
+import { type CodeRecord, fromStored, toStored } from "../../codes.ts";
+import type { Addition } from "../../contract.ts";
+import type { RedemptionRecords, StoredCode, StoredRedemptionRecord } from "../../store.ts";
+import { voiding } from "../voiding.ts";
 
-/** A code used up, whose token was issued: listed void, it is settled once the token is revoked. */
+/**
+ * A code used up by a 0.19 instance, which kept its token on the code: listed void, it is settled
+ * once the token is revoked, though no redemption record holds it.
+ */
 const used: CodeRecord = {
 	format: 2,
 	state: "consumed",
@@ -25,6 +28,12 @@ const used: CodeRecord = {
 
 it("settles a listed void alike whichever instance's sweep reaches it, both at once among them", async () => {
 	const stand = memoryRecords<StoredCode>(() => 0, { shards: 1, perShard: 10 });
+	const none = memoryRecords<StoredRedemptionRecord>(() => 0, { shards: 1, perShard: 10 });
+	const kept: RedemptionRecords = {
+		create: none.records.create,
+		read: none.records.read,
+		update: none.records.change,
+	};
 	await stand.records.create("n1", toStored(used), 60_000);
 	await stand.deferred.add("n1");
 	const logged = recordingLog();
@@ -34,6 +43,7 @@ it("settles a listed void alike whichever instance's sweep reaches it, both at o
 	const instance = () =>
 		voiding({
 			store: { nameOf: (code) => code, save: stand.records.create, update: stand.records.change },
+			kept,
 			voids: stand.deferred,
 			tokens: {
 				revokeReferenced: async (reference: string) => {
@@ -42,7 +52,6 @@ it("settles a listed void alike whichever instance's sweep reaches it, both at o
 				},
 			} as unknown as Tokens,
 			log: logged.log,
-			now: () => 0,
 			additions: [
 				{
 					field: "extra",
