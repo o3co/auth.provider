@@ -59,10 +59,39 @@ export function rulesOf(place: SubjectPlace, category: string) {
 		}
 		return lifetimeMs;
 	};
+	/**
+	 * Moves the record from `from`, the subject it was read under, to `to` as one: its envelope's
+	 * subject and value rewritten, its entry out of `from`'s bucket and into `to`'s, held by both
+	 * tombstones absent: `erased` where `to`'s stands, `from-erased` where only `from`'s does.
+	 * Indexed `online-indexed` only: `moveTo`'s first case, the one caller.
+	 */
+	const move = (
+		key: string,
+		from: string,
+		to: string,
+		value: Json,
+	): Rule<"moved" | "missing" | "erased" | "from-erased"> => {
+		return {
+			needs: () => [bucketOf(from, key), bucketOf(to, key), tombOf(from), tombOf(to)],
+			decide: (held, [fromBucket, toBucket, fromTomb, toTomb]) => {
+				if (held === undefined) return { answer: "missing" };
+				if (toTomb !== undefined) return { answer: "erased" };
+				if (fromTomb !== undefined) return { answer: "from-erased" };
+				return {
+					answer: "moved",
+					record: { value: kept(ownersValue(value), to) },
+					needed: [
+						listedWithout(fromBucket, place.space.name, isRecord(key)),
+						listedWith(toBucket, place.space.name, { key, name: "record" }),
+						undefined,
+						undefined,
+					],
+				};
+			},
+		};
+	};
 	const base = {
-		bounded,
 		indexed,
-		byKeys,
 		open,
 		/** Places the record unless it is held (`exists`) or, once indexed, its subject's tombstone stands (`erased`). */
 		create: <T extends Json>(
@@ -164,42 +193,6 @@ export function rulesOf(place: SubjectPlace, category: string) {
 				};
 			},
 		}),
-		/**
-		 * Moves the record from `from`, the subject it was read under, to `to` as one: its envelope's
-		 * subject and value rewritten, its entry out of `from`'s bucket and into `to`'s, held by both
-		 * tombstones absent: `erased` where `to`'s stands, `from-erased` where only `from`'s does.
-		 * Indexed `online-indexed` only (`joint`'s move).
-		 */
-		move: (
-			key: string,
-			from: string,
-			to: string,
-			value: Json,
-		): Rule<"moved" | "missing" | "erased" | "from-erased"> => {
-			if (!byKeys)
-				throw new Error("subject-records: a record moves in an indexed online-indexed space");
-			return {
-				needs: () => [bucketOf(from, key), bucketOf(to, key), tombOf(from), tombOf(to)],
-				decide: (held, [fromBucket, toBucket, fromTomb, toTomb]) => {
-					const found = open(held);
-					if (held === undefined) return { answer: "missing" };
-					// Read under another subject meanwhile: missing for this move, as its `from` is gone.
-					if (found.subject !== from) return { answer: "missing" };
-					if (toTomb !== undefined) return { answer: "erased" };
-					if (fromTomb !== undefined) return { answer: "from-erased" };
-					return {
-						answer: "moved",
-						record: { value: kept(ownersValue(value), to) },
-						needed: [
-							listedWithout(fromBucket, place.space.name, isRecord(key)),
-							listedWith(toBucket, place.space.name, { key, name: "record" }),
-							undefined,
-							undefined,
-						],
-					};
-				},
-			};
-		},
 	};
 	return {
 		...base,
@@ -220,7 +213,7 @@ export function rulesOf(place: SubjectPlace, category: string) {
 				const { subject } = open(held);
 				if (held === undefined || subject === undefined || subject === to || !byKeys)
 					return undefined;
-				return base.move(key, subject, to, value);
+				return move(key, subject, to, value);
 			};
 			return {
 				needs: (held) => (moving(held) ?? changing).needs(held),
