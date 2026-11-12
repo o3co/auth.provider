@@ -1,7 +1,7 @@
 import type { Eraser, SetReading, SubjectReading } from "@mod/erasure-extensions";
 import type { StoredGrant } from "../store.ts";
 import type { Grant } from "./grant.ts";
-import { type ErasedStores, portsOf } from "./ports.ts";
+import { type ErasableStores, portsOf } from "./ports.ts";
 
 /** A grant's subject, the one its record names; a record of another shape is unreadable, as it may hold one. */
 export const grantSubjectOf =
@@ -13,7 +13,7 @@ export const grantSubjectOf =
 			: { kind: "subject", subject: grant.subject };
 	};
 
-/** A pending pair's subject, from its key alone (`<client>\n<subject>`); a key of another form is unreadable. */
+/** A pending pair's subject, from its key alone (`<client>\n<subject>`: a client id holds no newline, clients' rule); a key of another form is unreadable. */
 export const pairSubjectOf: SetReading = async (key) => {
 	const at = key.indexOf("\n");
 	const subject = at < 1 ? "" : key.slice(at + 1);
@@ -30,7 +30,7 @@ const listingNotRead: SetReading = async () => ({
 
 /** federation-grants' eraser, `federation-grants`: a subject's grants, pending pairs and listing, through the stores' ports, as the card gives it. */
 export function grantsEraser(
-	stores: ErasedStores,
+	stores: ErasableStores,
 	grantOf: (stored: StoredGrant | undefined) => Grant | undefined,
 ): Eraser {
 	const ports = portsOf(stores);

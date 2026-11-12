@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import type { StoredGrant } from "../../store.ts";
 import { grantSubjectOf, grantsEraser, pairSubjectOf } from "../eraser.ts";
 import type { Grant } from "../grant.ts";
-import type { ErasedStores } from "../ports.ts";
+import type { ErasableStores } from "../ports.ts";
 
 const signal = new AbortController().signal;
 const walk: Walk = { sweep: async () => ({ keys: [], server: "one" }) };
@@ -22,7 +22,7 @@ it("reads a grant's subject from its record, and a pending pair's from its key, 
 });
 
 it("states it cannot erase without the stores' ports, and erases and migrates each space through them", async () => {
-	const none = { grants: {}, pending: {}, subjects: {} } as unknown as ErasedStores;
+	const none = { grants: {}, pending: {}, subjects: {} } as unknown as ErasableStores;
 	expect(grantsEraser(none, grantOf)).toMatchObject({ name: "federation-grants", erasable: false });
 	const asked: string[] = [];
 	const store = (space: string) => ({
@@ -44,7 +44,7 @@ it("states it cannot erase without the stores' ports, and erases and migrates ea
 		pending: store("pending"),
 		subjects: store("subjects"),
 	};
-	const eraser = grantsEraser(stores as unknown as ErasedStores, grantOf);
+	const eraser = grantsEraser(stores as unknown as ErasableStores, grantOf);
 	expect(eraser.erasable).toBe(true);
 	expect((await eraser.online("alice", signal)).reports).toHaveLength(3);
 	expect((await eraser.window(["bob"], walk, signal)).reports).toHaveLength(3);

@@ -55,9 +55,9 @@ export interface GrantStore {
 }
 
 /**
- * What a set's add answers: those pushed out; `erased` where the subject's erasure fences it; or
- * `another-subject` where the set under the key is another subject's, or kept raw where none can
- * tell whose. Only a Store that fences answers the last two.
+ * What a keyed set's add answers: those pushed out; `erased` where the subject's erasure fences it;
+ * or `another-subject` where the keyed set under the key is another subject's, or kept raw where
+ * none can tell whose. Only a Store that fences answers the last two.
  */
 export type SetAdded = { readonly pushedOut: readonly string[] } | "erased" | "another-subject";
 

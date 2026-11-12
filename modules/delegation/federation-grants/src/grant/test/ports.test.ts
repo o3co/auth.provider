@@ -4,7 +4,7 @@ import { upstreams } from "@mod/upstreams";
 import { expect, it } from "vitest";
 import type { Settings } from "../../section.ts";
 import { grantStore, pendingIntents, subjectGrants } from "../../store.ts";
-import { type ErasedStores, portsOf, portsRefused } from "../ports.ts";
+import { type ErasableStores, portsOf, portsRefused } from "../ports.ts";
 import { sharedOver } from "../shared.ts";
 
 const names = ["grants", "pending", "subjects"] as const;
@@ -20,7 +20,7 @@ const storesWith = (offered: readonly string[]) =>
 					.map((o) => [o.slice(n.length + 1), async () => ({})]),
 			),
 		]),
-	) as unknown as ErasedStores;
+	) as unknown as ErasableStores;
 const refusal =
 	"the grant, pending and subject stores offer part of their erase and migrate: all six, or none";
 
