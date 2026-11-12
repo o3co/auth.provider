@@ -132,6 +132,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/session` (feature, `modules/identity/session`): Owns the contract of user sessions: their cookie, their listing under their subject, and their lifecycle (open → closing → closed), as every implementation keeps them; a session is opened only once listed, so a revocation finds every live one.
   - `rules` (`src/rules`): the rules every implementation of `sessions` keeps alike, the stand-in too, offered as `sessionRules`.
 - `@mod/session-lifecycle` (adapter, `modules/identity/session-lifecycle`): Keeps sessions for `session`'s contract: their records, cookies and listing under their subject, and their lifecycle (open → closing → closed), over its own store interfaces as the assembly wires them.
+  - `erasure` (`src/erasure`): erasing a subject's sessions and listing, and migrating their spaces, through the stores' ports.
   - `lifecycle` (`src/lifecycle`): a session's record, its cookie, and its way from open to closed.
   - `listing` (`src/lifecycle/listing`): a subject's listing once a session closes, and the sessions a login's listing pushed out.
   - `raise` (`src/raise`): raising a session's authentication (step-up).
