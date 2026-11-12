@@ -6,11 +6,17 @@ import { keptPasskeys } from "./records.ts";
 import type { section } from "./section.ts";
 import type {
 	ChallengeStore,
+	PasskeyKeys,
+	PasskeyOp,
 	PasskeyRecords,
 	PasskeyStore,
+	PasskeysAnswer,
 	StoredChallenge,
 	StoredPasskey,
 } from "./store.ts";
+
+type Together = NonNullable<PasskeyStore["updateTogether"]>;
+type AsOne = Parameters<NonNullable<PasskeyStore["updateAsOne"]>>[0];
 
 export type PasskeysSettings = z.input<typeof section>;
 
@@ -62,10 +68,12 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			const { passkeys } = await open();
 			const key = fresh();
 			const odd = held({ state: "unheard-of", nested: { list: [1, "two"] } });
-			expect(await passkeys.credentials.save(key, odd, "endless")).toBe("created");
-			expect(await passkeys.credentials.save(key, held({ n: 1 }), "endless")).toBe("exists");
+			expect(await passkeys.credentials.save(key, odd, "endless", "alice")).toBe("created");
+			expect(await passkeys.credentials.save(key, held({ n: 1 }), "endless", "alice")).toBe(
+				"exists",
+			);
 			expect(await passkeys.subjects.read(key)).toBeUndefined();
-			expect(await passkeys.subjects.save(key, held({ n: 1 }), "endless")).toBe("created");
+			expect(await passkeys.subjects.save(key, held({ n: 1 }), "endless", "alice")).toBe("created");
 			expect(await passkeys.credentials.read(key)).toEqual(odd);
 			expect(await passkeys.subjects.update(key, plus(1))).toEqual({
 				before: held({ n: 1 }),
@@ -74,13 +82,15 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			expect(await passkeys.credentials.update(fresh(), plus(1))).toBeUndefined();
 		});
 
-		it("changes records of both spaces as one, giving the change what it watched, each space apart", async () => {
+		it("changes records of both spaces as one, giving the change what it watched, each space apart", async (context) => {
 			const { passkeys } = await open();
-			const together = passkeys.updateTogether.bind(passkeys);
+			const { updateTogether } = passkeys;
+			if (!updateTogether) return context.skip();
+			const together = updateTogether.bind(passkeys);
 			// One key in both spaces, and the owner's in both: each space keeps its own.
 			const [key, owner] = [fresh(), fresh()];
-			await passkeys.subjects.save(owner, held({ n: 7 }), "endless");
-			await passkeys.credentials.save(owner, held({ n: 9 }), "endless");
+			await passkeys.subjects.save(owner, held({ n: 7 }), "endless", "alice");
+			await passkeys.credentials.save(owner, held({ n: 9 }), "endless", "alice");
 			const seen: unknown[] = [];
 			const first = await together(
 				{ credentials: [key], subjects: [key] },
@@ -119,12 +129,14 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			});
 		});
 
-		it("writes the records it watched as well, as a subject's list and the credentials it names", async () => {
+		it("writes the records it watched as well, as a subject's list and the credentials it names", async (context) => {
 			const { passkeys } = await open();
-			const together = passkeys.updateTogether.bind(passkeys);
+			const { updateTogether } = passkeys;
+			if (!updateTogether) return context.skip();
+			const together = updateTogether.bind(passkeys);
 			const [list, a, b] = [fresh(), fresh(), fresh()];
-			await passkeys.subjects.save(list, held({ ids: [a, b] }), "endless");
-			await passkeys.credentials.save(a, held({ n: 1 }), "endless");
+			await passkeys.subjects.save(list, held({ ids: [a, b] }), "endless", "alice");
+			await passkeys.credentials.save(a, held({ n: 1 }), "endless", "alice");
 			const idsOf = (record: StoredPasskey | undefined) =>
 				(record as unknown as { ids?: string[] } | undefined)?.ids ?? [];
 			const cleared = await together(
@@ -152,15 +164,16 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 
 		it("changes records as one again where another writer changes what it watched first", async (ctx) => {
 			const { passkeys, raceNextTogether: race } = await open();
-			const together = passkeys.updateTogether.bind(passkeys);
-			if (!race) {
+			const { updateTogether } = passkeys;
+			if (!race || !updateTogether) {
 				ctx.skip();
 				return;
 			}
+			const together = updateTogether.bind(passkeys);
 			const [key, owner, other] = [fresh(), fresh(), fresh()];
-			await passkeys.credentials.save(key, held({ owner }), "endless");
-			await passkeys.subjects.save(owner, held({ n: 1 }), "endless");
-			await passkeys.subjects.save(other, held({ n: 2 }), "endless");
+			await passkeys.credentials.save(key, held({ owner }), "endless", "alice");
+			await passkeys.subjects.save(owner, held({ n: 1 }), "endless", "alice");
+			await passkeys.subjects.save(other, held({ n: 2 }), "endless", "alice");
 			const ownerOf = (record: StoredPasskey | undefined) =>
 				(record as unknown as { owner?: string } | undefined)?.owner;
 			const watched: unknown[] = [];
@@ -189,10 +202,66 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			expect(watched).toEqual([held({ n: 10 }), held({ n: 2 })]);
 		});
 
+		it("changes records of both spaces as one by the ops decided, writing nothing where one is refused", async (context) => {
+			const { passkeys } = await open();
+			const { updateAsOne } = passkeys;
+			if (!updateAsOne) return context.skip();
+			const asOne = (p: AsOne) => updateAsOne.call(passkeys, p);
+			const [list, record, other] = [fresh(), fresh(), fresh()];
+			const [inList, inRecords] = [
+				{ place: "subjects" as const, key: list },
+				{ place: "credentials" as const, key: record },
+			];
+			const create = (n: number): PasskeyOp => ({
+				kind: "create",
+				value: held({ n }),
+				lifetimeMs: "endless",
+				subject: "alice",
+			});
+			const written = await asOne({
+				targets: [inRecords, inList],
+				decide: () => ({ targets: [create(1), create(2)] }),
+			});
+			expect(written).toMatchObject({
+				kind: "written",
+				targets: [{ after: { value: { n: 1 } } }, {}],
+			});
+			const refused = await asOne({
+				targets: [{ place: "credentials", key: other }, inList],
+				decide: () => ({ targets: [create(3), create(4)] }),
+			});
+			expect(refused).toEqual({ kind: "refused", at: { in: "targets", nth: 1 }, why: "exists" });
+			expect(await passkeys.credentials.read(other)).toBeUndefined();
+			const moved = await asOne({
+				targets: [inRecords],
+				watch: () => [inList],
+				decide: () => ({ targets: [{ kind: "move", value: held({ n: 5 }), to: "alice" }] }),
+			});
+			expect(moved).toMatchObject({ kind: "written", watched: [{ after: { value: { n: 2 } } }] });
+			expect(await passkeys.credentials.read(record)).toEqual(held({ n: 5 }));
+			// The two spaces stay apart: one key, a record in each.
+			expect(await passkeys.subjects.read(record)).toBeUndefined();
+		});
+
+		it("refuses, where it erases, every record saved for a subject it erased, in each space and only for that subject", async (context) => {
+			const { passkeys } = await open();
+			for (const space of [passkeys.credentials, passkeys.subjects]) {
+				const { erase } = space;
+				if (!erase) return context.skip();
+				await space.save(fresh(), held({ n: 1 }), "endless", "erin");
+				const report = await erase.call(space, "erin", new AbortController().signal);
+				// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+				if (report.kind === "stopped") return context.skip();
+				expect(report.kind).toBe("erased");
+				expect(await space.save(fresh(), held({ n: 2 }), "endless", "erin")).toBe("erased");
+				expect(await space.save(fresh(), held({ n: 3 }), "endless", "finn")).toBe("created");
+			}
+		});
+
 		it("changes a record only from what it holds, again after a racing writer", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.passkeys.subjects.save(key, held({ n: 1 }), "endless");
+			await place.passkeys.subjects.save(key, held({ n: 1 }), "endless", "alice");
 			place.raceNextUpdate(key, (record) => held({ n: counted(record) * 10 }));
 			expect((await place.passkeys.subjects.update(key, plus(1)))?.after).toEqual(held({ n: 11 }));
 		});
@@ -200,7 +269,7 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 		it("keeps records without end, through a restart and through memory pressure", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.passkeys.credentials.save(key, held({ n: 1 }), "endless");
+			await place.passkeys.credentials.save(key, held({ n: 1 }), "endless", "alice");
 			place.advance(10 * 365 * 86_400_000);
 			await place.restart?.();
 			await place.pressMemory?.();
@@ -213,7 +282,9 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			if (!lose || !failover) return context.skip();
 			const key = fresh();
 			lose();
-			expect(await place.passkeys.subjects.save(key, held({ n: 1 }), "endless")).toBe("created");
+			expect(await place.passkeys.subjects.save(key, held({ n: 1 }), "endless", "alice")).toBe(
+				"created",
+			);
 			lose();
 			expect((await place.passkeys.subjects.update(key, plus(1)))?.after).toEqual(held({ n: 2 }));
 			await failover();
@@ -232,7 +303,9 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 				await failover();
 				place.advance(60_000);
 			});
-			await place.passkeys.credentials.save(key, held({ n: 1 }), "endless").catch(() => undefined);
+			await place.passkeys.credentials
+				.save(key, held({ n: 1 }), "endless", "alice")
+				.catch(() => undefined);
 			expect(await place.passkeys.credentials.read(key)).toEqual(seen);
 		});
 
@@ -272,20 +345,30 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			const keys: string[] = [];
 			const spied = (records: PasskeyRecords): PasskeyRecords => ({
 				...records,
-				save: (key, record, lifetimeMs) => {
-					keys.push(key);
-					return records.save(key, record, lifetimeMs);
+				save: (...given) => {
+					keys.push(given[0]);
+					return records.save(...given);
 				},
 			});
 			const [subject, id] = [fresh(), randomBytes(16).toString("base64url")];
+			// A registration writes its record together with its listing: its key is the first named.
+			const { updateAsOne: asOne, updateTogether: together } = passkeys;
 			const watched: PasskeyStore = {
 				credentials: spied(passkeys.credentials),
 				subjects: spied(passkeys.subjects),
-				// A registration writes its record together with its listing: its key is the first named.
-				updateTogether: (named, p) => {
-					keys.push(...named.credentials);
-					return passkeys.updateTogether(named, p);
-				},
+				...(asOne
+					? {
+							updateAsOne: (p: AsOne) => {
+								keys.push(...p.targets.filter((t) => t.place === "credentials").map((t) => t.key));
+								return asOne.call(passkeys, p);
+							},
+						}
+					: {
+							updateTogether: (named: PasskeyKeys, p: Parameters<Together>[1]) => {
+								keys.push(...named.credentials);
+								return (together as Together).call(passkeys, named, p);
+							},
+						}),
 			};
 			const records = keptPasskeys(watched, writeToken);
 			const userHandle = await records.handleFor(subject, handleOf());
@@ -368,4 +451,74 @@ export function challengeStoreContract(name: string, open: () => Promise<Challen
 			expect((await place.challenges.take(challenge, mark))?.before).toEqual(mark);
 		});
 	});
+}
+
+/**
+ * The passkey store's `updateAsOne` over an `updateTogether`, as a Store keeping records raw does
+ * it: no subject read or kept, no tombstone; each op refused as subject-records' would refuse it
+ * raw (`create` where held, `exists`; `change` or `move` where gone, `missing`), nothing written.
+ * No op removes a record: passkeys gives none, and `updateTogether` has no word for one.
+ */
+export function updatingAsOne(together: Together): NonNullable<PasskeyStore["updateAsOne"]> {
+	type Name = AsOne["targets"][number];
+	type Next = { readonly value: StoredPasskey } | undefined;
+	const named = (names: readonly Name[]): PasskeyKeys => ({
+		credentials: names.filter((k) => k.place === "credentials").map((k) => k.key),
+		subjects: names.filter((k) => k.place === "subjects").map((k) => k.key),
+	});
+	/** Each name's record as `updateTogether` reads it: by its space, the targets first. */
+	const readOf = <V>(
+		names: readonly Name[],
+		read: { readonly [S in keyof PasskeyKeys]: readonly V[] },
+	) =>
+		names.map(
+			({ place }, n) => read[place][names.slice(0, n).filter((k) => k.place === place).length],
+		);
+	const raw = (held: StoredPasskey | undefined) =>
+		held === undefined ? undefined : { value: held };
+	return async (p) => {
+		let names: readonly Name[] = p.targets;
+		let refused: Extract<PasskeysAnswer, { kind: "refused" }> | undefined;
+		const changed = await together(named(p.targets), {
+			watch: (read) => {
+				const watched = p.watch?.(readOf(p.targets, read).map(raw)) ?? [];
+				names = [...p.targets, ...watched];
+				return named(watched);
+			},
+			change: (read) => {
+				refused = undefined;
+				const held = readOf(names, read);
+				const count = p.targets.length;
+				const ops = p.decide(held.slice(0, count).map(raw), held.slice(count).map(raw));
+				const next = names.map((_, n): Next => {
+					const op = n < count ? ops.targets?.[n] : ops.watched?.[n - count];
+					if (op === undefined) return undefined;
+					if (op.kind === "remove") throw new TypeError("updatingAsOne: no op removes a record");
+					const gone = held[n] === undefined;
+					const why =
+						op.kind === "create" ? (gone ? undefined : "exists") : gone ? "missing" : undefined;
+					const at =
+						n < count
+							? { in: "targets" as const, nth: n }
+							: { in: "watched" as const, nth: n - count };
+					if (why !== undefined) refused ??= { kind: "refused", at, why };
+					return { value: op.value };
+				});
+				if (refused) return {};
+				const bySpace = (place: keyof PasskeyKeys) =>
+					next.filter((_, n) => names[n]?.place === place);
+				return { credentials: bySpace("credentials"), subjects: bySpace("subjects") };
+			},
+		});
+		if (refused) return refused;
+		const shown = readOf(names, changed).map((c) => ({
+			before: raw(c?.before),
+			after: raw(c?.after),
+		}));
+		return {
+			kind: "written",
+			targets: shown.slice(0, p.targets.length),
+			watched: shown.slice(p.targets.length),
+		};
+	};
 }

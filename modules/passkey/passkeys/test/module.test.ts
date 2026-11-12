@@ -110,7 +110,7 @@ it("takes all it names, with a witnessing and without", async () => {
 
 it("refuses to boot a passkey store that cannot change both its spaces as one", async () => {
 	const stores = memoryStores();
-	// Built where no type is checked: the type requires `updateTogether`, so boot checks it too.
+	// Neither `updateAsOne` nor `updateTogether`: the types cannot require one of two, so boot does.
 	const lacking = {
 		credentials: stores.passkeys.credentials,
 		subjects: stores.passkeys.subjects,
@@ -259,8 +259,8 @@ it("ends a passkey whose write may have landed though its answer was lost", asyn
 	const lossy = defineModule({ name: "lossy-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(passkeyStore).by(() => ({
 			...stores.passkeys,
-			updateTogether: async (keys, p) => {
-				const done = await stores.passkeys.updateTogether(keys, p);
+			updateAsOne: async (p) => {
+				const done = await stores.passkeys.updateAsOne(p);
 				if (lose) {
 					lose = false;
 					throw new Unavailable("passkey-store");
@@ -334,9 +334,9 @@ it("leaves no usable passkey where the registration is stopped and its end canno
 		m.provide(passkeyStore).by(() => ({
 			credentials: failing(stores.passkeys.credentials),
 			subjects: failing(stores.passkeys.subjects),
-			updateTogether: async (keys, p) => {
+			updateAsOne: async (p) => {
 				if (fails.down) throw new Unavailable("passkey-store");
-				const done = await stores.passkeys.updateTogether(keys, p);
+				const done = await stores.passkeys.updateAsOne(p);
 				if (fails.lose) {
 					fails.lose = false;
 					fails.down = true;

@@ -14,10 +14,12 @@ import {
 	type StoredChallenge,
 	type StoredPasskey,
 } from "../src/store.ts";
+import { updatingAsOne } from "../src/testing.ts";
 
 type Space = keyof PasskeyKeys;
 type Race = (record: StoredPasskey) => StoredPasskey;
 type Together = Required<Pick<PasskeyStore, "updateTogether">>;
+type AsOne = Required<Pick<PasskeyStore, "updateAsOne">>;
 
 /**
  * passkeys' stores on the records stand-in, on the given clock, each behind a switch: credentials
@@ -117,13 +119,13 @@ export function memoryStores(now: () => number = () => 0) {
 	const down = {
 		credentials: unavailableSwitch<PasskeyRecords>("credentials"),
 		subjects: unavailableSwitch<PasskeyRecords>("subjects"),
-		together: unavailableSwitch<Together>("passkeys"),
+		together: unavailableSwitch<AsOne>("passkeys"),
 		challenges: unavailableSwitch<ChallengeStore>("challenges"),
 	};
-	const passkeys: PasskeyStore = {
+	const passkeys: PasskeyStore & AsOne = {
 		credentials: down.credentials.wrap(keyed("credentials")),
 		subjects: down.subjects.wrap(keyed("subjects")),
-		...down.together.wrap({ updateTogether: changeTogether }),
+		...down.together.wrap({ updateAsOne: updatingAsOne(changeTogether) }),
 	};
 	const challenges = down.challenges.wrap({
 		open: challengesStand.records.create,
@@ -228,17 +230,17 @@ export function jointOver(store: PasskeyStore, now: () => number = () => 1_000) 
 			return records.update(...args);
 		},
 	});
-	const together = store.updateTogether.bind(store);
+	const asOne = (store.updateAsOne as AsOne["updateAsOne"]).bind(store);
 	const counting: PasskeyStore = {
 		credentials: one(store.credentials),
 		subjects: one(store.subjects),
-		updateTogether: (named, p) => {
+		updateAsOne: (p) => {
 			counted.together += 1;
-			const change = (read: Parameters<typeof p.change>[0]) => {
+			const decide: typeof p.decide = (...read) => {
 				counted.decisions += 1;
-				return p.change(read);
+				return p.decide(...read);
 			};
-			return together(named, { watch: p.watch, change });
+			return asOne({ ...p, decide });
 		},
 	};
 	const token = () => {

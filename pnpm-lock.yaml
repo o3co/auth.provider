@@ -2951,6 +2951,9 @@ importers:
 
   modules/passkey/passkeys:
     dependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel

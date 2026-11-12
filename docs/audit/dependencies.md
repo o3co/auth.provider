@@ -216,7 +216,7 @@ flowchart LR
 | `@mod/passkey-reset` | feature | `@mod/audit`, `@mod/kernel`, `@mod/passkeys`, `@mod/subject-revocation` |
 | `@mod/passkey-witness` | feature | `@mod/kernel` |
 | `@mod/passkey-witnessing` | feature | `@mod/audit`, `@mod/kernel`, `@mod/passkey-witness`, `@mod/passkeys` |
-| `@mod/passkeys` | feature | `@mod/kernel`, `@mod/passkey-witness`, `@mod/webauthn` |
+| `@mod/passkeys` | feature | `@mod/erasure-extensions`, `@mod/kernel`, `@mod/passkey-witness`, `@mod/webauthn` |
 | `@mod/webauthn` | feature | `@mod/kernel` |
 | `@mod/webauthn-login` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/passkeys`, `@mod/rate-limit`, `@mod/refresh`, `@mod/subject-revocation`, `@mod/users` |
 

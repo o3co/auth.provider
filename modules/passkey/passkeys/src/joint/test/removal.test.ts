@@ -151,7 +151,12 @@ it("makes the holder anew in a reset of a subject that has none, under the handl
 		removed: 0,
 		emptied: { handle, fence: 1 },
 	});
-	expect(await records.holder("dee")).toEqual({ handle, credentials: [], fence: 1 });
+	expect(await records.holder("dee")).toEqual({
+		handle,
+		credentials: [],
+		fence: 1,
+		subject: "dee",
+	});
 	// A holder there keeps its handle.
 	expect((await records.cleared("dee", fresh())).emptied).toEqual({ handle, fence: 2 });
 });

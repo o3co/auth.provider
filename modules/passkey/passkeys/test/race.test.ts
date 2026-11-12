@@ -51,7 +51,7 @@ async function raced(kimsWrite: "lands" | "fails") {
 		if (kimsWrite === "lands") {
 			expect(await records.register("kim", kims, 10)).toBe("registered");
 		} else {
-			stores.down.together.failNext("updateTogether");
+			stores.down.together.failNext("updateAsOne");
 			await expect(records.register("kim", kims, 10)).rejects.toSatisfy(isUnavailable);
 		}
 	});

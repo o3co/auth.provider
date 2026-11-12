@@ -1,7 +1,7 @@
 # passkeys
 
 ## Responsibilities
-- Keeps passkeys: each subject's user handle, and the credentials registered for it; its internal module `registration` registers them, `records` reads and writes them in the shape written, and `joint` changes a list and its records as one.
+- Keeps passkeys: each subject's user handle, and the credentials registered for it; its internal module `registration` registers them, `records` reads and writes them in the shape written, `joint` changes a list and its records as one, and `ports` uses the store's ports.
 - Answers assertions by the passkeys it keeps, through `webauthn`'s ceremonies; its internal module `challenges` keeps the challenges both answer.
 - Asks the witnessing contributed, if any, where it settles, handing what it reads anew, so a passkey witness's mark is kept in line by `passkey-witnessing`; its internal module `holders` asks it.
 
@@ -18,10 +18,10 @@
 - Extension point `passkeyWitnessing` (at most one, two refusing boot), for `passkey-witnessing`: `settle` and `emptied`, asked as the internal module `holders`' card says; `emptied` takes the mark off only on `none`.
 - `passkeyReading`, taken only by `passkey-witnessing` (its backfill): `writtenHolding` (what the subject's list names as written, read anew: `passkey`, only `pending` ones, or `none`). Its `takenBy`, like `passkeyClearing`'s, is a composition rule (the kernel at assembly, the guard on shipped imports: imported only by the packages named), not a runtime defence: a module trusting a read the witness is not asked about would pass what the witness disputes.
 - Store interfaces, which the assembly wires. The store never sees what a record holds.
-  - Passkeys: credentials and subjects, each by a key passkeys makes, saved once, read, changed from what they hold, kept without end; records of both spaces and the ones a change watches from them changed as one (`updateTogether`), which boot requires. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
+  - Passkeys: credentials and subjects, each by a key passkeys makes, saved once for a subject, read, changed from what they hold, kept without end; records of both spaces and the ones a change watches from them changed as one (`updateAsOne`; `updateTogether` deprecated). Its ports: the internal module `ports`' card. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
   - Challenges: opened for a lifetime, taken by putting a mark in place. Needs: survives a crash, never rolled back by failover, names derived from the challenge.
 - Operator section: `user-verification` (default `preferred`; `discouraged` is warned of at every start, `passkeys.user_unverified`), `max-credentials` (per subject, default 10).
-- `./testing`: the section's test configuration builder, and the contract tests of both store interfaces.
+- `./testing`: the section's test configuration builder, the contract tests of both store interfaces, and `updatingAsOne` (the passkey store's `updateAsOne` over an `updateTogether`, records kept raw, for test doubles).
 
 ## Invariants
 - `registrations`' creation options require a discoverable credential, as `passkeys` lists none to ask for. `passkeys` refuses an assertion without a user handle before any store is read; the handle must be its holder's, judged after the signature.
@@ -34,7 +34,7 @@
 - Passkeys and subjects through the passkey store; challenges through the challenge store. Their keys are the ones `webauthn` made before this package, so the records kept stay readable.
 
 ## Depends on
-- `kernel`, `webauthn` (the ceremonies, the credential's form), `passkey-witness` (whether a witness is composed)
+- `kernel`, `webauthn` (the ceremonies, the credential's form), `passkey-witness` (whether a witness is composed), `erasure-extensions` (the store's erase and migrate reports)
 
 ## Vocabulary
 - holder: a subject's user handle, the ids of its passkeys, and its fence, which each write that empties the list moves on, never back. passkey: a credential this package keeps for a subject.

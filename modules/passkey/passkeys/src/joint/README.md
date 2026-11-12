@@ -21,4 +21,4 @@ Internal module of `passkeys`: the writes that change a holder's list, each with
 - `afterRemoval` reads without writing. A listed passkey or pending one of the subject is held; none needs the holder that write left (its handle, at its fence or later) and every listed record readable, none the subject's; anything else is unsure. A holder that changes between its two reads is read again from the start, once.
 
 ## Depends on
-- `webauthn` (the credential's form); the internal module `records`; the package's store interface
+- `webauthn` (the credential's form); the internal modules `records` and `ports` (the store's change as one); the package's store interface

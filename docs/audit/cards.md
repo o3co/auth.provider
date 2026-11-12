@@ -275,10 +275,11 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/passkey-reset` (feature, `modules/passkey/passkey-reset`): An operator's reset of a subject's passkeys: ends the subject's sessions, empties its passkey list, then ends the sessions again.
 - `@mod/passkey-witness` (feature, `modules/passkey/passkey-witness`): Owns the contract of a passkey witness: who remembers, apart from `passkeys`' store, that a subject holds a passkey, so losing that store never reads as holding none.
 - `@mod/passkey-witnessing` (feature, `modules/passkey/passkey-witnessing`): Keeps the passkey witness's mark in line with what `passkeys` holds, so losing the passkey store never reads as holding none, but for a passkey lost between its write and its mark. Bridges `passkeys` and the witness composed (`passkey-witness`'s `passkeyWitnesses`).
-- `@mod/passkeys` (feature, `modules/passkey/passkeys`): Keeps passkeys: each subject's user handle, and the credentials registered for it; its internal module `registration` registers them, `records` reads and writes them in the shape written, and `joint` changes a list and its records as one.
+- `@mod/passkeys` (feature, `modules/passkey/passkeys`): Keeps passkeys: each subject's user handle, and the credentials registered for it; its internal module `registration` registers them, `records` reads and writes them in the shape written, `joint` changes a list and its records as one, and `ports` uses the store's ports.
   - `challenges` (`src/challenges`): the challenges that registrations and assertions answer.
   - `holders` (`src/holders`): whether subjects hold passkeys, and the settle that asks the witnessing where `passkeys` settles.
   - `joint` (`src/joint`): the writes that change a holder's list, each with the records it names in one change, and what a write that emptied a list leaves.
+  - `ports` (`src/ports`): the passkey store's ports, as passkeys uses them.
   - `records` (`src/records`): the passkey records, read in the shape written, and the writes that leave every list as it is.
   - `registration` (`src/registration`): registering passkeys.
 - `@mod/webauthn` (feature, `modules/passkey/webauthn`): Runs WebAuthn ceremonies for its relying party: options, response verification, the signature count and the user handle, by its internal module `ceremony`.

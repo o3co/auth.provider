@@ -25,7 +25,7 @@ it("leaves no id taken for good when the store fails as a registration writes", 
 	const { stores, records, credentialFor } = await kept();
 	const id = fresh();
 	const sams = await credentialFor("sam", id);
-	stores.down.together.failNext("updateTogether");
+	stores.down.together.failNext("updateAsOne");
 	await expect(records.register("sam", sams, 10)).rejects.toSatisfy(isUnavailable);
 	// Nothing of it, read raw before any later registration writes.
 	expect(await heldState(stores.passkeys, ["sam", "kim"], [id])).toEqual({

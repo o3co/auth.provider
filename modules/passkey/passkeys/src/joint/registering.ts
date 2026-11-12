@@ -83,7 +83,7 @@ export function registeringWith(
 						const list = listed.includes(id) ? listed : [...listed, id];
 						return {
 							credentials: [{ value: record }],
-							subjects: [{ value: stored({ ...ours, credentials: list }) }],
+							subjects: [{ value: stored({ ...ours, credentials: list, subject }) }],
 						};
 					},
 				},
@@ -103,7 +103,7 @@ export function registeringWith(
 						const rest = listed.filter((c) => c !== id);
 						return {
 							credentials: [{ value: removedOf(subject) }],
-							subjects: [listed.includes(id) ? { value: listing(ours, rest) } : undefined],
+							subjects: [listed.includes(id) ? { value: listing(ours, rest, subject) } : undefined],
 						};
 					},
 				},

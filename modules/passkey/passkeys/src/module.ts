@@ -16,6 +16,7 @@ import {
 } from "./contract.ts";
 import { holdersOver } from "./holders/holders.ts";
 import { passkeysOver } from "./passkeys.ts";
+import { portsRefused } from "./ports/ports.ts";
 import { type KeptPasskeys, keptPasskeys } from "./records.ts";
 import { registrationsOver } from "./registration/registrations.ts";
 import { type Settings, section } from "./section.ts";
@@ -58,13 +59,12 @@ export default defineModule(
 		takes: [challengeStore, passkeyStore, passkeyWitnesses, passkeyWitnessing, ceremonies],
 	},
 	(m) => [
-		// Over a store that changes both its spaces as one: typed as required, and checked here for a
-		// store built where no type is checked.
+		// Over a store that changes both its spaces as one, its ports whole: checked here, as the
+		// types cannot say exactly one, nor all or none.
 		m.provide(kept).by(async (c) => {
 			const store = await c.get(passkeyStore);
-			if (typeof store.updateTogether !== "function") {
-				return c.refuse("passkeys", "its passkey store cannot change both its spaces as one");
-			}
+			const parted = portsRefused(store);
+			if (parted !== undefined) return c.refuse("passkeys", parted);
 			return keptPasskeys(store, tokenOf(c), c.clock.now);
 		}),
 		m.provide(passkeys).by(async (c) => {

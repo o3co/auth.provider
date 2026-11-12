@@ -6,7 +6,7 @@ Internal module of `passkeys`: the passkey records, read in the shape written, a
 - Reads holders and passkeys in the shape written, and makes the writes that keep a holder's list as it is: a first holder, an activation, a count, a name.
 
 ## Not here
-- The writes that change a list, and the fence they move (`joint`). Challenges (`challenges`). Where records are kept (the package's store interface).
+- The writes that change a list, and the fence they move (`joint`). Challenges (`challenges`). Which of the store's ports passkeys uses, and how (`ports`). Where records are kept (the package's store interface).
 
 ## Offers
 - `recordsOver` (the passkey store) → `holder`, `handleFor`, `passkey`, `activated`, `count`, `listed`, `renamed`, `writtenHolding`.
@@ -14,7 +14,7 @@ Internal module of `passkeys`: the passkey records, read in the shape written, a
 
 ## Invariants
 - Handles and credential ids are written and compared only in `webauthn`'s canonical form. A record read in another shape is unavailable: a broken record decides nothing.
-- A holder is version 1, with its handle, its list and an optional fence, read as 0 where 0.18 kept none. A passkey is version 1. A pending one is version 2 with its write's token, so a host reading only version 1 finds it broken, never a passkey. A removed one keeps only its subject.
+- A holder is version 1, with its handle, its list, an optional fence, read as 0 where 0.18 kept none, and the subject it is written for, which every write sets; a holder a 0.19 node creates holds no subject. A passkey is version 1. A pending one is version 2 with its write's token, so a host reading only version 1 finds it broken, never a passkey. A removed one keeps only its subject.
 - `handleFor` makes a holder only where the subject has none, and answers the one kept.
 - An activation turns only the pending record its write's token names into a passkey, keeping its subject and every list; any other (written over, taken by another subject, or removed) is `taken`.
 - A count moves on only over the passkey judged (its subject, key and count), as the record before the change tells; a removed or pending record has none, and one registered again by another subject is not the one judged.

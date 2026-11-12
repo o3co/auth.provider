@@ -12,6 +12,8 @@ export interface Holder {
 	readonly credentials: readonly string[];
 	/** Moved on by each write that empties the list; 0 where none has (or 0.18 kept the holder). */
 	readonly fence: number;
+	/** The subject it is written for; none where a node before 0.20 made it. */
+	readonly subject?: string;
 }
 
 export interface Passkey {
@@ -30,6 +32,7 @@ const holderShape = z.object({
 	handle: canonical(handleBytes),
 	credentials: z.array(z.string()),
 	fence: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+	subject: z.string().optional(),
 });
 const passkeyShape = z.object({
 	v: z.literal(1),
@@ -56,8 +59,8 @@ const removedShape = z.object({ v: z.literal(1), subject: z.string(), removed: z
 export function holderOf(record: StoredPasskey): Holder {
 	const parsed = holderShape.safeParse(record);
 	if (!parsed.success) throw broken();
-	const { handle, credentials, fence = 0 } = parsed.data;
-	return { handle, credentials, fence };
+	const { handle, credentials, fence = 0, subject } = parsed.data;
+	return { handle, credentials, fence, ...(subject === undefined ? {} : { subject }) };
 }
 
 /** A kept passkey, or the subject a removed one was held by; unavailable for any other shape. */
@@ -115,8 +118,8 @@ export function recordsOver(store: PasskeyStore) {
 		/** The subject's handle; `fresh` becomes it when the subject has none yet. */
 		handleFor: async (subject: string, fresh: string): Promise<string> => {
 			if (!isCanonical(fresh, handleBytes)) throw new Error("a handle must be canonical");
-			const first = stored({ v: 1, handle: fresh, credentials: [] });
-			await store.subjects.save(subjectKey(subject), first, "endless");
+			const first = stored({ v: 1, handle: fresh, credentials: [], subject });
+			await store.subjects.save(subjectKey(subject), first, "endless", subject);
 			const kept = await holder(subject);
 			if (!kept) throw broken();
 			return kept.handle;
