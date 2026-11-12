@@ -615,6 +615,20 @@ describe("refresh tokens", () => {
 		expect(await s.redeem("coded")).not.toHaveProperty("refresh_token");
 	});
 
+	it("are not given for an erased subject: the code's exchange is unavailable, no family is linked to its redemption, and its access token is revoked", async () => {
+		const s = await serve();
+		s.stores.erased.add("alice");
+		issuedTokens.length = 0;
+		const answer = await s.redeem();
+		expect(answer).toMatchObject({ error: "temporarily_unavailable" });
+		expect(answer.refresh_token).toBeUndefined();
+		expect(await familyOf(s, answer.redemption)).toBeUndefined();
+		expect(issuedTokens).toHaveLength(1);
+		expect(await s.active(issuedTokens[0])).toBe(false);
+		// A retry never passes: the code is voided.
+		expect(await answer.again()).toMatchObject({ error: "invalid_grant" });
+	});
+
 	it("rotate on every use, and a spent one that comes again revokes the family and what it issued", async () => {
 		const s = await serve();
 		const first = await s.redeem();
