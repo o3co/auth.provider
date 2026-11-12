@@ -1,6 +1,11 @@
-import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
+import { assemble, type BuildContext, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { transactionListings, transactionStore } from "@mod/mfa-flows";
+import {
+	heldLifetimeMaxMs,
+	type StoredTransaction,
+	transactionListings,
+	transactionStore,
+} from "@mod/mfa-flows";
 import { transactionListingsContract, transactionStoreContract } from "@mod/mfa-flows/testing";
 import { type Space, spaces } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
@@ -10,58 +15,116 @@ import { section } from "../src/section.ts";
 
 const runtime = quietRuntime({ clock: { now: () => 1_800_000_000_000 } });
 
-transactionStoreContract(
-	"mfa-flows-store on records, on a simulated replicated store",
-	async () => {
-		const simulated = simulatedStore();
-		const app = await assemble({
-			modules: [simulated.module, wiring],
-			config: kernelConfig(),
-			runtime,
-		});
-		const transactions = app.get(transactionStore);
-		return {
-			transactions,
-			advance: (ms) => simulated.shiftClock(ms),
-			raceNextUpdate: (key, change) =>
-				simulated.beforeNext("replaceIf", "mfa-flows-store.transactions", async () => {
-					await transactions.update(key, (record) => ({ value: change(record) }));
-				}),
-			loseNextAnswer: () => simulated.loseNextReply(),
-			failover: () => simulated.failover(),
-			restart: () => simulated.restart(),
-			pressMemory: () => simulated.pressMemory(),
-			holds: (text) => simulated.holds(text),
-		};
-	},
-);
+/** The wiring on a simulated replicated store at a phase, its kernel clock the given one. */
+async function opened(
+	phase: "reader" | "indexed" = "reader",
+	options: {
+		readonly blip?: boolean;
+		readonly config?: object;
+		readonly clock?: () => number;
+	} = {},
+) {
+	const simulated = simulatedStore();
+	if (phase === "indexed") simulated.mark("subject-records.phase", "indexed");
+	simulated.unreachable(options.blip ?? false);
+	let context: BuildContext<unknown> | undefined;
+	const asker = defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
+		m.provide(contract<object>("asker")).by((c) => {
+			context = c;
+			return {};
+		}),
+	]);
+	const app = await assemble({
+		modules: [simulated.module, wiring, asker],
+		config: { ...kernelConfig(), ...options.config },
+		runtime: options.clock ? quietRuntime({ clock: { now: options.clock } }) : runtime,
+	});
+	const ready = () => context?.readinessReport(1000).then((r) => r.answer);
+	return { simulated, app, ready };
+}
+
+for (const phase of ["reader", "indexed"] as const) {
+	transactionStoreContract(
+		`mfa-flows-store on subject-records, ${phase}, on a simulated replicated store`,
+		async () => {
+			const { simulated, app } = await opened(phase);
+			const transactions = app.get(transactionStore);
+			return {
+				transactions,
+				advance: (ms) => simulated.shiftClock(ms),
+				raceNextUpdate: (key, change) =>
+					// A bounded record is fenced at its create alone: a change is a batch on its own partition, in either phase.
+					simulated.beforeNext("batch", "mfa-flows-store.transactions", async () => {
+						await transactions.update(key, (record) => ({ value: change(record) }));
+					}),
+				loseNextAnswer: () => simulated.loseNextReply(),
+				failover: () => simulated.failover(),
+				restart: () => simulated.restart(),
+				pressMemory: () => simulated.pressMemory(),
+				holds: (text) => simulated.holds(text),
+			};
+		},
+	);
+}
 
 // The listings' own kernel clock; the simulated store runs on it, so lifetimes and the store's run together.
 let listingsNow = 1_800_000_000_000;
-const listingsRuntime = quietRuntime({ clock: { now: () => listingsNow } });
 
-transactionListingsContract(
-	"mfa-flows-store on records' keyed sets, on a simulated replicated store, keeping the section's 7 a holder",
-	async () => {
-		const simulated = simulatedStore();
-		const app = await assemble({
-			modules: [simulated.module, wiring],
-			config: { ...kernelConfig(), "mfa-flows-store": { "transactions-per-holder": 7 } },
-			runtime: listingsRuntime,
-		});
-		return {
-			listings: app.get(transactionListings),
-			cap: 7,
-			advance: (ms) => {
-				listingsNow += ms;
-			},
-			loseNextAnswer: () => simulated.loseNextReply(),
-			failover: () => simulated.failover(),
-			restart: () => simulated.restart(),
-			pressMemory: () => simulated.pressMemory(),
-		};
-	},
-);
+for (const phase of ["reader", "indexed"] as const) {
+	transactionListingsContract(
+		`mfa-flows-store on subject-records' keyed sets, ${phase}, on a simulated replicated store, keeping the section's 7 a holder`,
+		async () => {
+			const { simulated, app } = await opened(phase, {
+				config: { "mfa-flows-store": { "transactions-per-holder": 7 } },
+				clock: () => listingsNow,
+			});
+			return {
+				listings: app.get(transactionListings),
+				cap: 7,
+				advance: (ms) => {
+					listingsNow += ms;
+				},
+				loseNextAnswer: () => simulated.loseNextReply(),
+				failover: () => simulated.failover(),
+				restart: () => simulated.restart(),
+				pressMemory: () => simulated.pressMemory(),
+			};
+		},
+	);
+}
+
+it("fences a subject's transactions until the bound, refusing a new one for the subject, and erases its listings", async () => {
+	const { app } = await opened("indexed");
+	const [transactions, listings] = [app.get(transactionStore), app.get(transactionListings)];
+	const record = (n: number) => ({ n }) as unknown as StoredTransaction;
+	await transactions.save("t1", record(1), 60_000, "alice");
+	await listings.add("login:alice", "m1", 60_000, "alice");
+	const signal = new AbortController().signal;
+	expect(await transactions.erase?.("alice", signal)).toMatchObject({ kind: "fenced" });
+	expect(await listings.erase?.("alice", signal)).toMatchObject({ kind: "erased", removed: 1 });
+	expect(await listings.members("login:alice")).toEqual([]);
+	expect(await transactions.save("t2", record(2), 60_000, "alice")).toBe("erased");
+	expect(await listings.add("login:alice", "m2", 60_000, "alice")).toBe("erased");
+	expect(await transactions.save("t3", record(3), 60_000, "bob")).toBe("created");
+	// One kept before the erasure ends by its own end, within the bound.
+	expect(await transactions.read("t1")).toEqual(record(1));
+});
+
+it("keeps nothing past mfa-flows' bound, the longer of a transaction's and a release permit's", async () => {
+	const transactions = (await opened("indexed")).app.get(transactionStore);
+	const record = { n: 1 } as unknown as StoredTransaction;
+	await expect(
+		transactions.save("t", record, heldLifetimeMaxMs + 1, "alice"),
+	).rejects.toBeInstanceOf(TypeError);
+	expect(await transactions.save("p", record, heldLifetimeMaxMs, "alice")).toBe("created");
+});
+
+it("starts over a store's blip unready, out of traffic, and turns ready once the store answers", async () => {
+	const { simulated, ready } = await opened("indexed", { blip: true });
+	expect(await ready()).toBe("unready");
+	simulated.unreachable(false);
+	expect(await ready()).toBe("ready");
+});
 
 it("keeps 5 transactions a holder unless the section says, from 1 to 10000", () => {
 	expect(section.parse({})).toEqual({ "transactions-per-holder": 5 });

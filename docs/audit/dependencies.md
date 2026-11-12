@@ -285,7 +285,7 @@ flowchart LR
 | `@mod/federation-grants-store` | wiring | `@mod/federation-grants`, `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-records` |
 | `@mod/federation-tokens-store` | wiring | `@mod/federation-tokens`, `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-records` |
 | `@mod/jwt-bearer-store` | wiring | `@mod/jwt-bearer`, `@mod/kernel`, `@mod/records`, `@mod/store` |
-| `@mod/mfa-flows-store` | wiring | `@mod/kernel`, `@mod/mfa-flows`, `@mod/records`, `@mod/store` |
+| `@mod/mfa-flows-store` | wiring | `@mod/kernel`, `@mod/mfa-flows`, `@mod/store`, `@mod/subject-records` |
 | `@mod/mfa-store` | wiring | `@mod/kernel`, `@mod/mfa`, `@mod/records`, `@mod/store` |
 | `@mod/refresh-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/refresh`, `@mod/store`, `@mod/subject-records` |
 | `@mod/rp-logout-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/rp-logout`, `@mod/store` |
