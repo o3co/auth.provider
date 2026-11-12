@@ -2,10 +2,10 @@ import { recordingLog } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import type { Tokens } from "@mod/tokens";
 import { expect, it } from "vitest";
-import { type CodeRecord, fromStored, toStored } from "../src/codes.ts";
-import type { Addition } from "../src/contract.ts";
-import { voiding } from "../src/grant.ts";
-import type { StoredCode } from "../src/store.ts";
+import { type CodeRecord, fromStored, toStored } from "../../codes.ts";
+import type { Addition } from "../../contract.ts";
+import type { StoredCode } from "../../store.ts";
+import { voiding } from "../voiding.ts";
 
 /** A code used up, whose token was issued: listed void, it is settled once the token is revoked. */
 const used: CodeRecord = {
