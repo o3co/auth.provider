@@ -69,9 +69,16 @@ export function intentsWith(p: IntentsParts): GrantIntents {
 		...stepping,
 		...callback,
 		failed,
-		// Recorded best effort, as an outage's audit is: the browser half's notice answers nothing.
+		// The browser half's notice answers nothing, so its audit goes on after; one that fails then (no
+		// outage, which reads as `unread`) is a defect, logged by kind, naming no subject.
 		noted: (ref, outcome, from) => {
-			failure(foundOf(ref), outcome, from).catch(() => undefined);
+			failure(foundOf(ref), outcome, from).catch((error: unknown) => {
+				const kind = error instanceof Error ? error.name : typeof error;
+				p.log.warn("federation-grants.audit_failed", {
+					audit: "federation.grant.authorization_failed",
+					kind,
+				});
+			});
 		},
 		unanswered: (from) =>
 			audited.record("federation.grant.authorization_failed", {

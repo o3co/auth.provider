@@ -17,7 +17,7 @@ Internal module of `federation-grants`: a grant's intent through the browser, as
 - Binding the first session and making its question are two writes: a session that loses the binding is stale, and a failed question leaves the binding for that session to try again.
 - The upstream's tokens are judged here, writing nothing; the browser half ends an intent they refuse.
 - An activation writes only over its own intent, unended and within its time as read then, never over a revoked grant, and seals the tokens as judged, at the time judged. A race that refuses it ends the intent and is audited.
-- A connection's failure, by `failed` or the browser half's `noted`, is audited without the subject where it is erased (`grant`'s `auditedAbout`); a notice's audit is best effort, recorded once that is read. An activation is audited naming the subject: the browser half reads the boundary (`stillValid`) just before it, in the same request.
+- A connection's failure, by `failed` or the browser half's `noted`, is audited without the subject where it is erased (`grant`'s `auditedAbout`); a notice's audit goes on after the notice returns, and one failing then (a defect: an outage reads as `unread`) is logged (`federation-grants.audit_failed`, by the audit's kind and the error's), naming no subject. An activation is audited naming the subject: the browser half reads the boundary (`stillValid`) just before it, in the same request.
 - Only an intent still the grant's current one, unended and within its time, is read or changed, at the change too; ending one with an error is written past its time as well.
 
 ## Depends on

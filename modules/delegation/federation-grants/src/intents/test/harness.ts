@@ -4,7 +4,12 @@ import type { Clients } from "@mod/clients";
 import { assemble, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import type { Seal } from "@mod/seal";
-import { erasedSubjects, revocations, subjectErasure } from "@mod/subject-revocation";
+import {
+	type ErasedSubjects,
+	erasedSubjects,
+	revocations,
+	subjectErasure,
+} from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import type { Delegation, Upstreams, UpstreamTokens } from "@mod/upstreams";
 import { memoryStores } from "../../../test/stores.ts";
@@ -41,7 +46,9 @@ export const upstreamTokens = (more: Readonly<Record<string, unknown>> = {}) =>
  * The intents alone, over memory stores and the revocation stand-in, a test upstream `corp` behind
  * the connection `cal`, and a client `worker` that may use it. Intents are written as a lodging writes them.
  */
-export async function intents(options: { readonly settings?: Record<string, unknown> } = {}) {
+export async function intents(
+	options: { readonly settings?: Record<string, unknown>; readonly erased?: ErasedSubjects } = {},
+) {
 	let now = 1_800_000_000_000;
 	const logged = recordingLog();
 	const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
@@ -93,7 +100,7 @@ export async function intents(options: { readonly settings?: Record<string, unkn
 		}),
 		listed: listingWith(stores.subjects, logged.log),
 		audit: app.get(audit),
-		erased: app.get(erasedSubjects),
+		erased: options.erased ?? app.get(erasedSubjects),
 		settings,
 		origin,
 		...runtime,

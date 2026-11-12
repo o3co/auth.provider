@@ -133,6 +133,24 @@ describe("a subject erased", () => {
 	});
 });
 
+it("logs a notice's audit that fails for a defect, naming no subject, the notice returning at once", async () => {
+	const broken = { erased: async () => Promise.reject(new TypeError("broken")) };
+	const h = await intents({ erased: broken });
+	const { ref } = await h.questioned();
+	const unhandled: unknown[] = [];
+	const caught = (reason: unknown) => void unhandled.push(reason);
+	process.on("unhandledRejection", caught);
+	expect(h.intents.noted(ref, "upstream_error", {})).toBeUndefined();
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	process.off("unhandledRejection", caught);
+	expect(unhandled).toEqual([]);
+	const warned = h.logs().filter((l) => l.event === "federation-grants.audit_failed");
+	expect(warned.map((l) => l.fields)).toEqual([
+		{ audit: "federation.grant.authorization_failed", kind: "TypeError" },
+	]);
+	expect(h.events.some((e) => e.kind === "federation.grant.authorization_failed")).toBe(false);
+});
+
 describe("the decision", () => {
 	it("spends a denied question, ends the intent as denied, audits it with its source, and answers the way back", async () => {
 		const h = await intents();
