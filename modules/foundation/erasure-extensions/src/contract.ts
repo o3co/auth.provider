@@ -105,9 +105,10 @@ export type Elsewhere = (key: string, value: unknown) => Promise<void>;
 export interface Erased {
 	readonly reports: readonly (SpaceReport | ForgottenReport)[];
 	/**
-	 * Sessions whose participants were never told, each counted once: high for a record it could not
-	 * read, but a lower bound per RP (a session several RPs hold is one) and after an interrupted
-	 * run. 0 for an eraser with no sessions to lose.
+	 * Sessions whose participants were never told, each counted once; summed across erasers, the
+	 * sessions whose logout may not have reached all their RPs. High for a record it could not read,
+	 * and for a session closing when erased (another eraser may count it too); low after an
+	 * interrupted run. 0 for an eraser with no sessions to lose.
 	 */
 	readonly logoutGaps: number;
 }
