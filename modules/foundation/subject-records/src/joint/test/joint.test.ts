@@ -180,6 +180,11 @@ it("moves by the subject a record is read under: to an erased subject refused, f
 		});
 	await make("k1", "alice");
 	await make("k2", "bob");
+	expect(await moved("none", "alice")).toEqual({
+		kind: "refused",
+		at: { in: "targets", index: 0 },
+		why: "missing",
+	});
 	await erase(claims, "erin");
 	expect(await moved("k1", "erin")).toEqual({
 		kind: "refused",

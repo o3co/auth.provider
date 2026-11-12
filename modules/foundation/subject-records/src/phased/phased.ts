@@ -117,7 +117,6 @@ export const phasedRecordsIn = <T extends Json>(
 			read: true,
 			change: true,
 			remove: true,
-			move: true,
 			scan: true,
 			erase: true,
 			migrate: true,

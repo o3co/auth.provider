@@ -119,22 +119,6 @@ export function subjectRecordsIn<T extends Json>(
 			key: string,
 			when?: (value: T) => boolean,
 		): Promise<"removed" | "left" | "missing"> => ruled(key, rules.remove(key, when)),
-		/**
-		 * Moves the record from one subject to another as one (account erasure §3.5): its envelope's
-		 * subject rewritten, its entry out of `from`'s bucket and into `to`'s, held by both subjects'
-		 * tombstones absent; a set under the key stays its own subject's. `missing` where there is no
-		 * record, `not-from` where its subject is another, `erased` where either tombstone stopped it.
-		 * Only an indexed `online-indexed` space.
-		 */
-		move: async (
-			key: string,
-			from: string,
-			to: string,
-		): Promise<"moved" | "missing" | "not-from" | "erased"> => {
-			// Either tombstone stops it, as this one op has always answered.
-			const moved = await ruled(key, rules.move(key, from, to));
-			return moved === "from-erased" ? "erased" : moved;
-		},
 		/** A page of the keys of the space's living records, as `store` walks: names, where keyed by secrets. */
 		scan: async (
 			cursor?: string,

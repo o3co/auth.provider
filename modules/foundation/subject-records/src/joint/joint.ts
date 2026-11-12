@@ -151,7 +151,7 @@ export function jointRecordsIn<P extends string>(
 			needs: inner.needs,
 			decide: (h, needed, attempt) => {
 				const d = inner.decide(h, needed, attempt);
-				const answer = d.answer === "moved" ? "ok" : d.answer === "not-from" ? "missing" : d.answer;
+				const answer = d.answer === "moved" ? "ok" : d.answer;
 				return { ...d, answer };
 			},
 		};

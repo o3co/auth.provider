@@ -89,7 +89,6 @@ it("starts over a store's blip, unready and unavailable until the phase reads, t
 	expect(await records.change("alice", (n) => ({ value: n + 1 }))).toEqual({ before: 1, after: 2 });
 	expect(await records.read("alice")).toBe(2);
 	expect((await records.scan()).keys).toEqual(["alice"]);
-	await expect(records.move("alice", "alice", "bob")).rejects.toThrow();
 	await records.remove("alice");
 	expect(await records.read("alice")).toBeUndefined();
 	const sets = await phasedKeyedSetsIn(
