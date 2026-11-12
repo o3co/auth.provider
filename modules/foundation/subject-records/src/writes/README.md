@@ -9,11 +9,12 @@ Internal module of `subject-records`: a subject's records, by the category its s
 - Keyed sets: internal module `sets`. Erasing and migrating: internal modules `erase` and `migrate`. The phase: the place's, given (or read once: internal module `phased`).
 
 ## Offers
-- `subjectRecordsIn` (a place, its index space, the phase; where; the builder's `refuse`; `secret` for a bounded space) → `create` (a key, a value or its maker, a lifetime, its subject last: `created`, `exists` or `erased`), `read`, `change`, `remove` (a key, and optionally a check of its value: `removed`, `left` where the check said no, or `missing`), `scan`; and `unowned` (deprecated, below).
+- `subjectRecordsIn` (a place, its index space, the phase; where; the builder's `refuse`; `secret` for a bounded space) → `create` (a key, a value or its maker, a lifetime, its subject last: `created`, `exists` or `erased`), `read`, `change`, `changeNamed`, `remove` (a key, and optionally a check of its value: `removed`, `left` where the check said no, or `missing`), `scan`; and `unowned` (deprecated, below).
 - `rulesOf` (a place, its category) → each write's rule: the index records it reads besides the record, named from the record as read, and what it answers and writes from all it read. The one statement of the writes' conditions; `subjectRecordsIn` runs each op through it, one record at a time, and `joint` many as one.
 - `online-indexed`: each record's key in its subject's bucket. `online-keyed`: each record's key its subject itself, one per subject (any other key, TypeError). `bounded`: each written raw, fenced at creation by its subject's tombstone, gone by its end, at most the space's `boundedMs`.
 
 ## Invariants
+- `changeNamed` reaches the same record as `change` by the name it is kept by (records' `secretName`) under a secret, elsewhere by its key: the same rule, its fixed end and its fence alike, so a bounded record is changed by name through its subject's tombstone, which fences only creation.
 - `moveTo`, `joint`'s alone, holds a move's three cases: from another subject, rebucketed (`erased` for `to`'s tombstone, `from-erased` for `from`'s alone); to its own subject, or raw, a `change`.
 - A create holds the record absent, the subject's tombstone absent and, as read, the bucket (`online-indexed`) or the witness (`online-keyed`), and writes the record with its entry or its witness, as one.
 - A value may be made from the attempt's deadline: owners whose value bounds a time by the write, as subject-revocation's boundaries do, need it.

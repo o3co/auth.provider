@@ -10,6 +10,7 @@ Internal module of `subject-records`: the builders over the phase a process hold
 
 ## Offers
 - `phasedRecordsIn` and `phasedKeyedSetsIn` (a place with no phase, the phase read once, where, the builder's `refuse`, as the builders take them) → the builder's methods, each answering through that phase, and `ready`, the template's probe check.
+- `phasedRecordsIn` also answers `nameOf` (a secret) where its records are keyed by secrets: records' own digest, read off the target it writes, needing no phase; a record a 0.19 instance wrote under a secret is the one `changeNamed` reaches.
 - Each also answers the space's `erase` (a subject, a signal, for records `eachRemoved` too) and `migrate` at that phase: `phasedRecordsIn`'s a walk, the owner's `SubjectReading`, a signal and optionally its `Elsewhere`; `phasedKeyedSetsIn`'s a walk, the owner's `SetReading` and a signal. They come in the order an owner's store ports take them, so the wiring maps them with no arrow and never handles the phase. `unowned`'s `closed` answers that phase as captured, not the mark at the write.
 - `phasedJointRecordsIn` (places by name, with no phase; the phase read once; where; `refuse`) → `changeSubjectRecords` and `ready`. Given the template's one `PhaseOnce`, its builders and the joint change see one phase. It has no `erase` or `migrate`: each place's builder has them.
 

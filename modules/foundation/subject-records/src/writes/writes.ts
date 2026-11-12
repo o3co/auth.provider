@@ -31,11 +31,14 @@ export function subjectRecordsIn<T extends Json>(
 	const rules = rulesOf(place, category);
 	const recordOf = (key: string): Target =>
 		options.secret ? { place, secret: key } : { place, key };
+	/** A record by the name it is kept by: under a secret, the name `nameOf` gives; elsewhere its key. */
+	const namedOf = (name: string): Target =>
+		options.secret ? { place, secretName: name } : { place, key: name };
 	/** Runs one rule on one record, as one change: its needs read beside it, its writes in one write. */
-	const ruled = async <A>(key: string, rule: Rule<A>): Promise<A> => {
+	const ruledAt = async <A>(target: Target, rule: Rule<A>): Promise<A> => {
 		let answer: A | undefined;
 		await changeRecords({
-			targets: [recordOf(key)],
+			targets: [target],
 			watch: ([held]) => rule.needs(held),
 			decide: ([held], needed, attempt) => {
 				const decided = rule.decide(held, needed, attempt);
@@ -48,6 +51,7 @@ export function subjectRecordsIn<T extends Json>(
 		});
 		return answer as A;
 	};
+	const ruled = <A>(key: string, rule: Rule<A>): Promise<A> => ruledAt(recordOf(key), rule);
 	return {
 		/**
 		 * Places the record, unless the key holds one (`exists`) or, once indexed, its subject is
@@ -107,6 +111,18 @@ export function subjectRecordsIn<T extends Json>(
 			change: (current: T, attempt: Attempt) => Changed<T> | undefined,
 		): Promise<{ readonly before: T; readonly after: T } | undefined> => {
 			const answer = await ruled(key, rules.change(change));
+			return answer.kind === "changed" ? { before: answer.before, after: answer.after } : undefined;
+		},
+		/**
+		 * `change` by the record's name, which `nameOf` gives a space keyed by secrets: the same record
+		 * and rule, its end and fence alike, for an owner that keeps names, never secrets (code-grant).
+		 * Elsewhere a name is the key itself.
+		 */
+		changeNamed: async (
+			name: string,
+			change: (current: T, attempt: Attempt) => Changed<T> | undefined,
+		): Promise<{ readonly before: T; readonly after: T } | undefined> => {
+			const answer = await ruledAt(namedOf(name), rules.change(change));
 			return answer.kind === "changed" ? { before: answer.before, after: answer.after } : undefined;
 		},
 		/**
