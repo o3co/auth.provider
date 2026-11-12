@@ -17,8 +17,9 @@ import {
 	sessionRedemptions,
 	voidList,
 } from "./contract.ts";
-import { answerFields, codeGrant, voiding } from "./grant.ts";
+import { answerFields, codeGrant } from "./grant.ts";
 import { section } from "./section.ts";
+import { voiding } from "./voiding/voiding.ts";
 
 const takes = [
 	codeStore,
@@ -35,7 +36,7 @@ const takes = [
 ];
 
 // Safe on many instances: every instance runs the sweep over the shared void list, and settling a void twice
-// does no harm (test/voids.test.ts).
+// does no harm (voiding/test/voids.test.ts).
 export default defineModule({ name: "code-grant", replicaSafe: true, section, takes }, (m) => [
 	m.provide(codes).by(async (c) => {
 		const store = await c.get(codeStore);
