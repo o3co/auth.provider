@@ -1,7 +1,7 @@
 import { contract, defineModule, optional, probes } from "@mod/kernel";
 import {
-	heldLifetimeMaxMs,
 	type StoredTransaction,
+	storedLifetimeMaxMs,
 	transactionListings,
 	type transactionListingsNeeds,
 	transactionStore,
@@ -33,7 +33,7 @@ const transactions: Space = {
 	// Its needs, and what subject-records needs of a space holding a subject's data.
 	guarantees: [...new Set([...Object.values(guaranteeFor), ...tombstoneFloor])],
 	subjectData: "bounded",
-	boundedMs: heldLifetimeMaxMs,
+	boundedMs: storedLifetimeMaxMs,
 	erasedBy: "mfa-flows",
 };
 /** Each need of the listings, as the guarantee their space declares; members are digests, so no secret names them. */

@@ -1,13 +1,14 @@
 import { assemble, type BuildContext, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import {
-	heldLifetimeMaxMs,
 	type StoredTransaction,
+	storedLifetimeMaxMs,
 	transactionListings,
 	transactionStore,
 } from "@mod/mfa-flows";
 import { transactionListingsContract, transactionStoreContract } from "@mod/mfa-flows/testing";
-import { type Space, spaces } from "@mod/store";
+import { secretRecordsIn } from "@mod/records";
+import { type Space, type Store, spaces, store } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import wiring from "../src/module.ts";
@@ -114,9 +115,9 @@ it("keeps nothing past mfa-flows' bound, the longer of a transaction's and a rel
 	const transactions = (await opened("indexed")).app.get(transactionStore);
 	const record = { n: 1 } as unknown as StoredTransaction;
 	await expect(
-		transactions.save("t", record, heldLifetimeMaxMs + 1, "alice"),
+		transactions.save("t", record, storedLifetimeMaxMs + 1, "alice"),
 	).rejects.toBeInstanceOf(TypeError);
-	expect(await transactions.save("p", record, heldLifetimeMaxMs, "alice")).toBe("created");
+	expect(await transactions.save("p", record, storedLifetimeMaxMs, "alice")).toBe("created");
 });
 
 it("starts over a store's blip unready, out of traffic, and turns ready once the store answers", async () => {
@@ -144,4 +145,41 @@ it("declares, for the listings, each guarantee mfa-flows needs, confirmed reads 
 	});
 	const listed = app.get(declared).find((s) => s.name === "mfa-flows-store.transaction-listings");
 	expect(listed?.guarantees).toEqual(["no-eviction", "durable", "replicated", "confirmed-reads"]);
+});
+
+it("reads, in either phase, a transaction a 0.19 node saved through records under a secret on the same space", async () => {
+	for (const phase of ["reader", "indexed"] as const) {
+		const held = contract<{ readonly store: Store; readonly spaces: readonly Space[] }>("held");
+		const holder = defineModule(
+			{ name: "holder", replicaSafe: false, takes: [store, spaces] },
+			(m) => [
+				m.provide(held).by(async (c) => ({
+					store: await c.get(store),
+					spaces: await c.collect(spaces),
+				})),
+			],
+		);
+		const simulated = simulatedStore();
+		if (phase === "indexed") simulated.mark("subject-records.phase", "indexed");
+		const app = await assemble({
+			modules: [simulated.module, wiring, holder],
+			config: kernelConfig(),
+			runtime,
+		});
+		const { store: kept, spaces: declared } = app.get(held);
+		const space = declared.find((s) => s.name === "mfa-flows-store.transactions");
+		const random = { bytes: (n: number) => new Uint8Array(n).fill(7) };
+		// The space as 0.19 declared it: the same name and guarantees, no subject data stated, so its keys.
+		const { subjectData: _, boundedMs: __, erasedBy: ___, ...as019 } = space as Space;
+		const before = secretRecordsIn<StoredTransaction>({ store: kept, space: as019, random });
+		const record = { n: 19 } as unknown as StoredTransaction;
+		expect(await before.create("t-0.19", record, 60_000)).toBe("created");
+		const transactions = app.get(transactionStore);
+		expect(await transactions.read("t-0.19")).toEqual(record);
+		expect(
+			await transactions.update("t-0.19", () => ({ value: { n: 20 } as never })),
+		).toMatchObject({
+			after: { n: 20 },
+		});
+	}
 });

@@ -14,5 +14,8 @@
 		"@mod/store": "workspace:*",
 		"@mod/subject-records": "workspace:*",
 		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"@mod/records": "workspace:*"
 	}
 }
