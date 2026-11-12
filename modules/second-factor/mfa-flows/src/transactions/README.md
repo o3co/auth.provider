@@ -9,7 +9,7 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 - What a request may do with a transaction, and every answer (`proof`, and `mfa-enrollment` through `flowParts`). What a binding keeps in one (`mfa-enrollment`). The store's implementation (the wiring side).
 
 ## Offers
-- `transactionsIn` (the build context) → the operations below. It takes the package's store interface and `cookies`' contract from the assembly, and randomness, the clock and the package's `transaction-lifetime` and `attempts-per-transaction` from the context.
+- `transactionsIn` (the build context) → the operations below, refusing the boot where the stores offer part of their erasure ports (`erasure`). It takes the package's store interface and `cookies`' contract from the assembly, and randomness, the clock and the package's `transaction-lifetime` and `attempts-per-transaction` from the context.
 - `transactionsOver` (those parts, given directly) → the same operations. `transactionsTakes`: what `transactionsIn` takes, for the takes of each module calling it.
 - `start`: a new transaction with every attempt, holding what it is given for its work → its identifier, deadline and cookie. `nextDeadline`: the deadline of one started now.
 - `find` (request, identifier) → the transaction and the time left, or none.
@@ -42,4 +42,4 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 - `find` answers a transaction only while its holder's listing holds it and an attempt is left; taking it takes it off the listing, logging `mfa-flows.listing_failed` when that fails. Every caller takes it once its last attempt is judged.
 
 ## Depends on
-- `kernel` (the build context, the clock, unavailable); `http` (the request type); `cookies`; `session` (the login facts type); `login-gates` (`LoginFrom`); `mfa-extensions` (`AskedFrom`, whom it asks for); `subject-attributes` (`vouches`); the package's store interface
+- `kernel` (the build context, the clock, unavailable); `http` (the request type); `cookies`; `session` (the login facts type); `login-gates` (`LoginFrom`); `mfa-extensions` (`AskedFrom`, whom it asks for); `subject-attributes` (`vouches`); the package's store interface; internal module `erasure` (`portsRefused`)

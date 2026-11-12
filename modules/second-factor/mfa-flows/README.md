@@ -20,6 +20,7 @@
 - Store interfaces for transactions and for each holder's live transactions, their needs and erasure ports, `transactionLifetimeMaxMs` and `heldLifetimeMaxMs`: `transactions`' card.
 - Extension point `enrollmentFlow` (exactly one, boot refused otherwise): the handlers of `POST enrollment` and `POST enrollment/complete`, and the answer to a challenge in an enrollment's transaction. `mfa-enrollment` contributes it, coming wherever this package is composed.
 - Its lockout to `subjectLockouts` (`wiring`).
+- Its eraser `mfa-flows` (internal module `erasure`), contributed to `erasure-extensions`' `erasers`: a subject's transactions and permits fenced, its listings erased, through the stores' ports.
 - Contract `flowParts`, for the module binding factors: the transactions, the resume of a held login, recording through this package's declaration, the common answers, the request helpers, and the lockout's name and policy (`seams`' card).
 - `./testing`: test configuration builders and the section's keys (`flowKeys`), and the store interfaces' contract tests for every implementation (see `transactions`' card).
 

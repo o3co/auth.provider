@@ -315,6 +315,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/mfa-entry` (feature, `modules/second-factor/mfa-entry`): Judges a session against second factors: the entry requirement `mfa` sets for using a session and for changing credentials, and whether a session proved a second factor recently.
 - `@mod/mfa-extensions` (feature, `modules/second-factor/mfa-extensions`): Owns what a module implements for `mfa`: a kind of second factor, a gate asked before a subject's first counting factor, and the witnessing, with the types they take and give.
 - `@mod/mfa-flows` (feature, `modules/second-factor/mfa-flows`): Owns transactions (short records waiting for a second factor) and drives the login gate and step-up, and the routes of enrollment.
+  - `erasure` (`src/erasure`): erasing a subject's transactions and listings, and migrating their spaces, through the stores' ports.
   - `permits` (`src/permits`): a session's permit to release its subject's lockout.
   - `proof` (`src/proof`): holding a login or a session until a factor is proved, and proving it.
   - `recording` (`src/recording`): the audit events a request records, with where it came from.

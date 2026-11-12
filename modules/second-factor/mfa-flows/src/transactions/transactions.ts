@@ -3,6 +3,7 @@ import type { HttpRequest } from "@mod/http";
 import { type BuildContext, type Clock, isUnavailable, type Log, Unavailable } from "@mod/kernel";
 import type { AskedFrom } from "@mod/mfa-extensions";
 import { vouches } from "@mod/subject-attributes";
+import { portsRefused } from "../erasure/ports.ts";
 import type { Settings } from "../section.ts";
 import {
 	type TransactionListings,
@@ -53,10 +54,13 @@ export type Transactions = ReturnType<typeof transactionsOver>;
 export const transactionsTakes = [transactionStore, transactionListings, cookies] as const;
 
 /** The transactions over the contracts the assembly gives and the package's section. */
-export const transactionsIn = async (c: BuildContext<Settings>) =>
-	transactionsOver({
-		store: await c.get(transactionStore),
-		listings: await c.get(transactionListings),
+export const transactionsIn = async (c: BuildContext<Settings>) => {
+	const [store, listings] = [await c.get(transactionStore), await c.get(transactionListings)];
+	const parted = portsRefused(store, listings);
+	if (parted !== undefined) return c.refuse("mfa-flows", parted);
+	return transactionsOver({
+		store,
+		listings,
 		jar: await c.get(cookies),
 		log: c.log,
 		random: c.random.bytes,
@@ -64,6 +68,7 @@ export const transactionsIn = async (c: BuildContext<Settings>) =>
 		ttlMs: c.section["transaction-lifetime"] * 1000,
 		attempts: c.section["attempts-per-transaction"],
 	});
+};
 
 export function transactionsOver(parts: TransactionParts) {
 	const { store, listings, jar, random, clock, ttlMs, attempts } = parts;
