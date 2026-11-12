@@ -36,10 +36,11 @@ export type JointOp =
 	/** Gives it to `to` with `value`, from the subject it is read under (see the card's three cases). */
 	| { readonly kind: "move"; readonly value: Json; readonly to: string };
 
-/** Where a refusal is: the target or the watched record, by its place in its list. */
+/** Where a refusal is: the target or the watched record, by its place (`nth`) in its list. */
 export interface JointAt {
 	readonly in: "targets" | "watched";
-	readonly index: number;
+	/** Its place in that list, from 0. */
+	readonly nth: number;
 }
 
 /** A record of a joint change, opened: what it held, and holds after. */
@@ -107,7 +108,7 @@ export function jointRecordsIn<P extends string>(
 	};
 
 	/** The rule an op follows on a record read as `held`: `writes`' own, a move's three cases among them. */
-	const ruleOf = (name: P, key: string, held: Json | undefined, op: JointOp): Ruled => {
+	const ruleOf = (name: P, key: string, op: JointOp): Ruled => {
 		const rule = rules[name];
 		const changed = (value: Json, lifetimeMs?: number | "endless") => {
 			const inner = rule.change<Json>(() =>
@@ -141,12 +142,8 @@ export function jointRecordsIn<P extends string>(
 				decide: (h, needed, attempt) => ({ ...inner.decide(h, needed, attempt), answer: "ok" }),
 			};
 		}
-		// A move from the subject it is read under: raw, or under `to` already, it is a change.
-		const from = rule.open(held).subject;
-		if (held === undefined || from === undefined || from === op.to || !rule.byKeys) {
-			return changed(op.value);
-		}
-		const inner = rule.move(key, from, op.to, op.value);
+		// Its three cases are the rule's, by the record as read.
+		const inner = rule.moveTo(key, op.to, op.value);
 		return {
 			needs: inner.needs,
 			decide: (h, needed, attempt) => {
@@ -226,7 +223,7 @@ export function jointRecordsIn<P extends string>(
 						if (seen.has(id))
 							throw new TypeError("subject-records: a record takes one op in a joint change");
 						seen.add(id);
-						const rule = ruleOf(name.place, name.key, helds[at], op);
+						const rule = ruleOf(name.place, name.key, op);
 						for (const t of rule.needs(helds[at])) if (!index.has(idOf(t))) missing.set(idOf(t), t);
 						if (missing.size > 0) continue;
 						const needs = rule.needs(helds[at]);
@@ -242,8 +239,8 @@ export function jointRecordsIn<P extends string>(
 						if (decided.answer !== "ok") {
 							const where: JointAt =
 								at < p.targets.length
-									? { in: "targets", index: at }
-									: { in: "watched", index: at - p.targets.length };
+									? { in: "targets", nth: at }
+									: { in: "watched", nth: at - p.targets.length };
 							outcome = { kind: "refused", at: where, why: decided.answer };
 							return {};
 						}

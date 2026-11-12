@@ -161,7 +161,7 @@ it("holds every subject's tombstone a change names in its one write: one landing
 			targets: [{ place: "claims", key: "c1" }],
 			decide: () => ({ targets: [move({ l: "dave" }, "dave")] }),
 		}),
-	).toEqual({ kind: "refused", at: { in: "targets", index: 0 }, why: "erased" });
+	).toEqual({ kind: "refused", at: { in: "targets", nth: 0 }, why: "erased" });
 	expect(raced).toBeUndefined();
 	expect(await held(claims, "c1")).toEqual(envelope("alice", { l: "alice" }));
 });
@@ -182,13 +182,13 @@ it("moves by the subject a record is read under: to an erased subject refused, f
 	await make("k2", "bob");
 	expect(await moved("none", "alice")).toEqual({
 		kind: "refused",
-		at: { in: "targets", index: 0 },
+		at: { in: "targets", nth: 0 },
 		why: "missing",
 	});
 	await erase(claims, "erin");
 	expect(await moved("k1", "erin")).toEqual({
 		kind: "refused",
-		at: { in: "targets", index: 0 },
+		at: { in: "targets", nth: 0 },
 		why: "erased",
 	});
 	expect(await held(claims, "k1")).toEqual(envelope("alice", { n: 0 }));
@@ -224,7 +224,7 @@ it("refuses a change at the first record its rule refuses, writing nothing, and 
 		await tried([create({ n: 1 }, "bob"), create({ n: 9 }, "alice")], ["bob", "alice"]),
 	).toEqual({
 		kind: "refused",
-		at: { in: "targets", index: 1 },
+		at: { in: "targets", nth: 1 },
 		why: "exists",
 	});
 	expect(await held(lists, "bob")).toBeUndefined();
@@ -338,4 +338,21 @@ it("refuses at build a place of another category, a store writing no two partiti
 	expect(() => jointRecordsIn({ l: p.at(lists), o: o.at(other) }, "w", refuse)).toThrow(
 		/one store/,
 	);
+});
+
+it("leaves no record of a subject when a move to its own subject is erased after: a self-move is a change, its entry kept", async () => {
+	const { changeSubjectRecords, held, listed, erase } = await opened();
+	await changeSubjectRecords({
+		targets: [{ place: "claims", key: "self" }],
+		decide: () => ({ targets: [create({ n: 0 }, "alice")] }),
+	});
+	expect(
+		await changeSubjectRecords({
+			targets: [{ place: "claims", key: "self" }],
+			decide: () => ({ targets: [move({ n: 1 }, "alice")] }),
+		}),
+	).toMatchObject({ kind: "written", targets: [{ after: { value: { n: 1 }, subject: "alice" } }] });
+	expect(await listed(claims, "alice", "self")).toBe(true);
+	expect(await erase(claims, "alice")).toMatchObject({ kind: "erased", removed: 1 });
+	expect(await held(claims, "self")).toBeUndefined();
 });
