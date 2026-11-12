@@ -9,7 +9,7 @@
 ## Offers
 - `subjectRecordsIn` (internal module `writes`): a subject's records in a space declaring `online-indexed`, `online-keyed` or `bounded`.
 - `subjectKeyedSetsIn` (internal module `sets`): keyed sets of `online-indexed` and `online-keyed` spaces.
-- `jointRecordsIn` (internal module `joint`): records of several `online-indexed` places changed as one by the ops their owner decides.
+- `phasedJointRecordsIn` (internal modules `joint`, `phased`): records of several `online-indexed` places changed as one by the ops their owner decides, over the phase read once; the bare builder stays inside the package.
 - `phasedRecordsIn`, `phasedKeyedSetsIn` (internal module `phased`): the builders over the phase read once, with the space's `erase` and `migrate` and `ready` for the template's probe.
 - `eraseSubject` (internal module `erase`) → the space's `SpaceReport`; `sweepIndex` → a page of the index swept of entries whose records or sets are gone.
 - `migrateRecords`, `migrateSets` (internal module `migrate`) → the space's `MigrationReport`.
