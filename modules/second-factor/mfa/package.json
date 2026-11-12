@@ -13,6 +13,7 @@
 	},
 	"dependencies": {
 		"@mod/audit": "workspace:*",
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/labels": "workspace:*",
 		"@mod/login-gates": "workspace:*",

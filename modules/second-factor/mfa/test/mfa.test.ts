@@ -1184,7 +1184,8 @@ it("refuses to start over a factor store that cannot write a list and a claim as
 	expect((refused as BootRefused).refusals).toEqual([
 		{
 			where: "mfa",
-			reason: "its factor store cannot write a list and a claim as one (updateTogether)",
+			reason:
+				"its factor store offers updateTogether or updateAsOne: exactly one, to write a list and a claim as one",
 		},
 	]);
 });

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Unavailable } from "@mod/kernel";
-import type { FactorStore, StoredFactors } from "../store.ts";
+import type { FactorOp, FactorRead, FactorStore, StoredFactors } from "../store.ts";
 
 export interface Factor {
 	readonly id: string;
@@ -67,12 +67,16 @@ export function factorRecords(store: FactorStore) {
 		};
 		if (await store.update(key, changing)) return;
 		const first = next([], 0);
-		if (
-			!first ||
-			(await store.save(key, storedList(subject, first.factors, first.fences), "endless")) ===
-				"created"
-		)
-			return;
+		if (!first) return;
+		const saved = await store.save(
+			key,
+			storedList(subject, first.factors, first.fences),
+			"endless",
+			subject,
+		);
+		if (saved === "created") return;
+		// Its subject erased: refused, never tried again.
+		if (saved === "erased") throw new Unavailable("mfa");
 		// Another request saved one first, yet it cannot be found.
 		if (!(await store.update(key, changing))) throw new Unavailable("mfa");
 	};
@@ -129,7 +133,48 @@ export function factorRecords(store: FactorStore) {
 		): Promise<T | "duplicate"> => {
 			const mine: Claim = { listKey: keyOf(subject), factor: claimed.factor };
 			let last: Decision<T> | "duplicate" | undefined;
-			await store.updateTogether(keyOf(subject), claimKey(claimed.kind, claimed.value), {
+			const { updateAsOne, updateTogether } = store;
+			if (updateAsOne) {
+				const at = (key: string) => ({ place: "factors" as const, key });
+				/** My list as decided: changed where held, else created for me. */
+				const listed = (list: FactorRead, value: StoredFactors): FactorOp =>
+					list === undefined
+						? { kind: "create", value, lifetimeMs: "endless", subject }
+						: { kind: "change", value };
+				const answer = await updateAsOne.call(store, {
+					targets: [at(keyOf(subject)), at(claimKey(claimed.kind, claimed.value))],
+					// The claim's own list tells whether it still holds the value: watched, never changed.
+					watch: ([, claim]) => {
+						const held = claimOf(claim?.value);
+						return held ? [at(held.listKey)] : [];
+					},
+					decide: ([list, claim], [holder]) => {
+						const decision = judge(factorsOf(list?.value), fencesOf(list?.value));
+						last = decision;
+						if (!decision.next) return {};
+						const held = claimOf(claim?.value);
+						if (held && factorsOf(holder?.value).some((f) => f.id === held.factor)) {
+							last = "duplicate";
+							return {};
+						}
+						const fences = fencesOf(list?.value) + (decision.fence ? 1 : 0);
+						const value = asClaim(mine);
+						// A claim held for another subject, its factor gone, moves to mine.
+						const claimOp: FactorOp =
+							claim === undefined
+								? { kind: "create", value, lifetimeMs: "endless", subject }
+								: { kind: "move", value, to: subject };
+						return {
+							targets: [listed(list, storedList(subject, decision.next, fences)), claimOp],
+						};
+					},
+				});
+				// Refused (my subject erased): read before any verdict, never tried again.
+				if (answer.kind === "refused") throw new Unavailable("mfa");
+				return last === "duplicate" ? "duplicate" : (last as Decision<T>).verdict;
+			}
+			if (!updateTogether) throw new Unavailable("mfa");
+			await updateTogether.call(store, keyOf(subject), claimKey(claimed.kind, claimed.value), {
 				// The claim's own list tells whether it still holds the value.
 				watch: (_list, claim) => {
 					const held = claimOf(claim);

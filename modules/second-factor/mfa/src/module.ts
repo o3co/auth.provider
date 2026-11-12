@@ -9,6 +9,7 @@ import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { resealers, seal } from "@mod/seal";
 import { enforcers, factorStore, proofSteps } from "./contract.ts";
 import { addsMfa, byKind, type Decisions, factorDecisions, leftOut } from "./factors.ts";
+import { portsRefused } from "./records/ports.ts";
 import { resealerOver } from "./records/resealer.ts";
 import { section } from "./section.ts";
 
@@ -73,12 +74,8 @@ export default defineModule(
 			}
 			const stored = await c.get(factorStore);
 			// A binding writes its factor and the claim on its value at once: never one without the other.
-			if (typeof stored.updateTogether !== "function") {
-				return c.refuse(
-					"mfa",
-					"its factor store cannot write a list and a claim as one (updateTogether)",
-				);
-			}
+			const parted = portsRefused(stored);
+			if (parted !== undefined) return c.refuse("mfa", parted);
 			return factorDecisions({
 				stored,
 				kinds: byKind(taken),

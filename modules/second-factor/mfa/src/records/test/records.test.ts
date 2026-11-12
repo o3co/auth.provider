@@ -15,9 +15,9 @@ it("changes the list another request saved first, rather than its own first list
 	const { factors } = memoryFactors();
 	const racing: FactorStore = {
 		...factors,
-		save: async (key, record, lifetimeMs) => {
-			await factors.save(key, listOf("theirs"), lifetimeMs);
-			return factors.save(key, record, lifetimeMs);
+		save: async (key, record, lifetimeMs, subject) => {
+			await factors.save(key, listOf("theirs"), lifetimeMs, subject);
+			return factors.save(key, record, lifetimeMs, subject);
 		},
 	};
 	// The run written answers: it saw the list the other request saved.

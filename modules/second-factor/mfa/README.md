@@ -17,8 +17,8 @@
 - Audit events, with the subject, once written (never for a refused or raced decision but a first binding refused (`mfa.first_binding_conflict`), nor a reset, never with a secret, proof or code): declared in `./audit-events`, listed in the audit event reference. A removal or reissue whose store answer is lost is recorded once a read after it shows it landed, and still answers unavailable.
 - Contributions: `login-gates` amr (each kind taken's, and `mfa` if one adds it); `seal`'s `resealers`, a resealer sealing again what a `previous` key sealed.
 - Section: `mode` (`optional`, which every start warns of as `mfa.not_required`, or `required` by default), `max-factors` (default 10).
-- Store interface `factorStore`: factor lists and claims on unique values, by keys mfa makes, contents opaque; save once, read, change from what it holds, kept without end; a list and a claim changed as one (`updateTogether`), a binding writing its factor and the claim on its unique value at once; mfa refuses to start over a store without it. Needs: never evicted, survives a crash and a failover, reads only what is confirmed.
-- `./testing`: the store's contract test, a config builder, and `updatingTogether`, a place's `updateTogether` over records' stand-in.
+- Store interface `factorStore`: factor lists and claims on unique values, by keys mfa makes, contents opaque; save once for a subject, read, change from what it holds, kept without end; a list and a claim changed as one, a binding writing its factor and the claim on its unique value at once; its ports' one statement, refused at build: `records`' card. Needs: never evicted, survives a crash and a failover, reads only what is confirmed.
+- `./testing`: the store's contract test, a config builder, and `updatingAsOne` and `updatingTogether` (deprecated), a place's `updateAsOne` and `updateTogether` over records' stand-in.
 
 ## Invariants
 - "required" refuses to boot unless a composed kind counts.
@@ -32,4 +32,4 @@
 - Only a gate's `true` admits a first binding; any other answer does not.
 
 ## Depends on
-- `kernel`, `login-gates`, `seal`, `audit`, `mfa-reading`, `mfa-binding`, `mfa-managing` (the contracts it provides), `mfa-extensions` (the kinds, gates and witnessing), `mfa-witness` (only to refuse a witness left unasked), `labels` (the label's shape)
+- `kernel`, `login-gates`, `seal`, `audit`, `mfa-reading`, `mfa-binding`, `mfa-managing` (the contracts it provides), `mfa-extensions` (the kinds, gates and witnessing), `mfa-witness` (only to refuse a witness left unasked), `labels` (the label's shape), `erasure-extensions` (the store ports' erasure types)

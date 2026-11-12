@@ -237,7 +237,7 @@ flowchart LR
 | Package | Kind | Depends on |
 |---|---|---|
 | `@mod/account-mail-code` | feature | `@mod/kernel`, `@mod/mail`, `@mod/mail-address`, `@mod/mfa-extensions`, `@mod/subject-attributes`, `@mod/users` |
-| `@mod/mfa` | feature | `@mod/audit`, `@mod/kernel`, `@mod/labels`, `@mod/login-gates`, `@mod/mfa-binding`, `@mod/mfa-extensions`, `@mod/mfa-managing`, `@mod/mfa-reading`, `@mod/mfa-witness`, `@mod/seal` |
+| `@mod/mfa` | feature | `@mod/audit`, `@mod/erasure-extensions`, `@mod/kernel`, `@mod/labels`, `@mod/login-gates`, `@mod/mfa-binding`, `@mod/mfa-extensions`, `@mod/mfa-managing`, `@mod/mfa-reading`, `@mod/mfa-witness`, `@mod/seal` |
 | `@mod/mfa-binding` | feature | `@mod/kernel`, `@mod/mfa-extensions`, `@mod/mfa-reading` |
 | `@mod/mfa-binding-proof` | feature | `@mod/kernel`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading`, `@mod/seal` |
 | `@mod/mfa-email` | feature | `@mod/account-mail-code`, `@mod/kernel`, `@mod/mail`, `@mod/mfa`, `@mod/mfa-binding-proof`, `@mod/mfa-email-proof`, `@mod/mfa-extensions`, `@mod/subject-attributes`, `@mod/users` |

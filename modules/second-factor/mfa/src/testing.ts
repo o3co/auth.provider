@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import type { section } from "./section.ts";
-import type { FactorStore, StoredFactors } from "./store.ts";
+import type { FactorOp, FactorRead, FactorStore, FactorsAnswer, StoredFactors } from "./store.ts";
 
 export type MfaSettings = z.input<typeof section>;
 
@@ -48,8 +48,8 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 			const { factors } = await open();
 			const key = fresh();
 			const odd = asStored({ state: "unheard-of", nested: { list: [1, "two"] } });
-			expect(await factors.save(key, odd, "endless")).toBe("created");
-			expect(await factors.save(key, asStored({ n: 1 }), "endless")).toBe("exists");
+			expect(await factors.save(key, odd, "endless", "alice")).toBe("created");
+			expect(await factors.save(key, asStored({ n: 1 }), "endless", "alice")).toBe("exists");
 			expect(await factors.read(key)).toEqual(odd);
 			expect(await factors.update(key, () => undefined)).toEqual({ before: odd, after: odd });
 			expect(await factors.update(fresh(), plus(1))).toBeUndefined();
@@ -59,7 +59,7 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 		it("changes a list only from what it holds, again after a racing writer", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.factors.save(key, asStored({ n: 1 }), "endless");
+			await place.factors.save(key, asStored({ n: 1 }), "endless", "alice");
 			expect(await place.factors.update(key, plus(1))).toEqual({
 				before: asStored({ n: 1 }),
 				after: asStored({ n: 2 }),
@@ -70,9 +70,11 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 
 		it("changes a list and a claim as one, giving the change the records it watched", async () => {
 			const { factors } = await open();
-			const together = factors.updateTogether.bind(factors);
+			const { updateTogether } = factors;
+			if (!updateTogether) return;
+			const together = updateTogether.bind(factors);
 			const [list, claimKey, owner] = [fresh(), fresh(), fresh()];
-			await factors.save(owner, asStored({ n: 7 }), "endless");
+			await factors.save(owner, asStored({ n: 7 }), "endless", "alice");
 			const seen: unknown[] = [];
 			const first = await together(list, claimKey, {
 				watch: () => [owner],
@@ -103,15 +105,16 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 
 		it("changes a list and a claim again where another writer changes what it watched, or the claim's owner, first", async (ctx) => {
 			const { factors, raceNextTogether: race } = await open();
-			const together = factors.updateTogether.bind(factors);
-			if (!race) {
+			const { updateTogether } = factors;
+			if (!race || !updateTogether) {
 				ctx.skip();
 				return;
 			}
+			const together = updateTogether.bind(factors);
 			const [list, claimKey, ann, bob] = [fresh(), fresh(), fresh(), fresh()];
-			await factors.save(ann, asStored({ n: 1 }), "endless");
-			await factors.save(bob, asStored({ n: 2 }), "endless");
-			await factors.save(claimKey, asStored({ owner: ann }), "endless");
+			await factors.save(ann, asStored({ n: 1 }), "endless", "alice");
+			await factors.save(bob, asStored({ n: 2 }), "endless", "alice");
+			await factors.save(claimKey, asStored({ owner: ann }), "endless", "alice");
 			const ownerOf = (claim: StoredFactors | undefined) =>
 				(claim as unknown as { owner?: string } | undefined)?.owner;
 			const watchedKeys: string[][] = [];
@@ -144,10 +147,56 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 			expect(await factors.read(claimKey)).toEqual(asStored({ owner: bob }));
 		});
 
+		it("changes records as one by the ops decided, writing nothing where one is refused", async () => {
+			const { factors } = await open();
+			const { updateAsOne } = factors;
+			if (!updateAsOne) return;
+			const as = (key: string) => ({ place: "factors" as const, key });
+			const [list, claim, other] = [fresh(), fresh(), fresh()];
+			const create = (n: number): FactorOp => ({
+				kind: "create",
+				value: asStored({ n }),
+				lifetimeMs: "endless",
+				subject: "alice",
+			});
+			expect(
+				await updateAsOne.call(factors, {
+					targets: [as(list), as(claim)],
+					decide: () => ({ targets: [create(1), create(2)] }),
+				}),
+			).toMatchObject({ kind: "written", targets: [{ after: { value: { n: 1 } } }, {}] });
+			const refused = await updateAsOne.call(factors, {
+				targets: [as(other), as(claim)],
+				decide: () => ({ targets: [create(3), create(4)] }),
+			});
+			expect(refused).toEqual({ kind: "refused", at: { in: "targets", nth: 1 }, why: "exists" });
+			expect(await factors.read(other)).toBeUndefined();
+			const moved = await updateAsOne.call(factors, {
+				targets: [as(claim)],
+				watch: () => [as(list)],
+				decide: () => ({ targets: [{ kind: "move", value: asStored({ n: 5 }), to: "alice" }] }),
+			});
+			expect(moved).toMatchObject({ kind: "written", watched: [{ after: { value: { n: 1 } } }] });
+			expect(await factors.read(claim)).toEqual(asStored({ n: 5 }));
+		});
+
+		it("refuses, where it erases, every list saved for a subject it erased, and only for that subject", async (context) => {
+			const { factors } = await open();
+			const { erase } = factors;
+			if (!erase) return context.skip();
+			await factors.save(fresh(), asStored({ n: 1 }), "endless", "erin");
+			const report = await erase.call(factors, "erin", new AbortController().signal);
+			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+			if (report.kind === "stopped") return context.skip();
+			expect(report.kind).toBe("erased");
+			expect(await factors.save(fresh(), asStored({ n: 2 }), "endless", "erin")).toBe("erased");
+			expect(await factors.save(fresh(), asStored({ n: 3 }), "endless", "finn")).toBe("created");
+		});
+
 		it("walks the keys it keeps, over pages", async () => {
 			const place = await open();
 			const keys = Array.from({ length: 120 }, fresh);
-			for (const key of keys) await place.factors.save(key, asStored({ n: 1 }), "endless");
+			for (const key of keys) await place.factors.save(key, asStored({ n: 1 }), "endless", "alice");
 			const seen = new Set<string>();
 			let cursor: string | undefined;
 			do {
@@ -161,8 +210,8 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 		it("keeps a list without end, changed or not", async () => {
 			const place = await open();
 			const [kept, changed] = [fresh(), fresh()];
-			await place.factors.save(kept, asStored({ n: 1 }), "endless");
-			await place.factors.save(changed, asStored({ n: 1 }), "endless");
+			await place.factors.save(kept, asStored({ n: 1 }), "endless", "alice");
+			await place.factors.save(changed, asStored({ n: 1 }), "endless", "alice");
 			await place.factors.update(changed, plus(1));
 			place.advance(10 * 365 * 86_400_000);
 			expect(await place.factors.read(kept)).toEqual(asStored({ n: 1 }));
@@ -174,7 +223,7 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 			const { restart, pressMemory } = place;
 			if (!restart || !pressMemory) return context.skip();
 			const key = fresh();
-			await place.factors.save(key, asStored({ n: 1 }), "endless");
+			await place.factors.save(key, asStored({ n: 1 }), "endless", "alice");
 			// As a proof's state is changed: a used step must not come back.
 			await place.factors.update(key, plus(1));
 			await restart();
@@ -188,7 +237,7 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 			if (!lose || !failover) return context.skip();
 			const key = fresh();
 			lose();
-			expect(await place.factors.save(key, asStored({ n: 1 }), "endless")).toBe("created");
+			expect(await place.factors.save(key, asStored({ n: 1 }), "endless", "alice")).toBe("created");
 			lose();
 			expect((await place.factors.update(key, plus(1)))?.after).toEqual(asStored({ n: 2 }));
 			await failover();
@@ -207,7 +256,7 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 				await failover();
 				place.advance(60_000);
 			});
-			await place.factors.save(key, asStored({ n: 1 }), "endless").catch(() => undefined);
+			await place.factors.save(key, asStored({ n: 1 }), "endless", "alice").catch(() => undefined);
 			expect(seen).toEqual(asStored({ n: 1 }));
 			expect(await place.factors.read(key)).toEqual(seen);
 		});
@@ -245,8 +294,93 @@ export interface ChangingTogether {
 	}>;
 }
 
+/** What `updatingAsOne` needs of a records stand-in: records of it changed as one. */
+export interface ChangingRecords {
+	changeRecords(
+		keys: readonly string[],
+		p: {
+			readonly watch?: (read: readonly (StoredFactors | undefined)[]) => readonly string[];
+			readonly decide: (
+				read: readonly (StoredFactors | undefined)[],
+				watched: readonly (StoredFactors | undefined)[],
+			) => {
+				readonly targets?: readonly (KeptFactors | { readonly remove: true } | undefined)[];
+				readonly watched?: readonly (KeptFactors | { readonly remove: true } | undefined)[];
+			};
+		},
+	): Promise<{
+		readonly targets: readonly {
+			readonly before: StoredFactors | undefined;
+			readonly after: StoredFactors | undefined;
+		}[];
+		readonly watched: readonly {
+			readonly before: StoredFactors | undefined;
+			readonly after: StoredFactors | undefined;
+		}[];
+	}>;
+}
+
+/**
+ * A place's `updateAsOne` over a records stand-in, as a Store keeping records raw does it: no
+ * subject read or kept, no tombstone; each op refused as subject-records' would refuse it raw
+ * (`create` where held, `exists`; `change` or `move` where gone, `missing`), nothing written.
+ */
+export function updatingAsOne(records: ChangingRecords): NonNullable<FactorStore["updateAsOne"]> {
+	const raw = (held: StoredFactors | undefined): FactorRead =>
+		held === undefined ? undefined : { value: held };
+	return async (p) => {
+		let refused: Extract<FactorsAnswer, { kind: "refused" }> | undefined;
+		const names = (read: readonly (StoredFactors | undefined)[]) =>
+			(p.watch?.(read.map(raw)) ?? []).map((k) => k.key);
+		const changed = await records.changeRecords(
+			p.targets.map((k) => k.key),
+			{
+				watch: names,
+				decide: (read, watched) => {
+					refused = undefined;
+					const ops = p.decide(read.map(raw), watched.map(raw));
+					const nextOf = (
+						held: StoredFactors | undefined,
+						op: FactorOp | undefined,
+						at: { readonly in: "targets" | "watched"; readonly nth: number },
+					): KeptFactors | { readonly remove: true } | undefined => {
+						if (op === undefined) return undefined;
+						if (op.kind === "remove") return { remove: true };
+						const why =
+							op.kind === "create" ? (held ? "exists" : undefined) : held ? undefined : "missing";
+						if (why !== undefined) refused ??= { kind: "refused", at, why };
+						return { value: op.value, lifetimeMs: "endless" };
+					};
+					const targets = read.map((held, nth) =>
+						nextOf(held, ops.targets?.[nth], { in: "targets", nth }),
+					);
+					const others = watched.map((held, nth) =>
+						nextOf(held, ops.watched?.[nth], { in: "watched", nth }),
+					);
+					return refused ? {} : { targets, watched: others };
+				},
+			},
+		);
+		if (refused) return refused;
+		const shown = (c: {
+			readonly before: StoredFactors | undefined;
+			readonly after: StoredFactors | undefined;
+		}) => ({
+			before: raw(c.before),
+			after: raw(c.after),
+		});
+		return {
+			kind: "written",
+			targets: changed.targets.map(shown),
+			watched: changed.watched.map(shown),
+		};
+	};
+}
+
 /** A place's `updateTogether` over a records stand-in, the list and the claim it writes kept without end. */
-export function updatingTogether(records: ChangingTogether): FactorStore["updateTogether"] {
+export function updatingTogether(
+	records: ChangingTogether,
+): NonNullable<FactorStore["updateTogether"]> {
 	const endless = (next: { readonly value: StoredFactors } | undefined) =>
 		next && { value: next.value, lifetimeMs: "endless" as const };
 	return async (listKey, claimKey, p) => {
