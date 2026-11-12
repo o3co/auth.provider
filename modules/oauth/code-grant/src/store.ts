@@ -16,16 +16,13 @@ export interface ChangedCode {
 export interface CodeStore {
 	/** A code's name: never the code, which cannot be had from it; names are kept, so it never changes. */
 	nameOf(code: string): string;
-	/** Keeps a new code's record for its lifetime, unless the name holds one already. */
-	save(name: string, record: StoredCode, lifetimeMs: number): Promise<"created" | "exists">;
 	/**
 	 * Keeps a new code's record, under the code's name (`nameOf`), for its lifetime and its subject,
 	 * unless the name holds one already (`exists`) or, where the Store fences creation past a
 	 * subject's erasure, the subject is erased there (`erased`). It takes the code itself, so a Store
-	 * keyed by secrets names it; every other call takes the name. Optional until code-grant takes
-	 * it in place of `save`.
+	 * keyed by secrets names it; every other call takes the name.
 	 */
-	create?(
+	create(
 		code: string,
 		record: StoredCode,
 		lifetimeMs: number,

@@ -93,7 +93,10 @@ const memoryStores = () => {
 	const module = defineModule({ name: "code-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(codeStore).by((c) => {
 			clock = c.clock.now;
-			return { nameOf, save: stand.records.create, update };
+			// Created by the code, under its name, as a Store keyed by secrets names it.
+			const create: CodeStore["create"] = (code, record, lifetimeMs) =>
+				stand.records.create(nameOf(code), record, lifetimeMs);
+			return { nameOf, create, update };
 		}),
 		m.provide(voidList).by(() => voids.wrap(stand.deferred)),
 	]);
@@ -110,7 +113,11 @@ codeStoreContract("records stand-in", async () => {
 	const size = { shards: 4, perShard: 5 };
 	const stand = memoryRecords<StoredCode>(() => now, size);
 	return {
-		codes: { nameOf, save: stand.records.create, update: stand.records.change },
+		codes: {
+			nameOf,
+			create: (code, record, lifetimeMs) => stand.records.create(nameOf(code), record, lifetimeMs),
+			update: stand.records.change,
+		},
 		voids: stand.deferred,
 		advance: (ms) => {
 			now += ms;
