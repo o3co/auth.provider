@@ -19,11 +19,15 @@ export const prefix = "store";
 
 /** Any write of a code's record. */
 export const codeRecord = storeWrite({ prefix, space: "code-grant-store.codes" });
-/** The write that keeps a new code: the record a code is issued with. */
+/**
+ * The write that keeps a new code: the record a code is issued with. Codes are `subject-records`'
+ * bounded records, so a write is a batch.
+ */
 export const codeKept = storeWrite({
 	prefix,
 	space: "code-grant-store.codes",
-	operations: ["putIfAbsent"],
+	operations: ["batch"],
+	value: (v) => (v as CodeRecord | null)?.state === "issued",
 });
 /** A read of a session's entry, confirmed: a refresh reads its family's session after the family. */
 export const sessionRead = storeRead({ prefix, space: "session-store.sessions" });
@@ -37,6 +41,14 @@ export const codeReadSettled = storeWrite({
 	space: "code-grant-store.codes",
 	name: "settled",
 });
+/**
+ * A read of the store's clock, the one script that names no key: every change of records as one
+ * (`records`' `changeRecords`) reads it first, a code's look before use among them.
+ */
+export const clockRead: Match = {
+	request: (command) => isStoreOperation(command) && command.args[1]?.toString() === "0",
+	succeeded: () => true,
+};
 /** The read of the browser's session behind its cookie, which an authorization waits on first. */
 export const cookieRead = storeRead({ prefix, space: "session-store.cookies" });
 
@@ -51,17 +63,29 @@ const codeWrite = (challenge: string, is: (r: CodeRecord) => boolean): Match =>
 	storeWrite({
 		prefix,
 		space: "code-grant-store.codes",
-		operations: ["replaceIf"],
+		operations: ["batch"],
 		value: (v) => (v as CodeRecord).challenge === challenge && is(v as CodeRecord),
 	});
+/** The name a code's redemption goes by: the name records keep the code under, its secret. */
+const redemptionOf = (c: Code) =>
+	`1.${createHash("sha256").update(`code-grant-store.codes\n${c.code}`).digest("base64url")}`;
 
-/** The write that uses the code up: its record turned consumed, before any token is noted on it. */
+/** The write that uses the code up: its record turned consumed, no token or void mark on it. */
 export const codeUse = (c: Code) =>
 	codeWrite(c.challenge, (r) => r.state === "consumed" && r.token === undefined && !r.void);
 
-/** The write that notes, on the used code, the token issued for it. */
+/** The write that notes, on the code's redemption record, the token issued for it. */
 export const codeNoted = (c: Code) =>
-	codeWrite(c.challenge, (r) => r.state === "consumed" && r.token !== undefined && !r.void);
+	storeWrite({
+		prefix,
+		space: "code-grant-store.redemption-records",
+		partition: redemptionOf(c),
+		operations: ["batch"],
+		value: (v) => {
+			const r = v as { token?: unknown; void?: unknown } | null;
+			return r?.token !== undefined && !r?.void;
+		},
+	});
 
 /** A refresh token's family, which names its record, and its secret. */
 const partsOf = (token: string) => {
