@@ -1,6 +1,13 @@
-import { codeStore, type StoredCode, voidList } from "@mod/code-grant";
+import {
+	codeStore,
+	redemptionRecords,
+	type StoredCode,
+	type StoredRedemptionRecord,
+	storedRecordMaxMs,
+	voidList,
+} from "@mod/code-grant";
 import { codeStoreContract } from "@mod/code-grant/testing";
-import { assemble, kernelConfig } from "@mod/kernel";
+import { assemble, type BuildContext, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { crowdingFor } from "@mod/records/testing";
 import { simulatedStore } from "@mod/store/testing";
@@ -52,7 +59,55 @@ it("creates a code by the code, under the name records make of it, once", async 
 	});
 	const codes = app.get(codeStore);
 	const record = { n: 1 } as unknown as StoredCode;
-	expect(await codes.create?.("the-code", record, 60_000, "alice")).toBe("created");
-	expect(await codes.create?.("the-code", record, 60_000, "alice")).toBe("exists");
+	expect(await codes.create("the-code", record, 60_000, "alice")).toBe("created");
+	expect(await codes.create("the-code", record, 60_000, "alice")).toBe("exists");
 	expect((await codes.update(codes.nameOf("the-code"), () => undefined))?.after).toEqual(record);
+});
+
+/** The wiring on a simulated store, its records raw (`reader`) or indexed, unreachable at first where `blip`. */
+async function opened(phase: "reader" | "indexed", blip = false) {
+	const simulated = simulatedStore();
+	if (phase === "indexed") simulated.mark("subject-records.phase", "indexed");
+	simulated.unreachable(blip);
+	let context: BuildContext<unknown> | undefined;
+	const asker = defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
+		m.provide(contract<object>("asker")).by((c) => {
+			context = c;
+			return {};
+		}),
+	]);
+	const app = await assemble({
+		modules: [simulated.module, wiring, asker],
+		config: kernelConfig(),
+		runtime,
+	});
+	const ready = () => context?.readinessReport(1000).then((r) => r.answer);
+	return { simulated, ready, records: app.get(redemptionRecords) };
+}
+
+const record = (n: number) => ({ n }) as unknown as StoredRedemptionRecord;
+
+for (const phase of ["reader", "indexed"] as const) {
+	it(`keeps a redemption record once by its name, for its subject, and changes it only from what it holds (${phase})`, async () => {
+		const { records } = await opened(phase);
+		expect(await records.create("r1", record(1), 60_000, "alice")).toBe("created");
+		expect(await records.create("r1", record(2), 60_000, "alice")).toBe("exists");
+		expect(await records.read("r1")).toEqual(record(1));
+		expect(await records.update("r1", () => ({ value: record(3) }))).toEqual({
+			before: record(1),
+			after: record(3),
+		});
+		expect(await records.update("none", () => ({ value: record(4) }))).toBeUndefined();
+		// Bounded past the longest token and its allowances, never longer.
+		await expect(records.create("r2", record(1), storedRecordMaxMs + 1, "alice")).rejects.toThrow(
+			TypeError,
+		);
+	});
+}
+
+it("starts over a store's blip unready, out of traffic, and turns ready once the store answers", async () => {
+	const { simulated, ready } = await opened("indexed", true);
+	expect(await ready()).toBe("unready");
+	simulated.unreachable(false);
+	expect(await ready()).toBe("ready");
 });
