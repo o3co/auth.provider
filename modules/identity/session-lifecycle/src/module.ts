@@ -91,9 +91,12 @@ export default defineModule(
 			};
 		}),
 		// Its build takes only its two stores, collecting no probes: the erasure gate collects erasers.
-		m
-			.contribute(erasers)
-			.by(async (c) => sessionEraser(await c.get(sessionStore), await c.get(subjectSessions))),
+		m.contribute(erasers).by(async (c) =>
+			sessionEraser(await c.get(sessionStore), await c.get(subjectSessions), {
+				clock: c.clock,
+				lifetimeMs: c.section.lifetime * 1000,
+			}),
+		),
 		m.contribute(revocationFollowers).by(async (c) => {
 			const listed = await c.get(subjectSessions);
 			const lateSessions = c.late(sessions);

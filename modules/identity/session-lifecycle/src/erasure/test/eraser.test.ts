@@ -5,6 +5,8 @@ import { sessionEraser, sessionSubjectOf } from "../eraser.ts";
 import { portsRefused } from "../ports.ts";
 
 const signal = new AbortController().signal;
+const now = 1_800_000_000_000;
+const lifetime = { clock: { now: () => now }, lifetimeMs: 3_600_000 };
 const walk: Walk = { sweep: async () => ({ keys: [], server: "one" }) };
 const kept = {
 	save: async () => "created",
@@ -19,13 +21,13 @@ const listed = {
 const report = (space: string) => ({ kind: "erased", space, removed: 0 }) as unknown as SpaceReport;
 const migrated = (space: string) =>
 	({ kind: "migrated", space, indexed: 0, removed: 0 }) as unknown as MigrationReport;
-const record = (state: string) => ({
+const record = (state: string, openedAt = now) => ({
 	format: 2,
 	state,
 	subject: "alice",
 	amr: ["pwd"],
-	authenticatedAt: 0,
-	openedAt: 0,
+	authenticatedAt: openedAt,
+	openedAt,
 });
 const stored = (value: unknown) => value as StoredSession;
 
@@ -61,6 +63,7 @@ describe("session-lifecycle's eraser", () => {
 		const eraser = sessionEraser(
 			kept as unknown as SessionStore,
 			listed as unknown as SubjectSessions,
+			lifetime,
 		);
 		expect([eraser.name, eraser.erasable]).toEqual(["session-lifecycle", false]);
 		expect(await eraser.online("alice", signal)).toEqual({ reports: [], logoutGaps: 0 });
@@ -69,9 +72,15 @@ describe("session-lifecycle's eraser", () => {
 
 	it("erases sessions then the listing, counting each open, closing or unreadable session removed as a logout gap", async () => {
 		const asked: string[] = [];
-		const removed = [record("open"), record("closing"), record("closed"), { format: 9 }].map(
-			stored,
-		);
+		// An open session past the lifetime in force is owed no logout: no participant is called on its end alone.
+		const expired = record("open", now - lifetime.lifetimeMs);
+		const removed = [
+			record("open"),
+			expired,
+			record("closing"),
+			record("closed"),
+			{ format: 9 },
+		].map(stored);
 		const sessions = {
 			...kept,
 			erase: async (subject: string, _: AbortSignal, each?: (r: StoredSession) => void) => {
@@ -98,6 +107,7 @@ describe("session-lifecycle's eraser", () => {
 		const eraser = sessionEraser(
 			sessions as unknown as SessionStore,
 			listing as unknown as SubjectSessions,
+			lifetime,
 		);
 		expect(eraser.erasable).toBe(true);
 		expect(await eraser.online("alice", signal)).toEqual({

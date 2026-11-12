@@ -1,4 +1,5 @@
 import type { Eraser, SetReading, SubjectReading } from "@mod/erasure-extensions";
+import type { Clock } from "@mod/kernel";
 import { fromStored } from "../lifecycle/record.ts";
 import type { SessionStore, StoredSession, SubjectSessions } from "../store.ts";
 import { portsOf } from "./ports.ts";
@@ -21,19 +22,27 @@ const listingUnread: SetReading = async () => ({
 	reason: "a listing keyed by its subject is never read",
 });
 
-/** Whether a removed record was a session whose participants were never told: open, closing, or unreadable (counted high). */
-const untold = (record: StoredSession) => {
-	const read = fromStored(record);
-	return read === undefined || read.state !== "closed";
-};
-
 /**
  * session-lifecycle's eraser, `session-lifecycle`, as its spaces' `erasedBy` names it: a subject's
  * sessions and listing erased through the stores' own ports, each open, closing or unreadable
  * session removed counted as a logout gap. `erasable` only where the stores offer their ports whole;
  * where they do not, empty reports, the field carrying the fact.
  */
-export function sessionEraser(kept: SessionStore, listed: SubjectSessions): Eraser {
+export function sessionEraser(
+	kept: SessionStore,
+	listed: SubjectSessions,
+	lifetime: { readonly clock: Clock; readonly lifetimeMs: number },
+): Eraser {
+	/**
+	 * Whether a removed record was a session whose participants were never told: closing, open within
+	 * the lifetime in force (one past it is owed no logout, as no participant is called on its end
+	 * alone, as `leftOf` reads it), or unreadable, counted high.
+	 */
+	const untold = (record: StoredSession) => {
+		const read = fromStored(record);
+		if (read === undefined || read.state === "closing") return true;
+		return read.state === "open" && read.openedAt + lifetime.lifetimeMs > lifetime.clock.now();
+	};
 	const ports = portsOf(kept, listed);
 	if (!ports) {
 		const none = { reports: [], logoutGaps: 0 };
