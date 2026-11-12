@@ -16,8 +16,9 @@
 - `noHandoff`, where no module receives upstream tokens.
 - Extension point `handoffSealing`: the seal a held login's tokens are kept under. Where some module receives upstream tokens, none or two refuse boot.
 - Composition definition (`./module`): provides `handoff` over the receivers in name order, taking the held login store and the sealing contributed in every assembly, used only where some module receives upstream tokens. `upstream-handoff-seal` contributes the composed `seal`.
-- The eraser `upstream-handoff`, contributed to `erasure-extensions`' `erasers`, as its Store's space's `erasedBy` names it: a subject's held logins fenced through the Store's `erase`, a window doing the same for each subject, and `migrate` reading none (held logins are bounded); `erasable` only where the Store offers `erase` and `migrate`, empty reports where not.
+- The eraser `upstream-handoff`, contributed to `erasure-extensions`' `erasers`, as its Store's space's `erasedBy` names it: a subject's held logins fenced through the Store's `erase`, a window doing the same for each subject, and `migrate` reading none (held logins are bounded); `erasable` only where the Store offers the pair, empty reports where not.
 - Store interface for held logins, each saved for its subject (`erased` where the Store fenced the subject's erasure), with `erase` and `migrate` optional in 0.20 and required in 0.22; its needs (survives failover, names from the secret), `heldLoginLifetimeMaxMs` (an hour, the longest a held login may be kept: a Store fencing held logins by a bound declares it) and contract test (`./testing`).
+- `portsRefused` (the Store) → why its ports cannot be used, or none: `erase` and `migrate` come together or neither, one alone refused at build in `handoffIn`; `portsOf` → the pair, whole, or none.
 
 ## Invariants
 - Only a login whose upstream gave tokens carries anything; any other keeps nothing.

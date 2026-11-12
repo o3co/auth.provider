@@ -17,6 +17,7 @@ import {
 	upstreamLoginReceivers,
 } from "@mod/upstreams";
 import { heldOver } from "./held/held.ts";
+import { portsRefused } from "./ports.ts";
 import { type HeldLoginStore, heldLoginLifetimeMaxMs, heldLoginStore } from "./store.ts";
 
 declare const joinedMark: unique symbol;
@@ -88,6 +89,8 @@ export async function handoffIn(
 	);
 	const [contributed, ...others] = await c.collect(handoffSealing);
 	const held = await c.get(heldLoginStore);
+	const ports = portsRefused(held);
+	if (ports !== undefined) return c.refuse("upstream-handoff", ports);
 	// Sealing is needed only where a module receives upstream tokens.
 	if (receivers.length === 0) return noHandoff;
 	if (others.length > 0)

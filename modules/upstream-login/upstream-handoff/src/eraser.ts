@@ -1,4 +1,5 @@
 import type { Eraser, SubjectReading } from "@mod/erasure-extensions";
+import { portsOf } from "./ports.ts";
 import type { HeldLoginStore } from "./store.ts";
 
 /** Held logins are bounded: a migration indexes none, and reads none; one asked to read is a defect. */
@@ -12,8 +13,8 @@ const heldSubjectOf: SubjectReading = async () => {
  * `migrate`; one that does not answers empty reports, the field carrying the fact.
  */
 export function heldLoginEraser(held: HeldLoginStore): Eraser {
-	const { erase, migrate } = held;
-	if (!erase || !migrate) {
+	const ports = portsOf(held);
+	if (!ports) {
 		const none = { reports: [], logoutGaps: 0 };
 		return {
 			name: "upstream-handoff",
@@ -24,7 +25,7 @@ export function heldLoginEraser(held: HeldLoginStore): Eraser {
 		};
 	}
 	const online = async (subject: string, signal: AbortSignal) => ({
-		reports: [await erase.call(held, subject, signal)],
+		reports: [await ports.erase(subject, signal)],
 		logoutGaps: 0,
 	});
 	return {
@@ -37,6 +38,6 @@ export function heldLoginEraser(held: HeldLoginStore): Eraser {
 			for (const subject of subjects) reports.push(...(await online(subject, signal)).reports);
 			return { reports, logoutGaps: 0 };
 		},
-		migrate: async (walk, signal) => [await migrate.call(held, walk, heldSubjectOf, signal)],
+		migrate: async (walk, signal) => [await ports.migrate(walk, heldSubjectOf, signal)],
 	};
 }
