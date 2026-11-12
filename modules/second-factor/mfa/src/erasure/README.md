@@ -13,10 +13,11 @@ Internal module of `mfa`: erasing a subject's factor lists and claims, and migra
 - `factorSubjectOf` (the store, to read a claim's list) → a record's subject, as the migration reads it.
 
 ## Invariants
-- A list is its subject's where the subject it holds names its key (`s-<sha256(subject)>`). A list holding none, which only 0.18.0-rc.1 wrote, is unreadable, the reason naming its remedy: rewrite it (mfa-reset of its subject) or accept that erasure stays off.
+- A list, read strictly through `records`' `strictListOf`, is its subject's where the subject it holds names its key (`s-` and the base64url SHA-256 of the subject). One of another shape, a missing factors array among them, is unreadable as malformed.
+- A list holding no subject, otherwise a list, which only 0.18.0-rc.1 wrote, is unreadable, the reason naming its key and its remedies: the subject's next proof or change of a factor rewrites it; mfa-reset of the subject rewrites it by clearing its factors, to be bound again; or erasure stays off.
 - A claim is its list's subject's where that list holds its factor. A claim is an orphan where its list, read during the migration's maintenance window (AE §5.1), does not hold its factor. No provider writes then, so that reading stands until the claim is removed: the claim states something false, and removing it loses nothing.
-- A claim whose list is gone, a record of another shape, or a read that fails is unreadable, never an orphan.
+- A claim whose list is gone or malformed, a record of another shape, or a read that fails is unreadable, never an orphan.
 - `erasable` only where the store offers `erase` and `migrate`; otherwise empty reports.
 
 ## Depends on
-- `erasure-extensions` (the eraser and its readings); internal module `records` (the shapes and keys); the package's store interface.
+- `erasure-extensions` (the eraser and its readings); internal module `records` (`recordKindOf`, `strictListOf`, `strictClaimOf`, `listKeyOf`); the package's store interface.

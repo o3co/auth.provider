@@ -24,6 +24,11 @@ describe("mfa's eraser", () => {
 		expect(await read(listKeyOf("ann"), ann)).toEqual({ kind: "subject", subject: "ann" });
 		expect((await read(listKeyOf("bob"), ann)).kind).toBe("unreadable");
 		const rc = await read(listKeyOf("ann"), { factors: [factor("f1")] });
+		expect(rc).toMatchObject({ reason: expect.stringContaining(listKeyOf("ann")) });
+		expect(await read(listKeyOf("ann"), { subject: "ann" })).toMatchObject({
+			kind: "unreadable",
+			reason: expect.stringMatching(/malformed/),
+		});
 		expect(rc).toMatchObject({
 			kind: "unreadable",
 			reason: expect.stringMatching(/0\.18\.0-rc\.1.*mfa-reset/),
@@ -44,6 +49,11 @@ describe("mfa's eraser", () => {
 			expect((await read("u-x", value)).kind).toBe("unreadable");
 		}
 		expect((await read("z-x", ann)).kind).toBe("unreadable");
+		// A list under ann's key holding no factors array is malformed: her claims are never orphans for it.
+		const malformed = factorSubjectOf({
+			read: readOf({ [listKeyOf("ann")]: { subject: "ann" } as unknown as StoredFactors }),
+		});
+		expect((await malformed("u-x", claim("f1"))).kind).toBe("unreadable");
 	});
 
 	it("erases through the store's ports, each subject in a window, and states that it cannot where the store offers none", async () => {
