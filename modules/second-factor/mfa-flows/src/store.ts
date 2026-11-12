@@ -20,7 +20,7 @@ export interface ChangedTransaction {
 /** Transactions by their identifier, never kept in clear, each kept for its lifetime and changed only from what it holds. Every call throws Unavailable when the place cannot tell. */
 export interface TransactionStore {
 	/**
-	 * Keeps a new record for its lifetime, at most `heldLifetimeMaxMs`, and its subject,
+	 * Keeps a new record for its lifetime, at most `storedLifetimeMaxMs`, and its subject,
 	 * unless the identifier holds one already (`exists`) or, where the Store fences saves past a
 	 * subject's erasure, the subject is erased there (`erased`). The subject comes last.
 	 */
@@ -33,21 +33,21 @@ export interface TransactionStore {
 	read(id: string): Promise<StoredTransaction | undefined>;
 	/**
 	 * Changes the transaction from what it holds; `change` runs again on a race, so it is pure; none
-	 * leaves it. Nothing when gone, or, where the Store fences saves past a subject's erasure, when
-	 * its subject is erased.
+	 * leaves it. Nothing when gone. Not fenced by its subject's erasure: a record saved before it is
+	 * changed and used until its end, as a bounded space fences only a save.
 	 */
 	update(
 		id: string,
 		change: (record: StoredTransaction) => ChangedTransaction | undefined,
 	): Promise<{ readonly before: StoredTransaction; readonly after: StoredTransaction } | undefined>;
 	/**
-	 * Erases a subject's transactions here, where the Store can: optional in 0.20, required in 0.22,
+	 * Fences a subject's transactions and permits here, where the Store can: optional in 0.20, required in 0.22,
 	 * as a Store not built through `subject-records` cannot be erased. This store's `erase` and
 	 * `migrate` and the listings' come together or none; a part refuses the boot.
 	 */
 	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
 	/** Once, under the maintenance key, each transaction read by mfa-flows' reading; optional as `erase` is. */
-	migrate?(walk: Walk, subjectOf: SubjectReading, signal: AbortSignal): Promise<MigrationReport>;
+	migrate?(walk: Walk, reading: SubjectReading, signal: AbortSignal): Promise<MigrationReport>;
 }
 
 /** The longest a transaction may be kept: the section's ceiling, refused past it by the transactions. */
@@ -57,7 +57,10 @@ export const transactionLifetimeMaxMs = 1_800_000;
  * The longest the transaction store keeps a record: the longer of a transaction's ceiling and a
  * release permit's (`session`'s longest recent window), the bound a Store fencing the store declares.
  */
-export const heldLifetimeMaxMs = Math.max(transactionLifetimeMaxMs, longestRecentMs);
+export const storedLifetimeMaxMs = Math.max(transactionLifetimeMaxMs, longestRecentMs);
+
+/** @deprecated `storedLifetimeMaxMs`; removed once the store wiring reads it, in this release. */
+export const heldLifetimeMaxMs = storedLifetimeMaxMs;
 
 export const transactionStore = contract<TransactionStore>("mfa-flows.transaction-store");
 

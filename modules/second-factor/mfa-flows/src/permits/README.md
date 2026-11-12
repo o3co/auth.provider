@@ -9,7 +9,7 @@ Internal module of `mfa-flows`: a session's permit to release its subject's lock
 - Which factors guessing cannot beat, and how long a proof stays recent (`session`). The release itself (`release`). When to grant (`proof`).
 
 ## Offers
-- `permitsOver` (the transaction store, the clock, `session`'s recent window and its longest one, at most `heldLifetimeMaxMs`, longer a TypeError) → grant (a handle, its session's subject), the session's permit (none / ready with its id / used with its answer), and use.
+- `permitsOver` (the transaction store, the clock, `session`'s recent window and its longest one, at most `storedLifetimeMaxMs`, longer a TypeError) → grant (a handle, its session's subject), the session's permit (none / ready with its id / used with its answer), and use.
 
 ## Invariants
 - A permit is named by a hash of the session's handle in the transaction store; the handle is never kept in clear.

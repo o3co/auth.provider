@@ -1,6 +1,6 @@
 # erasure
 
-Internal module of `mfa-flows`: erasing a subject's transactions and listings, and migrating their spaces, through the stores' ports.
+Internal module of `mfa-flows`: fencing a subject's transactions and permits and erasing its listings, and migrating their spaces, through the stores' ports.
 
 ## Responsibilities
 - Is mfa-flows' eraser, `mfa-flows`, as its spaces' `erasedBy` names it, and states whether it can erase.
@@ -11,7 +11,7 @@ Internal module of `mfa-flows`: erasing a subject's transactions and listings, a
 ## Offers
 - `flowsEraser` (the transaction store, the listings, `session` read late) → an `Eraser`: `online` fences the subject's transactions and permits, then erases its listings; `window` each subject in turn; `migrate` the transactions (bounded: nothing to index), then the listings by `listingSubjectOf`.
 - `portsRefused` (the transaction store, the listings): why a part of the four ports refuses the boot, which `transactions` asks at its build; `portsOf`: the four, where both stores offer both.
-- `listingSubjectOf` (`session`'s `subjectOf`) → a listing's subject from its key: `login:<subject>` that subject; `session:<handle>` its session's, through `subjectOf`; anything else, or a session with no record naming one, unreadable, so the space stops and a run after the listing's end (30 min at most) finishes it.
+- `listingSubjectOf` (`session`'s `subjectOf`) → a listing's subject from its key: `login:<subject>` that subject; `session:<handle>` its session's, through `subjectOf`; anything else, or a session with no record naming one, unreadable, so the space stops and a run after the listing's end finishes it: its last transaction's end (`transactionLifetimeMaxMs` at most), then the store's clearing of the set.
 
 ## Invariants
 - `erasable` only where both stores offer both ports; otherwise empty reports. `logoutGaps` is 0: it removes no session.

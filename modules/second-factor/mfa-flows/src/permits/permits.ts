@@ -1,5 +1,5 @@
 import type { Clock } from "@mod/kernel";
-import { heldLifetimeMaxMs, type StoredTransaction, type TransactionStore } from "../store.ts";
+import { type StoredTransaction, storedLifetimeMaxMs, type TransactionStore } from "../store.ts";
 import { hashOf } from "../transactions/records.ts";
 
 /** What a used permit's release answered: released, or a fixed hold left standing since `fixedAt`. */
@@ -24,15 +24,15 @@ export interface PermitParts {
 	readonly clock: Clock;
 	/** Whether a proof at that time is still recent (`session`'s window). */
 	readonly recent: (at: number) => boolean;
-	/** How long a session's record lives from its first permit: the longest recent window, at most `heldLifetimeMaxMs`. */
+	/** How long a session's record lives from its first permit: the longest recent window, at most `storedLifetimeMaxMs`. */
 	readonly keepMs: number;
 }
 
 export type Permits = ReturnType<typeof permitsOver>;
 
 export function permitsOver(p: PermitParts) {
-	if (!(p.keepMs > 0 && p.keepMs <= heldLifetimeMaxMs)) {
-		throw new TypeError("mfa-flows: a permit is kept 1 ms to heldLifetimeMaxMs");
+	if (!(p.keepMs > 0 && p.keepMs <= storedLifetimeMaxMs)) {
+		throw new TypeError("mfa-flows: a permit is kept 1 ms to storedLifetimeMaxMs");
 	}
 	const keyOf = (handle: string) => hashOf(`release-permit\n${handle}`);
 	const permitOf = (record: StoredTransaction | undefined) =>

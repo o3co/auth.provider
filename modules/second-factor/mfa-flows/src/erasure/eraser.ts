@@ -5,14 +5,17 @@ import {
 	type SubjectReading,
 } from "@mod/erasure-extensions";
 import type { Sessions } from "@mod/session";
-import type { TransactionListings, TransactionStore } from "../store.ts";
+import {
+	type TransactionListings,
+	type TransactionStore,
+	transactionLifetimeMaxMs,
+} from "../store.ts";
 import { portsOf } from "./ports.ts";
 
-/** The transactions' reading, never asked: a bounded space has nothing to index. */
-const transactionsUnread: SubjectReading = async () => ({
-	kind: "unreadable",
-	reason: "a bounded space's record is never read",
-});
+/** Transactions and permits are bounded: a migration indexes none, and reads none; one asked to read is a defect. */
+const transactionsUnread: SubjectReading = async () => {
+	throw new Error("mfa-flows: a transaction or permit is bounded, so no migration reads one");
+};
 
 /**
  * Whose a raw listing is, from its key alone: `login:<subject>` that subject's; `session:<handle>`
@@ -32,8 +35,7 @@ export const listingSubjectOf =
 		if (subject !== undefined) return { kind: "subject", subject };
 		return {
 			kind: "unreadable",
-			reason:
-				"a listing whose session has no record naming its subject: it ends with its transactions, within 30 min; run again then",
+			reason: `a listing whose session has no record naming its subject: it ends after its last transaction, within ${transactionLifetimeMaxMs / 60_000} min, and the store's clearing of the set; run again then`,
 		};
 	};
 

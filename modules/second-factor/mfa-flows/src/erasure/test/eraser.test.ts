@@ -49,7 +49,11 @@ describe("mfa-flows' eraser", () => {
 				asked.push(`transactions:${subject}`);
 				return report("fenced", "transactions");
 			},
-			migrate: async () => migrated("transactions"),
+			// A bounded space's reading is never asked; one asked is a defect, and says so.
+			migrate: async (_: Walk, reading: (key: string, value: unknown) => Promise<unknown>) => {
+				await expect(reading("t", {})).rejects.toThrow(/bounded/);
+				return migrated("transactions");
+			},
 		} as unknown as TransactionStore;
 		const listings = {
 			...plainListings,
