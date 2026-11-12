@@ -52,22 +52,19 @@ export type MigrationReport = ReportMade &
 	);
 
 /**
- * An owner's answer for a space it cannot migrate yet, by the space's declared name and why: not
- * finished, as `stopped` is, the reason saying what is missing or when to run again. Made by the
- * owner through `ownerStopped`, with no brand: it states nothing `subject-records` wrote.
+ * An owner's answer that it cannot migrate yet, and why: not finished, as `stopped` is, the reason
+ * saying what is missing or when to run again, and naming in the owner's words the part stopped
+ * where it has several spaces. It names no space: its reader knows the eraser that answered it, and
+ * the spaces through `erasedBy`. Made by the owner through `ownerStopped`, with no brand: it states
+ * nothing `subject-records` wrote.
  */
 export interface OwnerStopped {
 	readonly kind: "owner-stopped";
-	readonly space: string;
 	readonly reason: string;
 }
 
-/** An owner's stop of a space's migration, by its declared name and why. */
-export const ownerStopped = (space: string, reason: string): OwnerStopped => ({
-	kind: "owner-stopped",
-	space,
-	reason,
-});
+/** An owner's stop of its migration, and why. */
+export const ownerStopped = (reason: string): OwnerStopped => ({ kind: "owner-stopped", reason });
 
 /**
  * Whose a record written before indexing is, as its owner reads it: a subject's; an orphan, which

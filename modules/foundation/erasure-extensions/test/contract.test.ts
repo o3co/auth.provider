@@ -81,12 +81,8 @@ it("takes an owner's step for an orphan: what a record holds, kept outside the s
 });
 
 it("makes an owner's stop of a migration, which no cast makes a MigrationReport", async () => {
-	const stopped: OwnerStopped = ownerStopped("federation-tokens-store.tokens", "no port");
-	expect(stopped).toEqual({
-		kind: "owner-stopped",
-		space: "federation-tokens-store.tokens",
-		reason: "no port",
-	});
+	const stopped: OwnerStopped = ownerStopped("no port");
+	expect(stopped).toEqual({ kind: "owner-stopped", reason: "no port" });
 	const answer: Awaited<ReturnType<Eraser["migrate"]>> = [stopped];
 	expect(answer).toEqual([stopped]);
 	// @ts-expect-error The owner's stop states nothing written: a brand-free object is never a MigrationReport.
