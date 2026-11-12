@@ -13,7 +13,7 @@
 - `eraseSubject` (internal module `erase`) → the space's `SpaceReport`; `sweepIndex` → a page of the index swept of entries whose records or sets are gone.
 - `migrateRecords` (internal module `migrate`) → the space's `MigrationReport`.
 - `subjectRecordsPhase` (internal module `phase`): its mark, `read`, `once` → `PhaseOnce`, and `write` (`not-in-maintenance`, then `not-paired`).
-- `indexSpaceOf` (a space) → its index space: `.index` after its name, its guarantees, `internal`; the wiring declares it beside the space. `SubjectPlace`, `Phase`.
+- `indexSpaceOf` (a space) → its index space: `.index` after its name, its guarantees, `internal`; the wiring declares it beside the space. `tombstoneFloor` (no eviction, durable, replicated): what a space holding a subject's data declares beside its own needs, as its index keeps the tombstone with the space's guarantees. `SubjectPlace`, `Phase`.
 
 ## Invariants
 - Every write goes through `records`' `changeRecords`, the one door to a space holding a subject's data; a read goes to the store and writes nothing. In `reader`, each write is one record in one partition, which any store writes as one.
@@ -35,5 +35,6 @@
 ## Vocabulary
 - subject: the account a record belongs to.
 - tombstone: a subject's mark that no record of it is written past.
+- floor: `tombstoneFloor`, the guarantees a tombstone needs, which every space holding a subject's data declares.
 - bucket: part of a subject's index, the entries of its records and sets.
 - witness: the index's mark that this package wrote an envelope at a subject's key, telling it from a raw value of its shape.

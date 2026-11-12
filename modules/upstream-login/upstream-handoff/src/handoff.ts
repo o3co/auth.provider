@@ -17,7 +17,7 @@ import {
 	upstreamLoginReceivers,
 } from "@mod/upstreams";
 import { heldOver } from "./held/held.ts";
-import { type HeldLoginStore, heldLoginStore } from "./store.ts";
+import { type HeldLoginStore, heldLoginLifetimeMaxMs, heldLoginStore } from "./store.ts";
 
 declare const joinedMark: unique symbol;
 /** What a join gave each receiver, read by the handoff alone; its caller holds it for `withdrawn`. */
@@ -132,6 +132,11 @@ export function handoffWith(parts: Parts): Handoff {
 	const held = heldOver(parts.seal, parts.held);
 	return {
 		of: (idp, subject, tokens, lifetimeMs) => {
+			if (!(lifetimeMs > 0 && lifetimeMs <= heldLoginLifetimeMaxMs)) {
+				throw new TypeError(
+					"upstream-handoff: a held login is kept 1 ms to heldLoginLifetimeMaxMs",
+				);
+			}
 			if (tokens === undefined) return undefined;
 			// Past the deadline the kept tokens are gone, so the caller's gates refuse a resume.
 			const deadline = parts.clock.now() + lifetimeMs;

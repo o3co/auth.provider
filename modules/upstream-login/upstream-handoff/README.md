@@ -10,13 +10,14 @@
 - How sealing works (`seal`), and how a held login resumes (`login-gates`).
 
 ## Offers
-- `handoff.of` (IdP, local subject, the upstream's tokens, a lifetime): none where there are no tokens; else the carry and deadline for the caller to hand its gates, and what follows the login's outcome.
+- `handoff.of` (IdP, local subject, the upstream's tokens, a lifetime of at most `heldLoginLifetimeMaxMs`, longer a TypeError): none where there are no tokens; else the carry and deadline for the caller to hand its gates, and what follows the login's outcome.
 - `handoff.opened` (session, carry): the gates' news that a held login opened.
 - `handoff.joined` (session, IdP, tokens): a link's tokens, handed at once to the open session it joined, answering what it gave each receiver; `handoff.withdrawn` (session id, IdP, that answer) takes them back.
 - `noHandoff`, where no module receives upstream tokens.
 - Extension point `handoffSealing`: the seal a held login's tokens are kept under. Where some module receives upstream tokens, none or two refuse boot.
 - Composition definition (`./module`): provides `handoff` over the receivers in name order, taking the held login store and the sealing contributed in every assembly, used only where some module receives upstream tokens. `upstream-handoff-seal` contributes the composed `seal`.
-- Store interface for held logins, its needs (survives failover, names from the secret) and contract test (`./testing`).
+- The eraser `upstream-handoff`, contributed to `erasure-extensions`' `erasers`, as its Store's space's `erasedBy` names it: a subject's held logins fenced through the Store's `erase`, a window doing the same for each subject, and `migrate` reading none (held logins are bounded); `erasable` only where the Store offers `erase` and `migrate`, empty reports where not.
+- Store interface for held logins, each saved for its subject (`erased` where the Store fenced the subject's erasure), with `erase` and `migrate` optional in 0.20 and required in 0.22; its needs (survives failover, names from the secret), `heldLoginLifetimeMaxMs` (an hour, the longest a held login may be kept: a Store fencing held logins by a bound declares it) and contract test (`./testing`).
 
 ## Invariants
 - Only a login whose upstream gave tokens carries anything; any other keeps nothing.
@@ -33,7 +34,7 @@
 - The held login record: the internal module `held`'s.
 
 ## Depends on
-- `kernel`, `upstreams` (the receivers, the tokens), `seal` (the sealing's interface), `login-gates` (a login's outcome), `session` (the session)
+- `kernel`, `erasure-extensions` (`Eraser`, `erasers`, and the store's erasure ports' reports), `upstreams` (the receivers, the tokens), `seal` (the sealing's interface), `login-gates` (a login's outcome), `session` (the session)
 
 ## Vocabulary
 - held login: a login a gate held, its tokens sealed until it opens.

@@ -4442,12 +4442,12 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/records':
-        specifier: workspace:*
-        version: link:../../foundation/records
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
       '@mod/upstream-handoff':
         specifier: workspace:*
         version: link:../../upstream-login/upstream-handoff
@@ -5507,6 +5507,9 @@ importers:
 
   modules/upstream-login/upstream-handoff:
     dependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel

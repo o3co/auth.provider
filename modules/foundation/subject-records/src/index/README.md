@@ -9,7 +9,7 @@ Internal module of `subject-records`: where a space keeps its subjects' index, a
 - Writing them: the package's builders, through `records`' `changeRecords`.
 
 ## Offers
-- `indexSpaceOf` (a space) → its index space: `.index` after its name, its guarantees, `internal`; `isIndexSpaceOf` checks one.
+- `indexSpaceOf` (a space) → its index space: `.index` after its name, its guarantees, `internal`; `isIndexSpaceOf` checks one. `tombstoneFloor`: the guarantees a tombstone needs, which such a space declares beside its own.
 - `indexOver` (a place, its space, its index space) → `tombOf` (a subject), `bucketOf` (a subject, a key), `bucketsOf` (a subject: all 16), `witnessOf` (a subject, `record` or `set`) and `entryAt` (a partition, as a scan finds it), each a target of the index space.
 - `entriesIn` (a bucket's value, its space) → its entries, or `UnreadableIndex`; `listedWith` and `listedWithout` → the bucket's next with an entry, or without those picked; `targetOf` (an entry) → what it lists; `bucketNames`, the 16; `witnessed`, what a witness holds.
 - `SubjectPlace` and `Phase`, as the package offers them; `checkedSubjectPlace` (a place, the categories a builder writes) → its category, refusing at build, through the builder's `refuse`, a store with no batch across once indexed, an index not the space's, and another category.

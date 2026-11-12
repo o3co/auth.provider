@@ -1,4 +1,5 @@
 import { setting } from "@mod/kernel";
+import { heldLoginLifetimeMaxMs } from "@mod/upstream-handoff";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 
@@ -37,9 +38,17 @@ export const section = z.strictObject({
 		),
 	"transaction-lifetime": setting
 		.duration("s")
-		.pipe(z.number().int().min(60).max(3600))
+		.pipe(
+			z
+				.number()
+				.int()
+				.min(60)
+				.max(heldLoginLifetimeMaxMs / 1000),
+		)
 		.prefault("10m")
-		.describe("How long a round trip, or a held login's tokens, may wait, from 1m to 1h."),
+		.describe(
+			"How long a round trip, or a held login's tokens, may wait, from 1m to 1h: held to the longest upstream-handoff keeps a held login.",
+		),
 	requests: z
 		.number()
 		.int()

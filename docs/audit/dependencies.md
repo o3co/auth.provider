@@ -293,7 +293,7 @@ flowchart LR
 | `@mod/session-tokens-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-tokens`, `@mod/store` |
 | `@mod/subject-revocation-store` | wiring | `@mod/erasure-extensions`, `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-revocation` |
 | `@mod/tokens-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/tokens` |
-| `@mod/upstream-handoff-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/upstream-handoff` |
+| `@mod/upstream-handoff-store` | wiring | `@mod/kernel`, `@mod/store`, `@mod/subject-records`, `@mod/upstream-handoff` |
 | `@mod/upstream-round-trip-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/upstream-round-trip` |
 | `@mod/users-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-records`, `@mod/users` |
 | `@mod/webauthn-store` | wiring | `@mod/kernel`, `@mod/passkeys`, `@mod/records`, `@mod/store` |
@@ -343,7 +343,7 @@ flowchart LR
 | `@mod/idp-oidc` | feature | `@mod/external-jwt`, `@mod/host-entries`, `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/upstream-client`, `@mod/upstreams`, `@mod/url-setting` |
 | `@mod/rp-logout-federation` | feature | `@mod/federation-tokens`, `@mod/kernel`, `@mod/rp-logout` |
 | `@mod/upstream-client` | feature | `@mod/external-jwt`, `@mod/kernel`, `@mod/outbound`, `@mod/upstreams`, `@mod/url-setting` |
-| `@mod/upstream-handoff` | feature | `@mod/kernel`, `@mod/login-gates`, `@mod/seal`, `@mod/session`, `@mod/upstreams` |
+| `@mod/upstream-handoff` | feature | `@mod/erasure-extensions`, `@mod/kernel`, `@mod/login-gates`, `@mod/seal`, `@mod/session`, `@mod/upstreams` |
 | `@mod/upstream-handoff-seal` | feature | `@mod/kernel`, `@mod/seal`, `@mod/upstream-handoff` |
 | `@mod/upstream-round-trip` | feature | `@mod/cookies`, `@mod/http`, `@mod/kernel` |
 | `@mod/upstreams` | feature | `@mod/http`, `@mod/kernel`, `@mod/session` |
