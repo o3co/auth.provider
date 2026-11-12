@@ -59,9 +59,6 @@ export const transactionLifetimeMaxMs = 1_800_000;
  */
 export const storedLifetimeMaxMs = Math.max(transactionLifetimeMaxMs, longestRecentMs);
 
-/** @deprecated `storedLifetimeMaxMs`; removed once the store wiring reads it, in this release. */
-export const heldLifetimeMaxMs = storedLifetimeMaxMs;
-
 export const transactionStore = contract<TransactionStore>("mfa-flows.transaction-store");
 
 /** A transaction taken once must stay taken: one that came back could finish a login twice. */
