@@ -18,7 +18,7 @@ export type SessionRecord = {
 	| (Full & { readonly state: "open" })
 	| (Full & { readonly state: "closing" })
 	| (Full & { readonly state: "closed" })
-	/** The mark a close leaves where there was no record. */
+	/** 0.19's raw closed mark, holding no subject: read, never written. */
 	| { readonly state: "closed" }
 );
 

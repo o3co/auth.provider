@@ -33,7 +33,7 @@ export interface SessionStore {
 	read(handle: string): Promise<StoredSession | undefined>;
 	/**
 	 * Changes the record from what it holds; `change` reruns on a race, so it is pure. Nothing when
-	 * gone, or, where the Store fences a subject's erasure, when its subject is erased.
+	 * gone, or, where the Store fences saves past a subject's erasure, when its subject is erased.
 	 */
 	update(
 		handle: string,
@@ -74,8 +74,8 @@ export interface ClosingList {
 export interface SubjectSessions {
 	/**
 	 * Lists the handle for its lifetime; answers the others pushed out over the place's cap, never the
-	 * handle being added. Where the Store fences a subject's erasure: `erased` for an erased subject,
-	 * and `another-subject` where the listing under the key is another subject's.
+	 * handle being added. Where the Store fences saves past a subject's erasure, `erased` for an
+	 * erased subject; a Store keying listings otherwise may answer `another-subject`. Either is a refusal.
 	 */
 	add(
 		subject: string,
