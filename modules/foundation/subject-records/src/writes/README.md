@@ -10,7 +10,7 @@ Internal module of `subject-records`: a subject's records, by the category its s
 
 ## Offers
 - `subjectRecordsIn` (a place, its index space, the phase; where; the builder's `refuse`; `secret` for a bounded space) → `create` (a key, a value or its maker, a lifetime, its subject last: `created`, `exists` or `erased`), `read`, `change`, `remove` (a key, and optionally a check of its value: `removed`, `left` where the check said no, or `missing`), `move`, `scan`; and `unowned` (deprecated, below).
-- `rulesOf` (a place, its category) → each write's rule: the index records it reads besides the record, named from the record as read, and what it answers and writes from all it read. The one statement of the writes' conditions; `subjectRecordsIn` runs each op through it, one record at a time.
+- `rulesOf` (a place, its category) → each write's rule: the index records it reads besides the record, named from the record as read, and what it answers and writes from all it read. The one statement of the writes' conditions; `subjectRecordsIn` runs each op through it, one record at a time, and `joint` many as one. A move's rule answers `erased` for `to`'s tombstone and `from-erased` for `from`'s alone; the single `move` answers both `erased`.
 - `online-indexed`: each record's key in its subject's bucket; `move` gives a record to another subject. `online-keyed`: each record's key its subject itself, one per subject (any other key, TypeError). `bounded`: each written raw, fenced at creation by its subject's tombstone, gone by its end, at most the space's `boundedMs`.
 
 ## Invariants

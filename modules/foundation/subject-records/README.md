@@ -9,6 +9,7 @@
 ## Offers
 - `subjectRecordsIn` (internal module `writes`): a subject's records in a space declaring `online-indexed`, `online-keyed` or `bounded`.
 - `subjectKeyedSetsIn` (internal module `sets`): keyed sets of `online-indexed` and `online-keyed` spaces.
+- `jointRecordsIn` (internal module `joint`): records of several `online-indexed` places changed as one by the ops their owner decides.
 - `phasedRecordsIn`, `phasedKeyedSetsIn` (internal module `phased`): the builders over the phase read once, with the space's `erase` and `migrate` and `ready` for the template's probe.
 - `eraseSubject` (internal module `erase`) → the space's `SpaceReport`; `sweepIndex` → a page of the index swept of entries whose records or sets are gone.
 - `migrateRecords`, `migrateSets` (internal module `migrate`) → the space's `MigrationReport`.
@@ -20,7 +21,7 @@
 - `reader`: records written raw, with no index or tombstone, as they were. `indexed`, from the mark `subject-records.phase`: a record of an `online-*` space is kept in an envelope with its subject (internal module `envelope`). An owner's value holding `records:v` at its top is refused in both phases.
 - A subject's part of the index (internal module `index`) holds its tombstone, 16 buckets of the entries of its records and sets, and, in an `online-keyed` space, the witness of its envelopes; no key holds a subject. A bucket in another shape is refused wherever it is read, never skipped.
 - Every write of an `online-keyed` envelope writes its subject's witness with it where missing; erasing removes it with what it witnesses; a removal or an end may leave it, holding nothing but its hashed key.
-- `erased` answers a create the tombstone stopped: an owner takes it as refused, never as `exists`, and never tries it again.
+- `erased` answers a write the tombstone stopped: a create, and in a joint change a change of the subject's record or a move to it. An owner takes it as refused, never as `exists`, and never tries it again.
 - A record or set physically held is listed in its subject's bucket, expired or not, once indexed: an entry leaves a bucket only with what it lists. A set never changes subject.
 - A raw record, from before records were indexed, is changed raw, with no tombstone condition. The one migration indexes or removes every raw record of an `online-*` space and every raw set of an `online-indexed` one, or stops that space, before erasure can be enabled; a raw set of an `online-keyed` space needs none (account erasure §3.3, §5.1). A space holds records or sets, so it has one report.
 - Erasing writes the tombstone first, then removes only what reads absent or names the subject. A report is made by this package alone (internal modules `erase` and `migrate`).

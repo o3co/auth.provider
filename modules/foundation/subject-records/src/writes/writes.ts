@@ -130,8 +130,11 @@ export function subjectRecordsIn<T extends Json>(
 			key: string,
 			from: string,
 			to: string,
-		): Promise<"moved" | "missing" | "not-from" | "erased"> =>
-			ruled(key, rules.move(key, from, to)),
+		): Promise<"moved" | "missing" | "not-from" | "erased"> => {
+			// Either tombstone stops it, as this one op has always answered.
+			const moved = await ruled(key, rules.move(key, from, to));
+			return moved === "from-erased" ? "erased" : moved;
+		},
 		/** A page of the keys of the space's living records, as `store` walks: names, where keyed by secrets. */
 		scan: async (
 			cursor?: string,
