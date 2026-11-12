@@ -1,7 +1,13 @@
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { erasedSubjects, revocations, subjectErasure, subjectRevocation } from "../src/contract.ts";
+import {
+	erasedSubjects,
+	erasureFence,
+	revocations,
+	subjectErasure,
+	subjectRevocation,
+} from "../src/contract.ts";
 import revocationModule from "../src/module.ts";
 import { type BoundaryStore, boundaryStore, type StoredBoundary } from "../src/store.ts";
 import {
@@ -246,6 +252,20 @@ subjectRevocationContract("the stand-in", async () => {
 		erasedSubjects: app.get(erasedSubjects),
 		...adapter,
 	};
+});
+
+it("lets the stand-in's fence pass a subject until it is marked, and refuses a receipt id fenced twice", async () => {
+	const app = await assemble({
+		modules: [subjectRevocationStandIn],
+		config: kernelConfig(),
+		runtime: quietRuntime({ clock: { now: () => now } }),
+	});
+	const fence = app.get(erasureFence);
+	expect(await fence.fence("alice", "r-1")).toBe("passed");
+	await expect(fence.fence("alice", "r-1")).rejects.toThrow("a fence's receipt id is used");
+	await app.get(subjectErasure).markErased("alice");
+	expect(await fence.fence("alice", "r-2")).toBe("erased");
+	expect(await fence.fence("bob", "r-3")).toBe("passed");
 });
 
 subjectRevocationContract("the lagging stand-in, caught up", async () => {

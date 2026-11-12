@@ -236,11 +236,13 @@ export const subjectRevocationStandIn = defineModule(
 		}),
 		// The fence: passes unless the subject is marked; a receipt id is new to each fence, as there.
 		m.provide(erasureFence).by(async (c) => {
-			const erased = erasedInto(await c.get(standInBoundaries).then((b) => () => b));
+			const boundaries = await c.get(standInBoundaries);
+			const erased = erasedInto(() => boundaries);
 			const receipts = new Set<string>();
 			return {
 				fence: async (subject, receiptId) => {
-					if (receipts.has(receiptId)) throw new TypeError(`a receipt ${receiptId} fenced twice`);
+					if (receipts.has(receiptId))
+						throw new Error("subject-revocation: a fence's receipt id is used");
 					receipts.add(receiptId);
 					return (await erased(subject)) ? "erased" : "passed";
 				},
