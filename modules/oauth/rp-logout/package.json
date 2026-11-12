@@ -41,10 +41,10 @@
 		"@mod/subject-attributes": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/users": "workspace:*",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	},
 	"peerDependenciesMeta": {
 		"vitest": {

@@ -27,6 +27,6 @@
 		"@mod/mfa-managing": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	}
 }

@@ -34,7 +34,7 @@
 		"zod": "4.6.7"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	},
 	"peerDependenciesMeta": {
 		"vitest": {
@@ -48,6 +48,6 @@
 		"@mod/secret-hash": "workspace:*",
 		"@mod/session-requirements": "workspace:*",
 		"@mod/store": "workspace:*",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	}
 }

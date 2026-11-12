@@ -20,7 +20,7 @@
 		"zod": "4.6.7"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	},
 	"peerDependenciesMeta": {
 		"vitest": {
@@ -28,7 +28,7 @@
 		}
 	},
 	"devDependencies": {
-		"vitest": "5.0.5",
+		"vitest": "5.1.0",
 		"@mod/seal": "workspace:*"
 	}
 }

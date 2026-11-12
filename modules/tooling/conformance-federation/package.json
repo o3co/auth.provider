@@ -25,7 +25,7 @@
 		"@mod/conformance-second-factor": "workspace:*",
 		"@mod/conformance-tunnel": "workspace:*",
 		"@mod/spec-checklist": "workspace:*",
-		"jose": "6.2.15",
-		"vitest": "5.0.5"
+		"jose": "6.2.16",
+		"vitest": "5.1.0"
 	}
 }

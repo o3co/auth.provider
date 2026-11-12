@@ -17,7 +17,7 @@
 		"@mod/conformance-legacy": "workspace:*",
 		"@mod/conformance-oauth": "workspace:*",
 		"@mod/ledger-fakes": "workspace:*",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	},
 	"devDependencies": {
 		"@mod/conformance-code": "workspace:*",
@@ -26,6 +26,6 @@
 		"@mod/conformance-second-factor": "workspace:*",
 		"@mod/spec-checklist": "workspace:*",
 		"@mod/webauthn": "workspace:*",
-		"jose": "6.2.15"
+		"jose": "6.2.16"
 	}
 }
