@@ -30,7 +30,7 @@ export default defineModule(
 				log: c.log,
 				random: c.random,
 			});
-			return { nameOf: records.nameOf, save: records.named.create, update: records.named.change };
+			return { nameOf: records.nameOf, save: records.create, update: records.named.change };
 		}),
 		m.provide(voidList).by(async (c) =>
 			deferredIn({

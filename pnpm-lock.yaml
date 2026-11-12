@@ -1363,6 +1363,9 @@ importers:
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/grants':
         specifier: workspace:*
         version: link:../grants

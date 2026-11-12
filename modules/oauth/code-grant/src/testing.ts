@@ -67,7 +67,7 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			if (!holds) return context.skip();
 			const [code, kept] = [fresh(), fresh()];
 			const name = place.codes.nameOf(code);
-			await place.codes.save(name, held({ kept }), 60_000);
+			await place.codes.save(code, held({ kept }), 60_000, "alice");
 			await place.codes.update(name, (record) => ({ value: record }));
 			await place.voids.add(name);
 			expect([holds(kept), holds(name), holds(code)]).toEqual([true, true, false]);
@@ -75,18 +75,20 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 
 		it("keeps a record whole and once per name, whatever it holds", async () => {
 			const { codes } = await open();
-			const name = fresh();
+			const code = fresh();
+			const name = codes.nameOf(code);
 			const odd = held({ state: "unheard-of", nested: { list: [1, "two"] } });
-			expect(await codes.save(name, odd, 60_000)).toBe("created");
-			expect(await codes.save(name, held({ n: 1 }), 60_000)).toBe("exists");
+			expect(await codes.save(code, odd, 60_000, "alice")).toBe("created");
+			expect(await codes.save(code, held({ n: 1 }), 60_000, "alice")).toBe("exists");
 			expect(await codes.update(name, () => undefined)).toEqual({ before: odd, after: odd });
 			expect(await codes.update(fresh(), plus(1))).toBeUndefined();
 		});
 
 		it("changes a record only from what it holds, again after a racing writer", async () => {
 			const place = await open();
-			const name = fresh();
-			await place.codes.save(name, held({ n: 1 }), 60_000);
+			const code = fresh();
+			const name = place.codes.nameOf(code);
+			await place.codes.save(code, held({ n: 1 }), 60_000, "alice");
 			expect(await place.codes.update(name, plus(1))).toEqual({
 				before: held({ n: 1 }),
 				after: held({ n: 2 }),
@@ -97,15 +99,16 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 
 		it("ends a record at exactly its lifetime, counted from the write that last set one", async () => {
 			const place = await open();
-			const name = fresh();
-			await place.codes.save(name, held({ n: 1 }), 1000);
+			const code = fresh();
+			const name = place.codes.nameOf(code);
+			await place.codes.save(code, held({ n: 1 }), 1000, "alice");
 			place.advance(999);
 			await place.codes.update(name, (record) => ({ value: record, lifetimeMs: 1000 }));
 			place.advance(999);
 			expect(await place.codes.update(name, () => undefined)).toBeDefined();
 			place.advance(1);
 			expect(await place.codes.update(name, () => undefined)).toBeUndefined();
-			expect(await place.codes.save(name, held({ n: 2 }), 1000)).toBe("created");
+			expect(await place.codes.save(code, held({ n: 2 }), 1000, "alice")).toBe("created");
 		});
 
 		it("keeps voids until done, and a void whose handling failed", async () => {
@@ -132,8 +135,9 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			const place = await open();
 			const { restart, pressMemory } = place;
 			if (!restart || !pressMemory) return context.skip();
-			const [name, kept] = [fresh(), fresh()];
-			await place.codes.save(name, held({ n: 1 }), 60_000);
+			const [code, kept] = [fresh(), fresh()];
+			const name = place.codes.nameOf(code);
+			await place.codes.save(code, held({ n: 1 }), 60_000, "alice");
 			await place.voids.add(kept);
 			await restart();
 			await pressMemory();
@@ -147,9 +151,10 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			const place = await open();
 			const { loseNextAnswer: lose, failover } = place;
 			if (!lose || !failover) return context.skip();
-			const [name, kept, settled] = [fresh(), fresh(), fresh()];
+			const [code, kept, settled] = [fresh(), fresh(), fresh()];
+			const name = place.codes.nameOf(code);
 			lose();
-			expect(await place.codes.save(name, held({ n: 1 }), 60_000)).toBe("created");
+			expect(await place.codes.save(code, held({ n: 1 }), 60_000, "alice")).toBe("created");
 			lose();
 			expect((await place.codes.update(name, plus(1)))?.after).toEqual(held({ n: 2 }));
 			await failover();
