@@ -78,6 +78,10 @@ export function tokeningWith({ p, records, connections, record, stateRefusal }: 
 			grantEndsAt: p.judge.endOf(grant) ?? p.clock.now(),
 		});
 		if (current.kind === "handed") {
+			// The hand-out passes only where its subject is not erased: answered as a grant its subject's
+			// revocation ended, recording nothing about an erased subject.
+			if ((await p.fence(grant.subject)) === "erased")
+				return error(410, "grant_revoked", "backstop");
 			await used(grant);
 			record(
 				"federation.grant.token.success",

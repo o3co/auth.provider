@@ -3,6 +3,7 @@ import { type Clients, clients, recordRefusedAuthentication } from "@mod/clients
 import type { HttpRequest, HttpResponse } from "@mod/http";
 import { type BuildContext, type Clock, isUnavailable, type Log, type Random } from "@mod/kernel";
 import { attemptLimit, type RateLimit } from "@mod/rate-limit";
+import { erasureFence } from "@mod/subject-revocation";
 import { type Upstreams, upstreams } from "@mod/upstreams";
 import type { Judge, Listing, Records } from "../grant/grant.ts";
 import { shared } from "../grant/shared.ts";
@@ -42,6 +43,8 @@ export interface ApiParts {
 	readonly clock: Clock;
 	readonly random: Random;
 	readonly log: Pick<Log, "warn">;
+	/** The erasure fence for a token handed, one fenced write where erasure is enabled: `erased` where the subject is. */
+	readonly fence: (subject: string) => Promise<"passed" | "erased">;
 }
 
 export const base = "/oauth/federation-grants";
@@ -88,11 +91,13 @@ export const apiTakes = [
 	attemptLimit,
 	upstreams,
 	audit,
+	erasureFence,
 ] as const;
 
 /** The client routes' handler, over the contracts the assembly gives. */
 export async function apiOver(c: BuildContext<Settings>) {
 	const parts = await c.get(shared);
+	const fenced = await c.get(erasureFence);
 	return apiWith({
 		...parts,
 		...(await c.get(retention)),
@@ -108,5 +113,8 @@ export async function apiOver(c: BuildContext<Settings>) {
 		clock: c.clock,
 		random: c.random,
 		log: c.log,
+		// Each hand-out's own receipt, written where erasure is enabled: 128 fresh random bits.
+		fence: (subject) =>
+			fenced.fence(subject, Buffer.from(c.random.bytes(16)).toString("base64url")),
 	});
 }

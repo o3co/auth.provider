@@ -1,4 +1,5 @@
-import { expect, it } from "vitest";
+import { revocations, subjectErasure } from "@mod/subject-revocation";
+import { expect, it, vi } from "vitest";
 import { harness, said } from "../../../test/harness.ts";
 
 it("refuses a lodging for a subject erased here as unknown, keeping nothing and auditing it without the subject", async () => {
@@ -14,4 +15,22 @@ it("refuses a lodging for a subject erased here as unknown, keeping nothing and 
 		],
 	]);
 	expect(h.events.some((e) => e.kind === "federation.grant.requested")).toBe(false);
+});
+
+it("hands no token for a subject erased once the grant was judged, answered as a grant its revocation ended, recording no success", async () => {
+	const h = await harness();
+	const { id } = await h.connected();
+	const kept = h.app.get(revocations);
+	const compare = kept.compare.bind(kept);
+	// The route reads the boundary twice, the grant's judging and the token's: the subject is erased
+	// just after the second, the last before the fence.
+	let read = 0;
+	vi.spyOn(kept, "compare").mockImplementation(async (...args) => {
+		const answer = await compare(...args);
+		if (++read === 2) await h.app.get(subjectErasure).markErased("alice");
+		return answer;
+	});
+	expect(said(await h.grantCall(id, "token"))).toBe("410 grant_revoked backstop");
+	expect(read).toBe(2);
+	expect(h.events.some((e) => e.kind === "federation.grant.token.success")).toBe(false);
 });
