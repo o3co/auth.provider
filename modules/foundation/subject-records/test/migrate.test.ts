@@ -1,11 +1,8 @@
-import { createHash } from "node:crypto";
-import type { Elsewhere, SubjectReading, Walk } from "@mod/erasure-extensions";
-import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
-import { type Json, type Key, type Space, type Store, spaces, store } from "@mod/store";
-import { simulatedStore } from "@mod/store/testing";
+import type { Elsewhere, SubjectReading } from "@mod/erasure-extensions";
+import type { Json, Space } from "@mod/store";
 import { expect, it } from "vitest";
-import { indexSpaceOf, migrateRecords, subjectRecordsIn } from "../src/subject-records.ts";
+import { migrateRecords, subjectRecordsIn } from "../src/subject-records.ts";
+import { bucketOf, envelope, placed } from "./placed.ts";
 
 const g = ["durable"] as const;
 const indexed: Space = { name: "migrated-test", guarantees: g, subjectData: "online-indexed" };
@@ -16,14 +13,9 @@ const bounded: Space = {
 	subjectData: "bounded",
 	boundedMs: 60_000,
 };
-const held = contract<Store>("test.store");
 const refuse = (where: string, reason: string): never => {
 	throw new Error(`${where}: ${reason}`);
 };
-const part = (space: Space, subject: string) =>
-	`1.${createHash("sha256").update(`${space.name}\n${subject}`).digest("base64url")}`;
-const bucketOf = (key: string) => `m${createHash("sha256").update(key).digest("hex")[0]}`;
-const envelope = (subject: string, value: Json) => ({ "records:v": 1, subject, value });
 
 /** An owner's reading where a record is keyed by its subject. */
 const byKey: SubjectReading = async (key) => ({ kind: "subject", subject: key });
@@ -38,60 +30,7 @@ const owners: SubjectReading = async (_key, value) => {
 		: { kind: "subject", subject: named };
 };
 
-async function opened() {
-	const simulated = simulatedStore();
-	const app = await assemble({
-		modules: [
-			simulated.module,
-			defineModule({ name: "user", replicaSafe: false, takes: [store] }, (m) => [
-				...[indexed, keyed, bounded].flatMap((space) => [
-					m.contribute(spaces).by(() => space),
-					m.contribute(spaces).by(() => indexSpaceOf(space)),
-				]),
-				m.provide(held).by((c) => c.get(store)),
-			]),
-		],
-		config: kernelConfig(),
-		runtime: quietRuntime(),
-	});
-	const s = app.get(held);
-	const random = {
-		bytes: (n: number) => new Uint8Array(n).map(() => Math.floor(Math.random() * 256)),
-	};
-	const at = (space: Space, phase: "reader" | "indexed" = "indexed") => ({
-		store: s,
-		space,
-		index: indexSpaceOf(space),
-		random,
-		phase,
-	});
-	/** A walk of a space as the tool hands it in, every page on one server, each key `twice` where asked. */
-	const walk = (twice = false): Walk => ({
-		sweep: async (name, cursor) => {
-			const space = [indexed, keyed, bounded].find((one) => one.name === name) as Space;
-			const page = await s.scan(space, cursor);
-			const keys: readonly Key[] = twice ? page.keys.flatMap((k) => [k, k]) : page.keys;
-			return page.cursor === undefined
-				? { keys, server: "one" }
-				: { keys, cursor: page.cursor, server: "one" };
-		},
-	});
-	const put = (space: Space, partition: string, value: Json, ms?: number) =>
-		s.putIfAbsent({ space, partition, name: "record" }, value, {
-			expiry: ms === undefined ? { kind: "never" } : { kind: "after", ms },
-		});
-	const raw = async (space: Space, partition: string) =>
-		(await s.get({ space, partition, name: "record" })).entry;
-	const index = async (space: Space, subject: string, name: string) =>
-		(
-			await s.get({
-				space: indexSpaceOf(space),
-				partition: `${part(space, subject)}.${name}`,
-				name: "record",
-			})
-		).entry?.value;
-	return { s, at, walk, put, raw, index };
-}
+const opened = () => placed([indexed, keyed, bounded]);
 
 it("indexes each raw record its owner reads as a subject's, keeping its value and end, and removes each proven an orphan", async () => {
 	const { at, walk, put, raw, index } = await opened();

@@ -24,6 +24,7 @@ export {
 	keyedSetsIn,
 	type Member,
 	overCap,
+	type StrictSet,
 } from "./keyed-sets/keyed-sets.ts";
 export { type Attempt, type Changed, type Place, writeDeadline } from "./writing/writing.ts";
 export type { DeferredSize };

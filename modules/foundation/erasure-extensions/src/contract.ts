@@ -36,9 +36,9 @@ export const forgottenIn = (space: string, removed: number): ForgottenReport => 
 });
 
 /**
- * What putting one space's records written before indexing into the index did: indexed, or
- * removed as records holding no subject's data (`removed`: orphans proven to have no owner, those
- * the owner kept elsewhere first among them); or not finished, with why.
+ * What putting one space's records or keyed sets written before indexing into the index did:
+ * indexed, or removed as holding no subject's data (`removed`: orphans proven to have no owner,
+ * those the owner kept elsewhere first among them); or not finished, with why.
  */
 export type MigrationReport = ReportMade &
 	(
@@ -82,6 +82,14 @@ export type SubjectOf =
  * failure is `unreadable`, never `orphan`.
  */
 export type SubjectReading = (key: string, value: unknown) => Promise<SubjectOf>;
+
+/**
+ * The owner's reading of a keyed set's subject from its key alone: the owner never sees how a set
+ * is kept. An orphan set is proven by its key's form, never by what the set holds. It writes
+ * nothing; a lookup it makes may fail, and a failure is `unreadable`, never `orphan`; so is a
+ * lookup's confirmed "none", as a parent no longer found proves nothing of the set.
+ */
+export type SetReading = (key: string) => Promise<SubjectOf>;
 
 /**
  * The owner's step for a record its reading answered `orphan`, before the migration removes it:

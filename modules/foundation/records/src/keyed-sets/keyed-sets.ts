@@ -184,4 +184,61 @@ keyedSetsIn.codec = (p: { readonly cap: number; readonly clock: Clock }) => {
 	};
 };
 
+/**
+ * Whether a stored value is a set the codec's format holds, read strictly, needing no cap or clock:
+ * every part well formed, each member with its end, ended ones included; or why not. Nothing is
+ * dropped: one malformed part makes it all unreadable. For a migration that must not lose a member;
+ * the codec's reads stay lenient.
+ */
+keyedSetsIn.strict = (current: Json | undefined): StrictSet => {
+	const read = strictSet(current);
+	return typeof read === "string" ? { kind: "unreadable", reason: read } : { kind: "set" };
+};
+
+/** A set read strictly: whole, or why it cannot be read. */
+export type StrictSet =
+	| { readonly kind: "set" }
+	| { readonly kind: "unreadable"; readonly reason: string };
+
+/** One list of a set, strictly: pairs of a member and a finite end, each member once. */
+function strictList(
+	list: Json | undefined,
+	name: string,
+): readonly (readonly [string, number])[] | string {
+	if (list === undefined) return [];
+	if (!Array.isArray(list)) return `${name} is not a list`;
+	const seen = new Set<string>();
+	const pairs: (readonly [string, number])[] = [];
+	for (const item of list) {
+		if (!Array.isArray(item) || item.length !== 2) return `${name} holds an entry of another shape`;
+		const [member, ends] = item;
+		if (typeof member !== "string" || typeof ends !== "number" || !Number.isFinite(ends)) {
+			return `${name} holds an entry of another shape`;
+		}
+		if (seen.has(member)) return `${name} holds a member twice`;
+		seen.add(member);
+		pairs.push([member, ends]);
+	}
+	return pairs;
+}
+
+/** A stored set, strictly: the bare list of the first format, or `held` and `awaiting` and nothing else; why not, where not. */
+function strictSet(current: Json | undefined): string | undefined {
+	if (current === undefined || current === null) return "no set";
+	if (Array.isArray(current)) {
+		const held = strictList(current, "the set");
+		return typeof held === "string" ? held : undefined;
+	}
+	if (typeof current !== "object") return "a value of another shape";
+	const kept = current as Readonly<Record<string, Json>>;
+	if (Object.keys(kept).some((name) => name !== "held" && name !== "awaiting")) {
+		return "a set holding parts of another name";
+	}
+	for (const name of ["held", "awaiting"] as const) {
+		const list = strictList(kept[name], name);
+		if (typeof list === "string") return list;
+	}
+	return undefined;
+}
+
 export type KeyedSets = ReturnType<typeof keyedSetsIn>;
