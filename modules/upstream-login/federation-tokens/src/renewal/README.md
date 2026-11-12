@@ -11,6 +11,8 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 
 ## Offers
 - `renewalIn` (the build context) builds it, taking the stores, `upstreams`, the vault and `session`'s entries (late) itself.
+- `tokensEraser` (the store, `session`'s entries by handle) → the eraser `federation-tokens`, contributed to `erasure-extensions`' `erasers`: a subject's records erased through the store's `erase`, a window doing so for each subject; `erasable` only where the store offers `erase` and `migrate`, else empty reports.
+- `tokensSubjectOf` (`session`'s entries) → the migration's reading: a record's key is its session's handle and its value holds only the upstream's tokens, so its subject is its session's, read at level `none`, which no requirement falls short of. A session that no longer enters proves nothing: unreadable, as the record ends with it and a rerun then finds none.
 - `renewalWith` (store, locks, `upstreams`, `session`'s entries by handle, vault, `kernel`'s runtime, settings): `current` (session, IdP → handed / an outcome the routes answer), `receive`, `disconnect` (→ the id_token, or not linked), `withdraw`, `close`
 
 ## Invariants
@@ -26,8 +28,9 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 - An entry that does not open is removed.
 - A refresh asks for the granted scope.
 - A refresh answer narrower than the grant is kept; one with no scope means the grant; a wider or unreadable one is refused, its access token neither kept nor handed.
+- The store's `erase` and `migrate` are optional in 0.20 and required in 0.22.
 - A record is written for what is left of its session, and not at all once the session lets nobody in at `use`: closed, ended, revoked, or short of a requirement. A first record is saved for the session's subject; a save answered `erased`, its subject's erasure fencing it, keeps nothing, and the login's tokens are not kept.
 - A login's tokens are checked against their session once written; when it closed or fell short of a requirement meanwhile, they are withdrawn.
 
 ## Depends on
-- `upstreams` (the refresh, the tokens), `kernel`, `session`; the package's store interface and `vault`
+- `upstreams` (the refresh, the tokens), `kernel`, `session`, `erasure-extensions` (the eraser, its reports and reading); the package's store interface and `vault`

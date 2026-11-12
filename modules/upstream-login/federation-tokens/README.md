@@ -14,6 +14,7 @@
 ## Offers
 - Receiver `federation-tokens` for `upstreams`' upstream login receivers; its receipt is the kept entry's version, so `withdrawn` given it removes that entry only while it holds that version, and without one removes nothing.
 - Participant `federation-tokens` for closing sessions.
+- The eraser `federation-tokens` (internal module `renewal`).
 - `upstreamEndSessions.of` (session handle, return and state → the end of session of the first IdP the session holds tokens of, with its id_token as the hint / none).
   - It forgets nothing, so it is asked before the session closes.
   - An end of session the upstream cannot build is none, warned as `federation-tokens.end_session_failed` with the IdP and the failure's kind only.
@@ -27,7 +28,7 @@
 - Client metadata section `federation-tokens`: `receives` (default false), `post-logout-redirect-uris` (default none; each one a client may register to be sent back to, by `redirect-uris`' rule).
 - Operator section: `refresh-before` (default `30s`), `max-lifetime` (default `1d`), `lock-lifetime` (default `5s`), `requests` in `window`; times written with their unit, a bare number refused.
 - Store interfaces, which the assembly wires; the store never reads a record.
-  - Upstream tokens: one record per session handle, saved once for the session's subject (or `erased`), read, changed from what it holds with a new lifetime or its own, removed, and the sessions whose records live walked by pages; `erase` and `migrate` optional in 0.20, required in 0.22. Needs: no eviction, never rolled back by failover.
+  - Upstream tokens: one record per session handle, saved once for the session's subject (or `erased`), read, changed from what it holds with a new lifetime or its own, removed, and the sessions whose records live walked by pages. Needs: no eviction, never rolled back by failover.
   - Refresh locks: held under their holder's mark unless held, for a lifetime, and changed only from the mark they hold. Needs: no eviction.
 - Audit events with the subject, `idp`, `client` and the source when determined: `federation.token.succeeded` (`refreshed`), `federation.token.failed` (`reason`), `federation.logout.succeeded` (`redirected`).
 - Test configuration builders and the contract test of both store interfaces (`./testing`).
