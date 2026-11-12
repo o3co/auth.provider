@@ -413,6 +413,10 @@ it("takes Alpine's current packages in the stage the app runs in, which each gui
 		expect(guide, template).toContain(
 			"`--no-cache-filter=runtime` builds the stage the app runs in again",
 		);
+		expect(guide, template).toContain(
+			"A build by other means does the same: compose with `build: { pull: true, no_cache: true }`, `docker/build-push-action` with `pull: true` and `no-cache-filters: runtime`, any other builder with `--no-cache`.",
+		);
+		expect(guide, template).not.toMatch(/docker build (?!--pull --no-cache-filter=runtime )/);
 	}
 });
 

@@ -182,6 +182,8 @@ function built(app: string) {
 			"--progress=plain",
 			"--add-host",
 			`${hostName}:host-gateway`,
+			"--pull",
+			"--no-cache-filter=runtime",
 			"--secret",
 			`id=npmrc,src=${secret}`,
 			"-t",

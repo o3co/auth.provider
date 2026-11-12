@@ -35,8 +35,8 @@
 - A scalar its owner's example gives in several lines is still read from env, but left out of the env example and listed among the keys written in the local layer; the guide and the env example say such a value goes in the local layer.
 - Git leaves out every env file but `.env.example`, the local layer, `*.pem` and `*.key`; the image's build context leaves out those, `.env.example` and `.git`.
 - The image follows one Node 24 minor, patch and digest unpinned, so a build takes its patches; a minor is fixed only until a newer one is out, so the operator moves `FROM` to the latest 24.x minor at each Node security release.
-- The stage the app runs in takes Alpine's current packages; the guide builds it uncached.
 - It pins corepack by version and installs the locked production dependencies in a stage of their own; the stage the app runs in starts again from Node's image and takes out the corepack and the yarn Node's image bundles, so no package manager but npm is in it, and runs node under `tini` as a user other than root.
+- The stage the app runs in takes Alpine's current packages; the guide builds it uncached.
 - Only an app composing `http` is given its port and interface in the image and the guide, and only one composing `http-ops` is checked for liveness (`/_healthcheck`, after a start period) or told of its endpoints.
 
 ## Data
