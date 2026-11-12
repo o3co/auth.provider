@@ -1,6 +1,7 @@
-import { type Audit, declaredAudit } from "@mod/audit";
+import type { Audit } from "@mod/audit";
 import type { BuildContext, Clock, Log, Random } from "@mod/kernel";
-import events from "../audit-events.ts";
+import { type ErasedSubjects, erasedSubjects } from "@mod/subject-revocation";
+import { auditedAbout } from "../grant/audit.ts";
 import {
 	type Grant,
 	type Judge,
@@ -19,6 +20,8 @@ export interface SweepParts {
 	readonly revocation: Revocation;
 	readonly unlisted: Unlisting;
 	readonly audit: Audit;
+	/** Whether a subject is marked erased: for what an audit names, never for access. */
+	readonly erased: ErasedSubjects;
 	readonly clock: Clock;
 	readonly random: Random;
 	readonly log: Log;
@@ -32,7 +35,7 @@ export interface SweepParts {
 export function sweepWith(p: SweepParts) {
 	const { grants, records, judge } = p;
 	const version = secretFrom(p.random);
-	const audited = declaredAudit(p.audit, events);
+	const about = auditedAbout(p.audit, p.erased);
 	const ended = (grant: Grant) => {
 		const end = judge.endOf(grant);
 		return end !== undefined && end <= p.clock.now();
@@ -62,10 +65,9 @@ export function sweepWith(p: SweepParts) {
 		if (records.grantOf(changed?.before)?.status === "revoked" || after?.status !== "revoked")
 			return false;
 		await p.unlisted(after);
-		audited.record("federation.grant.revoked", {
-			subject: after.subject,
-			attributes: { client: after.client, connection: after.connection, outcome: "backstop" },
-		});
+		// Revoked because its subject's boundary ends it, erasure among the reasons: audited without it where so.
+		const attributes = { client: after.client, connection: after.connection, outcome: "backstop" };
+		await about("federation.grant.revoked", after.subject, attributes);
 		return true;
 	};
 	/** Sweeps one grant; a grant authorized again since the judgement is read and judged once more. */
@@ -106,7 +108,7 @@ export function sweepWith(p: SweepParts) {
 	};
 }
 
-export const sweepTakes = [grantStore] as const;
+export const sweepTakes = [grantStore, erasedSubjects] as const;
 
 /** Starts the sweep on this host every `sweep-interval`, over the contracts the assembly gives. */
 export async function sweepIn(
@@ -118,6 +120,7 @@ export async function sweepIn(
 		grants: await c.get(grantStore),
 		...parts,
 		audit,
+		erased: await c.get(erasedSubjects),
 		clock: c.clock,
 		random: c.random,
 		log: c.log,

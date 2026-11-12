@@ -9,7 +9,7 @@ Internal module of `federation-grants`: a grant's intent through the browser, as
 - Sessions, the round trip, the upstream's start and exchange, and whose upstream account a callback reached: the browser half's (`federation-grants-connect`). When an intent is lodged or renewed (`api`).
 
 ## Offers
-- `intentsWith` (clients, upstreams, the store interfaces, `grant`'s parts, audit, settings, origin, runtime) and `intentsOver` (the build context) → `grantIntents`, the package's contract for the browser half; `browserBase`.
+- `intentsWith` (clients, upstreams, the store interfaces, `grant`'s parts, audit, erased subjects, settings, origin, runtime) and `intentsOver` (the build context) → `grantIntents`, the package's contract for the browser half; `browserBase`.
 
 ## Invariants
 - A link is read, never spent: a login or a step-up comes back to it. A question is spent by a denial, of the intent `asked` read, or by an acceptance once the upstream start is built or refused.
@@ -17,7 +17,8 @@ Internal module of `federation-grants`: a grant's intent through the browser, as
 - Binding the first session and making its question are two writes: a session that loses the binding is stale, and a failed question leaves the binding for that session to try again.
 - The upstream's tokens are judged here, writing nothing; the browser half ends an intent they refuse.
 - An activation writes only over its own intent, unended and within its time as read then, never over a revoked grant, and seals the tokens as judged, at the time judged. A race that refuses it ends the intent and is audited.
+- A connection's failure, by `failed` or the browser half's `noted`, is audited without the subject where it is erased (`grant`'s `auditedAbout`); a notice's audit is best effort, recorded once that is read. An activation is audited naming the subject: the browser half reads the boundary (`stillValid`) just before it, in the same request.
 - Only an intent still the grant's current one, unended and within its time, is read or changed, at the change too; ending one with an error is written past its time as well.
 
 ## Depends on
-- `clients`, `upstreams` (the delegation), `audit`, `kernel`; `grant`, the package's store interfaces
+- `clients`, `upstreams` (the delegation), `audit`, `subject-revocation` (erased subjects), `kernel`; `grant`, the package's store interfaces

@@ -1,6 +1,7 @@
 import { declaredAudit } from "@mod/audit";
 import events from "../audit-events.ts";
 import type { Back, GrantIntents, Sourced } from "../browser.ts";
+import { auditedAbout } from "../grant/audit.ts";
 import { connectionsIn, type Intent, returnsTo, type Step, secretFrom } from "../grant/grant.ts";
 import { type Found, foundOf } from "./found.ts";
 import { browserBase, type IntentsParts } from "./intents.ts";
@@ -12,16 +13,15 @@ export function commonWith(p: IntentsParts) {
 	const connections = connectionsIn(settings, p.upstreams);
 	const audited = declaredAudit(p.audit, events);
 	const callbackUrl = (name: string) => `${p.origin}${browserBase}/callback/${name}`;
+	const about = auditedAbout(p.audit, p.erased);
+	/** A failed connection, audited without its subject where it is erased: a callback can come after. */
 	const failure = ({ grant }: Found, outcome: string, from: Sourced) =>
-		audited.record("federation.grant.authorization_failed", {
-			subject: grant.subject,
-			attributes: {
-				client: grant.client,
-				connection: grant.connection,
-				outcome,
-				...(from.source ? { source: from.source } : {}),
-			},
-		});
+		about(
+			"federation.grant.authorization_failed",
+			grant.subject,
+			{ client: grant.client, connection: grant.connection, outcome },
+			from.source,
+		);
 
 	/** The grant and its intent, while the intent is the grant's current one, not ended and within its time. */
 	const liveIntent = async (step: Pick<Step, "grant" | "intent"> | undefined) => {
@@ -68,7 +68,7 @@ export function commonWith(p: IntentsParts) {
 	const failed: GrantIntents["failed"] = async (ref, error, from) => {
 		const found = foundOf(ref);
 		await changeIntent(found, (i) => ({ ...i, ended: error }), { ending: true });
-		failure(found, from.outcome ?? error, from);
+		await failure(found, from.outcome ?? error, from);
 		return back(found, error);
 	};
 	return {

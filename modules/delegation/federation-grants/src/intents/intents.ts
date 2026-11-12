@@ -1,6 +1,7 @@
 import { type Audit, audit } from "@mod/audit";
 import { type Clients, clients } from "@mod/clients";
 import type { BuildContext, Clock, Log, Random } from "@mod/kernel";
+import { type ErasedSubjects, erasedSubjects } from "@mod/subject-revocation";
 import { type Upstreams, upstreams } from "@mod/upstreams";
 import { z } from "zod";
 import type { GrantIntents } from "../browser.ts";
@@ -30,6 +31,8 @@ export interface IntentsParts {
 	readonly judge: Judge;
 	readonly listed: Listing;
 	readonly audit: Audit;
+	/** Whether a subject is marked erased: for what an audit names, never for access. */
+	readonly erased: ErasedSubjects;
 	readonly settings: Settings;
 	readonly origin: string;
 	readonly clock: Clock;
@@ -66,7 +69,10 @@ export function intentsWith(p: IntentsParts): GrantIntents {
 		...stepping,
 		...callback,
 		failed,
-		noted: (ref, outcome, from) => failure(foundOf(ref), outcome, from),
+		// Recorded best effort, as an outage's audit is: the browser half's notice answers nothing.
+		noted: (ref, outcome, from) => {
+			failure(foundOf(ref), outcome, from).catch(() => undefined);
+		},
 		unanswered: (from) =>
 			audited.record("federation.grant.authorization_failed", {
 				attributes: { outcome: "unavailable", ...(from.source ? { source: from.source } : {}) },
@@ -81,6 +87,7 @@ export const intentsTakes = [
 	stepStore,
 	pendingIntents,
 	audit,
+	erasedSubjects,
 ] as const;
 
 /** The intents over the contracts the assembly gives. */
@@ -93,6 +100,7 @@ export const intentsOver = async (c: BuildContext<Settings>) =>
 		steps: await c.get(stepStore),
 		pending: await c.get(pendingIntents),
 		audit: await c.get(audit),
+		erased: await c.get(erasedSubjects),
 		settings: c.section,
 		clock: c.clock,
 		random: c.random,

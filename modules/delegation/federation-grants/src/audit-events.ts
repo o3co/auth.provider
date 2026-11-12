@@ -18,8 +18,8 @@ export default auditEvents({
 		when: "the user connects a renewal, with the identity check that applied (`outcome`), and which of the grant's account differs from what it held (`account_changed`: `issuer` or `subject`), if any",
 	},
 	"federation.grant.authorization_failed": {
-		attributes: ["client", "connection", "outcome", "source"],
-		when: "a connection fails, with why (`outcome`)",
+		attributes: ["client", "connection", "outcome", "source", "withheld"],
+		when: "a connection fails, with why (`outcome`); without the subject, `withheld` `erased` or `unread`, where it is erased or that cannot be read",
 	},
 	"federation.grant.revoke.denied": {
 		attributes: ["client", "reason", "source"],
@@ -35,6 +35,6 @@ export default auditEvents({
 	},
 	"federation.grant.revoked": {
 		attributes: ["client", "connection", "outcome", "source", "withheld"],
-		when: "a grant ends, revoked by its client or by the subject's revocation (`outcome`); without the subject, `withheld` `erased` or `unread`, where the revocation said it is erased, or it is or cannot be read so",
+		when: "a grant ends, revoked by its client or by the subject's revocation (`outcome`); without the subject, `withheld` `erased` or `unread`, where the revocation said it is erased, or a request or the sweep reads it erased or cannot read it",
 	},
 });

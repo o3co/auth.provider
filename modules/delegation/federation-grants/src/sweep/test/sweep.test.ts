@@ -25,6 +25,8 @@ async function swept() {
 	const logged = recordingLog();
 	const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
 	const revoked = new Set<string>();
+	/** Subjects marked erased: what the audit withholds. */
+	const erased = new Set<string>();
 	const judged: string[] = [];
 	const judge: Judge = {
 		revoked: async (grant) => {
@@ -42,6 +44,7 @@ async function swept() {
 		revocation: revocationWith(judge, 30 * day),
 		unlisted: unlistingWith(stores.subjects, logged.log),
 		audit: { record: (event) => void events.push(event), lost: () => ({}) },
+		erased: { erased: async (subject) => erased.has(subject) },
 		...runtime,
 	});
 	/** Keeps an active grant with credentials, ending in `life` ms. */
@@ -76,6 +79,7 @@ async function swept() {
 		kept,
 		read,
 		revoked,
+		erased,
 		judged,
 		events,
 		logs: () => logged.lines(),
@@ -120,6 +124,18 @@ it("revokes a grant its subject's revocation ends, though its listing missed it,
 			subject: "bob",
 			attributes: { client: "worker", connection: "cal", outcome: "backstop" },
 		}),
+	]);
+});
+
+it("revokes the grant of a subject marked erased, its eraser yet to run, auditing it without the subject", async () => {
+	const s = await swept();
+	await s.kept("held", "erin", day);
+	s.revoked.add("erin");
+	s.erased.add("erin");
+	await s.run();
+	expect((await s.read("held"))?.status).toBe("revoked");
+	expect(s.events.map((e) => [e.kind, e.subject, e.attributes?.withheld])).toEqual([
+		["federation.grant.revoked", undefined, "erased"],
 	]);
 });
 
