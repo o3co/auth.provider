@@ -222,7 +222,7 @@ npx @o3co/create-auth-provider my-provider-dpop --pattern simple-web --add @mod/
 まず `pnpm install` を実行して `pnpm-lock.yaml` を作成し、次を実行します。
 
 ```sh
-docker build -t auth-provider .
+docker build --pull --no-cache-filter=runtime -t auth-provider .
 docker run --env-file .env \
   -e HTTP_HOST=0.0.0.0 \
   -e HTTP_PORT=8080 \
@@ -235,6 +235,10 @@ docker run --env-file .env \
 Docker の env ファイルでは、変数ごとに 1 行で記述する必要があります。PEM 鍵などの複数行の値は `config/local.conf` に保存してください。
 
 イメージは Node 24 を使い、本番用の依存パッケージだけをインストールして、非 root ユーザーで実行します。ヘルスチェックでは `/_healthcheck` を呼び出します。
+
+`--pull` はイメージの Node マイナーの最新パッチを取り込み、`--no-cache-filter=runtime` はアプリを実行するステージをビルドし直すので、Alpine リポジトリの現在のパッケージを取り込みます。キャッシュされたステージは、以前のビルドのパッケージのままです。
+
+ほかの方法でビルドする場合も同じです。compose では `build: { pull: true, no_cache: true }`、`docker/build-push-action` では `pull: true` と `no-cache-filters: runtime`、そのほかのビルダーでは `--no-cache` を指定します。
 
 ## 本番運用の前に
 
