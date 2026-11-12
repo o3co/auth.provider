@@ -1,4 +1,5 @@
 import { audit } from "@mod/audit";
+import { erasers } from "@mod/erasure-extensions";
 import { contract, defineModule } from "@mod/kernel";
 import { amrSources } from "@mod/login-gates";
 import { factorBinding } from "@mod/mfa-binding";
@@ -8,6 +9,7 @@ import { factorReading } from "@mod/mfa-reading";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { resealers, seal } from "@mod/seal";
 import { enforcers, factorStore, proofSteps } from "./contract.ts";
+import { factorEraser } from "./erasure/eraser.ts";
 import { addsMfa, byKind, type Decisions, factorDecisions, leftOut } from "./factors.ts";
 import { portsRefused } from "./records/ports.ts";
 import { resealerOver } from "./records/resealer.ts";
@@ -92,6 +94,8 @@ export default defineModule(
 		}),
 		// The three faces are the one implementation, built once in each app.
 		m.provide(factorReading).by((c) => c.get(decisions)),
+		// Its build takes only the factor store, collecting no probes: the erasure gate collects erasers.
+		m.contribute(erasers).by(async (c) => factorEraser(await c.get(factorStore))),
 		m.provide(factorBinding).by((c) => c.get(decisions)),
 		m.provide(factorManaging).by((c) => c.get(decisions)),
 		m

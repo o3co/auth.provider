@@ -302,6 +302,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/mfa` (feature, `modules/second-factor/mfa`): Owns each subject's second factors: a kind's secret, sealed, and its state.
   - `binding` (`src/binding`): a factor begun, its pending proof, and its binding.
   - `clearing` (`src/clearing`): a reset's clearing of a subject's factors and its mark, and a first binding refused.
+  - `erasure` (`src/erasure`): erasing a subject's factor lists and claims, and migrating its space, through the factor store's ports.
   - `records` (`src/records`): how the factor lists and the claims on unique values are kept in `factorStore`, and sealed again.
   - `standing` (`src/standing`): whether a subject's counting factors stand.
 - `@mod/mfa-binding` (feature, `modules/second-factor/mfa-binding`): Owns the contract for binding a new second factor: beginning it, judging its first proof, and writing it. The proofs asked before a first binding are another thing: `mfa-binding-proof`.
