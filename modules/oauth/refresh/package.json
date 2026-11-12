@@ -15,6 +15,7 @@
 		"./audit-events": "./src/audit-events.ts"
 	},
 	"dependencies": {
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/audit": "workspace:*",
 		"@mod/claims-selection": "workspace:*",
 		"@mod/client-allowance": "workspace:*",

@@ -8,17 +8,18 @@
 - The access token format and its revocation (`tokens`). Whether a client is allowed a grant (`client-allowance`). The session lifecycle (`session`).
 
 ## Offers
-- Grant `refresh_token` for `grants`, taking its audience from the request; a `code-grant` addition `refresh_token`, for a client allowed the grant; taking it back revokes the family its redemption started, or marks that none may start.
+- Grant `refresh_token` for `grants`, taking its audience from the request; a `code-grant` addition `refresh_token`, for a client allowed the grant; taking it back revokes the family its redemption started, or writes `taken` (none may start).
 - A `tokens` access condition: a token whose family has ended is revoked.
-- A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family, answered as written so it is audited; another client is answered the same, and a family already marked revoked is finished before it is answered.
+- A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family; `settle` says how each is answered.
 - `grants`' token tie `family`: a token's family, `ended` (`family has ended`) or held to its end, naming the family's session, if any, to issue from; a token issued from it is adopted.
+- The eraser `refresh` (internal module `settle`).
 - Contract `lineage`: `start(...)` → a family's first refresh token, or nothing for a client not allowed to refresh.
 - Operator section `refresh`, with `lifetime` (written with its unit, in whole seconds) and `bind-confidential-clients` (false, as 0.17); its keys are in the configuration reference.
 - Audit event `refresh.family_revoked`, with the client, and the subject unless `withheld`, when a reuse revokes a family; never a token, its secret or the family's name: declared in `./audit-events`, listed in the audit event reference.
-- Store interfaces: families, redemptions, token links; their needs (never evicted, survives a crash, never rolled back by failover), contract test and configuration builders (`./testing`).
+- Store interfaces: families (each for its subject, erasable: `settle`), redemptions, token links; their needs (never evicted, survives a crash, never rolled back by failover), contract test and configuration builders (`./testing`).
 
 ## Invariants
-- A family's revocation is its confirmed mark: an operation that read or wrote the family before it may finish; from then the access condition and the grant refuse every token of it at each verification and use, a token handed back meanwhile at its next. Nothing more follows: its access tokens are not revoked by id, nor is it swept.
+- A family's revocation is its confirmed mark: an operation that read or wrote the family before it may finish; from then the access condition and the grant refuse every token of it at each verification and use, a token handed back meanwhile at its next.
 - A refresh token is `<family>.<secret>`: the family's name, 16 random bytes, and the secret, 32 random bytes, each in base64url, 66 characters in all (RFC 6749 §5.1 asks its size be documented).
 - Only a family's current token is usable, and each use swaps it for a new one. Any other token of the family is reuse and revokes the family; so is the loser of two concurrent uses.
 - A token with anything after it, another client's token, and one without the family's binding are refused without spending it.
@@ -33,7 +34,7 @@
 - Internal modules `grant` (the grant), `founding` (a family's beginning, the code addition among them), `lineage` (the contract and the access condition) and `settle` (the stores, revocation and the revocable kind) each take their contracts from the build context; the package's module only declares.
 
 ## Deprecated
-- The store interfaces `settle`'s card names there.
+- The store interfaces, and the family store's `unowned` with the mark saved where no record is, that `settle`'s card names there.
 - `refresh.sweep-interval`: taken, not read. A later release refuses it.
 - The log events `refresh.access_pushed_out`, `refresh.session_list_pushed_out` and `refresh.settle_retry_failed`: no longer written. A later release drops their names.
 
@@ -41,7 +42,7 @@
 - Family records (the current secret's hash, client, subject, scope, audience, session, authentication context, binding, end; or a revoked mark), what each redemption left, and each access token's family. Every record outlives what it covers by one allowance, for hosts whose clocks lag.
 
 ## Depends on
-- `kernel`, `tokens`, `grants`, `client-allowance`, `claims-selection`, `code-grant`, `token-control`, `session`, `subject-revocation`, `clients`, `issuer`, `sender-binding`, `audit`
+- `kernel`, `tokens`, `grants`, `client-allowance`, `claims-selection`, `code-grant`, `token-control`, `session`, `subject-revocation`, `clients`, `issuer`, `sender-binding`, `audit`, `erasure-extensions`
 
 ## Vocabulary
 - family: the series of refresh tokens that starts from one code redemption or one `start`. reuse: a token arriving that is not the family's current token.

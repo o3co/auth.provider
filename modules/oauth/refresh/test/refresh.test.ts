@@ -458,7 +458,7 @@ describe("a code's selection through its family", () => {
 		).toBeUndefined();
 	});
 
-	it("voids the code, revoking its token and ending its family, when the family's selection cannot be kept", async () => {
+	it("voids the code, revoking its token and starting no family, when the family's selection cannot be kept", async () => {
 		const s = await serve();
 		s.selections.state.failFamilies = true;
 		issuedTokens.length = 0;
@@ -467,9 +467,8 @@ describe("a code's selection through its family", () => {
 		expect(answer).toMatchObject({ error: "temporarily_unavailable" });
 		expect(issuedTokens).toHaveLength(1);
 		expect(await s.active(issuedTokens[0])).toBe(false);
-		const family = await familyOf(s, answer.redemption);
-		expect(family).toEqual(expect.any(String));
-		expect(liveFamily(await s.stores.kept.records.read(family ?? ""))).toBeUndefined();
+		// The selection is kept before the family's record and its redemption: neither is written.
+		expect(await familyOf(s, answer.redemption)).toBeUndefined();
 		expect(await answer.again()).toMatchObject({ error: "invalid_grant" });
 	});
 
@@ -614,6 +613,20 @@ describe("refresh tokens", () => {
 		const s = await serve();
 		expect(typeof (await s.redeem()).refresh_token).toBe("string");
 		expect(await s.redeem("coded")).not.toHaveProperty("refresh_token");
+	});
+
+	it("are not given for an erased subject: the code's exchange is unavailable, no family is linked to its redemption, and its access token is revoked", async () => {
+		const s = await serve();
+		s.stores.erased.add("alice");
+		issuedTokens.length = 0;
+		const answer = await s.redeem();
+		expect(answer).toMatchObject({ error: "temporarily_unavailable" });
+		expect(answer.refresh_token).toBeUndefined();
+		expect(await familyOf(s, answer.redemption)).toBeUndefined();
+		expect(issuedTokens).toHaveLength(1);
+		expect(await s.active(issuedTokens[0])).toBe(false);
+		// A retry never passes: the code is voided.
+		expect(await answer.again()).toMatchObject({ error: "invalid_grant" });
 	});
 
 	it("rotate on every use, and a spent one that comes again revokes the family and what it issued", async () => {

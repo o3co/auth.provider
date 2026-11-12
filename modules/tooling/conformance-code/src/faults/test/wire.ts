@@ -69,9 +69,16 @@ const partsOf = (token: string) => {
 	return { family, secret };
 };
 
+/** A family's record as written: raw, or opened from `subject-records`' envelope once indexed. */
+const familyIn = (v: unknown) => {
+	const held = v as { "records:v"?: unknown; value?: unknown } | null;
+	return (held?.["records:v"] === 1 ? held.value : v) as { current?: unknown } | null;
+};
+
 /**
  * The write that rotates a family from `token`: its record's current secret moved off the token's,
- * the family still live; a revocation, which keeps no current secret, is none.
+ * the family still live; a revocation, which keeps no current secret, is none. Families are
+ * `subject-records`' records, so a change is a batch, its record with what keeps it.
  */
 export function rotationFrom(token: string): Match {
 	const { family, secret } = partsOf(token);
@@ -80,9 +87,9 @@ export function rotationFrom(token: string): Match {
 		prefix,
 		space: "refresh-store.families",
 		partition: family,
-		operations: ["replaceIf"],
+		operations: ["batch"],
 		value: (v) => {
-			const current = (v as { current?: unknown }).current;
+			const current = familyIn(v)?.current;
 			return typeof current === "string" && current !== presented;
 		},
 	});
