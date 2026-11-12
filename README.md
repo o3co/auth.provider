@@ -222,7 +222,7 @@ The [configuration reference](docs/configuration.md) lists every setting with it
 Run `pnpm install` first so that `pnpm-lock.yaml` exists, then:
 
 ```sh
-docker build -t auth-provider .
+docker build --pull --no-cache-filter=runtime -t auth-provider .
 docker run --env-file .env \
   -e HTTP_HOST=0.0.0.0 \
   -e HTTP_PORT=8080 \
@@ -235,6 +235,8 @@ docker run --env-file .env \
 Docker env files take one line per variable, so keep multi-line values such as PEM keys in `config/local.conf`.
 
 The image uses Node 24, installs production dependencies only and runs as a non-root user. Its health check calls `/_healthcheck`.
+
+`--pull` takes the newest patch of the image's Node minor, and `--no-cache-filter=runtime` builds the stage the app runs in again, so it takes the Alpine repository's current packages: a cached stage keeps those of an earlier build.
 
 ## Before production
 
