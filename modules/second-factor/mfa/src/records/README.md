@@ -14,6 +14,7 @@ Internal module of `mfa`: how the factor lists and the claims on unique values a
 - `portsRefused` (store): the factor store's ports, stated once and refused at build: `updateAsOne` offered, and `erase` and `migrate` both or neither.
 - `resealerOver` (store, seal): the resealer `mfa` contributes.
 - `sealContext`, `listKeyOf`, `storedList`, `factorsOf`, `fencesOf`, `subjectOf`: the keys, contexts and record shapes the two share. `claimKeyOf` (kind, value): the key of a claim on a unique value.
+- `recordKindOf` (key): a list's or a claim's; `strictListOf` and `strictClaimOf` (a record): the shape read strictly, none for any other, for what must not guess (the eraser).
 
 ## Invariants
 - A factor list's record holds its subject, so its secrets can be sealed again; the store's key is the subject's hash.
@@ -21,8 +22,7 @@ Internal module of `mfa`: how the factor lists and the claims on unique values a
 - A factor of a unique value is written with its claim, as one; a claim whose list lacks its factor is stale, and a binding takes it.
 - A list counts how far the subject's fence has moved (none read as 0): a clear moves it in its own write, and `fence` moves it alone, each writing even an empty list; every other write keeps it, so it never goes back while the list is kept.
 - A secret a `previous` key sealed is sealed again in the write a proof of its factor makes, and by the resealer, which walks every list and writes only over the secret read; one no key opens, or a list whose subject is not its key's, is left.
-
-- A claim is written through `updateAsOne`: the claim created, or moved to the binding's subject from the one it is held for; the prior holder's list watched, never changed; the binding's list changed, or created. Its answer words are subject-records' joint change's. A refusal is read before any verdict.
+- A claim is written through `updateAsOne`: the claim created, or moved to the binding's subject from the one it is held for; the prior holder's list watched, never changed; the binding's list changed, or created. Its words, the ops it asks and the answers it reads, are subject-records' joint change's. A refusal is read before any verdict.
 - A save or a claim its subject's erasure refused is unavailable, never tried again; a claim moved from a subject whose tombstone alone stands is unavailable too, the Store's answer: both `erased` cases surface as Unavailable.
 
 ## Depends on

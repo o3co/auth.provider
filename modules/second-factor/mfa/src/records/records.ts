@@ -46,6 +46,43 @@ export const storedList = (subject: string, factors: readonly Factor[], fences =
 export const listKeyOf = (subject: string) => `s-${hashOf(subject)}`;
 export const claimKeyOf = (kind: string, value: string) => `u-${hashOf(`${kind}\n${value}`)}`;
 const claimOf = (record: StoredFactors | undefined) => record as unknown as Claim | undefined;
+
+/** Which record of the store a key names: a subject's list (`s-`), a claim on a unique value (`u-`), or neither. */
+export const recordKindOf = (key: string): "list" | "claim" | undefined =>
+	key.startsWith("s-") ? "list" : key.startsWith("u-") ? "claim" : undefined;
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+	value !== null && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * A list read strictly, for what must not guess: its factors (each with a string id), its subject
+ * where it holds one, its fences; none for any other shape, a missing or malformed factors array
+ * among them. The lenient reads above take what they can for the flows; this one decides erasure.
+ */
+export const strictListOf = (
+	record: unknown,
+):
+	| { readonly subject?: string; readonly factors: readonly { readonly id: string }[] }
+	| undefined => {
+	if (!isObject(record)) return undefined;
+	const { subject, factors, fences, ...rest } = record;
+	if (Object.keys(rest).length > 0 || !Array.isArray(factors)) return undefined;
+	if (!factors.every((f) => isObject(f) && typeof f.id === "string")) return undefined;
+	if (subject !== undefined && typeof subject !== "string") return undefined;
+	if (fences !== undefined && typeof fences !== "number") return undefined;
+	const listed = factors as readonly { readonly id: string }[];
+	return subject === undefined ? { factors: listed } : { subject, factors: listed };
+};
+
+/** A claim read strictly: its list's key and its factor's id, and nothing else; none for any other shape. */
+export const strictClaimOf = (record: unknown): Claim | undefined => {
+	if (!isObject(record)) return undefined;
+	const { listKey, factor, ...rest } = record;
+	if (typeof listKey !== "string" || typeof factor !== "string" || Object.keys(rest).length > 0) {
+		return undefined;
+	}
+	return { listKey, factor };
+};
 const asClaim = (claim: Claim) => claim as unknown as StoredFactors;
 const sameClaim = (a: Claim | undefined, b: Claim) =>
 	a?.listKey === b.listKey && a.factor === b.factor;

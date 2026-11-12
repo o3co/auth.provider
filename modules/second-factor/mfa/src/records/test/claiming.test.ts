@@ -84,3 +84,30 @@ it("states the factor store's ports once: updateAsOne offered, erase and migrate
 	expect(portsRefused({ ...store, erase })).toMatch(/erase and migrate/);
 	expect(storedList("x", [])).toEqual({ subject: "x", factors: [] });
 });
+
+it("reads a list and a claim strictly for what must not guess, and tells a key's record by its kind", async () => {
+	const { recordKindOf, strictClaimOf, strictListOf } = await import("../records.ts");
+	expect([recordKindOf("s-x"), recordKindOf("u-x"), recordKindOf("x")]).toEqual([
+		"list",
+		"claim",
+		undefined,
+	]);
+	expect(strictListOf(storedList("ann", [factor("f1")]))).toMatchObject({
+		subject: "ann",
+		factors: [{ id: "f1" }],
+	});
+	expect(strictListOf({ factors: [factor("f1")], fences: 2 })).toMatchObject({
+		factors: [{ id: "f1" }],
+	});
+	for (const malformed of [
+		{ subject: "ann" },
+		{ subject: "ann", factors: [{}] },
+		{ factors: [], x: 1 },
+		[],
+		null,
+	]) {
+		expect(strictListOf(malformed)).toBeUndefined();
+	}
+	expect(strictClaimOf({ listKey: "s-a", factor: "f" })).toEqual({ listKey: "s-a", factor: "f" });
+	expect(strictClaimOf({ listKey: "s-a", factor: "f", x: 1 })).toBeUndefined();
+});
