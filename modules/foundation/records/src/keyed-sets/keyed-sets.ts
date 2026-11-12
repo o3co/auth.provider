@@ -181,8 +181,6 @@ keyedSetsIn.codec = (p: { readonly cap: number; readonly clock: Clock }) => {
 		},
 		awaiting: (current: Json | undefined): readonly string[] =>
 			byMember(live(contentOf(current).awaiting, p.clock.now())),
-		/** `keyedSetsIn.strict`, until subject-records reads it there; then this goes. */
-		strict: (current: Json | undefined): StrictSet => keyedSetsIn.strict(current),
 	};
 };
 
