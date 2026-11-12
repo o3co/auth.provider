@@ -22,7 +22,7 @@
 - Every write of an `online-keyed` envelope writes its subject's witness with it where missing; erasing removes it with what it witnesses; a removal or an end may leave it, holding nothing but its hashed key.
 - `erased` answers a create the tombstone stopped: an owner takes it as refused, never as `exists`, and never tries it again.
 - A record or set physically held is listed in its subject's bucket, expired or not, once indexed: an entry leaves a bucket only with what it lists. A set never changes subject.
-- A raw record, from before records were indexed, is changed raw, with no tombstone condition. The one migration indexes or removes every raw record of an `online-*` space and every raw set of an `online-indexed` one, or stops that space, before erasure can be enabled; a raw set of an `online-keyed` space needs none, as erasing removes what is under the subject's key (account erasure §3.3, §5.1). A space holds records or sets, so it has one report.
+- A raw record, from before records were indexed, is changed raw, with no tombstone condition. The one migration indexes or removes every raw record of an `online-*` space and every raw set of an `online-indexed` one, or stops that space, before erasure can be enabled; a raw set of an `online-keyed` space needs none (account erasure §3.3, §5.1). A space holds records or sets, so it has one report.
 - Erasing writes the tombstone first, then removes only what reads absent or names the subject. A report is made by this package alone (internal modules `erase` and `migrate`).
 - Cost: a create or removal rewrites one bucket whole, its size growing with the subject's records (about a sixteenth of them); fine for what an owner keeps per subject, and not capped.
 

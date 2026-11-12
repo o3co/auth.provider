@@ -1,6 +1,6 @@
 import type { SetReading } from "@mod/erasure-extensions";
 import type { Json, Space } from "@mod/store";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { migrateSets, subjectKeyedSetsIn } from "../src/subject-records.ts";
 import { bucketOf, envelope, placed } from "./placed.ts";
 
@@ -43,12 +43,16 @@ it("indexes each raw set its owner reads by key as a subject's, whole with every
 	await put(indexed, "login:bob", [["b1", now + 10]]);
 	await put(indexed, "gone:x", [["x1", now + 10]]);
 	const ends = (await raw(indexed, "login:alice"))?.expiresAt;
-	expect(await migrateSets(at(indexed), walk(), byKey)).toEqual({
+	// A step elsewhere in the options is never run for a set: the orphan is removed all the same.
+	const elsewhere = vi.fn();
+	const options = { signal: new AbortController().signal, elsewhere };
+	expect(await migrateSets(at(indexed), walk(), byKey, options)).toEqual({
 		kind: "migrated",
 		space: indexed.name,
 		indexed: 2,
 		removed: 1,
 	});
+	expect(elsewhere).not.toHaveBeenCalled();
 	// Wrapped whole: nothing rebuilt through an add, so no cap applied again, and its end kept.
 	expect((await raw(indexed, "login:alice"))?.value).toEqual(envelope("alice", full));
 	expect((await raw(indexed, "login:alice"))?.expiresAt).toBe(ends);
@@ -58,6 +62,8 @@ it("indexes each raw set its owner reads by key as a subject's, whole with every
 	// What the owner reads once indexed is the set as it was: its live members, `m0` ended at `now`.
 	const sets = subjectKeyedSetsIn(at(indexed), "w", refuse);
 	expect((await sets.members("login:alice")).map((m) => m.member)).toHaveLength(11);
+	// And an add goes on as before, now its subject's: those over the cap pushed out, never refused.
+	expect(await sets.add("login:bob", "b2", 60_000, "bob")).toEqual({ pushedOut: [] });
 	expect(await sets.awaiting("login:alice")).toEqual([]);
 	// Again, a key met twice in a walk too: every set is migrated already.
 	expect(await migrateSets(at(indexed), walk(true), byKey)).toMatchObject({

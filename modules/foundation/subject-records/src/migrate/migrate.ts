@@ -6,7 +6,7 @@ import type {
 	SubjectReading,
 	Walk,
 } from "@mod/erasure-extensions";
-import { type Clock, Unavailable } from "@mod/kernel";
+import { Unavailable } from "@mod/kernel";
 import { changeRecords, keyedSetsIn, type Target } from "@mod/records";
 import { canonicalJson, type Json } from "@mod/store";
 import { kept, opened } from "../envelope/envelope.ts";
@@ -72,15 +72,15 @@ export async function migrateRecords(
 /**
  * Puts the keyed sets of one `online-indexed` space kept raw before indexing into its index, as
  * `migrateRecords` does records, with these differences: each set is read strictly first
- * (`records`' codec), and one with any malformed part stops the space, removing nothing more; the
+ * (`records`' `keyedSetsIn.strict`), and one with any malformed part stops the space, removing nothing more; the
  * owner reads its subject from the key alone (`SetReading`); an indexed set is its raw value whole
  * in an envelope, both lists and every member's end as they were, nothing rebuilt and no cap
  * applied again, keeping its end; an orphan is removed, with no step elsewhere first. An
- * `online-keyed` space has none to index: erasing a subject removes what is under its key, raw or
- * not, and the next add puts it in its envelope.
+ * `online-keyed` space has none to index, and its reading is not called: erasing a subject removes
+ * what is under its key, raw or not, and the next add puts it in its envelope.
  */
 export async function migrateSets(
-	place: SubjectPlace & { readonly cap: number; readonly clock: Clock },
+	place: SubjectPlace,
 	walk: Walk,
 	reading: SetReading,
 	options: { readonly signal?: AbortSignal } = {},
@@ -97,19 +97,19 @@ export async function migrateSets(
 	if (place.phase !== "indexed") return report({ kind: "stopped", space, reason: "not-indexed" });
 	if (category === "online-keyed")
 		return report({ kind: "migrated", space, indexed: 0, removed: 0 });
-	const codec = keyedSetsIn.codec(place);
 	const how: Migrating = {
 		entry: "set",
 		check: (value) => {
-			const read = codec.strict(value);
+			const read = keyedSetsIn.strict(value);
 			return read.kind === "unreadable" ? read.reason : undefined;
 		},
 		read: (key) => reading(key),
 	};
-	return migrating(place, walk, false, how, options);
+	// The signal alone: no step elsewhere runs for a set, whatever else the options hold.
+	return migrating(place, walk, false, how, options.signal ? { signal: options.signal } : {});
 }
 
-/** What one migration walks: records or sets, how each is read, and its owner's step for an orphan. */
+/** What one migration walks: records or sets, and how each is read. */
 interface Migrating {
 	readonly entry: "record" | "set";
 	/** Why a value cannot be read as one of its kind, or none; a reason stops the space. */

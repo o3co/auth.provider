@@ -156,8 +156,9 @@ it("erases and migrates a sets space at the phase read, as records' builder does
 	expect(await sets.erase("bob", signal)).toMatchObject({ kind: "erased" });
 	expect(await sets.add("bob", "n", 60_000, "bob")).toBe("erased");
 	const walk = { sweep: async () => ({ keys: [], server: "one" }) };
-	// An online-keyed space has no raw set to index.
-	expect(await sets.migrate(walk, async () => ({ kind: "orphan" }), signal)).toMatchObject({
+	// An online-keyed space has no raw set to index: its reading, which would stop it, is not called.
+	const stops = async () => ({ kind: "unreadable" as const, reason: "never asked" });
+	expect(await sets.migrate(walk, stops, signal)).toMatchObject({
 		kind: "migrated",
 		indexed: 0,
 		removed: 0,

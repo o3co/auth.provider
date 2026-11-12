@@ -76,33 +76,21 @@ async function opened() {
 	return { at, walk, rawLeft };
 }
 
-it("finishes a records' walk whose server changes at its second page, and erasure then removes each", async () => {
-	const { at, walk, rawLeft } = await opened();
-	const report = await migrateRecords(
-		at(records),
-		walk((asked) => (asked === 0 ? "A" : "B")),
-		byValue,
-	);
-	expect(report).toEqual({ kind: "migrated", space: records.name, indexed: 4, removed: 0 });
-	expect(await rawLeft(records)).toEqual([]);
-	for (const subject of subjects) {
-		expect(await eraseSubject(at(records), subject)).toMatchObject({ kind: "erased", removed: 1 });
-	}
-});
-
-it("finishes a sets' walk whose server changes at its second page, and erasure then removes each", async () => {
-	const { at, walk, rawLeft } = await opened();
-	const report = await migrateSets(
-		at(sets),
-		walk((asked) => (asked === 0 ? "A" : "B")),
-		byKey,
-	);
-	expect(report).toEqual({ kind: "migrated", space: sets.name, indexed: 4, removed: 0 });
-	expect(await rawLeft(sets)).toEqual([]);
-	for (const subject of subjects) {
-		expect(await eraseSubject(at(sets), subject)).toMatchObject({ kind: "erased", removed: 1 });
-	}
-});
+for (const space of [records, sets]) {
+	it(`finishes a walk of ${space.name} whose server changes at its second page, and erasure then removes each`, async () => {
+		const { at, walk, rawLeft } = await opened();
+		const changing = walk((asked) => (asked === 0 ? "A" : "B"));
+		const report =
+			space === records
+				? await migrateRecords(at(space), changing, byValue)
+				: await migrateSets(at(space), changing, byKey);
+		expect(report).toEqual({ kind: "migrated", space: space.name, indexed: 4, removed: 0 });
+		expect(await rawLeft(space)).toEqual([]);
+		for (const subject of subjects) {
+			expect(await eraseSubject(at(space), subject)).toMatchObject({ kind: "erased", removed: 1 });
+		}
+	});
+}
 
 it("stops as walk-unsteady, never migrated, where the server changes at every page", async () => {
 	const { at, walk } = await opened();
