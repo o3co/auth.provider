@@ -1,25 +1,29 @@
-import type { Eraser, SubjectReading } from "@mod/erasure-extensions";
+import { type Eraser, ownerStopped, type SubjectReading } from "@mod/erasure-extensions";
 import type { Sessions } from "@mod/session";
 import type { UpstreamTokenStore } from "../store.ts";
 import { portsOf } from "./ports.ts";
 
-/** Whose a record written before indexing is: its session's subject, as the card gives it. */
+/** Whose a record written before indexing is: its session's subject, read through `subjectOf`, as the card gives it. */
 export const tokensSubjectOf =
-	(sessions: Pick<Sessions, "entryOf">): SubjectReading =>
+	(subjectOf: (handle: string) => Promise<string | undefined>): SubjectReading =>
 	async (key) => {
-		const entry = await sessions.entryOf(key, "none");
-		if (entry.kind === "entered")
-			return { kind: "subject", subject: entry.session.context.subject };
+		const subject = await subjectOf(key);
+		if (subject !== undefined) return { kind: "subject", subject };
 		return {
 			kind: "unreadable",
-			reason: "a record whose session no longer enters: it ends with that session; run again then",
+			reason: "a record whose session has no record: it ends by its own lifetime; run again then",
 		};
 	};
+
+/** Where `session` offers no `subjectOf`: no record kept by a session handle can be read, so none is. */
+const noSubjectOf = ownerStopped(
+	"session offers no subjectOf: records kept by session handle cannot be read; 0.22 requires it",
+);
 
 /** federation-tokens' eraser, `federation-tokens`, through the store's own ports, as the card gives it. */
 export function tokensEraser(
 	store: UpstreamTokenStore,
-	sessions: Pick<Sessions, "entryOf">,
+	sessions: () => Pick<Sessions, "subjectOf">,
 ): Eraser {
 	const ports = portsOf(store);
 	if (!ports) {
@@ -46,6 +50,13 @@ export function tokensEraser(
 			for (const subject of subjects) reports.push(...(await online(subject, signal)).reports);
 			return { reports, logoutGaps: 0 };
 		},
-		migrate: async (walk, signal) => [await ports.migrate(walk, tokensSubjectOf(sessions), signal)],
+		// `session` is read once, at the migration's start.
+		migrate: async (walk, signal) => {
+			const kept = sessions();
+			const { subjectOf } = kept;
+			if (!subjectOf) return [noSubjectOf];
+			const read = (handle: string) => subjectOf.call(kept, handle);
+			return [await ports.migrate(walk, tokensSubjectOf(read), signal)];
+		},
 	};
 }

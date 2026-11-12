@@ -60,8 +60,6 @@ export default defineModule({ name, replicaSafe: true, section, takes }, (m) => 
 	// Late: session collects this module's participant; the eraser reads sessions only when it migrates.
 	m.contribute(erasers).by(async (c) => {
 		const late = c.late(sessions);
-		return tokensEraser(await c.get(upstreamTokenStore), {
-			entryOf: (handle, level) => late().entryOf(handle, level),
-		});
+		return tokensEraser(await c.get(upstreamTokenStore), late);
 	}),
 ]);
