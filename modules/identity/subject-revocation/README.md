@@ -23,7 +23,7 @@
 - A boundary is compared with times from the hosts' clocks, so the store's clock joins them: a host ahead of the store by d leaves d of a window, one behind refuses d more, and no interface moves a boundary back. Keeping clocks right is the operator's job.
 - A failing follower is logged by name and kind and does not stop the rest; the boundary stays, nothing here retries it, and `record` answers incomplete.
 - Comparison is in seconds; what started up to the second of the boundary plus the allowance is revoked. An allowance below zero is none, and one that is no number revokes. Comparison is done only through the offered interface and is not reimplemented by callers.
-- An erased subject is revoked by every comparison, whatever the time, kind or allowance; the mark is never moved or dropped. Where erasure is enabled and the mark is read, a composition not covered does not start; unread, it starts unready. Traffic goes only to ready instances, a node whose store cannot tell never serves where erasure is enabled, and enabling it restarts every node (internal module `erasure`).
+- An erased subject is revoked by every comparison, whatever the time, kind or allowance; the mark is never moved or dropped. Where erasure is enabled and the mark is read, a composition not covered does not start; unread, it starts unready. Traffic goes only to ready instances, a node whose store cannot tell never serves where erasure is enabled, and enabling it (one-way) restarts every node (internal module `erasure`).
 - When it cannot be read, it is unavailable, not "no boundary" (how a record of another shape reads: internal modules `boundaries` and `erasure`).
 
 ## Data
