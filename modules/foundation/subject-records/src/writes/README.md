@@ -10,6 +10,7 @@ Internal module of `subject-records`: a subject's records, by the category its s
 
 ## Offers
 - `subjectRecordsIn` (a place, its index space, the phase; where; the builder's `refuse`; `secret` for a bounded space) → `create` (a key, a value or its maker, a lifetime, its subject last: `created`, `exists` or `erased`), `read`, `change`, `remove` (a key, and optionally a check of its value: `removed`, `left` where the check said no, or `missing`), `move`, `scan`; and `unowned` (deprecated, below).
+- `rulesOf` (a place, its category) → each write's rule: the index records it reads besides the record, named from the record as read, and what it answers and writes from all it read. The one statement of the writes' conditions; `subjectRecordsIn` runs each op through it, one record at a time.
 - `online-indexed`: each record's key in its subject's bucket; `move` gives a record to another subject. `online-keyed`: each record's key its subject itself, one per subject (any other key, TypeError). `bounded`: each written raw, fenced at creation by its subject's tombstone, gone by its end, at most the space's `boundedMs`.
 
 ## Invariants
@@ -24,4 +25,4 @@ Internal module of `subject-records`: a subject's records, by the category its s
 - Refuses at build, through `refuse`: once indexed, a store that writes no records of two partitions as one; an index that is not the space's; another category; secret keys outside `bounded`.
 
 ## Depends on
-- `records` (`changeRecords`, its targets), `store`; internal modules `envelope`, `index`
+- `records` (`changeRecords`, its targets, `Next`), `store`; internal modules `envelope`, `index`
