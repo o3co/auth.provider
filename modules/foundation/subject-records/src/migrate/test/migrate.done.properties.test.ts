@@ -1,11 +1,13 @@
 /**
- * A migration's `migrated` means done: over any walk the tool hands in, pages split anyhow and the
- * server changing at any of them, `migrateRecords` and `migrateSets` answer `migrated` only where
- * no raw record or set of the space is left, the counts are what was raw, and erasing each subject
- * then leaves nothing of theirs, only tombstones; all read from the store itself. A walk whose
- * server changes at every page ends in `walk-unsteady`; a space holding an entry its owner cannot
- * read, or a malformed set, is `stopped`, never `migrated`. An `online-keyed` space has no sets to
- * index: they stay raw, and erasing each subject removes them.
+ * A migration's `migrated` means done: finished, nothing left to migrate in the space (not a single
+ * record's or set's outcome, which `migrate.ts` calls `Done`). Over any walk the tool hands in, pages
+ * split anyhow and the server changing at any of them, `migrateRecords` and `migrateSets` answer
+ * `migrated` only where no raw record or set of the space is left and the counts are what was raw;
+ * erasing each subject then leaves nothing of theirs: tombstones, and records' own settle marks
+ * until their 1 ms ends; all read from the store itself. A walk whose server changes at every page
+ * ends in `walk-unsteady`; a space holding a record its owner cannot read, or a malformed set, is
+ * `stopped`, never `migrated`. An `online-keyed` space has no sets to index: they stay raw, and
+ * erasing each subject removes them.
  *
  * The walk is an input, not an interleaving: no scheduler. Per-PR runs are fixed: FC_SEED
  * (default 20261111) and FC_RUNS (default 200).
@@ -37,16 +39,18 @@ type Arm = keyof typeof arms;
 const subjects = ["alice", "bob", "carol", "dave"] as const;
 type Subject = (typeof subjects)[number];
 const far = 9e15;
+/** The store clock, standing still unless the test moves it. */
+const storeNow = 1_800_000_000_000;
 /** Calls of `sweep` past which a walk never ends: a migration that never stops it fails here. */
 const endless = 400;
 
 /**
- * One entry of a space before the run: its owner (`undefined`, an orphan), whether the owner
- * cannot read it, a set malformed, and a record already in its envelope, written once indexed.
+ * A record or set kept in the space before the run: its subject (`undefined`, an orphan), whether
+ * the owner cannot read it, a set malformed, and a record already in its envelope, written once indexed.
  */
-interface Entry {
+interface Kept {
 	readonly key: string;
-	readonly owner: Subject | undefined;
+	readonly subject: Subject | undefined;
 	readonly unreadable: boolean;
 	readonly malformed: boolean;
 	readonly enveloped: boolean;
@@ -59,29 +63,29 @@ interface WalkShape {
 }
 interface Case {
 	readonly arm: Arm;
-	readonly entries: readonly Entry[];
+	readonly kept: readonly Kept[];
 	readonly walk: WalkShape;
 }
 
 const rarely = fc.nat({ max: 11 }).map((n) => n === 0);
-const owner = fc.option(fc.constantFrom(...subjects), { nil: undefined, freq: 4 });
+const whose = fc.option(fc.constantFrom(...subjects), { nil: undefined, freq: 4 });
 const records = (keyed: boolean) =>
 	(keyed
 		? fc.uniqueArray(fc.constantFrom(...subjects), { minLength: 1, maxLength: 4 }).map((keys) =>
 				keys.map((key) => ({
 					key,
-					owner: fc.option(fc.constant(key), { nil: undefined, freq: 3 }),
+					subject: fc.option(fc.constant(key), { nil: undefined, freq: 3 }),
 				})),
 			)
 		: fc
 				.uniqueArray(fc.nat({ max: 11 }), { minLength: 1, maxLength: 8 })
-				.map((ns) => ns.map((n) => ({ key: `k${n}`, owner })))
+				.map((ns) => ns.map((n) => ({ key: `k${n}`, subject: whose })))
 	).chain((made) =>
 		fc.tuple(
-			...made.map(({ key, owner: who }) =>
+			...made.map(({ key, subject: who }) =>
 				fc.record({
 					key: fc.constant(key),
-					owner: who,
+					subject: who,
 					unreadable: rarely,
 					malformed: fc.constant(false),
 					enveloped: rarely,
@@ -94,29 +98,29 @@ const sets = (keyed: boolean) =>
 	(keyed
 		? fc
 				.uniqueArray(fc.constantFrom(...subjects), { minLength: 1, maxLength: 4 })
-				.map((keys) => keys.map((key) => ({ key, owner: key as Subject | undefined })))
+				.map((keys) => keys.map((key) => ({ key, subject: key as Subject | undefined })))
 		: fc
 				.uniqueArray(fc.option(fc.constantFrom(...subjects), { nil: undefined, freq: 3 }), {
 					minLength: 1,
 					maxLength: 5,
 				})
-				.chain((owners) =>
+				.chain((named) =>
 					fc.tuple(
-						...owners.map((who) =>
+						...named.map((who) =>
 							(who === undefined
 								? fc.nat({ max: 3 }).map((n) => `gone:${n}`)
 								: fc.constant(`login:${who}`)
-							).map((key) => ({ key, owner: who })),
+							).map((key) => ({ key, subject: who })),
 						),
 					),
 				)
 				.map((made) => made.filter((one, at) => made.findIndex((o) => o.key === one.key) === at))
 	).chain((made) =>
 		fc.tuple(
-			...made.map(({ key, owner: who }) =>
+			...made.map(({ key, subject: who }) =>
 				fc.record({
 					key: fc.constant(key),
-					owner: fc.constant(who),
+					subject: fc.constant(who),
 					unreadable: keyed ? fc.constant(false) : rarely,
 					malformed: keyed ? fc.constant(false) : rarely,
 					enveloped: fc.constant(false),
@@ -136,7 +140,7 @@ const cases: fc.Arbitrary<Case> = fc.oneof(
 	...(["records-indexed", "records-keyed", "sets-indexed", "sets-keyed"] as const).map((arm) =>
 		fc.record({
 			arm: fc.constant(arm),
-			entries: arm.startsWith("records")
+			kept: arm.startsWith("records")
 				? records(arm.endsWith("keyed"))
 				: sets(arm.endsWith("keyed")),
 			walk: walkShape,
@@ -177,29 +181,29 @@ function walking(s: Awaited<ReturnType<typeof placed>>["s"], space: Space, shape
 	return { walk, length: () => all?.length ?? 0 };
 }
 
-/** What a raw value is: a record naming its owner, or a set, well formed or not. */
-const rawOf = (arm: Arm, e: Entry): Json =>
+/** What a raw value is: a record naming its subject, or a set, well formed or not. */
+const rawOf = (arm: Arm, e: Kept): Json =>
 	arm.startsWith("records")
-		? { owner: e.owner ?? "nobody" }
+		? { subject: e.subject ?? "nobody" }
 		: e.malformed
 			? { held: [["a", far], ["b"]] }
 			: [[`m-${e.key}`, far]];
 
 /** The owner's readings: a record's subject from its value, a set's from its key; unreadable where generated. */
 const recordReading =
-	(entries: readonly Entry[]): SubjectReading =>
+	(kept: readonly Kept[]): SubjectReading =>
 	async (key, value) => {
-		if (entries.some((e) => e.key === key && e.unreadable))
+		if (kept.some((e) => e.key === key && e.unreadable))
 			return { kind: "unreadable", reason: "sealed" };
-		const named = (value as { owner?: string }).owner;
+		const named = (value as { subject?: string }).subject;
 		return named === "nobody" || named === undefined
 			? { kind: "orphan" }
 			: { kind: "subject", subject: named };
 	};
 const setReading =
-	(entries: readonly Entry[]): SetReading =>
+	(kept: readonly Kept[]): SetReading =>
 	async (key) => {
-		if (entries.some((e) => e.key === key && e.unreadable))
+		if (kept.some((e) => e.key === key && e.unreadable))
 			return { kind: "unreadable", reason: "sealed" };
 		const [form, subject] = key.split(":");
 		return form === "login" && subject ? { kind: "subject", subject } : { kind: "orphan" };
@@ -207,28 +211,28 @@ const setReading =
 
 it("answers migrated only where nothing raw is left, the counts are what was raw, and erasing each subject leaves only tombstones", async () => {
 	await fc.assert(
-		fc.asyncProperty(cases, async ({ arm, entries, walk: shape }) => {
+		fc.asyncProperty(cases, async ({ arm, kept, walk: shape }) => {
 			const space = arms[arm];
 			const name = arm.startsWith("records") ? "record" : "set";
 			const keyed = arm.endsWith("keyed");
-			const { s, simulated, at, put } = await placed([space]);
+			const { s, simulated, at, put } = await placed([space], storeNow);
 			const place = at(space, "indexed");
 			const writer = subjectRecordsIn<Json>(place, "test", (where, reason) => {
 				throw new Error(`${where}: ${reason}`);
 			});
-			for (const e of entries) {
-				if (e.enveloped && e.owner !== undefined) {
-					expect(await writer.create(e.key, rawOf(arm, e), "endless", e.owner)).toBe("created");
+			for (const e of kept) {
+				if (e.enveloped && e.subject !== undefined) {
+					expect(await writer.create(e.key, rawOf(arm, e), "endless", e.subject)).toBe("created");
 				} else await put(space, e.key, rawOf(arm, e), undefined, name);
 			}
-			const raw = entries.filter((e) => !(e.enveloped && e.owner !== undefined));
+			const raw = kept.filter((e) => !(e.enveloped && e.subject !== undefined));
 			const { walk, length } = walking(s, space, shape);
 			const report: MigrationReport =
 				name === "record"
-					? await migrateRecords(place, walk, recordReading(entries))
-					: await migrateSets(place, walk, setReading(entries));
+					? await migrateRecords(place, walk, recordReading(kept))
+					: await migrateSets(place, walk, setReading(kept));
 
-			// Stopped, never migrated: a raw entry its owner cannot read, a malformed set, a walk changing at every page.
+			// Stopped, never migrated: a raw record or set its owner cannot read, a malformed set, a walk changing at every page.
 			const bad = raw.some((e) => e.unreadable || e.malformed);
 			const firstPage = shape.sizes[0] ?? 1;
 			const unsteady = shape.changes === "every" && length() > firstPage;
@@ -239,36 +243,41 @@ it("answers migrated only where nothing raw is left, the counts are what was raw
 			if (shape.changes !== "every" && !bad) expect(report.kind).toBe("migrated");
 			if (report.kind !== "migrated") return;
 
-			// (c) The counts are what was raw: each raw entry a subject's indexed, each orphan removed.
-			const owned = raw.filter((e) => e.owner !== undefined).length;
+			// (c) The counts are what was raw: each raw record or set of a subject indexed, each orphan removed.
+			const ofSubjects = raw.filter((e) => e.subject !== undefined).length;
 			expect(report).toEqual(
 				arm === "sets-keyed"
 					? { kind: "migrated", space: space.name, indexed: 0, removed: 0 }
-					: { kind: "migrated", space: space.name, indexed: owned, removed: raw.length - owned },
+					: {
+							kind: "migrated",
+							space: space.name,
+							indexed: ofSubjects,
+							removed: raw.length - ofSubjects,
+						},
 			);
 
-			// (a) Nothing raw is left: each entry an envelope of its owner, listed or witnessed; no orphan.
+			// (a) Nothing raw is left: each an envelope of its subject, listed or witnessed; no orphan.
 			const index = indexSpaceOf(space);
 			const value = async (sp: Space, partition: string, n: string) =>
 				(await s.get({ space: sp, partition, name: n })).entry?.value;
-			for (const e of entries) {
+			for (const e of kept) {
 				const held = await value(space, e.key, name);
 				if (arm === "sets-keyed") {
 					expect(held).toEqual(rawOf(arm, e));
 					continue;
 				}
-				if (e.owner === undefined) {
+				if (e.subject === undefined) {
 					expect(held).toBeUndefined();
 					continue;
 				}
-				expect(held).toEqual(envelope(e.owner, rawOf(arm, e)));
+				expect(held).toEqual(envelope(e.subject, rawOf(arm, e)));
 				if (keyed) {
-					expect(e.owner).toBe(e.key);
-					expect(await value(index, `${part(space, e.owner)}.witness.${name}`, "record")).toBe(1);
+					expect(e.subject).toBe(e.key);
+					expect(await value(index, `${part(space, e.subject)}.witness.${name}`, "record")).toBe(1);
 				} else {
 					const listed = (await value(
 						index,
-						`${part(space, e.owner)}.${bucketOf(e.key)}`,
+						`${part(space, e.subject)}.${bucketOf(e.key)}`,
 						"record",
 					)) as readonly (readonly [string, string])[] | undefined;
 					expect(listed?.filter(([k, n]) => k === e.key && n === name)).toHaveLength(1);
@@ -279,20 +288,35 @@ it("answers migrated only where nothing raw is left, the counts are what was raw
 			for (const subject of subjects) {
 				expect(await eraseSubject(place, subject)).toMatchObject({ kind: "erased" });
 			}
-			// Past records' own `settled` marks (1 ms, holding `true`), which a standing clock keeps live.
-			simulated.shiftClock(1_000);
+			// Read with the store clock standing still: tombstones, and records' own settle marks alone.
 			const left = async (sp: Space) => {
-				const found: string[] = [];
+				const found: { key: Key; held: { value: Json; expiresAt: number | null } }[] = [];
 				let on: string | undefined;
 				do {
 					const page = await s.scan(sp, on);
-					found.push(...page.keys.map((k) => String(k.partition)));
+					for (const key of page.keys) {
+						const held = (await s.get(key)).entry;
+						if (held !== null) found.push({ key, held });
+					}
 					on = page.cursor;
 				} while (on !== undefined);
 				return found;
 			};
+			const tomb = ({ key }: { key: Key }) =>
+				key.space.name === index.name && String(key.partition).endsWith(".tomb");
+			// A settle mark: records' write protocol, `true`, ending at most 1 ms after its write.
+			const mark = ({ key, held }: { key: Key; held: { value: Json; expiresAt: number | null } }) =>
+				key.name === "settled" &&
+				held.value === true &&
+				held.expiresAt !== null &&
+				held.expiresAt <= storeNow + 1;
+			for (const one of [...(await left(space)), ...(await left(index))]) {
+				expect(tomb(one) || mark(one), JSON.stringify(one)).toBe(true);
+			}
+			// 1 ms on, the marks are gone: only tombstones remain.
+			simulated.shiftClock(1);
 			expect(await left(space)).toEqual([]);
-			expect((await left(index)).filter((p) => !p.endsWith(".tomb"))).toEqual([]);
+			expect((await left(index)).filter((one) => !tomb(one))).toEqual([]);
 		}),
 		{ seed, numRuns },
 	);

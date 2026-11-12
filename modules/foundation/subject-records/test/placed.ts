@@ -16,8 +16,8 @@ export const part = (space: Space, subject: string) =>
 export const bucketOf = (key: string) => `m${createHash("sha256").update(key).digest("hex")[0]}`;
 export const envelope = (subject: string, value: Json) => ({ "records:v": 1, subject, value });
 
-/** The spaces given, each beside its index space, on a fresh simulated store. */
-export async function placed(given: readonly Space[]) {
+/** The spaces given, each beside its index space, on a fresh simulated store; on the system clock unless `now` says. */
+export async function placed(given: readonly Space[], now?: number) {
 	const simulated = simulatedStore();
 	const app = await assemble({
 		modules: [
@@ -31,7 +31,7 @@ export async function placed(given: readonly Space[]) {
 			]),
 		],
 		config: kernelConfig(),
-		runtime: quietRuntime(),
+		runtime: now === undefined ? quietRuntime() : quietRuntime({ clock: { now: () => now } }),
 	});
 	const s = app.get(held);
 	const random = {
