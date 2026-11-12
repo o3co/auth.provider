@@ -867,6 +867,18 @@ describe("session closing", () => {
 		await expect(s.close(handle)).rejects.toSatisfy(isUnavailable);
 	});
 
+	it("reads the subject of a record kept past the lifetime in force, ending nothing", async () => {
+		const { s, stores, login, handleOf } = await boot({ lifetime: "2m" });
+		const handle = await handleOf(await login());
+		// Kept longer than the lifetime in force, as a record written under a longer one is.
+		await stores.kept.records.change(handle, (r) => ({ value: r, lifetimeMs: 3_600_000 }));
+		now += 120_001;
+		expect(await s.subjectOf?.(handle)).toBe("alice");
+		// Nothing was written: the record is still open, and a close finds it so.
+		expect((await stores.kept.records.read(handle)) as unknown).toMatchObject({ state: "open" });
+		expect((await s.close(handle)).from).toBe("open");
+	});
+
 	it("reads a record's subject without entering it: none for a closed mark or no record, unavailable for one it cannot read", async () => {
 		const { s, stores, login, handleOf } = await boot();
 		const subjectOf = (handle: string) => s.subjectOf?.(handle);
