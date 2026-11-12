@@ -33,7 +33,7 @@ it("settles a listed void alike whichever instance's sweep reaches it, both at o
 	/** One instance's sweep, over the store and void list every instance shares. */
 	const instance = () =>
 		voiding({
-			store: { nameOf: (code) => code, save: stand.records.create, update: stand.records.change },
+			store: { nameOf: (code) => code, create: stand.records.create, update: stand.records.change },
 			voids: stand.deferred,
 			tokens: {
 				revokeReferenced: async (reference: string) => {

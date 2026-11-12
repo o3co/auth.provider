@@ -69,12 +69,14 @@ export default defineModule({ name: "code-grant", replicaSafe: true, section, ta
 					authenticatedAt: context.authenticatedAt,
 					...(context.authenticatedAtUnknown ? { authenticatedAtUnknown: true } : {}),
 				};
-				const saved = await store.save(
-					store.nameOf(code),
+				// Created for its subject: one erased here meanwhile gets no code, answered as a session gone.
+				const created = await store.create(
+					code,
 					toStored(record),
 					c.section["code-lifetime"] * 1000,
+					facts.subject,
 				);
-				if (saved !== "created") throw new Unavailable("code-grant");
+				if (created !== "created") throw new Unavailable("code-grant");
 				return code;
 			},
 			redemptionOf: (code) => store.nameOf(code),
