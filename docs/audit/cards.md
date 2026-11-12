@@ -178,6 +178,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `document` (`src/document`): reading and judging a client's metadata document.
   - `fetching` (`src/fetching`): how often a document is fetched, and how long its answer is kept.
 - `@mod/code-grant` (feature, `modules/oauth/code-grant`): Holds authorization codes and redeems them at the token endpoint (the `authorization_code` grant), adding the ID token and the contributed additions to the answer.
+  - `erasure` (`src/erasure`): erasing a subject's codes and redemption records.
   - `redemption-record` (`src/redemption-record`): each redemption's record, which holds its token and outlives its code.
   - `voiding` (`src/voiding`): voiding a code that came again, and retrying what failed.
 - `@mod/consent` (feature, `modules/oauth/consent`): Keeps each subject's grants, per client, as the union of the ranges agreed to; for a client from another source, as the ranges agreed to under what its source says of it now.
