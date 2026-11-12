@@ -1,6 +1,7 @@
 import { audit } from "@mod/audit";
 import { metadataSections } from "@mod/clients";
 import { csrfChecked } from "@mod/csrf";
+import { erasers } from "@mod/erasure-extensions";
 import { routes, use } from "@mod/http";
 import { defineModule } from "@mod/kernel";
 import { returnPaths } from "@mod/login-gates";
@@ -10,13 +11,14 @@ import { revocationFollowers } from "@mod/subject-revocation";
 import { apiOver, apiTakes, base } from "./api/api.ts";
 import { followerOver, followerTakes } from "./api/follow.ts";
 import { type GrantsBrowser, grantIntents, grantsBrowsers } from "./browser.ts";
+import { grantsEraser } from "./grant/eraser.ts";
 import { clientSection } from "./grant/grant.ts";
+import { resealerOver } from "./grant/resealer.ts";
 import { recordsOver, shared, sharedOver, sharedTakes } from "./grant/shared.ts";
 import { browserBase, intentsOver, intentsTakes } from "./intents/intents.ts";
-import { resealerOver } from "./resealer.ts";
 import { retention, retentionOver, retentionTakes } from "./retention/retention.ts";
 import { name, type Settings, section } from "./section.ts";
-import { grantStore } from "./store.ts";
+import { grantStore, pendingIntents, subjectGrants } from "./store.ts";
 import { sweepIn, sweepTakes } from "./sweep/sweep.ts";
 
 /** The requests a source may make in each window, on the client routes and the browser's alike. */
@@ -55,6 +57,15 @@ export default defineModule(
 			.contribute(resealers)
 			.by(async (c) => resealerOver(await c.get(grantStore), await recordsOver(c))),
 		m.provide(shared).by(sharedOver),
+		// Its build takes the three stores and the records' reading, collecting no probes.
+		m.contribute(erasers).by(async (c) => {
+			const stores = {
+				grants: await c.get(grantStore),
+				pending: await c.get(pendingIntents),
+				subjects: await c.get(subjectGrants),
+			};
+			return grantsEraser(stores, (await recordsOver(c)).grantOf);
+		}),
 		m.provide(retention).by(async (c) => {
 			const parts = await retentionOver(c);
 			// Built once, so one sweep runs on each host.

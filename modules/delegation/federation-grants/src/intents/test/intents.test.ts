@@ -117,6 +117,40 @@ describe("raising the session", () => {
 	});
 });
 
+describe("a subject erased", () => {
+	it("audits a connection failed after its subject's mark without the subject, by `failed` and by `noted`", async () => {
+		const h = await intents();
+		const { ref } = await h.questioned();
+		await h.erase();
+		await h.intents.failed(ref, "access_denied", {});
+		h.intents.noted(ref, "upstream_error", {});
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		const failed = h.events.filter((e) => e.kind === "federation.grant.authorization_failed");
+		expect(failed.map((e) => [e.subject, e.attributes?.outcome, e.attributes?.withheld])).toEqual([
+			[undefined, "access_denied", "erased"],
+			[undefined, "upstream_error", "erased"],
+		]);
+	});
+});
+
+it("logs a notice's audit that fails for a defect, naming no subject, the notice returning at once", async () => {
+	const broken = { erased: async () => Promise.reject(new TypeError("broken")) };
+	const h = await intents({ erased: broken });
+	const { ref } = await h.questioned();
+	const unhandled: unknown[] = [];
+	const caught = (reason: unknown) => void unhandled.push(reason);
+	process.on("unhandledRejection", caught);
+	expect(h.intents.noted(ref, "upstream_error", {})).toBeUndefined();
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	process.off("unhandledRejection", caught);
+	expect(unhandled).toEqual([]);
+	const warned = h.logs().filter((l) => l.event === "federation-grants.audit_failed");
+	expect(warned.map((l) => l.fields)).toEqual([
+		{ audit: "federation.grant.authorization_failed", kind: "TypeError" },
+	]);
+	expect(h.events.some((e) => e.kind === "federation.grant.authorization_failed")).toBe(false);
+});
+
 describe("the decision", () => {
 	it("spends a denied question, ends the intent as denied, audits it with its source, and answers the way back", async () => {
 		const h = await intents();
@@ -290,6 +324,8 @@ describe("failures and notes", () => {
 		const h = await intents();
 		const { id, ref } = await h.questioned();
 		h.intents.noted(ref, "reauthentication_required", { source: "203.0.113.9" });
+		// A notice's audit reads whether the subject is erased first, so it lands a turn later.
+		await new Promise((resolve) => setTimeout(resolve, 0));
 		h.intents.unanswered({});
 		expect(h.grantOf(id)?.intent?.ended).toBeUndefined();
 		expect(outcomes(h, "federation.grant.authorization_failed")).toEqual([

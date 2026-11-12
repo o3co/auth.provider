@@ -2,6 +2,7 @@ import { declaredAudit } from "@mod/audit";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { determinedSource } from "@mod/request-source";
 import events from "../audit-events.ts";
+import { auditedAbout, cut } from "../grant/audit.ts";
 import { connectionsIn, type Grant, secretFrom } from "../grant/grant.ts";
 import type { ApiParts } from "./api.ts";
 
@@ -16,10 +17,6 @@ export const error = (
 		{ error: code, ...(description ? { error_description: description } : {}) },
 		headers ? { headers } : {},
 	);
-/** The most characters of a text a caller sent that reach audit: federation-grants' own cap. */
-const auditTextMax = 200;
-/** Text a caller sent, cut short before it reaches audit. */
-const cut = (text: string) => text.slice(0, auditTextMax);
 
 /** What every client route works with: the parts, a secret, the connections, the audit, and a grant's own refusal. */
 export function apiCommonWith(p: ApiParts) {
@@ -39,6 +36,14 @@ export function apiCommonWith(p: ApiParts) {
 			attributes: { ...attributes, ...(from ? { source: from } : {}) },
 		});
 	};
+	const about = auditedAbout(p.audit, p.erased);
+	/** Records an event about a subject that may be erased, as `grant`'s one rule has it. */
+	const recordAbout = (
+		kind: keyof typeof events,
+		subject: string,
+		attributes: Record<string, string>,
+		request: HttpRequest,
+	) => about(kind, subject, attributes, determinedSource(request));
 	/** What a grant's own record says before anything is asked of it, as every grant route answers it, and why. */
 	const stateRefusal = (
 		grant: Grant,
@@ -52,7 +57,7 @@ export function apiCommonWith(p: ApiParts) {
 			return { why: "grant_expired", answer: error(410, "grant_expired", "lifetime") };
 		return undefined;
 	};
-	return { p, records, settings, secret, connections, record, stateRefusal };
+	return { p, records, settings, secret, connections, record, recordAbout, stateRefusal };
 }
 
 export type ApiCommon = ReturnType<typeof apiCommonWith>;

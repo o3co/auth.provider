@@ -4,7 +4,12 @@ import type { Clients } from "@mod/clients";
 import { assemble, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import type { Seal } from "@mod/seal";
-import { revocations } from "@mod/subject-revocation";
+import {
+	type ErasedSubjects,
+	erasedSubjects,
+	revocations,
+	subjectErasure,
+} from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import type { Delegation, Upstreams, UpstreamTokens } from "@mod/upstreams";
 import { memoryStores } from "../../../test/stores.ts";
@@ -41,7 +46,9 @@ export const upstreamTokens = (more: Readonly<Record<string, unknown>> = {}) =>
  * The intents alone, over memory stores and the revocation stand-in, a test upstream `corp` behind
  * the connection `cal`, and a client `worker` that may use it. Intents are written as a lodging writes them.
  */
-export async function intents(options: { readonly settings?: Record<string, unknown> } = {}) {
+export async function intents(
+	options: { readonly settings?: Record<string, unknown>; readonly erased?: ErasedSubjects } = {},
+) {
 	let now = 1_800_000_000_000;
 	const logged = recordingLog();
 	const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
@@ -93,6 +100,7 @@ export async function intents(options: { readonly settings?: Record<string, unkn
 		}),
 		listed: listingWith(stores.subjects, logged.log),
 		audit: app.get(audit),
+		erased: options.erased ?? app.get(erasedSubjects),
 		settings,
 		origin,
 		...runtime,
@@ -132,6 +140,7 @@ export async function intents(options: { readonly settings?: Record<string, unkn
 			grant.id,
 			records.stored(grant),
 			connectMs + settings.retention * 1000,
+			grant.subject,
 		);
 		const link = `link-${grant.id}`;
 		const step = { format: 1, kind: "link", grant: grant.id, intent: intent.id } as const;
@@ -161,6 +170,8 @@ export async function intents(options: { readonly settings?: Record<string, unkn
 		events: recorded.events,
 		logs: () => logged.lines(),
 		revoke: (who = "alice") => app.get(revocations).record(who),
+		/** Marks the subject erased, as account erasure does before any eraser runs. */
+		erase: (who = "alice") => app.get(subjectErasure).markErased(who),
 		relist: (connections: string[], returns: string[]) => {
 			listed.connections = connections;
 			listed.returns = returns;

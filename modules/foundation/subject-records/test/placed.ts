@@ -1,4 +1,4 @@
-/** For the migration tests: spaces with their index spaces on one simulated store, and what they read and write. */
+/** For the migration, erase and kinds tests: spaces with their index spaces on one simulated store, and what they read and write. */
 import { createHash } from "node:crypto";
 import type { Walk } from "@mod/erasure-extensions";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";

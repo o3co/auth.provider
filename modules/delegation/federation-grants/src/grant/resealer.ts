@@ -1,7 +1,7 @@
 import { isUnavailable } from "@mod/kernel";
 import type { Resealer } from "@mod/seal";
-import type { Grant, Records } from "./grant/grant.ts";
-import type { GrantStore } from "./store.ts";
+import type { GrantStore } from "../store.ts";
+import type { Grant, Records } from "./grant.ts";
 
 /** Walks every grant, sealing again credentials a past key sealed; ones no key opens are left. */
 export function resealerOver(grants: GrantStore, records: Records): Resealer {

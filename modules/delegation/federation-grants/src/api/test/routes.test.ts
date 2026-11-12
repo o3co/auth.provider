@@ -1,7 +1,7 @@
 import { testRequest } from "@mod/http/testing";
 import { sessions } from "@mod/session";
 import { describe, expect, it } from "vitest";
-import { back, harness, said } from "./harness.ts";
+import { back, harness, said } from "../../../test/harness.ts";
 
 describe("the client routes", () => {
 	it("answers another client's, another subject's and an unknown grant with the same 404 on every route that takes a grant id", async () => {

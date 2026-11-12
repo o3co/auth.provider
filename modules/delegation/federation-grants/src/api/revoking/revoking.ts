@@ -4,7 +4,7 @@ import type { Grant } from "../../grant/grant.ts";
 import type { ApiCommon } from "../common.ts";
 
 /** A grant revoked by its client. */
-export function revokingWith({ p, records, record }: ApiCommon) {
+export function revokingWith({ p, records, recordAbout }: ApiCommon) {
 	const revoke = async (request: HttpRequest, client: Client, grant: Grant) => {
 		const at = p.clock.now();
 		const changed = await p.grants.change(grant.id, (stored) => {
@@ -15,7 +15,8 @@ export function revokingWith({ p, records, record }: ApiCommon) {
 		});
 		if (records.grantOf(changed?.before)?.status !== "revoked" && changed) {
 			await p.unlisted(grant);
-			record(
+			// Revoked before the subject's tombstone, after its mark: audited without it where so.
+			await recordAbout(
 				"federation.grant.revoked",
 				grant.subject,
 				{ client: client.id, connection: grant.connection, outcome: "client" },

@@ -4,7 +4,7 @@ import { seal } from "@mod/seal";
 import { revocations } from "@mod/subject-revocation";
 import { upstreams } from "@mod/upstreams";
 import { name, type Settings } from "../section.ts";
-import { subjectGrants } from "../store.ts";
+import { grantStore, pendingIntents, subjectGrants } from "../store.ts";
 import {
 	type Judge,
 	judgeWith,
@@ -13,8 +13,17 @@ import {
 	type Records,
 	recordsWith,
 } from "./grant.ts";
+import { portsRefused } from "./ports.ts";
 
-export const sharedTakes = [seal, site, upstreams, revocations, subjectGrants] as const;
+export const sharedTakes = [
+	seal,
+	site,
+	upstreams,
+	revocations,
+	subjectGrants,
+	grantStore,
+	pendingIntents,
+] as const;
 
 /** The records over `seal`. */
 export const recordsOver = async (c: BuildContext<Settings>) => recordsWith(await c.get(seal));
@@ -38,6 +47,13 @@ export async function sharedOver(c: BuildContext<Settings>) {
 			c.refuse(`${name}.connections.${connection}.idp`, "the IdP it names offers no delegation");
 		}
 	}
+	const stores = {
+		grants: await c.get(grantStore),
+		pending: await c.get(pendingIntents),
+		subjects: await c.get(subjectGrants),
+	};
+	const ports = portsRefused(stores);
+	if (ports !== undefined) c.refuse(name, ports);
 	const maxMs = c.section["max-lifetime"] * 1000;
 	if (c.section["keep-on-subject-revocation"]) {
 		c.log.warn("federation-grants.kept_on_subject_revocation", {
@@ -51,6 +67,6 @@ export async function sharedOver(c: BuildContext<Settings>) {
 			keep: c.section["keep-on-subject-revocation"],
 			maxMs,
 		}),
-		listed: listingWith(await c.get(subjectGrants), c.log),
+		listed: listingWith(stores.subjects, c.log),
 	};
 }

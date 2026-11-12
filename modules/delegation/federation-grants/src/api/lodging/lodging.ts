@@ -20,6 +20,7 @@ export function lodgingWith({
 	secret,
 	connections,
 	record,
+	recordAbout,
 	stateRefusal,
 }: ApiCommon) {
 	/** An intent from a lodging's or a renewal's body, or the refusal that answers it. */
@@ -107,25 +108,30 @@ export function lodgingWith({
 		const name = body.text("connection");
 		if (!subject) return error(400, "invalid_request", "sub_required");
 		if (!name) return error(400, "invalid_request", "connection_required");
-		const denied = (outcome: string) => {
-			record("federation.grant.request.denied", subject, { client: client.id, outcome }, request);
-		};
+		// The subject a client names may be erased: audited without it where so.
+		const denied = (outcome: string) =>
+			recordAbout(
+				"federation.grant.request.denied",
+				subject,
+				{ client: client.id, outcome },
+				request,
+			);
 		if (!permits(client, name)) {
-			denied("connection_not_permitted");
+			await denied("connection_not_permitted");
 			return error(403, "access_denied", "connection_not_permitted");
 		}
 		const configured = connections.configured(name);
 		if (!configured) return error(503, "temporarily_unavailable", "connection_not_configured");
 		const asked = intentFrom(body, client, configured.connection, "initial");
 		if (asked.kind === "refused") {
-			denied("invalid_request");
+			await denied("invalid_request");
 			return asked.answer;
 		}
 		const { intent } = asked;
 		// Counted per client, whatever subject it names, so no client fills the store.
 		const counted = await p.lodges.hit("federation-grants.lodges", client.id, lodgeWindow());
 		if (counted.kind === "limited") {
-			denied("rate_limited");
+			await denied("rate_limited");
 			const after = String(Math.ceil(counted.retryAfterMs / 1000));
 			return error(429, "rate_limited", "provider", { "retry-after": after });
 		}
@@ -144,12 +150,23 @@ export function lodgingWith({
 			rotations: { from: now, count: 0 },
 		};
 		const connectMs = settings["connect-lifetime"] * 1000;
-		await p.grants.create(grant.id, records.stored(grant), connectMs + settings.retention * 1000);
+		const keptMs = connectMs + settings.retention * 1000;
+		// A subject erased here is one no intent is lodged for: refused, naming it nowhere.
+		if ((await p.grants.create(grant.id, records.stored(grant), keptMs, subject)) === "erased") {
+			const withheld = { client: client.id, outcome: "subject_unknown", withheld: "erased" };
+			record("federation.grant.request.denied", undefined, withheld, request);
+			return error(403, "access_denied", "subject_unknown");
+		}
 		await p.listed(grant, connectMs);
 		// Past the pair's cap, the intents that end first are pushed out, and end.
-		const { pushedOut } = await p.pending.add(`${client.id}\n${subject}`, grant.id, connectMs);
-		for (const id of pushedOut) await endIntent(id, "pushed_out");
-		record(
+		const pair = `${client.id}\n${subject}`;
+		const added = await p.pending.add(pair, grant.id, connectMs, subject);
+		// A pending pair's add refused, its subject erased meanwhile: logged and passed, the grant still pending.
+		if (typeof added !== "object") p.log.warn("federation-grants.pending_failed", { kind: added });
+		for (const id of typeof added === "object" ? added.pushedOut : [])
+			await endIntent(id, "pushed_out");
+		// Created before the subject's tombstone, after its mark: audited without it where so.
+		await recordAbout(
 			"federation.grant.requested",
 			subject,
 			{ client: client.id, connection: name, outcome: "initial" },
