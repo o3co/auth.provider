@@ -14,7 +14,8 @@
 - The operator section (its keys in the settings list): `lifetime`, `sweep-interval` and `recent-authentication`, times written with their unit (`8h`, `1m`, `10m`); a bare number is refused. `attributes` holds `login-attributes`' caps (`attributeCaps`), which this section only hosts.
 - Each host goes on with pending closes every `sweep-interval`, past a failing one; on stop, the host waits for the sweep under way.
 - Logs as `session-lifecycle.*`, never a value: the names a login's attributes dropped (names outside the set as a count), a capped authentication time, a failed participant by name and kind, a closing put off with its age, a sweep's failures and the listing's (a failed removal by kind, sessions pushed out by count, sessions ended in their record by count, and pushed-out sessions neither put back nor ended, by count).
-- Store interfaces of its own, named `session-lifecycle.*`, which a wiring must provide for it: records by handle (create, read, change from the current contents, with a lifetime or none), the cookie index by secret (create, read, remove), the closings (add, done, each) and each subject's listed sessions (add for a lifetime, members, remove). The stores never see record contents and need no eviction, crash survival and no rollback on failover.
+- Store interfaces of its own, named `session-lifecycle.*`, which a wiring must provide for it: records by handle (create for a subject, read, change from the current contents, with a lifetime or none), the cookie index by secret (create, read, remove), the closings (add, done, each) and each subject's listed sessions (add for a lifetime, members, remove). The stores never see record contents and need no eviction, crash survival and no rollback on failover.
+- Where the Store fences a subject's erasure, a record's create or a listing's add for an erased subject answers `erased`, and a listing's add over another subject's listing `another-subject`; a login takes either as refused. A record's change answers nothing.
 - The records, the cookie index and the listing read only what a failover keeps, since an entry or a revocation decides on what other requests wrote; the cookie index names its entries from the secret and never keeps it in clear.
 - `./testing`: the configuration builder, and contract tests of its store interfaces.
 
@@ -28,4 +29,4 @@
 - A host that cannot read a record (one a newer host wrote, during a rolling upgrade) lets nobody in on it and answers a login or close over its cookie Unavailable; the cookie stays.
 
 ## Depends on
-- `kernel`, `session` (the contract and its rules), `http`, `cookies`, `subject-revocation`, `login-attributes` (the attributes a login gives).
+- `kernel`, `session` (the contract and its rules), `http`, `cookies`, `subject-revocation`, `login-attributes` (the attributes a login gives), `erasure-extensions` (the store ports' erasure types).

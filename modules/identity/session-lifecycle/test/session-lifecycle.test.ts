@@ -803,13 +803,21 @@ describe("session closing", () => {
 		expect(stores.kept.pending()).toEqual([]);
 	});
 
-	it("marks a session closed with a write even when there is no record", async () => {
+	it("fails a login whose save or listing its subject's erasure refused, never trying it again", async () => {
+		const { s, stores } = await boot();
+		stores.erased.sessions.add("erin");
+		await expect(s.open(testRequest(), facts("erin"))).rejects.toSatisfy(isUnavailable);
+		// Saved, then refused at the listing: unlisted, and no cookie made to lead to it.
+		stores.erased.listed.add("finn");
+		await expect(s.open(testRequest(), facts("finn"))).rejects.toSatisfy(isUnavailable);
+		expect(await listed(stores, "finn")).toEqual([]);
+	});
+
+	it("answers closed where there is no record, writing nothing: ended, never opened, or erased", async () => {
 		const { s, stores } = await boot();
 		const handle = "x".repeat(43);
-		stores.down.sessions.failNext("save");
-		await expect(s.close(handle)).rejects.toSatisfy(isUnavailable);
-		expect((await s.close(handle)).kind).toBe("closed");
-		expect(stores.kept.peek(handle)).toEqual({ format: 2, state: "closed" });
+		expect(await s.close(handle)).toMatchObject({ kind: "closed" });
+		expect(stores.kept.peek(handle)).toBeUndefined();
 	});
 
 	it("keeps a closed record for the lifetime from its closing, then lets it go", async () => {

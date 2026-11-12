@@ -144,7 +144,7 @@ flowchart LR
 | `@mod/login-gates` | feature | `@mod/http`, `@mod/kernel`, `@mod/session`, `@mod/url-setting` |
 | `@mod/login-password` | feature | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/login-gates`, `@mod/rate-limit`, `@mod/request-source`, `@mod/users` |
 | `@mod/session` | feature | `@mod/cookies`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/subject-revocation` |
-| `@mod/session-lifecycle` | adapter | `@mod/cookies`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/session`, `@mod/subject-revocation` |
+| `@mod/session-lifecycle` | adapter | `@mod/cookies`, `@mod/erasure-extensions`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/session`, `@mod/subject-revocation` |
 | `@mod/session-participants` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/session-requirements` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/subject-attributes` | feature | `@mod/kernel`, `@mod/login-attributes`, `@mod/session`, `@mod/users` |

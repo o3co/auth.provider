@@ -35,7 +35,7 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 ## Invariants
 - The lifecycle only moves forward: the next state is decided from the state at the time of writing.
 - Every state change is written, and a step answers that the state moved only after the confirmed write returns.
-- Without a record, a close writes a closed mark before it answers closed.
+- Where a close's update answers nothing (ended, never opened, or its subject erased, its record gone or awaiting its eraser), it answers closed and writes nothing: a handle comes only from a record created before it was listed or its cookie made, and is never reissued.
 - A handle to close is added to the closings first, and taken off once closed.
 - A closing whose participants keep failing is retried after half its age (at least the sweep interval, at most 1 hour, a fixed backoff ceiling), and the closing's age is logged (`session-lifecycle.closing_pending`).
 - A closing whose record a host cannot read is put off the same way, by that host alone.
@@ -50,9 +50,8 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 - A record lives for the lifetime from login, without end while closing, and for the lifetime again once closed.
 - Cookie index, by the cookie's secret: the handle, for the session's lifetime.
 - Each subject's listing: the handle, for the session's lifetime from login.
-- A session is listed after its record and before its cookie; a login that cannot list it is unavailable.
+- A session is listed after its record and before its cookie; a login that cannot list it, or whose save or listing answers `erased` (or the listing `another-subject`), is unavailable, never tried again.
 - The listing never pushes out the session being opened.
-- The index needs its wiring to answer reads only from writes a failover keeps: an entry after a raise or a close decides on what another request wrote.
 
 ## Depends on
 - `kernel`, `http` (the request type), `cookies`, `subject-revocation`, `login-attributes` (the form kept attributes are read back in); `session`'s contract and rules; `session-lifecycle`'s store interfaces; `listing`.
