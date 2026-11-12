@@ -41,6 +41,7 @@
 		"release:evidence-judge": "pnpm --filter @mod/distribution run release-evidence-judge",
 		"release:sbom": "pnpm --filter @mod/distribution run release-sbom",
 		"release:scan": "pnpm --filter @mod/distribution run release-scan",
+		"image:scan": "pnpm --filter @mod/distribution run image-scan",
 		"release:listed": "pnpm --filter @mod/distribution run release-listed",
 		"release:notes": "pnpm --filter @mod/distribution run release-notes"
 	},

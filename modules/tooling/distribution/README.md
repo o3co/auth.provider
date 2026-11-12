@@ -17,6 +17,7 @@
 - `pnpm release:evidence-fetch <fetched>` and `pnpm release:evidence-judge <fetched> <dir>`: before anything is published, the evidence of the CI run that tested the tag's tree, fetched with a token and judged without one, or the release stopped; see the internal module `release-evidence`.
 - `pnpm release:sbom <tarballs> <dir>`: before anything is published, the release's lists of what it ships, made from its tarballs; see the internal module `release-sbom`.
 - `pnpm release:scan <lists> <dir>`: after the lists are made, a report of the known vulnerabilities in them, which stops and delays nothing; see the internal module `release-scan`.
+- `pnpm image:scan <tarballs> <dir>`: the image of the app the packed release makes, built as its guide says and scanned for critical and high vulnerabilities with a fix, any failing it; see the internal module `image-scan`.
 - `pnpm release:listed <tarballs> <tarballs.json>`: where the release publishes, the tarballs held to those the lists were made of; see the internal module `release-listed`.
 - `pnpm release:notes <version> <file>`: where the release publishes, its notes from the version's section of the changelog; see the internal module `release-notes`.
 
