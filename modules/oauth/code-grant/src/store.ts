@@ -6,10 +6,9 @@ declare const stored: unique symbol;
 /** A code's record as the store keeps it: the store never reads it, and only code-grant opens it. */
 export type StoredCode = { readonly [stored]: true };
 
-/** A record as a change leaves it, and its new lifetime from the write; without one it stays. */
+/** A record as a change leaves it; it keeps its end. */
 export interface ChangedCode {
 	readonly value: StoredCode;
-	readonly lifetimeMs?: number;
 }
 
 /** Where codes are kept, by a name made from the code. Every call throws Unavailable when the place cannot tell. */

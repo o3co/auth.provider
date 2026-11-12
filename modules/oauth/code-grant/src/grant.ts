@@ -1,5 +1,5 @@
 import type { Grant, GrantOutcome } from "@mod/grants";
-import { sameSecret } from "@mod/kernel";
+import { sameSecret, Unavailable } from "@mod/kernel";
 import type { Sessions } from "@mod/session";
 import { type AccessGrant, referenceOf } from "@mod/tokens";
 import { type CodeRecord, fromStored, s256, toStored, verifierShape } from "./codes.ts";
@@ -12,7 +12,13 @@ import {
 	type RedemptionHook,
 	type SessionRedemption,
 } from "./contract.ts";
-import type { ChangedCode, CodeStore } from "./store.ts";
+import {
+	createRedemptionRecord,
+	isRedeemed,
+	noteToken,
+	tokenEndFor,
+} from "./redemption-record/redemption-record.ts";
+import type { ChangedCode, CodeStore, RedemptionRecords } from "./store.ts";
 
 /** One answer for every refused code, so it tells nothing about why. */
 const refused: GrantOutcome = {
@@ -34,15 +40,8 @@ export const answerFields = new Set([
 	"scope",
 	"id_token",
 ]);
-/** The issued token's record outlives the token by this much, for clock drift between hosts. */
-const allowanceMs = 120_000;
-
+/** A code's record changed as given, keeping its end: a code is never kept longer than issued. */
 const changed = (record: CodeRecord): ChangedCode => ({ value: toStored(record) });
-/** A record changed as given, living until a token's end and the allowance after it. */
-const lasting = (record: CodeRecord, expiresAt: number, now: number): ChangedCode => ({
-	value: toStored(record),
-	lifetimeMs: Math.max(1, expiresAt - now + allowanceMs),
-});
 
 /** What the ID token maker is told about a redeemed code. */
 const idTokenRequest = (record: CodeRecord, clientId: string, name: string): IdTokenRequest => ({
@@ -71,6 +70,7 @@ const accessOf = (record: CodeRecord, clientId: string): AccessGrant => ({
 
 export function codeGrant(parts: {
 	readonly store: CodeStore;
+	readonly redemptionRecords: RedemptionRecords;
 	readonly sessions: Sessions;
 	readonly settle: (name: string) => Promise<void>;
 	readonly now: () => number;
@@ -79,7 +79,17 @@ export function codeGrant(parts: {
 	readonly redemptions: readonly SessionRedemption[];
 	readonly hooks: readonly RedemptionHook[];
 }): Grant {
-	const { store, sessions, settle, now, idToken, additions, redemptions, hooks } = parts;
+	const {
+		store,
+		redemptionRecords,
+		sessions,
+		settle,
+		now,
+		idToken,
+		additions,
+		redemptions,
+		hooks,
+	} = parts;
 	/** Whether the code's session enters at use: not closed, ended or short of a requirement. */
 	const enters = async (session: string) => (await sessions.entryOf(session)).kind === "entered";
 	return {
@@ -109,12 +119,17 @@ export function codeGrant(parts: {
 				if (admitted.kind === "refused") return admitted;
 			}
 			// Used up before it is checked: of two racing uses, only the one that turned it consumed goes on.
-			const used = await store.update(name, (kept) => {
-				const r = fromStored(kept);
+			const used = await store.update(name, (stored) => {
+				const r = fromStored(stored);
 				return r?.state === "issued" ? changed({ ...r, state: "consumed" }) : undefined;
 			});
 			const record = used && fromStored(used.before);
-			if (!record) return refused;
+			if (!record) {
+				// A code gone, its own record ended, may still have been redeemed: its token is revoked
+				// from its redemption record, which outlives it.
+				if (await isRedeemed(redemptionRecords, name)) await settle(name);
+				return refused;
+			}
 			if (record.state === "consumed") {
 				await settle(name);
 				return refused;
@@ -125,6 +140,16 @@ export function codeGrant(parts: {
 			// Asked again on what was used up: a look before use that missed the code asked nothing.
 			const again = target(record.audience, (audience) => record.audience.includes(audience));
 			if (again.kind === "error") return again;
+			// Its record is made once used up and before issuing (use-up, create, issue, note), under
+			// its subject's tombstone (`redemption-record`): a subject erased meanwhile gets no token.
+			const created = now();
+			const made = await createRedemptionRecord(redemptionRecords, name, record.subject);
+			if (made === "erased") {
+				await settle(name);
+				return refused;
+			}
+			// Only this request turned the code consumed: a record there already is no state it knows.
+			if (made !== "created") throw new Unavailable("code-grant");
 			// Pinned once used up and before issuing, so a hook holds what it needs through the redemption.
 			for (const hook of hooks) {
 				try {
@@ -134,23 +159,27 @@ export function codeGrant(parts: {
 					throw error;
 				}
 			}
-			// The token ends no later than its session, as a refreshed one ends with its family.
+			// The token ends no later than its session, as a refreshed one ends with its family, nor
+			// later than the allowance before its record's end.
 			const allowed = await issue(accessOf(record, client.id), {
 				session: record.session,
-				notAfter: entry.endsAt,
+				notAfter: Math.min(entry.endsAt, tokenEndFor(created)),
 			});
 			if (allowed.kind === "refused") return allowed;
 			const issued = allowed.access;
-			// Read once, outside the change: it may run again on a race.
-			const at = now();
 			const given = { reference: referenceOf(issued), expiresAt: issued.expiresAt };
-			// A record gone meanwhile is never written back (the code would be unused again), nor its token answered.
-			const noted = await store.update(name, (kept) => {
-				const r = fromStored(kept);
-				return r && lasting({ ...r, token: given }, issued.expiresAt, at);
+			// Noted on its record, which keeps its end; one gone meanwhile (erased) gets no token answered.
+			const after = await noteToken(redemptionRecords, name, given);
+			// TODO(0.22): noted on the code too, keeping its end (never the arbiter), so a 0.19 instance
+			// that takes a reuse while the code lives finds the token, and its sweep loses no revocation.
+			const coded = await store.update(name, (stored) => {
+				const r = fromStored(stored);
+				return r && changed({ ...r, token: given });
 			});
-			const after = noted && fromStored(noted.after);
-			if (!after) return refused;
+			const left = coded && fromStored(coded.after);
+			// A code whose record ended meanwhile is refused here, as one gone (erased) is: no hook is
+			// told of a code that is gone, as a hook's pin relies on.
+			if (!after || !left) return refused;
 			// From here a step that fails, even before it gives a promise, voids the code.
 			const voidIfFails = async <T>(step: () => Promise<T>): Promise<T> => {
 				try {
@@ -163,8 +192,9 @@ export function codeGrant(parts: {
 			for (const redemption of redemptions) {
 				await voidIfFails(() => redemption.redeemed(record.session, client.id));
 			}
-			// A reuse or a logout that came while the token was being made voids it.
-			if (after.void || !(await enters(record.session))) {
+			// A reuse or a logout that came while the token was being made voids it; until 0.22, a 0.19
+			// instance's reuse marks the code alone.
+			if (after.void || left.void || !(await enters(record.session))) {
 				await settle(name);
 				return refused;
 			}
