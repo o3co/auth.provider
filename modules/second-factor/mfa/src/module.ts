@@ -94,10 +94,10 @@ export default defineModule(
 		}),
 		// The three faces are the one implementation, built once in each app.
 		m.provide(factorReading).by((c) => c.get(decisions)),
-		// Its build takes only the factor store, collecting no probes: the erasure gate collects erasers.
-		m.contribute(erasers).by(async (c) => factorEraser(await c.get(factorStore))),
 		m.provide(factorBinding).by((c) => c.get(decisions)),
 		m.provide(factorManaging).by((c) => c.get(decisions)),
+		// Its build takes only the factor store, collecting no probes: the erasure gate collects erasers.
+		m.contribute(erasers).by(async (c) => factorEraser(await c.get(factorStore))),
 		m
 			.contribute(resealers)
 			.by(async (c) => resealerOver(await c.get(factorStore), await c.get(seal))),
