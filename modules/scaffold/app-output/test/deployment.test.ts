@@ -395,6 +395,31 @@ it("builds on one minor of Node 24, so a build takes its patches and never a new
 	expect(docker).not.toContain("@sha256:");
 });
 
+it("takes Alpine's current packages in the stage the app runs in, which each guide builds uncached", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http"], fakePackages(), readme);
+	const docker = await read(target, "Dockerfile");
+	const runtime = docker.slice(docker.indexOf(" AS runtime\n"));
+	// As root, before the stage turns to the app's user.
+	expect(runtime).toMatch(/^RUN apk upgrade --no-cache$/m);
+	expect(runtime.indexOf("RUN apk upgrade")).toBeLessThan(runtime.indexOf("USER node"));
+	for (const template of ["pattern-readme.md", "full-readme.md", "listed-readme.md"]) {
+		const written = await mkdtemp(join(tmpdir(), "app-output-"));
+		await writeDeployment(written, ["@mod/http"], fakePackages(), { ...readme, template });
+		const guide = await read(written, "README.md");
+		expect(guide, template).toContain(
+			"1. `docker build --pull --no-cache-filter=runtime -t auth-provider .`",
+		);
+		expect(guide, template).toContain(
+			"`--no-cache-filter=runtime` builds the stage the app runs in again",
+		);
+		expect(guide, template).toContain(
+			"A build by other means does the same: compose with `build: { pull: true, no_cache: true }`, `docker/build-push-action` with `pull: true` and `no-cache-filters: runtime`, any other builder with `--no-cache`.",
+		);
+		expect(guide, template).not.toMatch(/docker build (?!--pull --no-cache-filter=runtime )/);
+	}
+});
+
 it("records the packages outside the release and checks the lockfile against them, where the app composes one", async () => {
 	const grant = {
 		name: "@x/grant",
@@ -569,6 +594,10 @@ it("takes a registry's credentials as a build secret, only where a scope records
 	]);
 	// The image the app runs in takes neither.
 	expect(docker.slice(docker.indexOf("AS runtime"))).not.toContain("npmrc");
+	// Every build the guide gives takes the newest patch and builds the stage the app runs in uncached.
+	expect(await read(scoped, "README.md")).not.toMatch(
+		/docker build (?!--pull --no-cache-filter=runtime )/,
+	);
 	const plain = await written({ default: "https://registry.npmjs.org" });
 	expect(await readdir(plain)).not.toContain(".npmrc");
 	expect(await read(plain, "Dockerfile")).not.toContain("npmrc");
