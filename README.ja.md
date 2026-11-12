@@ -238,6 +238,8 @@ Docker の env ファイルでは、変数ごとに 1 行で記述する必要�
 
 `--pull` はイメージの Node マイナーの最新パッチを取り込み、`--no-cache-filter=runtime` はアプリを実行するステージをビルドし直すので、Alpine リポジトリの現在のパッケージを取り込みます。キャッシュされたステージは、以前のビルドのパッケージのままです。
 
+ほかの方法でビルドする場合も同じです。compose では `build: { pull: true, no_cache: true }`、`docker/build-push-action` では `pull: true` と `no-cache-filters: runtime`、そのほかのビルダーでは `--no-cache` を指定します。
+
 ## 本番運用の前に
 
 インメモリーストアを Redis、またはストアの契約を満たす独自のアダプターに置き換えてください。Redis アダプターには、単一プライマリー構成の Redis 7.0 以降が必要です。クラスターモードは拒否されます。アプリは起動時にサーバーの設定を検証します。永続化、レプリケーション、マネージドサービスについては、[Redis の要件](docs/runbook.md#redis)を読んでください。

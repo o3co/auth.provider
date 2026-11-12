@@ -126,6 +126,8 @@ docker build --pull --no-cache-filter=runtime --secret id=npmrc,src=$HOME/.npmrc
 
 `--pull` takes the newest patch of the image's Node minor, and `--no-cache-filter=runtime` builds the stage the app runs in again, so it takes the Alpine repository's current packages: a cached stage keeps those of an earlier build.
 
+A build by other means does the same: compose with `build: { pull: true, no_cache: true }`, `docker/build-push-action` with `pull: true` and `no-cache-filters: runtime`, any other builder with `--no-cache`.
+
 `pnpm-workspace.yaml` holds every package of the release the app depends on, or a package outside it takes as a peer, every bundle of the release those depend on, and zod, to one version each. When you upgrade the release, generate the app again with the new release's `create-auth-provider`, from outside the app, and take `package.json`, the README, the overrides, `held`, `scripts/check-outside.mjs` and the `Dockerfile` from it: the overrides and `held` move together, and the check refuses one without the other. Take the check too, as one older than the record may not read all of it: an app generated before `held` was recorded has a check that does not read it. A new version does not change a generated app's `Dockerfile`, manifest or check by itself.
 
 ### Run the app by its files

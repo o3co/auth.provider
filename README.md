@@ -238,6 +238,8 @@ The image uses Node 24, installs production dependencies only and runs as a non-
 
 `--pull` takes the newest patch of the image's Node minor, and `--no-cache-filter=runtime` builds the stage the app runs in again, so it takes the Alpine repository's current packages: a cached stage keeps those of an earlier build.
 
+A build by other means does the same: compose with `build: { pull: true, no_cache: true }`, `docker/build-push-action` with `pull: true` and `no-cache-filters: runtime`, any other builder with `--no-cache`.
+
 ## Before production
 
 Replace the in-memory store with Redis, or with your own adapter that meets the store contract. The Redis adapter needs Redis 7.0 or later as a single primary; cluster mode is refused. The app checks the server's settings at startup. Read the [Redis requirements](docs/runbook.md#redis) for persistence, replication and managed services.
