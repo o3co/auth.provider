@@ -59,7 +59,7 @@ export function rulesOf(place: SubjectPlace, category: string) {
 		}
 		return lifetimeMs;
 	};
-	return {
+	const base = {
 		bounded,
 		indexed,
 		byKeys,
@@ -197,6 +197,40 @@ export function rulesOf(place: SubjectPlace, category: string) {
 							undefined,
 						],
 					};
+				},
+			};
+		},
+	};
+	return {
+		...base,
+		/**
+		 * Gives the record to `to` with `value`, from the subject it is read under, in one of three
+		 * cases: under another subject, as `move` does; under `to` already, a `change`; kept raw
+		 * (`reader`, or before the migration), a `change` too, raw, its new value read by the migration.
+		 * `moved` for each, else `missing`, `erased` or `from-erased`, as `change` and `move` answer.
+		 */
+		moveTo: (
+			key: string,
+			to: string,
+			value: Json,
+		): Rule<"moved" | "missing" | "erased" | "from-erased"> => {
+			const changing = base.change<Json>(() => ({ value }));
+			/** The move a record read under another subject takes; none where it is a change. */
+			const moving = (held: Json | undefined) => {
+				const { subject } = open(held);
+				if (held === undefined || subject === undefined || subject === to || !byKeys)
+					return undefined;
+				return base.move(key, subject, to, value);
+			};
+			return {
+				needs: (held) => (moving(held) ?? changing).needs(held),
+				decide: (held, needed, attempt) => {
+					const move = moving(held);
+					if (move) return move.decide(held, needed, attempt);
+					const changed = changing.decide(held, needed, attempt);
+					const answer =
+						changed.answer.kind === "changed" ? ("moved" as const) : changed.answer.kind;
+					return { ...changed, answer };
 				},
 			};
 		},
