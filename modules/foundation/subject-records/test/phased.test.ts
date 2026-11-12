@@ -6,10 +6,12 @@ import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import {
 	indexSpaceOf,
+	phasedJointRecordsIn,
 	phasedKeyedSetsIn,
 	phasedRecordsIn,
 	subjectRecordsPhase,
 } from "../src/subject-records.ts";
+import { envelope, placed } from "./placed.ts";
 
 const g = ["durable"] as const;
 const keyed: Space = { name: "phased-keyed", guarantees: g, subjectData: "online-keyed" };
@@ -87,7 +89,6 @@ it("starts over a store's blip, unready and unavailable until the phase reads, t
 	expect(await records.change("alice", (n) => ({ value: n + 1 }))).toEqual({ before: 1, after: 2 });
 	expect(await records.read("alice")).toBe(2);
 	expect((await records.scan()).keys).toEqual(["alice"]);
-	await expect(records.move("alice", "alice", "bob")).rejects.toThrow();
 	await records.remove("alice");
 	expect(await records.read("alice")).toBeUndefined();
 	const sets = await phasedKeyedSetsIn(
@@ -163,4 +164,53 @@ it("erases and migrates a sets space at the phase read, as records' builder does
 		indexed: 0,
 		removed: 0,
 	});
+});
+
+it("changes records of several places as one over the phase read once, shared with each place's builder, unready until it reads", async () => {
+	const lists: Space = { name: "phased-lists", guarantees: g, subjectData: "online-indexed" };
+	const claims: Space = { name: "phased-claims", guarantees: g, subjectData: "online-indexed" };
+	const p = await placed([lists, claims]);
+	const { phase: _, ...listsPlace } = p.at(lists);
+	const { phase: __, ...claimsPlace } = p.at(claims);
+	const { state, control: c } = control("indexed");
+	const phase = subjectRecordsPhase.once(c);
+	state.down = true;
+	const joint = await phasedJointRecordsIn(
+		{ lists: listsPlace, claims: claimsPlace },
+		phase,
+		"w",
+		refuse,
+	);
+	const records = await phasedRecordsIn<number>(listsPlace, phase, "w", refuse);
+	await expect(joint.ready()).rejects.toThrow(Unavailable);
+	const created = () =>
+		joint.changeSubjectRecords({
+			targets: [
+				{ place: "lists", key: "alice" },
+				{ place: "claims", key: "c1" },
+			],
+			decide: () => ({
+				targets: [
+					{ kind: "create", value: 1, lifetimeMs: "endless", subject: "alice" },
+					{ kind: "create", value: 2, lifetimeMs: "endless", subject: "alice" },
+				],
+			}),
+		});
+	await expect(created()).rejects.toThrow(Unavailable);
+	state.down = false;
+	await joint.ready();
+	const reads = state.reads;
+	expect(await created()).toMatchObject({ kind: "written" });
+	// One phase read, shared: the builder reads what the joint change wrote, reading no phase again.
+	expect(await records.read("alice")).toBe(1);
+	expect(state.reads).toBe(reads);
+	expect((await p.raw(claims, "c1"))?.value).toEqual(envelope("alice", 2));
+	await expect(
+		phasedJointRecordsIn(
+			{ keyed: { ...listsPlace, space: keyed, index: indexSpaceOf(keyed) } },
+			phase,
+			"w",
+			refuse,
+		),
+	).rejects.toThrow(/refused at build/);
 });

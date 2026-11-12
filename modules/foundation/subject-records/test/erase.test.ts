@@ -3,6 +3,7 @@ import { Unavailable } from "@mod/kernel";
 import type { Control, Json, Space, Store } from "@mod/store";
 import { expect, it } from "vitest";
 import { clockAllowanceMs } from "../src/erase/erase.ts";
+import { jointRecordsIn } from "../src/joint/joint.ts";
 import {
 	eraseSubject,
 	indexSpaceOf,
@@ -303,7 +304,12 @@ it("keeps a set's entry when the record under its key is removed or moved, so er
 	expect(await indexOf(indexed, "alice")).toEqual({ [bucketOf("k")]: [["k", "set"]] });
 	await records.create("j", 1, 60_000, "alice");
 	await sets.add("j", "m", 60_000, "alice");
-	expect(await records.move("j", "alice", "bob")).toBe("moved");
+	const { changeSubjectRecords } = jointRecordsIn({ indexed: at(indexed) }, "w", refuse);
+	const moved = await changeSubjectRecords({
+		targets: [{ place: "indexed", key: "j" }],
+		decide: () => ({ targets: [{ kind: "move", value: 1, to: "bob" }] }),
+	});
+	expect(moved.kind).toBe("written");
 	expect(await eraseSubject(at(indexed), "alice")).toMatchObject({ kind: "erased", removed: 2 });
 	expect(await raw(indexed, "k", "set")).toBeUndefined();
 	expect(await raw(indexed, "j", "set")).toBeUndefined();

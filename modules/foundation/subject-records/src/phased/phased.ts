@@ -3,6 +3,7 @@ import { type Clock, isUnavailable, Unavailable } from "@mod/kernel";
 import type { Json } from "@mod/store";
 import { eraseSubject } from "../erase/erase.ts";
 import type { Phase, SubjectPlace } from "../index/index.ts";
+import { jointRecordsIn } from "../joint/joint.ts";
 import { migrateRecords, migrateSets } from "../migrate/migrate.ts";
 import type { PhaseOnce } from "../phase/phase.ts";
 import { subjectKeyedSetsIn } from "../sets/sets.ts";
@@ -25,7 +26,7 @@ async function phased<B extends Methods>(
 	phase: PhaseOnce,
 	build: (phase: Phase, refuse: Refuse) => B,
 	refuse: Refuse,
-	place: Omit<SubjectPlace, "phase">,
+	places: readonly Omit<SubjectPlace, "phase">[],
 	names: Readonly<Record<keyof B & string, true>>,
 ): Promise<B & { readonly ready: () => Promise<void> }> {
 	let built: B | undefined;
@@ -48,7 +49,9 @@ async function phased<B extends Methods>(
 		} catch (error) {
 			if (!(error instanceof Late)) throw error;
 			refused = error.message;
-			place.log?.error("subject-records.refused", { space: place.space.name, reason: refused });
+			for (const place of places) {
+				place.log?.error("subject-records.refused", { space: place.space.name, reason: refused });
+			}
 			throw new Unavailable("subject-records");
 		}
 	};
@@ -106,7 +109,7 @@ export const phasedRecordsIn = <T extends Json>(
 			};
 		},
 		refuse,
-		place,
+		[place],
 		// Every method the builder has, or the typecheck fails: none is left unrouted.
 		{
 			create: true,
@@ -114,7 +117,6 @@ export const phasedRecordsIn = <T extends Json>(
 			read: true,
 			change: true,
 			remove: true,
-			move: true,
 			scan: true,
 			erase: true,
 			migrate: true,
@@ -140,7 +142,7 @@ export const phasedKeyedSetsIn = (
 			};
 		},
 		refuse,
-		place,
+		[place],
 		// Every method the builder has, or the typecheck fails: none is left unrouted.
 		{
 			add: true,
@@ -151,4 +153,31 @@ export const phasedKeyedSetsIn = (
 			erase: true,
 			migrate: true,
 		} satisfies Record<keyof ReturnType<typeof subjectKeyedSetsIn> | "erase" | "migrate", true>,
+	);
+
+/**
+ * `jointRecordsIn` over the phase the process reads once (see `phased`), sharing the template's one
+ * read with its `phasedRecordsIn`: the joint change and the builders see one phase. It has no
+ * `erase` or `migrate`: those are each place's builder's.
+ */
+export const phasedJointRecordsIn = <P extends string>(
+	places: Readonly<Record<P, Omit<SubjectPlace, "phase">>>,
+	phase: PhaseOnce,
+	where: string,
+	refuse: Refuse,
+) =>
+	phased(
+		phase,
+		(read, told) => {
+			const at = Object.fromEntries(
+				(Object.entries(places) as [P, Omit<SubjectPlace, "phase">][]).map(([name, place]) => [
+					name,
+					{ ...place, phase: read },
+				]),
+			) as Record<P, SubjectPlace>;
+			return jointRecordsIn(at, where, told);
+		},
+		refuse,
+		Object.values(places) as Omit<SubjectPlace, "phase">[],
+		{ changeSubjectRecords: true } satisfies Record<keyof ReturnType<typeof jointRecordsIn>, true>,
 	);

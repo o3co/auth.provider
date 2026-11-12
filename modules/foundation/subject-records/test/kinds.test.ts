@@ -97,21 +97,6 @@ it("keeps a set keyed by its subject with no bucket, and a set written raw while
 	});
 });
 
-it("moves a record from one subject to another as one, and answers missing, not-from and erased", async () => {
-	const { at, raw, indexEntry, erase } = await opened();
-	const records = subjectRecordsIn<number>(at(indexed), "w", refuse);
-	await records.create("rec", 1, 60_000, "alice");
-	expect(await records.move("rec", "bob", "carol")).toBe("not-from");
-	expect(await records.move("none", "alice", "bob")).toBe("missing");
-	expect(await records.move("rec", "alice", "bob")).toBe("moved");
-	expect((await raw(indexed, "rec"))?.value).toEqual({ "records:v": 1, subject: "bob", value: 1 });
-	expect(await indexEntry(indexed, "alice", bucketOf("rec"))).toBeUndefined();
-	expect(await indexEntry(indexed, "bob", bucketOf("rec"))).toEqual([["rec", "record"]]);
-	await erase(indexed, "carol");
-	expect(await records.move("rec", "bob", "carol")).toBe("erased");
-	expect((await raw(indexed, "rec"))?.value).toMatchObject({ subject: "bob" });
-});
-
 it("writes every category in reader over a store without a batch across, and refuses that store once indexed", async () => {
 	const { s, at } = await opened();
 	const { batchAcross: _, ...lacking } = s;

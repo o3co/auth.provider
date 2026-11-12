@@ -1,14 +1,7 @@
-import { type Attempt, type Changed, changeRecords, type Next, type Target } from "@mod/records";
+import { type Attempt, type Changed, changeRecords, type Target } from "@mod/records";
 import type { Json } from "@mod/store";
-import { kept, opened, ownersValue } from "../envelope/envelope.ts";
-import {
-	checkedSubjectPlace,
-	indexOver,
-	listedWith,
-	listedWithout,
-	type SubjectPlace,
-	witnessed,
-} from "../index/index.ts";
+import { checkedSubjectPlace, type SubjectPlace } from "../index/index.ts";
+import { type Rule, rulesOf } from "./rules.ts";
 
 /**
  * A subject's records in a space declaring `online-indexed` (its keys in its subject's index),
@@ -35,27 +28,25 @@ export function subjectRecordsIn<T extends Json>(
 	);
 	const bounded = category === "bounded";
 	if (options.secret && !bounded) refuse(where, "only a bounded space keys its records by secrets");
-	const indexed = place.phase === "indexed";
-	// Bounded records are found by no subject, so they are kept raw and indexed by no bucket.
-	const enveloped = indexed && !bounded;
-	const byKeys = indexed && category === "online-indexed";
-	// An envelope keyed by its subject is written with its witness, which no raw value has.
-	const witnessing = enveloped && category === "online-keyed";
-	const { tombOf, bucketOf, witnessOf } = indexOver(place, place.space, place.index);
+	const rules = rulesOf(place, category);
 	const recordOf = (key: string): Target =>
 		options.secret ? { place, secret: key } : { place, key };
-	const open = (held: Json | undefined) => opened(held, enveloped);
-	const isRecord = (key: string) => (e: { key: string; name: string }) =>
-		e.key === key && e.name === "record";
-	/** A lifetime a bounded record may be created with: a number of ms, at most the space's ceiling. */
-	const boundedLifetime = (lifetimeMs: number | "endless") => {
-		const ceiling = place.space.boundedMs ?? 0;
-		if (lifetimeMs === "endless" || !(lifetimeMs >= 1 && lifetimeMs <= ceiling)) {
-			throw new TypeError(
-				`subject-records: a bounded record lives from 1 ms to ${ceiling} ms (${place.space.name})`,
-			);
-		}
-		return lifetimeMs;
+	/** Runs one rule on one record, as one change: its needs read beside it, its writes in one write. */
+	const ruled = async <A>(key: string, rule: Rule<A>): Promise<A> => {
+		let answer: A | undefined;
+		await changeRecords({
+			targets: [recordOf(key)],
+			watch: ([held]) => rule.needs(held),
+			decide: ([held], needed, attempt) => {
+				const decided = rule.decide(held, needed, attempt);
+				answer = decided.answer;
+				return {
+					...(decided.record === undefined ? {} : { targets: [decided.record] }),
+					...(decided.needed === undefined ? {} : { watched: decided.needed }),
+				};
+			},
+		});
+		return answer as A;
 	};
 	return {
 		/**
@@ -68,44 +59,8 @@ export function subjectRecordsIn<T extends Json>(
 			value: T | ((attempt: Attempt) => T),
 			lifetimeMs: number | "endless",
 			subject: string,
-		): Promise<"created" | "exists" | "erased"> => {
-			const lifetime = bounded ? boundedLifetime(lifetimeMs) : lifetimeMs;
-			if (category === "online-keyed" && key !== subject) {
-				throw new TypeError("subject-records: an online-keyed record is keyed by its subject");
-			}
-			let answer: "created" | "exists" | "erased" = "created";
-			await changeRecords({
-				targets: byKeys
-					? [recordOf(key), bucketOf(subject, key)]
-					: witnessing
-						? [recordOf(key), witnessOf(subject, "record")]
-						: [recordOf(key)],
-				watch: () => (indexed ? [tombOf(subject)] : []),
-				decide: ([held, bucket], [tomb], attempt) => {
-					if (tomb !== undefined) {
-						answer = "erased";
-						return {};
-					}
-					if (held !== undefined) {
-						answer = "exists";
-						return {};
-					}
-					answer = "created";
-					const made = ownersValue(typeof value === "function" ? value(attempt) : value);
-					const record: Next<Json> = {
-						value: enveloped ? kept(made, subject) : made,
-						lifetimeMs: lifetime,
-					};
-					if (witnessing)
-						return { targets: [record, bucket === undefined ? witnessed : undefined] };
-					if (!byKeys) return { targets: [record] };
-					return {
-						targets: [record, listedWith(bucket, place.space.name, { key, name: "record" })],
-					};
-				},
-			});
-			return answer;
-		},
+		): Promise<"created" | "exists" | "erased"> =>
+			ruled(key, rules.create(key, value, lifetimeMs, subject)),
 		/**
 		 * Saves a record that holds no subject's data, raw, in an `online-*` space, unless the key holds
 		 * one (`exists`); `closed` once this builder's phase is `indexed`, where no raw record is
@@ -123,7 +78,7 @@ export function subjectRecordsIn<T extends Json>(
 			lifetimeMs: number | "endless",
 		): Promise<"created" | "exists" | "closed"> => {
 			if (bounded) throw new TypeError("subject-records: a bounded space keeps no unowned record");
-			if (indexed) return "closed";
+			if (rules.indexed) return "closed";
 			let answer: "created" | "exists" | "closed" = "created";
 			await changeRecords({
 				targets: [recordOf(key)],
@@ -136,7 +91,7 @@ export function subjectRecordsIn<T extends Json>(
 		},
 		read: async (key: string): Promise<T | undefined> => {
 			const { entry } = await place.store.get(changeRecords.keyOf(recordOf(key)));
-			return open(entry?.value).value as T | undefined;
+			return rules.open(entry?.value).value as T | undefined;
 		},
 		/**
 		 * Changes the record from what it holds, as records do, leaving its index as it is: its
@@ -151,33 +106,8 @@ export function subjectRecordsIn<T extends Json>(
 			key: string,
 			change: (current: T, attempt: Attempt) => Changed<T> | undefined,
 		): Promise<{ readonly before: T; readonly after: T } | undefined> => {
-			let answer: { readonly before: T; readonly after: T } | undefined;
-			await changeRecords({
-				targets: [recordOf(key)],
-				watch: ([held]) => {
-					const { subject } = open(held);
-					if (subject === undefined) return [];
-					return witnessing ? [tombOf(subject), witnessOf(subject, "record")] : [tombOf(subject)];
-				},
-				decide: ([held], [tomb, witness], attempt) => {
-					const found = open(held);
-					if (held === undefined || tomb !== undefined) {
-						answer = undefined;
-						return {};
-					}
-					const before = found.value as T;
-					const changed = change(before, attempt);
-					answer = { before, after: changed ? changed.value : before };
-					if (!changed) return {};
-					const value = kept(ownersValue(changed.value), found.subject);
-					const keepsEnd = bounded || changed.lifetimeMs === undefined;
-					const targets = [keepsEnd ? { value } : { value, lifetimeMs: changed.lifetimeMs }];
-					// An envelope rewritten keyed by its subject has its witness, written where it is missing.
-					if (!witnessing || found.subject === undefined) return { targets };
-					return { targets, watched: [undefined, witness === undefined ? witnessed : undefined] };
-				},
-			});
-			return answer;
+			const answer = await ruled(key, rules.change(change));
+			return answer.kind === "changed" ? { before: answer.before, after: answer.after } : undefined;
 		},
 		/**
 		 * Removes the record, and its entry from its subject's bucket as one; a set under the key
@@ -188,65 +118,7 @@ export function subjectRecordsIn<T extends Json>(
 		remove: async (
 			key: string,
 			when?: (value: T) => boolean,
-		): Promise<"removed" | "left" | "missing"> => {
-			let answer: "removed" | "left" | "missing" = "removed";
-			await changeRecords({
-				targets: [recordOf(key)],
-				watch: ([held]) => {
-					const { subject } = open(held);
-					return subject !== undefined && byKeys ? [bucketOf(subject, key)] : [];
-				},
-				decide: ([held], [bucket]) => {
-					const found = open(held);
-					if (held === undefined) answer = "missing";
-					else if (when !== undefined && !when(found.value as T)) answer = "left";
-					else answer = "removed";
-					if (answer !== "removed") return {};
-					if (found.subject === undefined || !byKeys) return { targets: [{ remove: true }] };
-					return {
-						targets: [{ remove: true }],
-						watched: [listedWithout(bucket, place.space.name, isRecord(key))],
-					};
-				},
-			});
-			return answer;
-		},
-		/**
-		 * Moves the record from one subject to another as one (account erasure §3.5): its envelope's
-		 * subject rewritten, its entry out of `from`'s bucket and into `to`'s, held by both subjects'
-		 * tombstones absent; a set under the key stays its own subject's. `missing` where there is no
-		 * record, `not-from` where its subject is another, `erased` where either tombstone stopped it.
-		 * Only an indexed `online-indexed` space.
-		 */
-		move: async (
-			key: string,
-			from: string,
-			to: string,
-		): Promise<"moved" | "missing" | "not-from" | "erased"> => {
-			if (!byKeys)
-				throw new Error("subject-records: a record moves in an indexed online-indexed space");
-			let answer: "moved" | "missing" | "not-from" | "erased" = "moved";
-			await changeRecords({
-				targets: [recordOf(key), bucketOf(from, key), bucketOf(to, key)],
-				watch: () => [tombOf(from), tombOf(to)],
-				decide: ([held, fromBucket, toBucket], [fromTomb, toTomb]) => {
-					const found = open(held);
-					if (held === undefined) answer = "missing";
-					else if (found.subject !== from) answer = "not-from";
-					else if (fromTomb !== undefined || toTomb !== undefined) answer = "erased";
-					else answer = "moved";
-					if (answer !== "moved") return {};
-					return {
-						targets: [
-							{ value: kept(found.value as Json, to) },
-							listedWithout(fromBucket, place.space.name, isRecord(key)),
-							listedWith(toBucket, place.space.name, { key, name: "record" }),
-						],
-					};
-				},
-			});
-			return answer;
-		},
+		): Promise<"removed" | "left" | "missing"> => ruled(key, rules.remove(key, when)),
 		/** A page of the keys of the space's living records, as `store` walks: names, where keyed by secrets. */
 		scan: async (
 			cursor?: string,
