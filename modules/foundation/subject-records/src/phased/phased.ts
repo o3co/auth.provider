@@ -179,5 +179,5 @@ export const phasedJointRecordsIn = <P extends string>(
 		},
 		refuse,
 		Object.values(places) as Omit<SubjectPlace, "phase">[],
-		{ changeSubjectRecords: true },
+		{ changeSubjectRecords: true } satisfies Record<keyof ReturnType<typeof jointRecordsIn>, true>,
 	);
