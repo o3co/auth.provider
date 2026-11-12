@@ -133,69 +133,42 @@ export function factorRecords(store: FactorStore) {
 		): Promise<T | "duplicate"> => {
 			const mine: Claim = { listKey: keyOf(subject), factor: claimed.factor };
 			let last: Decision<T> | "duplicate" | undefined;
-			const { updateAsOne, updateTogether } = store;
-			if (updateAsOne) {
-				const at = (key: string) => ({ place: "factors" as const, key });
-				/** My list as decided: changed where held, else created for me. */
-				const listed = (list: FactorRead, value: StoredFactors): FactorOp =>
-					list === undefined
-						? { kind: "create", value, lifetimeMs: "endless", subject }
-						: { kind: "change", value };
-				const answer = await updateAsOne.call(store, {
-					targets: [at(keyOf(subject)), at(claimKey(claimed.kind, claimed.value))],
-					// The claim's own list tells whether it still holds the value: watched, never changed.
-					watch: ([, claim]) => {
-						const held = claimOf(claim?.value);
-						return held ? [at(held.listKey)] : [];
-					},
-					decide: ([list, claim], [holder]) => {
-						const decision = judge(factorsOf(list?.value), fencesOf(list?.value));
-						last = decision;
-						if (!decision.next) return {};
-						const held = claimOf(claim?.value);
-						if (held && factorsOf(holder?.value).some((f) => f.id === held.factor)) {
-							last = "duplicate";
-							return {};
-						}
-						const fences = fencesOf(list?.value) + (decision.fence ? 1 : 0);
-						const value = asClaim(mine);
-						// A claim held for another subject, its factor gone, moves to mine.
-						const claimOp: FactorOp =
-							claim === undefined
-								? { kind: "create", value, lifetimeMs: "endless", subject }
-								: { kind: "move", value, to: subject };
-						return {
-							targets: [listed(list, storedList(subject, decision.next, fences)), claimOp],
-						};
-					},
-				});
-				// Refused (my subject erased): read before any verdict, never tried again.
-				if (answer.kind === "refused") throw new Unavailable("mfa");
-				return last === "duplicate" ? "duplicate" : (last as Decision<T>).verdict;
-			}
-			if (!updateTogether) throw new Unavailable("mfa");
-			await updateTogether.call(store, keyOf(subject), claimKey(claimed.kind, claimed.value), {
-				// The claim's own list tells whether it still holds the value.
-				watch: (_list, claim) => {
-					const held = claimOf(claim);
-					return held ? [held.listKey] : [];
+			const at = (key: string) => ({ place: "factors" as const, key });
+			/** My list as decided: changed where held, else created for me. */
+			const listed = (list: FactorRead, value: StoredFactors): FactorOp =>
+				list === undefined
+					? { kind: "create", value, lifetimeMs: "endless", subject }
+					: { kind: "change", value };
+			const answer = await store.updateAsOne({
+				targets: [at(keyOf(subject)), at(claimKey(claimed.kind, claimed.value))],
+				// The claim's own list tells whether it still holds the value: watched, never changed.
+				watch: ([, claim]) => {
+					const held = claimOf(claim?.value);
+					return held ? [at(held.listKey)] : [];
 				},
-				change: (list, claim, [holder]) => {
-					const decision = judge(factorsOf(list), fencesOf(list));
+				decide: ([list, claim], [holder]) => {
+					const decision = judge(factorsOf(list?.value), fencesOf(list?.value));
 					last = decision;
 					if (!decision.next) return {};
-					const held = claimOf(claim);
-					if (held && factorsOf(holder).some((f) => f.id === held.factor)) {
+					const held = claimOf(claim?.value);
+					if (held && factorsOf(holder?.value).some((f) => f.id === held.factor)) {
 						last = "duplicate";
 						return {};
 					}
-					const fences = fencesOf(list) + (decision.fence ? 1 : 0);
+					const fences = fencesOf(list?.value) + (decision.fence ? 1 : 0);
+					const value = asClaim(mine);
+					// A claim held for another subject, its factor gone, moves to mine.
+					const claimOp: FactorOp =
+						claim === undefined
+							? { kind: "create", value, lifetimeMs: "endless", subject }
+							: { kind: "move", value, to: subject };
 					return {
-						list: { value: storedList(subject, decision.next, fences) },
-						claim: { value: asClaim(mine) },
+						targets: [listed(list, storedList(subject, decision.next, fences)), claimOp],
 					};
 				},
 			});
+			// Refused (my subject erased): read before any verdict, never tried again.
+			if (answer.kind === "refused") throw new Unavailable("mfa");
 			return last === "duplicate" ? "duplicate" : (last as Decision<T>).verdict;
 		},
 	};

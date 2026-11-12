@@ -72,37 +72,6 @@ export interface FactorStore {
 		change: (record: StoredFactors) => ChangedFactors | undefined,
 	): Promise<{ readonly before: StoredFactors; readonly after: StoredFactors } | undefined>;
 	/**
-	 * Changes a subject's list and a claim as one, from what both hold and what `watch` names
-	 * besides (keys of this store); `change` runs again on a race, so it is pure, and a part it
-	 * leaves out is kept. Every record read is held to what was read. Exactly one of this and
-	 * `updateAsOne` is offered.
-	 * @deprecated `updateAsOne`; removed in this release, once every Store offers it.
-	 */
-	updateTogether?(
-		listKey: string,
-		claimKey: string,
-		p: {
-			readonly watch: (
-				list: StoredFactors | undefined,
-				claim: StoredFactors | undefined,
-			) => readonly string[];
-			readonly change: (
-				list: StoredFactors | undefined,
-				claim: StoredFactors | undefined,
-				watched: readonly (StoredFactors | undefined)[],
-			) => { readonly list?: ChangedFactors; readonly claim?: ChangedFactors };
-		},
-	): Promise<{
-		readonly list: {
-			readonly before: StoredFactors | undefined;
-			readonly after: StoredFactors | undefined;
-		};
-		readonly claim: {
-			readonly before: StoredFactors | undefined;
-			readonly after: StoredFactors | undefined;
-		};
-	}>;
-	/**
 	 * Changes records of this store as one: those `targets` names, and those `watch` names from what
 	 * they hold, each by the op `decide` gives it, written as one, or refused at one record, nothing
 	 * written; `decide` runs again on a race, so it is pure. Its words are subject-records' joint
@@ -110,7 +79,7 @@ export interface FactorStore {
 	 * `refused` with `exists`, `erased` or `missing`. Where the Store fences saves past a subject's
 	 * erasure, a move from a subject whose tombstone alone stands is Unavailable.
 	 */
-	updateAsOne?(p: {
+	updateAsOne(p: {
 		readonly targets: readonly FactorKey[];
 		readonly watch?: (read: readonly FactorRead[]) => readonly FactorKey[];
 		readonly decide: (

@@ -22,7 +22,7 @@ export interface FactorPlace {
 	readonly loseNextAnswer?: () => void;
 	/** Where the place replicates: a replica takes over, keeping only what was confirmed. */
 	readonly failover?: () => Promise<void>;
-	/** Where another writer can come between: before the next list and claim changed together are written, it changes the record at `key` as given. */
+	/** Where another writer can come between: before the next change as one is written, it changes the record at `key` as given. */
 	readonly raceNextTogether?: (
 		key: string,
 		change: (record: StoredFactors) => StoredFactors,
@@ -68,74 +68,45 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 			expect((await place.factors.update(key, plus(1)))?.after).toEqual(asStored({ n: 21 }));
 		});
 
-		it("changes a list and a claim as one, giving the change the records it watched", async () => {
-			const { factors } = await open();
-			const { updateTogether } = factors;
-			if (!updateTogether) return;
-			const together = updateTogether.bind(factors);
-			const [list, claimKey, owner] = [fresh(), fresh(), fresh()];
-			await factors.save(owner, asStored({ n: 7 }), "endless", "alice");
-			const seen: unknown[] = [];
-			const first = await together(list, claimKey, {
-				watch: () => [owner],
-				change: (current, claim, watched) => {
-					seen.push([current, claim, watched]);
-					return { list: { value: asStored({ n: 1 }) }, claim: { value: asStored({ n: 2 }) } };
-				},
-			});
-			expect(seen).toEqual([[undefined, undefined, [asStored({ n: 7 })]]]);
-			expect(first).toEqual({
-				list: { before: undefined, after: asStored({ n: 1 }) },
-				claim: { before: undefined, after: asStored({ n: 2 }) },
-			});
-			expect([await factors.read(list), await factors.read(claimKey)]).toEqual([
-				asStored({ n: 1 }),
-				asStored({ n: 2 }),
-			]);
-			const kept = await together(list, claimKey, {
-				watch: () => [],
-				change: () => ({ list: plus(1)(asStored({ n: 1 })) }),
-			});
-			expect(kept).toEqual({
-				list: { before: asStored({ n: 1 }), after: asStored({ n: 2 }) },
-				claim: { before: asStored({ n: 2 }), after: asStored({ n: 2 }) },
-			});
-			expect(await factors.read(claimKey)).toEqual(asStored({ n: 2 }));
-		});
-
-		it("changes a list and a claim again where another writer changes what it watched, or the claim's owner, first", async (ctx) => {
+		it("changes records as one again where another writer changes what it watched, or the claim's owner, first", async (ctx) => {
 			const { factors, raceNextTogether: race } = await open();
-			const { updateTogether } = factors;
-			if (!race || !updateTogether) {
+			if (!race) {
 				ctx.skip();
 				return;
 			}
-			const together = updateTogether.bind(factors);
+			const as = (key: string) => ({ place: "factors" as const, key });
 			const [list, claimKey, ann, bob] = [fresh(), fresh(), fresh(), fresh()];
 			await factors.save(ann, asStored({ n: 1 }), "endless", "alice");
 			await factors.save(bob, asStored({ n: 2 }), "endless", "alice");
 			await factors.save(claimKey, asStored({ owner: ann }), "endless", "alice");
-			const ownerOf = (claim: StoredFactors | undefined) =>
-				(claim as unknown as { owner?: string } | undefined)?.owner;
+			const ownerOf = (claim: FactorRead) =>
+				(claim?.value as unknown as { owner?: string } | undefined)?.owner;
 			const watchedKeys: string[][] = [];
 			const seen: unknown[] = [];
 			// The list follows the claim's owner, unless the owner's list holds 2: then nothing is written.
 			const run = () =>
-				together(list, claimKey, {
-					watch: (_list, claim) => {
+				factors.updateAsOne({
+					targets: [as(list), as(claimKey)],
+					watch: ([, claim]) => {
 						const owner = ownerOf(claim);
 						const keys = owner ? [owner] : [];
 						watchedKeys.push(keys);
-						return keys;
+						return keys.map(as);
 					},
-					change: (_list, _claim, [owner]) => {
-						seen.push(owner);
-						const held = owner ? counted(owner) : 0;
-						return held === 2 ? {} : { list: { value: asStored({ n: 100 + held }) } };
+					decide: ([held], [owner]) => {
+						seen.push(owner?.value);
+						const n = owner ? counted(owner.value) : 0;
+						if (n === 2) return {};
+						const value = asStored({ n: 100 + n });
+						const op: FactorOp =
+							held === undefined
+								? { kind: "create", value, lifetimeMs: "endless", subject: "alice" }
+								: { kind: "change", value };
+						return { targets: [op] };
 					},
 				});
 			race(ann, () => asStored({ n: 10 }));
-			expect((await run()).list.after).toEqual(asStored({ n: 110 }));
+			expect(await run()).toMatchObject({ targets: [{ after: { value: asStored({ n: 110 }) } }] });
 			expect(seen).toEqual([asStored({ n: 1 }), asStored({ n: 10 })]);
 			watchedKeys.length = 0;
 			seen.length = 0;
@@ -143,14 +114,13 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 			const kept = await run();
 			expect(watchedKeys).toEqual([[ann], [bob]]);
 			expect(seen).toEqual([asStored({ n: 10 }), asStored({ n: 2 })]);
-			expect(kept.list).toEqual({ before: asStored({ n: 110 }), after: asStored({ n: 110 }) });
+			expect(kept).toMatchObject({ targets: [{ before: { value: asStored({ n: 110 }) } }] });
 			expect(await factors.read(claimKey)).toEqual(asStored({ owner: bob }));
 		});
 
 		it("changes records as one by the ops decided, writing nothing where one is refused", async () => {
 			const { factors } = await open();
-			const { updateAsOne } = factors;
-			if (!updateAsOne) return;
+			const updateAsOne = factors.updateAsOne;
 			const as = (key: string) => ({ place: "factors" as const, key });
 			const [list, claim, other] = [fresh(), fresh(), fresh()];
 			const create = (n: number): FactorOp => ({
@@ -263,36 +233,8 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 	});
 }
 
-/** A list or a claim as `updatingTogether` writes it: kept without end. */
+/** A list or a claim as `updatingAsOne` writes it: kept without end. */
 type KeptFactors = { readonly value: StoredFactors; readonly lifetimeMs: "endless" };
-
-/** What `updatingTogether` needs of a records stand-in: two records of it changed as one. */
-export interface ChangingTogether {
-	changeTogether(
-		firstKey: string,
-		secondKey: string,
-		p: {
-			readonly watch?: (
-				first: StoredFactors | undefined,
-				second: StoredFactors | undefined,
-			) => readonly string[];
-			readonly decide: (
-				first: StoredFactors | undefined,
-				second: StoredFactors | undefined,
-				watched: readonly (StoredFactors | undefined)[],
-			) => { readonly first?: KeptFactors | undefined; readonly second?: KeptFactors | undefined };
-		},
-	): Promise<{
-		readonly first: {
-			readonly before: StoredFactors | undefined;
-			readonly after: StoredFactors | undefined;
-		};
-		readonly second: {
-			readonly before: StoredFactors | undefined;
-			readonly after: StoredFactors | undefined;
-		};
-	}>;
-}
 
 /** What `updatingAsOne` needs of a records stand-in: records of it changed as one. */
 export interface ChangingRecords {
@@ -325,7 +267,7 @@ export interface ChangingRecords {
  * subject read or kept, no tombstone; each op refused as subject-records' would refuse it raw
  * (`create` where held, `exists`; `change` or `move` where gone, `missing`), nothing written.
  */
-export function updatingAsOne(records: ChangingRecords): NonNullable<FactorStore["updateAsOne"]> {
+export function updatingAsOne(records: ChangingRecords): FactorStore["updateAsOne"] {
 	const raw = (held: StoredFactors | undefined): FactorRead =>
 		held === undefined ? undefined : { value: held };
 	return async (p) => {
@@ -374,23 +316,5 @@ export function updatingAsOne(records: ChangingRecords): NonNullable<FactorStore
 			targets: changed.targets.map(shown),
 			watched: changed.watched.map(shown),
 		};
-	};
-}
-
-/** A place's `updateTogether` over a records stand-in, the list and the claim it writes kept without end. */
-export function updatingTogether(
-	records: ChangingTogether,
-): NonNullable<FactorStore["updateTogether"]> {
-	const endless = (next: { readonly value: StoredFactors } | undefined) =>
-		next && { value: next.value, lifetimeMs: "endless" as const };
-	return async (listKey, claimKey, p) => {
-		const changed = await records.changeTogether(listKey, claimKey, {
-			watch: p.watch,
-			decide: (list, claim, watched) => {
-				const next = p.change(list, claim, watched);
-				return { first: endless(next.list), second: endless(next.claim) };
-			},
-		});
-		return { list: changed.first, claim: changed.second };
 	};
 }

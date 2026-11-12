@@ -75,14 +75,11 @@ it("reads a refusal before any verdict, unavailable and never tried again, and r
 	expect(updates).toBe(1);
 });
 
-it("states the factor store's ports once: exactly one way to write a list and a claim as one, erase and migrate both or neither", () => {
+it("states the factor store's ports once: updateAsOne offered, erase and migrate both or neither", () => {
 	const { store } = asOne();
-	const { updateAsOne, ...plain } = store;
-	const together = { ...plain, updateTogether: async () => ({}) } as unknown as FactorStore;
+	const { updateAsOne: _, ...plain } = store;
 	expect(portsRefused(store)).toBeUndefined();
-	expect(portsRefused(together)).toBeUndefined();
-	expect(portsRefused(plain)).toMatch(/exactly one/);
-	expect(portsRefused({ ...together, updateAsOne } as FactorStore)).toMatch(/exactly one/);
+	expect(portsRefused(plain as FactorStore)).toMatch(/no updateAsOne/);
 	const erase = async () => ({}) as never;
 	expect(portsRefused({ ...store, erase })).toMatch(/erase and migrate/);
 	expect(storedList("x", [])).toEqual({ subject: "x", factors: [] });

@@ -18,7 +18,7 @@
 - Contributions: `login-gates` amr (each kind taken's, and `mfa` if one adds it); `seal`'s `resealers`, a resealer sealing again what a `previous` key sealed.
 - Section: `mode` (`optional`, which every start warns of as `mfa.not_required`, or `required` by default), `max-factors` (default 10).
 - Store interface `factorStore`: factor lists and claims on unique values, by keys mfa makes, contents opaque; save once for a subject, read, change from what it holds, kept without end; a list and a claim changed as one, a binding writing its factor and the claim on its unique value at once; its ports' one statement, refused at build: `records`' card. Needs: never evicted, survives a crash and a failover, reads only what is confirmed.
-- `./testing`: the store's contract test, a config builder, and `updatingAsOne` and `updatingTogether` (deprecated), a place's `updateAsOne` and `updateTogether` over records' stand-in.
+- `./testing`: the store's contract test, a config builder, and `updatingAsOne`, a place's `updateAsOne` over records' stand-in.
 
 ## Invariants
 - "required" refuses to boot unless a composed kind counts.

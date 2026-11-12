@@ -1175,7 +1175,7 @@ it("refuses to start without a module holding sessions to the factors, whatever 
 
 it("refuses to start over a factor store that cannot write a list and a claim as one", async () => {
 	const { factors } = memoryFactors();
-	const { updateTogether: _, ...lacking } = factors;
+	const { updateAsOne: _, ...lacking } = factors;
 	const store = defineModule({ name: "factor-store", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(factorStore).by(() => lacking as FactorStore),
 	]);
@@ -1184,8 +1184,7 @@ it("refuses to start over a factor store that cannot write a list and a claim as
 	expect((refused as BootRefused).refusals).toEqual([
 		{
 			where: "mfa",
-			reason:
-				"its factor store offers updateTogether or updateAsOne: exactly one, to write a list and a claim as one",
+			reason: "its factor store offers no updateAsOne, to write a list and a claim as one",
 		},
 	]);
 });
