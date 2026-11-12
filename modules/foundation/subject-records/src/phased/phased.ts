@@ -160,7 +160,7 @@ export const phasedKeyedSetsIn = (
  * read with its `phasedRecordsIn`: the joint change and the builders see one phase. It has no
  * `erase` or `migrate`: those are each place's builder's.
  */
-export const phasedJointRecordsIn = <P extends string>(
+export const phasedJointRecordsIn = <P extends string, T extends Json = Json>(
 	places: Readonly<Record<P, Omit<SubjectPlace, "phase">>>,
 	phase: PhaseOnce,
 	where: string,
@@ -175,7 +175,7 @@ export const phasedJointRecordsIn = <P extends string>(
 					{ ...place, phase: read },
 				]),
 			) as Record<P, SubjectPlace>;
-			return jointRecordsIn(at, where, told);
+			return jointRecordsIn<P, T>(at, where, told);
 		},
 		refuse,
 		Object.values(places) as Omit<SubjectPlace, "phase">[],

@@ -356,3 +356,24 @@ it("leaves no record of a subject when a move to its own subject is erased after
 	expect(await erase(claims, "alice")).toMatchObject({ kind: "erased", removed: 1 });
 	expect(await held(claims, "self")).toBeUndefined();
 });
+
+it("reads and writes an owner's own value type, so a wiring passes the change on with no cast", async () => {
+	type Counted = { readonly n: number };
+	const p = await placed([lists, claims]);
+	const { changeSubjectRecords } = jointRecordsIn<"lists", Counted>(
+		{ lists: p.at(lists) },
+		"w",
+		refuse,
+	);
+	await changeSubjectRecords({
+		targets: [{ place: "lists", key: "t" }],
+		decide: () => ({
+			targets: [{ kind: "create", value: { n: 1 }, lifetimeMs: "endless", subject: "alice" }],
+		}),
+	});
+	const answer = await changeSubjectRecords({
+		targets: [{ place: "lists", key: "t" }],
+		decide: ([read]) => ({ targets: [{ kind: "change", value: { n: (read?.value.n ?? 0) + 1 } }] }),
+	});
+	expect(answer.kind === "written" ? answer.targets[0]?.after?.value.n : undefined).toBe(2);
+});
