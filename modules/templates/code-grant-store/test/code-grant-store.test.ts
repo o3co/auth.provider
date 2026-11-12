@@ -1,9 +1,10 @@
-import { codeStore, voidList } from "@mod/code-grant";
+import { codeStore, type StoredCode, voidList } from "@mod/code-grant";
 import { codeStoreContract } from "@mod/code-grant/testing";
 import { assemble, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { crowdingFor } from "@mod/records/testing";
 import { simulatedStore } from "@mod/store/testing";
+import { expect, it } from "vitest";
 import wiring from "../src/module.ts";
 
 // Smaller than the defaults, so a full shard is reached only if the section is read.
@@ -40,4 +41,18 @@ codeStoreContract("code-grant-store on records, on a simulated replicated store"
 		pressMemory: () => simulated.pressMemory(),
 		holds: (text) => simulated.holds(text),
 	};
+});
+
+it("creates a code by the code, under the name records make of it, once", async () => {
+	const simulated = simulatedStore();
+	const app = await assemble({
+		modules: [simulated.module, wiring],
+		config: kernelConfig(),
+		runtime,
+	});
+	const codes = app.get(codeStore);
+	const record = { n: 1 } as unknown as StoredCode;
+	expect(await codes.create?.("the-code", record, 60_000, "alice")).toBe("created");
+	expect(await codes.create?.("the-code", record, 60_000, "alice")).toBe("exists");
+	expect((await codes.update(codes.nameOf("the-code"), () => undefined))?.after).toEqual(record);
 });
