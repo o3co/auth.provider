@@ -71,10 +71,14 @@ it("keeps a closed session closed through a lost answer and a failover, and fail
 	const { s, simulated, login, handleOf } = await boot();
 	const cookie = await login();
 	const handle = await handleOf(cookie);
-	simulated.beforeNext("replaceIf", "session-store.sessions", async () =>
-		simulated.loseNextReply(),
-	);
+	// A raw record's change is a batch on its own partition.
+	let lost = false;
+	simulated.beforeNext("batch", "session-store.sessions", async () => {
+		lost = true;
+		simulated.loseNextReply();
+	});
 	expect((await s.close(handle)).kind).toBe("closed");
+	expect(lost).toBe(true);
 	await simulated.failover();
 	expect(await s.enter(withCookie(cookie))).toBeUndefined();
 	expect((await s.entryOf(handle)).kind).toBe("absent");
@@ -114,10 +118,13 @@ it("never lets a raise it could not confirm be seen: what an entry reads is what
 	const { s, simulated, login } = await boot();
 	const cookie = await login();
 	// The raise's record write applies on the primary, but its confirmation never comes.
-	simulated.beforeNext("replaceIf", "session-store.sessions", async () =>
-		simulated.stallReplicas(true),
-	);
+	let stalled = false;
+	simulated.beforeNext("batch", "session-store.sessions", async () => {
+		stalled = true;
+		simulated.stallReplicas(true);
+	});
 	const raised = await s.raise(withCookie(cookie), ["otp"]);
+	expect(stalled).toBe(true);
 	expect(raised?.raised).toBe(false);
 	const fresh = withCookie(pair(raised?.cookies[0]));
 	const seen = await s.enter(fresh).catch((error) => error);

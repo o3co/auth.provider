@@ -289,7 +289,7 @@ flowchart LR
 | `@mod/mfa-store` | wiring | `@mod/kernel`, `@mod/mfa`, `@mod/records`, `@mod/store` |
 | `@mod/refresh-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/refresh`, `@mod/store`, `@mod/subject-records` |
 | `@mod/rp-logout-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/rp-logout`, `@mod/store` |
-| `@mod/session-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-lifecycle`, `@mod/store` |
+| `@mod/session-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-lifecycle`, `@mod/store`, `@mod/subject-records` |
 | `@mod/session-tokens-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-tokens`, `@mod/store` |
 | `@mod/subject-revocation-store` | wiring | `@mod/erasure-extensions`, `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-revocation` |
 | `@mod/tokens-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/tokens` |
