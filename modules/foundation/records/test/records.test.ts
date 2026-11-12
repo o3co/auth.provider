@@ -995,28 +995,22 @@ it("refuses to open a space holding a subject's data through any plain door, and
 	expect(() => deferredIn({ ...at(), shards: 1, perShard: 1 })).not.toThrow();
 });
 
-it("reads a stored set strictly, whole with every member's end, or unreadable where any part is malformed", () => {
+it("reads a stored set strictly, with no cap or clock: whole where every part is well formed, unreadable where any is not", () => {
 	const codec = keyedSetsIn.codec({ cap: 2, clock: { now: () => 10_000 } });
-	// Ended members and those awaiting are kept: nothing is dropped, nothing rebuilt.
-	expect(
-		codec.strict({
+	// Ended members and those awaiting are well formed, as is the first format's bare list.
+	for (const value of [
+		{
 			held: [
 				["a", 5_000],
 				["b", 20_000],
 			],
 			awaiting: [["c", 1]],
-		}),
-	).toEqual({
-		kind: "set",
-		held: [
-			["a", 5_000],
-			["b", 20_000],
-		],
-		awaiting: [["c", 1]],
-	});
-	// The first format: a bare list, all held.
-	expect(codec.strict([["a", 5_000]])).toEqual({ kind: "set", held: [["a", 5_000]], awaiting: [] });
-	expect(codec.strict({ held: [] })).toEqual({ kind: "set", held: [], awaiting: [] });
+		},
+		[["a", 5_000]],
+		{ held: [] },
+	]) {
+		expect(keyedSetsIn.strict(value as never), JSON.stringify(value)).toEqual({ kind: "set" });
+	}
 	const malformed = [
 		undefined,
 		null,
@@ -1039,7 +1033,7 @@ it("reads a stored set strictly, whole with every member's end, or unreadable wh
 		[["a", 1], ["b"]],
 	];
 	for (const value of malformed) {
-		expect(codec.strict(value as never).kind, JSON.stringify(value)).toBe("unreadable");
+		expect(keyedSetsIn.strict(value as never).kind, JSON.stringify(value)).toBe("unreadable");
 	}
 	// The lenient reads stay as they were: a malformed entry is left out, not refused.
 	expect(codec.members({ held: [["a", 20_000], ["b"]] } as never)).toEqual([

@@ -181,22 +181,25 @@ keyedSetsIn.codec = (p: { readonly cap: number; readonly clock: Clock }) => {
 		},
 		awaiting: (current: Json | undefined): readonly string[] =>
 			byMember(live(contentOf(current).awaiting, p.clock.now())),
-		/**
-		 * The set as kept, whole: both lists, each member with its end, ended ones included; or why the
-		 * value is not a set this format holds. Nothing is dropped: one malformed part makes it all
-		 * unreadable. For a migration that must not lose a member; the reads above stay lenient.
-		 */
-		strict: (current: Json | undefined): StrictSet => strictSet(current),
+		/** `keyedSetsIn.strict`, until subject-records reads it there; then this goes. */
+		strict: (current: Json | undefined): StrictSet => keyedSetsIn.strict(current),
 	};
 };
 
-/** A set read strictly: its lists whole, or why it cannot be read. */
+/**
+ * Whether a stored value is a set the codec's format holds, read strictly, needing no cap or clock:
+ * every part well formed, each member with its end, ended ones included; or why not. Nothing is
+ * dropped: one malformed part makes it all unreadable. For a migration that must not lose a member;
+ * the codec's reads stay lenient.
+ */
+keyedSetsIn.strict = (current: Json | undefined): StrictSet => {
+	const read = strictSet(current);
+	return typeof read === "string" ? { kind: "unreadable", reason: read } : { kind: "set" };
+};
+
+/** A set read strictly: whole, or why it cannot be read. */
 export type StrictSet =
-	| {
-			readonly kind: "set";
-			readonly held: readonly (readonly [string, number])[];
-			readonly awaiting: readonly (readonly [string, number])[];
-	  }
+	| { readonly kind: "set" }
 	| { readonly kind: "unreadable"; readonly reason: string };
 
 /** One list of a set, strictly: pairs of a member and a finite end, each member once. */
@@ -221,24 +224,23 @@ function strictList(
 	return pairs;
 }
 
-/** A stored set, strictly: the bare list of the first format, or `held` and `awaiting` and nothing else. */
-function strictSet(current: Json | undefined): StrictSet {
-	const unreadable = (reason: string): StrictSet => ({ kind: "unreadable", reason });
-	if (current === undefined || current === null) return unreadable("no set");
+/** A stored set, strictly: the bare list of the first format, or `held` and `awaiting` and nothing else; why not, where not. */
+function strictSet(current: Json | undefined): string | undefined {
+	if (current === undefined || current === null) return "no set";
 	if (Array.isArray(current)) {
 		const held = strictList(current, "the set");
-		return typeof held === "string" ? unreadable(held) : { kind: "set", held, awaiting: [] };
+		return typeof held === "string" ? held : undefined;
 	}
-	if (typeof current !== "object") return unreadable("a value of another shape");
+	if (typeof current !== "object") return "a value of another shape";
 	const kept = current as Readonly<Record<string, Json>>;
 	if (Object.keys(kept).some((name) => name !== "held" && name !== "awaiting")) {
-		return unreadable("a set holding parts of another name");
+		return "a set holding parts of another name";
 	}
-	const held = strictList(kept.held, "held");
-	if (typeof held === "string") return unreadable(held);
-	const awaiting = strictList(kept.awaiting, "awaiting");
-	if (typeof awaiting === "string") return unreadable(awaiting);
-	return { kind: "set", held, awaiting };
+	for (const name of ["held", "awaiting"] as const) {
+		const list = strictList(kept[name], name);
+		if (typeof list === "string") return list;
+	}
+	return undefined;
 }
 
 export type KeyedSets = ReturnType<typeof keyedSetsIn>;
