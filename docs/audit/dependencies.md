@@ -283,7 +283,7 @@ flowchart LR
 | `@mod/dpop-store` | wiring | `@mod/dpop`, `@mod/kernel`, `@mod/records`, `@mod/store` |
 | `@mod/exchange-id-tokens-store` | wiring | `@mod/exchange-id-tokens`, `@mod/kernel`, `@mod/records`, `@mod/store` |
 | `@mod/federation-grants-store` | wiring | `@mod/federation-grants`, `@mod/kernel`, `@mod/records`, `@mod/store` |
-| `@mod/federation-tokens-store` | wiring | `@mod/federation-tokens`, `@mod/kernel`, `@mod/records`, `@mod/store` |
+| `@mod/federation-tokens-store` | wiring | `@mod/federation-tokens`, `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-records` |
 | `@mod/jwt-bearer-store` | wiring | `@mod/jwt-bearer`, `@mod/kernel`, `@mod/records`, `@mod/store` |
 | `@mod/mfa-flows-store` | wiring | `@mod/kernel`, `@mod/mfa-flows`, `@mod/records`, `@mod/store` |
 | `@mod/mfa-store` | wiring | `@mod/kernel`, `@mod/mfa`, `@mod/records`, `@mod/store` |
@@ -336,7 +336,7 @@ flowchart LR
 |---|---|---|
 | `@mod/federation` | adapter | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/login-gates`, `@mod/rate-limit`, `@mod/request-source`, `@mod/upstream-handoff`, `@mod/upstream-round-trip`, `@mod/upstreams`, `@mod/url-setting`, `@mod/users` |
 | `@mod/federation-link` | feature | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/session`, `@mod/upstream-handoff`, `@mod/upstreams`, `@mod/url-setting`, `@mod/users` |
-| `@mod/federation-tokens` | feature | `@mod/audit`, `@mod/clients`, `@mod/http`, `@mod/kernel`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/seal`, `@mod/sender-binding`, `@mod/session`, `@mod/session-participants`, `@mod/session-tokens`, `@mod/tokens`, `@mod/upstreams` |
+| `@mod/federation-tokens` | feature | `@mod/audit`, `@mod/clients`, `@mod/erasure-extensions`, `@mod/http`, `@mod/kernel`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/seal`, `@mod/sender-binding`, `@mod/session`, `@mod/session-participants`, `@mod/session-tokens`, `@mod/subject-revocation`, `@mod/tokens`, `@mod/upstreams` |
 | `@mod/idp-apple` | feature | `@mod/external-jwt`, `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/upstream-client`, `@mod/upstreams`, `@mod/url-setting` |
 | `@mod/idp-github` | feature | `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/upstream-client`, `@mod/upstreams`, `@mod/url-setting` |
 | `@mod/idp-google` | feature | `@mod/external-jwt`, `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/upstream-client`, `@mod/upstreams`, `@mod/url-setting` |

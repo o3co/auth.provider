@@ -2,6 +2,7 @@ import { testRequest } from "@mod/http/testing";
 import { Unavailable } from "@mod/kernel";
 import type { BindingRead } from "@mod/sender-binding";
 import { type Entry, sessions } from "@mod/session";
+import { subjectErasure } from "@mod/subject-revocation";
 import type { UpstreamRefresh } from "@mod/upstreams";
 import { describe, expect, it, vi } from "vitest";
 import { type Flow, federationTokens } from "../src/routes/routes.ts";
@@ -184,6 +185,27 @@ describe("the token route", () => {
 			testRequest({ method: "POST", path: "/oauth/federation/corp/token" }),
 		);
 		expect([got.status, got.headers?.["retry-after"]]).toEqual([429, "7"]);
+	});
+
+	it("answers no token for a subject erased once its session was checked again, as for one that no longer enters, recording no success", async () => {
+		const h = await linked();
+		const kept = h.app.get(sessions);
+		const entryOf = kept.entryOf.bind(kept);
+		let asked = 0;
+		// The caller's check is the first read of the session, the check again before answering the second.
+		vi.spyOn(kept, "entryOf").mockImplementation(async (handle, level) => {
+			const entry = await entryOf(handle, level);
+			if (++asked === 2) await h.app.get(subjectErasure).markErased("alice");
+			return entry;
+		});
+		const got = await h.ask(h.token);
+		expect(asked).toBe(2);
+		expect([got.status, got.json, got.headers["www-authenticate"]]).toEqual([
+			401,
+			{ error: "invalid_token" },
+			'Bearer error="invalid_token"',
+		]);
+		expect(h.events).toEqual([]);
 	});
 
 	it("refuses a token once its session closed, and forgets the session's upstream tokens", async () => {

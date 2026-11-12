@@ -867,6 +867,33 @@ describe("session closing", () => {
 		await expect(s.close(handle)).rejects.toSatisfy(isUnavailable);
 	});
 
+	it("reads the subject of a record kept past the lifetime in force, ending nothing", async () => {
+		const { s, stores, login, handleOf } = await boot({ lifetime: "2m" });
+		const handle = await handleOf(await login());
+		// Kept longer than the lifetime in force, as a record written under a longer one is.
+		await stores.kept.records.change(handle, (r) => ({ value: r, lifetimeMs: 3_600_000 }));
+		now += 120_001;
+		expect(await s.subjectOf?.(handle)).toBe("alice");
+		// Nothing was written: the record is still open, and a close finds it so.
+		expect((await stores.kept.records.read(handle)) as unknown).toMatchObject({ state: "open" });
+		expect((await s.close(handle)).from).toBe("open");
+	});
+
+	it("reads a record's subject without entering it: none for a closed mark or no record, unavailable for one it cannot read", async () => {
+		const { s, stores, login, handleOf } = await boot();
+		const subjectOf = (handle: string) => s.subjectOf?.(handle);
+		const handle = await handleOf(await login());
+		expect(await subjectOf(handle)).toBe("alice");
+		const mark = { format: 1, state: "closed" } as unknown as StoredSession;
+		await stores.kept.records.create("marked", mark, 60_000);
+		expect(await subjectOf("marked")).toBeUndefined();
+		expect(await subjectOf("none")).toBeUndefined();
+		await stores.kept.records.change(handle, (r) => ({
+			value: { ...(r as object), format: 3 } as unknown as StoredSession,
+		}));
+		await expect(subjectOf(handle)).rejects.toSatisfy(isUnavailable);
+	});
+
 	it("puts off a closing whose record it cannot read, as one whose participants fail", async () => {
 		const recorded = recordingLog();
 		const { s, stores, login, app, handleOf } = await boot({ "sweep-interval": "1s" }, [], {
