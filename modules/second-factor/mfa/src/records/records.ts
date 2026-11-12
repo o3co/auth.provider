@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Unavailable } from "@mod/kernel";
-import type { FactorStore, StoredFactors } from "../store.ts";
+import type { FactorOp, FactorRead, FactorStore, StoredFactors } from "../store.ts";
 
 export interface Factor {
 	readonly id: string;
@@ -46,6 +46,43 @@ export const storedList = (subject: string, factors: readonly Factor[], fences =
 export const listKeyOf = (subject: string) => `s-${hashOf(subject)}`;
 export const claimKeyOf = (kind: string, value: string) => `u-${hashOf(`${kind}\n${value}`)}`;
 const claimOf = (record: StoredFactors | undefined) => record as unknown as Claim | undefined;
+
+/** Which record of the store a key names: a subject's list (`s-`), a claim on a unique value (`u-`), or neither. */
+export const recordKindOf = (key: string): "list" | "claim" | undefined =>
+	key.startsWith("s-") ? "list" : key.startsWith("u-") ? "claim" : undefined;
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+	value !== null && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * A list read strictly, for what must not guess: its factors (each with a string id), its subject
+ * where it holds one, its fences; none for any other shape, a missing or malformed factors array
+ * among them. The lenient reads above take what they can for the flows; this one decides erasure.
+ */
+export const strictListOf = (
+	record: unknown,
+):
+	| { readonly subject?: string; readonly factors: readonly { readonly id: string }[] }
+	| undefined => {
+	if (!isObject(record)) return undefined;
+	const { subject, factors, fences, ...rest } = record;
+	if (Object.keys(rest).length > 0 || !Array.isArray(factors)) return undefined;
+	if (!factors.every((f) => isObject(f) && typeof f.id === "string")) return undefined;
+	if (subject !== undefined && typeof subject !== "string") return undefined;
+	if (fences !== undefined && typeof fences !== "number") return undefined;
+	const listed = factors as readonly { readonly id: string }[];
+	return subject === undefined ? { factors: listed } : { subject, factors: listed };
+};
+
+/** A claim read strictly: its list's key and its factor's id, and nothing else; none for any other shape. */
+export const strictClaimOf = (record: unknown): Claim | undefined => {
+	if (!isObject(record)) return undefined;
+	const { listKey, factor, ...rest } = record;
+	if (typeof listKey !== "string" || typeof factor !== "string" || Object.keys(rest).length > 0) {
+		return undefined;
+	}
+	return { listKey, factor };
+};
 const asClaim = (claim: Claim) => claim as unknown as StoredFactors;
 const sameClaim = (a: Claim | undefined, b: Claim) =>
 	a?.listKey === b.listKey && a.factor === b.factor;
@@ -67,12 +104,16 @@ export function factorRecords(store: FactorStore) {
 		};
 		if (await store.update(key, changing)) return;
 		const first = next([], 0);
-		if (
-			!first ||
-			(await store.save(key, storedList(subject, first.factors, first.fences), "endless")) ===
-				"created"
-		)
-			return;
+		if (!first) return;
+		const saved = await store.save(
+			key,
+			storedList(subject, first.factors, first.fences),
+			"endless",
+			subject,
+		);
+		if (saved === "created") return;
+		// Its subject erased: refused, never tried again.
+		if (saved === "erased") throw new Unavailable("mfa");
 		// Another request saved one first, yet it cannot be found.
 		if (!(await store.update(key, changing))) throw new Unavailable("mfa");
 	};
@@ -129,28 +170,42 @@ export function factorRecords(store: FactorStore) {
 		): Promise<T | "duplicate"> => {
 			const mine: Claim = { listKey: keyOf(subject), factor: claimed.factor };
 			let last: Decision<T> | "duplicate" | undefined;
-			await store.updateTogether(keyOf(subject), claimKey(claimed.kind, claimed.value), {
-				// The claim's own list tells whether it still holds the value.
-				watch: (_list, claim) => {
-					const held = claimOf(claim);
-					return held ? [held.listKey] : [];
+			const at = (key: string) => ({ place: "factors" as const, key });
+			/** My list as decided: changed where held, else created for me. */
+			const listed = (list: FactorRead, value: StoredFactors): FactorOp =>
+				list === undefined
+					? { kind: "create", value, lifetimeMs: "endless", subject }
+					: { kind: "change", value };
+			const answer = await store.updateAsOne({
+				targets: [at(keyOf(subject)), at(claimKey(claimed.kind, claimed.value))],
+				// The claim's own list tells whether it still holds the value: watched, never changed.
+				watch: ([, claim]) => {
+					const held = claimOf(claim?.value);
+					return held ? [at(held.listKey)] : [];
 				},
-				change: (list, claim, [holder]) => {
-					const decision = judge(factorsOf(list), fencesOf(list));
+				decide: ([list, claim], [holder]) => {
+					const decision = judge(factorsOf(list?.value), fencesOf(list?.value));
 					last = decision;
 					if (!decision.next) return {};
-					const held = claimOf(claim);
-					if (held && factorsOf(holder).some((f) => f.id === held.factor)) {
+					const held = claimOf(claim?.value);
+					if (held && factorsOf(holder?.value).some((f) => f.id === held.factor)) {
 						last = "duplicate";
 						return {};
 					}
-					const fences = fencesOf(list) + (decision.fence ? 1 : 0);
+					const fences = fencesOf(list?.value) + (decision.fence ? 1 : 0);
+					const value = asClaim(mine);
+					// A claim held for another subject, its factor gone, moves to mine.
+					const claimOp: FactorOp =
+						claim === undefined
+							? { kind: "create", value, lifetimeMs: "endless", subject }
+							: { kind: "move", value, to: subject };
 					return {
-						list: { value: storedList(subject, decision.next, fences) },
-						claim: { value: asClaim(mine) },
+						targets: [listed(list, storedList(subject, decision.next, fences)), claimOp],
 					};
 				},
 			});
+			// Refused (my subject erased): read before any verdict, never tried again.
+			if (answer.kind === "refused") throw new Unavailable("mfa");
 			return last === "duplicate" ? "duplicate" : (last as Decision<T>).verdict;
 		},
 	};

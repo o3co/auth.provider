@@ -18,23 +18,25 @@ export interface JointKey<P extends string> {
 }
 
 /** A record as a joint change reads it: the owner's value, and its envelope's subject; none, raw. */
-export type JointRead = { readonly value: Json; readonly subject?: string } | undefined;
+export type JointRead<T extends Json = Json> =
+	| { readonly value: T; readonly subject?: string }
+	| undefined;
 
 /** What a joint change does to one record. */
-export type JointOp =
+export type JointOp<T extends Json = Json> =
 	/** Places it for `subject`, unless held (`exists`) or the subject's tombstone stands (`erased`). */
 	| {
 			readonly kind: "create";
-			readonly value: Json;
+			readonly value: T;
 			readonly lifetimeMs: number | "endless";
 			readonly subject: string;
 	  }
 	/** Rewrites it, unless gone (`missing`) or its subject's tombstone stands (`erased`). */
-	| { readonly kind: "change"; readonly value: Json; readonly lifetimeMs?: number | "endless" }
+	| { readonly kind: "change"; readonly value: T; readonly lifetimeMs?: number | "endless" }
 	/** Removes it, with its bucket's entry; never refused, a record gone reading undefined before and after. */
 	| { readonly kind: "remove" }
 	/** Gives it to `to` with `value`, from the subject it is read under (see the card's three cases). */
-	| { readonly kind: "move"; readonly value: Json; readonly to: string };
+	| { readonly kind: "move"; readonly value: T; readonly to: string };
 
 /** Where a refusal is: the target or the watched record, by its place (`nth`) in its list. */
 export interface JointAt {
@@ -44,17 +46,17 @@ export interface JointAt {
 }
 
 /** A record of a joint change, opened: what it held, and holds after. */
-export interface JointChanged {
-	readonly before: JointRead;
-	readonly after: JointRead;
+export interface JointChanged<T extends Json = Json> {
+	readonly before: JointRead<T>;
+	readonly after: JointRead<T>;
 }
 
 /** A joint change's answer, whole: written as one, or refused at one record, nothing written. */
-export type JointAnswer =
+export type JointAnswer<T extends Json = Json> =
 	| {
 			readonly kind: "written";
-			readonly targets: readonly JointChanged[];
-			readonly watched: readonly JointChanged[];
+			readonly targets: readonly JointChanged<T>[];
+			readonly watched: readonly JointChanged<T>[];
 	  }
 	| {
 			readonly kind: "refused";
@@ -74,7 +76,7 @@ const idOf = (target: Target) => JSON.stringify(changeRecords.keyOf(target));
  * write. Refuses at build, through `refuse`: a place of another category, a store writing no records
  * of two partitions as one (in either phase), places on two stores or of differing guarantees.
  */
-export function jointRecordsIn<P extends string>(
+export function jointRecordsIn<P extends string, T extends Json = Json>(
 	places: Readonly<Record<P, SubjectPlace>>,
 	where: string,
 	refuse: (where: string, reason: string) => never,
@@ -101,14 +103,14 @@ export function jointRecordsIn<P extends string>(
 		if (!(place in places)) throw new TypeError(`subject-records: no place named ${place}`);
 		return { place: places[place], key };
 	};
-	const opened = (name: P, held: Json | undefined): JointRead => {
+	const opened = (name: P, held: Json | undefined): JointRead<T> => {
 		if (held === undefined) return undefined;
 		const { value, subject } = rules[name].open(held);
-		return subject === undefined ? { value: value as Json } : { value: value as Json, subject };
+		return subject === undefined ? { value: value as T } : { value: value as T, subject };
 	};
 
 	/** The rule an op follows on a record read as `held`: `writes`' own, a move's three cases among them. */
-	const ruleOf = (name: P, key: string, op: JointOp): Ruled => {
+	const ruleOf = (name: P, key: string, op: JointOp<T>): Ruled => {
 		const rule = rules[name];
 		const changed = (value: Json, lifetimeMs?: number | "endless") => {
 			const inner = rule.change<Json>(() =>
@@ -163,16 +165,16 @@ export function jointRecordsIn<P extends string>(
 	 */
 	const changeSubjectRecords = async (p: {
 		readonly targets: readonly JointKey<P>[];
-		readonly watch?: (read: readonly JointRead[]) => readonly JointKey<P>[];
+		readonly watch?: (read: readonly JointRead<T>[]) => readonly JointKey<P>[];
 		readonly decide: (
-			read: readonly JointRead[],
-			watched: readonly JointRead[],
+			read: readonly JointRead<T>[],
+			watched: readonly JointRead<T>[],
 			attempt: Attempt,
 		) => {
-			readonly targets?: readonly (JointOp | undefined)[];
-			readonly watched?: readonly (JointOp | undefined)[];
+			readonly targets?: readonly (JointOp<T> | undefined)[];
+			readonly watched?: readonly (JointOp<T> | undefined)[];
 		};
-	}): Promise<JointAnswer> => {
+	}): Promise<JointAnswer<T>> => {
 		// The index records the ops need: grown until a decide's ops find all they need read.
 		let needed: Target[] = [];
 		for (;;) {
@@ -271,7 +273,7 @@ export function jointRecordsIn<P extends string>(
 			}
 			if (done?.kind === "unavailable") throw new Unavailable("subject-records");
 			if (done?.kind === "refused") return { kind: "refused", at: done.at, why: done.why };
-			const shown = (name: JointKey<P>, changed: ChangedRecord | undefined): JointChanged => ({
+			const shown = (name: JointKey<P>, changed: ChangedRecord | undefined): JointChanged<T> => ({
 				before: opened(name.place, changed?.before),
 				after: opened(name.place, changed?.after),
 			});

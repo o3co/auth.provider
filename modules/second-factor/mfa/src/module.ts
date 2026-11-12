@@ -1,4 +1,5 @@
 import { audit } from "@mod/audit";
+import { erasers } from "@mod/erasure-extensions";
 import { contract, defineModule } from "@mod/kernel";
 import { amrSources } from "@mod/login-gates";
 import { factorBinding } from "@mod/mfa-binding";
@@ -8,7 +9,9 @@ import { factorReading } from "@mod/mfa-reading";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { resealers, seal } from "@mod/seal";
 import { enforcers, factorStore, proofSteps } from "./contract.ts";
+import { factorEraser } from "./erasure/eraser.ts";
 import { addsMfa, byKind, type Decisions, factorDecisions, leftOut } from "./factors.ts";
+import { portsRefused } from "./records/ports.ts";
 import { resealerOver } from "./records/resealer.ts";
 import { section } from "./section.ts";
 
@@ -73,12 +76,8 @@ export default defineModule(
 			}
 			const stored = await c.get(factorStore);
 			// A binding writes its factor and the claim on its value at once: never one without the other.
-			if (typeof stored.updateTogether !== "function") {
-				return c.refuse(
-					"mfa",
-					"its factor store cannot write a list and a claim as one (updateTogether)",
-				);
-			}
+			const parted = portsRefused(stored);
+			if (parted !== undefined) return c.refuse("mfa", parted);
 			return factorDecisions({
 				stored,
 				kinds: byKind(taken),
@@ -97,6 +96,8 @@ export default defineModule(
 		m.provide(factorReading).by((c) => c.get(decisions)),
 		m.provide(factorBinding).by((c) => c.get(decisions)),
 		m.provide(factorManaging).by((c) => c.get(decisions)),
+		// Its build takes only the factor store, collecting no probes: the erasure gate collects erasers.
+		m.contribute(erasers).by(async (c) => factorEraser(await c.get(factorStore))),
 		m
 			.contribute(resealers)
 			.by(async (c) => resealerOver(await c.get(factorStore), await c.get(seal))),

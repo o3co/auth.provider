@@ -1,8 +1,8 @@
 import { isUnavailable } from "@mod/kernel";
 import { expect, it } from "vitest";
-import { type Factor, factorRecords } from "../src/records/records.ts";
-import type { FactorStore, StoredFactors } from "../src/store.ts";
-import { memoryFactors } from "./stores.ts";
+import { memoryFactors } from "../../../test/stores.ts";
+import type { FactorStore, StoredFactors } from "../../store.ts";
+import { type Factor, factorRecords } from "../records.ts";
 
 const factor = (id: string): Factor => ({ id, kind: "code", secret: "", state: null });
 const listOf = (...ids: string[]) => ({ factors: ids.map(factor) }) as unknown as StoredFactors;
@@ -15,9 +15,9 @@ it("changes the list another request saved first, rather than its own first list
 	const { factors } = memoryFactors();
 	const racing: FactorStore = {
 		...factors,
-		save: async (key, record, lifetimeMs) => {
-			await factors.save(key, listOf("theirs"), lifetimeMs);
-			return factors.save(key, record, lifetimeMs);
+		save: async (key, record, lifetimeMs, subject) => {
+			await factors.save(key, listOf("theirs"), lifetimeMs, subject);
+			return factors.save(key, record, lifetimeMs, subject);
 		},
 	};
 	// The run written answers: it saw the list the other request saved.
