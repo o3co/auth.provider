@@ -15,6 +15,7 @@ Internal module of `federation-grants`: what a grant and a browser step are, and
 - `recordsWith` (seal): `grantOf`, `stored`, `stepOf`, `storedStep`, `open`, `seal`.
 - `judgeWith` (revocations, keep, longest life): `revoked`, `intentRevoked`, `endOf`.
 - `listingWith` (listing, log): lists a grant under its subject, logging a failed write, or a listing the Store refused (its subject erased).
+- `grantsEraser` (the three stores, the records' `grantOf`) → the eraser `federation-grants`, contributed to `erasure-extensions`' `erasers`: a subject's grants, pending pairs and listing erased through each store's `erase`, three reports, a window doing so for each subject; `migrate` reading a grant's subject from its record, a pending pair's from its key (`<client>\n<subject>`), anything else `unreadable`, and a listing none, as keyed by its subject; `erasable` only with the six ports.
 - `portsRefused` (the grant, pending and subject stores) → why their ports cannot be used, or none: the six `erase` and `migrate` come together or none, a part refused at build in `sharedOver`; `portsOf` → the set, whole, or none.
 - `credentialsFrom` (tokens, now, longest life, scopes shown, held refresh token, the access token kept) → held, or refused with why and any rotated refresh token. Its end is `upstreams`' `refreshedExpiry`: the access token kept, answered again, keeps the earlier of the two ends, its life counted from now.
 - `connectionsIn` (settings, upstreams): a connection by name, and one with its IdP's delegation.

@@ -34,6 +34,7 @@
   - `sweep-interval` (`1h`): how often each host walks every grant kept, erasing the credentials of one ended or revoked that no request reads
   - `requests` per `window`
   - Times are written with their unit; a bare number is refused.
+- The eraser `federation-grants` (internal module `grant`).
 - Follower of `subject-revocation`: writes at once, for each grant listed under the subject, what the boundary decides at the next read.
 - Store interfaces the assembly wires: grants by id, walked by pages (no eviction, durable, replicated, confirmed reads); steps by secret (no eviction, replicated, names from the secret); pending first-time intents per client and subject, and each subject's grants (keyed sets; the listing also durable and replicated); and the refresh lock store (no eviction), each lock held under its holder's mark and changed only over the mark read, so a holder lets go of its own lock and never another's.
 - Audit events `federation.grant.*`: `requested`, `request.denied`, `authorized`, `reauthorized`, `authorization_failed`, `token.success`, `token.denied`, `revoke.denied`, `revoked`, with `client`, `connection` and an outcome or reason, `unavailable` where the store could not answer.
