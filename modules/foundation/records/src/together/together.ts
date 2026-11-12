@@ -20,7 +20,9 @@ import {
  */
 export type Target =
 	| { readonly place: Place; readonly key: string; readonly set?: true }
-	| { readonly place: Place; readonly secret: string };
+	| { readonly place: Place; readonly secret: string }
+	/** A record under a secret, by the name `nameOf` keeps it by: for an owner that keeps names, not secrets. */
+	| { readonly place: Place; readonly secretName: string };
 
 /** What `changeTogether` does to one record: set it (with a lifetime, or keeping its own), or remove it; none keeps it. */
 export type Next<T> = Changed<T> | { readonly remove: true } | undefined;
@@ -77,7 +79,11 @@ export function changesTogether(target: Store): boolean {
 
 /** A target's partition: its key, or the name its secret is kept by. */
 const partitionOf = (target: Target) =>
-	"secret" in target ? nameOf(target.place.space, target.secret) : target.key;
+	"secret" in target
+		? nameOf(target.place.space, target.secret)
+		: "secretName" in target
+			? target.secretName
+			: target.key;
 /** Where a target is kept: a keyed set's record (`set`) as keyed sets keep it, any other as records do. */
 const recordKey = (target: Target) => ({
 	space: target.place.space,
@@ -89,7 +95,8 @@ const sameTarget = (a: Target, b: Target) =>
 	partitionOf(a) === partitionOf(b) &&
 	recordKey(a).name === recordKey(b).name;
 /** The kind of records a target holds its space to: under a secret, or plain, keyed sets among them. */
-const kindOf = (target: Target) => ("secret" in target ? "secret records" : "records");
+const kindOf = (target: Target) =>
+	"secret" in target || "secretName" in target ? "secret records" : "records";
 
 /** What one record held before a change of records as one, and holds after. */
 export interface ChangedRecord<T = Json> {

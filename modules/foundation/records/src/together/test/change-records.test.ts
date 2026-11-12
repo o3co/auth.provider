@@ -452,6 +452,13 @@ it("reads and writes a record under a secret with a plain one as one, and refuse
 		{ before: 1, after: 2 },
 	]);
 	expect(await secretRecords.read("s3cret")).toBe(2);
+	// By the name it is kept by, the same record, the space still named by secret.
+	const named = await changeRecords({
+		targets: [{ place: kept, secretName: secretRecords.nameOf("s3cret") }],
+		decide: ([held]) => ({ targets: [{ value: (held as number) + 1 }] }),
+	});
+	expect(named.targets).toEqual([{ before: 2, after: 3 }]);
+	expect(await secretRecords.read("s3cret")).toBe(3);
 	await expect(
 		changeRecords({
 			targets: [
