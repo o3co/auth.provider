@@ -10,6 +10,7 @@ import {
 import {
 	type ErasedSubjects,
 	erasedSubjects,
+	erasureFence,
 	type Revocations,
 	revocationFollowers,
 	revocations,
@@ -232,6 +233,18 @@ export const subjectRevocationStandIn = defineModule(
 		m.provide(erasedSubjects).by(async (c) => {
 			const boundaries = await c.get(standInBoundaries);
 			return { erased: erasedInto(() => boundaries) };
+		}),
+		// The fence: passes unless the subject is marked; a receipt id is new to each fence, as there.
+		m.provide(erasureFence).by(async (c) => {
+			const erased = erasedInto(await c.get(standInBoundaries).then((b) => () => b));
+			const receipts = new Set<string>();
+			return {
+				fence: async (subject, receiptId) => {
+					if (receipts.has(receiptId)) throw new TypeError(`a receipt ${receiptId} fenced twice`);
+					receipts.add(receiptId);
+					return (await erased(subject)) ? "erased" : "passed";
+				},
+			};
 		}),
 	],
 );
