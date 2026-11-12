@@ -44,6 +44,9 @@ export function subjectRecordsIn<T extends Json>(
 	const { tombOf, bucketOf, witnessOf } = indexOver(place, place.space, place.index);
 	const recordOf = (key: string): Target =>
 		options.secret ? { place, secret: key } : { place, key };
+	/** A record by the name it is kept by: under a secret, the name `nameOf` gives; elsewhere its key. */
+	const namedOf = (name: string): Target =>
+		options.secret ? { place, secretName: name } : { place, key: name };
 	const open = (held: Json | undefined) => opened(held, enveloped);
 	const isRecord = (key: string) => (e: { key: string; name: string }) =>
 		e.key === key && e.name === "record";
@@ -56,6 +59,51 @@ export function subjectRecordsIn<T extends Json>(
 			);
 		}
 		return lifetimeMs;
+	};
+	const readAt = async (target: Target): Promise<T | undefined> => {
+		const { entry } = await place.store.get(changeRecords.keyOf(target));
+		return open(entry?.value).value as T | undefined;
+	};
+	/**
+	 * Changes the record from what it holds, as records do, leaving its index as it is: its
+	 * subject's tombstone absent, where its envelope names one, and nothing where it stopped it.
+	 * A bounded record keeps its fixed end, whatever lifetime is given; its subject is not kept, so
+	 * no tombstone holds its change. A record kept raw, from before records were indexed, is
+	 * changed raw: records turn indexed only under the maintenance key, and the one migration
+	 * indexes or removes every raw record before a tombstone can be written (account erasure
+	 * §3.3, §5.1).
+	 */
+	const changeAt = async (
+		target: Target,
+		change: (current: T, attempt: Attempt) => Changed<T> | undefined,
+	): Promise<{ readonly before: T; readonly after: T } | undefined> => {
+		let answer: { readonly before: T; readonly after: T } | undefined;
+		await changeRecords({
+			targets: [target],
+			watch: ([held]) => {
+				const { subject } = open(held);
+				if (subject === undefined) return [];
+				return witnessing ? [tombOf(subject), witnessOf(subject, "record")] : [tombOf(subject)];
+			},
+			decide: ([held], [tomb, witness], attempt) => {
+				const found = open(held);
+				if (held === undefined || tomb !== undefined) {
+					answer = undefined;
+					return {};
+				}
+				const before = found.value as T;
+				const changed = change(before, attempt);
+				answer = { before, after: changed ? changed.value : before };
+				if (!changed) return {};
+				const value = kept(ownersValue(changed.value), found.subject);
+				const keepsEnd = bounded || changed.lifetimeMs === undefined;
+				const targets = [keepsEnd ? { value } : { value, lifetimeMs: changed.lifetimeMs }];
+				// An envelope rewritten keyed by its subject has its witness, written where it is missing.
+				if (!witnessing || found.subject === undefined) return { targets };
+				return { targets, watched: [undefined, witness === undefined ? witnessed : undefined] };
+			},
+		});
+		return answer;
 	};
 	return {
 		/**
@@ -134,51 +182,22 @@ export function subjectRecordsIn<T extends Json>(
 			});
 			return answer;
 		},
-		read: async (key: string): Promise<T | undefined> => {
-			const { entry } = await place.store.get(changeRecords.keyOf(recordOf(key)));
-			return open(entry?.value).value as T | undefined;
-		},
-		/**
-		 * Changes the record from what it holds, as records do, leaving its index as it is: its
-		 * subject's tombstone absent, where its envelope names one, and nothing where it stopped it.
-		 * A bounded record keeps its fixed end, whatever lifetime is given; its subject is not kept, so
-		 * no tombstone holds its change. A record kept raw, from before records were indexed, is
-		 * changed raw: records turn indexed only under the maintenance key, and the one migration
-		 * indexes or removes every raw record before a tombstone can be written (account erasure
-		 * §3.3, §5.1).
-		 */
-		change: async (
+		read: (key: string): Promise<T | undefined> => readAt(recordOf(key)),
+		change: (
 			key: string,
 			change: (current: T, attempt: Attempt) => Changed<T> | undefined,
-		): Promise<{ readonly before: T; readonly after: T } | undefined> => {
-			let answer: { readonly before: T; readonly after: T } | undefined;
-			await changeRecords({
-				targets: [recordOf(key)],
-				watch: ([held]) => {
-					const { subject } = open(held);
-					if (subject === undefined) return [];
-					return witnessing ? [tombOf(subject), witnessOf(subject, "record")] : [tombOf(subject)];
-				},
-				decide: ([held], [tomb, witness], attempt) => {
-					const found = open(held);
-					if (held === undefined || tomb !== undefined) {
-						answer = undefined;
-						return {};
-					}
-					const before = found.value as T;
-					const changed = change(before, attempt);
-					answer = { before, after: changed ? changed.value : before };
-					if (!changed) return {};
-					const value = kept(ownersValue(changed.value), found.subject);
-					const keepsEnd = bounded || changed.lifetimeMs === undefined;
-					const targets = [keepsEnd ? { value } : { value, lifetimeMs: changed.lifetimeMs }];
-					// An envelope rewritten keyed by its subject has its witness, written where it is missing.
-					if (!witnessing || found.subject === undefined) return { targets };
-					return { targets, watched: [undefined, witness === undefined ? witnessed : undefined] };
-				},
-			});
-			return answer;
-		},
+		): Promise<{ readonly before: T; readonly after: T } | undefined> =>
+			changeAt(recordOf(key), change),
+		/**
+		 * `change` by the record's name, which `nameOf` gives a space keyed by secrets: the same record
+		 * and write, its end and fence alike, for an owner that keeps names, never secrets (code-grant).
+		 * Elsewhere a name is the key itself.
+		 */
+		changeNamed: (
+			name: string,
+			change: (current: T, attempt: Attempt) => Changed<T> | undefined,
+		): Promise<{ readonly before: T; readonly after: T } | undefined> =>
+			changeAt(namedOf(name), change),
 		/**
 		 * Removes the record, and its entry from its subject's bucket as one; a set under the key
 		 * keeps its own. No tombstone stops it. Where `when` is given, only a record whose value, raw

@@ -10,9 +10,10 @@ Internal module of `subject-records`: a subject's records, by the category its s
 
 ## Offers
 - `subjectRecordsIn` (a place, its index space, the phase; where; the builder's `refuse`; `secret` for a bounded space) → `create` (a key, a value or its maker, a lifetime, its subject last: `created`, `exists` or `erased`), `read`, `change`, `remove` (a key, and optionally a check of its value: `removed`, `left` where the check said no, or `missing`), `move`, `scan`; and `unowned` (deprecated, below).
-- `online-indexed`: each record's key in its subject's bucket; `move` gives a record to another subject. `online-keyed`: each record's key its subject itself, one per subject (any other key, TypeError). `bounded`: each written raw, fenced at creation by its subject's tombstone, gone by its end, at most the space's `boundedMs`.
+- `online-indexed`: each record's key in its subject's bucket; `move` gives a record to another subject. `online-keyed`: each record's key its subject itself, one per subject (any other key, TypeError). `bounded`: each written raw, fenced at creation by its subject's tombstone, gone by its end, at most the space's `boundedMs`, keyed by secrets where `secret` is asked (records' `secretRecordsIn` refuses a bounded space; this builder takes it).
 
 ## Invariants
+- `changeNamed` reaches the same record as `change` by the name it is kept by (records' `secretName`) under a secret, elsewhere by its key: the same write, its fixed end and its fence alike, so a bounded record is changed by name through its subject's tombstone, which fences only creation.
 - A create holds the record absent, the subject's tombstone absent and, as read, the bucket (`online-indexed`) or the witness (`online-keyed`), and writes the record with its entry or its witness, as one.
 - A value may be made from the attempt's deadline: owners whose value bounds a time by the write, as subject-revocation's boundaries do, need it.
 - A change holds the record and its subject's tombstone absent, is handed its attempt's deadline, leaves the bucket as it is, and writes the witness of an `online-keyed` envelope where missing. A change of a record whose subject is erased answers as absent, the record held until its eraser removes it; a create there answers `erased`.

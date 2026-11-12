@@ -1,5 +1,6 @@
 import type { Elsewhere, SetReading, SubjectReading, Walk } from "@mod/erasure-extensions";
 import { type Clock, isUnavailable, Unavailable } from "@mod/kernel";
+import { changeRecords } from "@mod/records";
 import type { Json } from "@mod/store";
 import { eraseSubject } from "../erase/erase.ts";
 import type { Phase, SubjectPlace } from "../index/index.ts";
@@ -75,14 +76,14 @@ async function phased<B extends Methods>(
  * `erase` and `migrate` at that phase, as an owner's store ports take them: the wiring never
  * handles the phase.
  */
-export const phasedRecordsIn = <T extends Json>(
+export const phasedRecordsIn = async <T extends Json>(
 	place: Omit<SubjectPlace, "phase">,
 	phase: PhaseOnce,
 	where: string,
 	refuse: Refuse,
 	options: { readonly secret?: true } = {},
-) =>
-	phased(
+) => ({
+	...(await phased(
 		phase,
 		(read, told) => {
 			const at = { ...place, phase: read };
@@ -105,13 +106,22 @@ export const phasedRecordsIn = <T extends Json>(
 			unowned: true,
 			read: true,
 			change: true,
+			changeNamed: true,
 			remove: true,
 			move: true,
 			scan: true,
 			erase: true,
 			migrate: true,
 		} satisfies Record<keyof ReturnType<typeof subjectRecordsIn<T>> | "erase" | "migrate", true>,
-	);
+	)),
+	/**
+	 * The name a record keyed by a secret is kept by: records' own digest, read from the target the
+	 * builder writes, so a record a 0.19 instance wrote under a secret is the one found. Needs no
+	 * phase. Elsewhere a key is its own name.
+	 */
+	nameOf: (secret: string) =>
+		options.secret ? changeRecords.keyOf({ place, secret }).partition : secret,
+});
 
 /** `subjectKeyedSetsIn` over the phase the process reads once (see `phased`). */
 export const phasedKeyedSetsIn = (
