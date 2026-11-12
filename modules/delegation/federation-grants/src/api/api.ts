@@ -1,7 +1,7 @@
 import { type Audit, audit } from "@mod/audit";
 import { type Clients, clients, recordRefusedAuthentication } from "@mod/clients";
 import type { HttpRequest, HttpResponse } from "@mod/http";
-import { type BuildContext, type Clock, isUnavailable, type Random } from "@mod/kernel";
+import { type BuildContext, type Clock, isUnavailable, type Log, type Random } from "@mod/kernel";
 import { attemptLimit, type RateLimit } from "@mod/rate-limit";
 import { type Upstreams, upstreams } from "@mod/upstreams";
 import type { Judge, Listing, Records } from "../grant/grant.ts";
@@ -41,6 +41,7 @@ export interface ApiParts {
 	readonly origin: string;
 	readonly clock: Clock;
 	readonly random: Random;
+	readonly log: Pick<Log, "warn">;
 }
 
 export const base = "/oauth/federation-grants";
@@ -106,5 +107,6 @@ export async function apiOver(c: BuildContext<Settings>) {
 		settings: c.section,
 		clock: c.clock,
 		random: c.random,
+		log: c.log,
 	});
 }

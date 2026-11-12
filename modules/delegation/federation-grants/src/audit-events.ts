@@ -6,8 +6,8 @@ export default auditEvents({
 		when: "a client lodges an intent, for a new grant (`initial`) or a renewal (`reauthorization`)",
 	},
 	"federation.grant.request.denied": {
-		attributes: ["client", "outcome", "source"],
-		when: "a client's intent is refused, with why (`outcome`)",
+		attributes: ["client", "outcome", "source", "withheld"],
+		when: "a client's intent is refused, with why (`outcome`); without the subject, `withheld` `erased`, where the subject named is erased (`subject_unknown`)",
 	},
 	"federation.grant.authorized": {
 		attributes: ["client", "connection", "outcome", "source"],

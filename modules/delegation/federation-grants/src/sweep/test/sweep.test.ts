@@ -68,7 +68,7 @@ async function swept() {
 			obtainedAt: now,
 			scope: ["openid"],
 		});
-		await stores.grants.create(id, records.stored({ ...grant, sealed }), 30 * day);
+		await stores.grants.create(id, records.stored({ ...grant, sealed }), 30 * day, grant.subject);
 	};
 	const read = async (id: string) => records.grantOf(await stores.grants.read(id));
 	return {

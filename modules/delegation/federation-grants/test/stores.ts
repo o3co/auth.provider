@@ -27,8 +27,11 @@ export function memoryStores(now: () => number = () => 0, cap = 16) {
 	const sets = memoryRecords<true>(now, size).keyedSets(cap);
 	const listed = memoryRecords<true>(now, size).keyedSets(100);
 	const down = unavailableSwitch<GrantStore>("records");
+	/** Subjects erased: a grant created for one is answered `erased`, as a Store that erases does. */
+	const erased = new Set<string>();
 	const grantRecords: GrantStore = down.wrap({
-		create: grants.records.create,
+		create: async (id, record, lifetimeMs, subject) =>
+			erased.has(subject) ? "erased" : grants.records.create(id, record, lifetimeMs),
 		read: grants.records.read,
 		change: grants.records.change,
 		// One grant a page, so a walk must go on by its cursor.
@@ -71,6 +74,7 @@ export function memoryStores(now: () => number = () => 0, cap = 16) {
 		subjects,
 		lockStore,
 		down,
+		erased,
 		raceNext: grants.raceNextChange,
 		peek: grants.peek,
 	};

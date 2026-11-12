@@ -1,3 +1,10 @@
+import type {
+	MigrationReport,
+	SetReading,
+	SpaceReport,
+	SubjectReading,
+	Walk,
+} from "@mod/erasure-extensions";
 import { contract } from "@mod/kernel";
 
 declare const storedGrant: unique symbol;
@@ -16,17 +23,43 @@ export interface Rewrite<T> {
 
 /** Grants by id. Every call throws Unavailable when the place cannot tell. */
 export interface GrantStore {
-	/** Keeps a new grant for its lifetime, unless the id holds one. */
-	create(id: string, record: StoredGrant, lifetimeMs: number): Promise<"created" | "exists">;
+	/**
+	 * Keeps a new grant for its lifetime and its subject, unless the id holds one (`exists`) or, where
+	 * the Store fences saves past a subject's erasure, the subject is erased there (`erased`). The
+	 * subject comes last: keep this value, this long, for this subject.
+	 */
+	create(
+		id: string,
+		record: StoredGrant,
+		lifetimeMs: number,
+		subject: string,
+	): Promise<"created" | "exists" | "erased">;
 	read(id: string): Promise<StoredGrant | undefined>;
-	/** Changes the grant from what it holds; `change` reruns on a race, so it is pure. Nothing when gone. */
+	/**
+	 * Changes the grant from what it holds; `change` reruns on a race, so it is pure. Nothing when
+	 * gone, or, where the Store fences a subject's erasure, when its subject is erased.
+	 */
 	change(
 		id: string,
 		change: (record: StoredGrant) => Rewrite<StoredGrant> | undefined,
 	): Promise<{ readonly before: StoredGrant; readonly after: StoredGrant } | undefined>;
 	/** A page of the ids of the grants that live, and the cursor on; none when done. A walk is no one instant. */
 	scan(cursor?: string): Promise<{ readonly keys: readonly string[]; readonly cursor?: string }>;
+	/**
+	 * Erases a subject's grants here, where the Store can: optional in 0.20, required in 0.22, as a
+	 * Store not built through `subject-records` cannot be erased. With every Store's ports, or none.
+	 */
+	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
+	/** Once, under the maintenance key, each grant read by federation-grants' reading; optional as `erase` is. */
+	migrate?(walk: Walk, reading: SubjectReading, signal: AbortSignal): Promise<MigrationReport>;
 }
+
+/**
+ * What a set's add answers: those pushed out; `erased` where the subject's erasure fences it; or
+ * `another-subject` where the set under the key is another subject's, or kept raw where none can
+ * tell whose. Only a Store that fences answers the last two.
+ */
+export type SetAdded = { readonly pushedOut: readonly string[] } | "erased" | "another-subject";
 
 export const grantStore = contract<GrantStore>("federation-grants.grant-store");
 
@@ -60,13 +93,13 @@ export const stepStoreNeeds = {
 
 /** First-time intents waiting for their connection, by client and subject, at most the wiring's cap to a pair. */
 export interface PendingIntents {
-	/** Adds a grant for a lifetime; answers the grants pushed out over the cap as `pushedOut`. */
-	add(
-		pair: string,
-		grant: string,
-		lifetimeMs: number,
-	): Promise<{ readonly pushedOut: readonly string[] }>;
+	/** Adds a grant for a lifetime, for the pair's subject, last; answers those pushed out over the cap. */
+	add(pair: string, grant: string, lifetimeMs: number, subject: string): Promise<SetAdded>;
 	remove(pair: string, grant: string): Promise<void>;
+	/** Erases a subject's pairs here, where the Store can; optional as the grant store's is. */
+	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
+	/** Once, under the maintenance key, each pair read by its key alone; optional as `erase` is. */
+	migrate?(walk: Walk, reading: SetReading, signal: AbortSignal): Promise<MigrationReport>;
 }
 
 export const pendingIntents = contract<PendingIntents>("federation-grants.pending-intents");
@@ -76,13 +109,13 @@ export const pendingIntentsNeeds = { neverEvicted: true } as const;
 
 /** Each subject's grants, listed for their records' lifetime, so a revocation's closing work finds them; a lost one only skips that work. Every call throws Unavailable when the place cannot tell. */
 export interface SubjectGrants {
-	add(
-		subject: string,
-		grant: string,
-		lifetimeMs: number,
-	): Promise<{ readonly pushedOut: readonly string[] }>;
+	add(subject: string, grant: string, lifetimeMs: number): Promise<SetAdded>;
 	members(subject: string): Promise<readonly { readonly member: string }[]>;
 	remove(subject: string, grant: string): Promise<void>;
+	/** Erases a subject's listing here, where the Store can; optional as the grant store's is. */
+	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
+	/** Once, under the maintenance key; a listing keyed by its subject has none to index. */
+	migrate?(walk: Walk, reading: SetReading, signal: AbortSignal): Promise<MigrationReport>;
 }
 
 export const subjectGrants = contract<SubjectGrants>("federation-grants.subject-grants");

@@ -132,6 +132,7 @@ export async function intents(options: { readonly settings?: Record<string, unkn
 			grant.id,
 			records.stored(grant),
 			connectMs + settings.retention * 1000,
+			grant.subject,
 		);
 		const link = `link-${grant.id}`;
 		const step = { format: 1, kind: "link", grant: grant.id, intent: intent.id } as const;

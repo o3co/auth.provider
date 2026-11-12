@@ -88,7 +88,7 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/federation-grants` | feature | `@mod/audit`, `@mod/clients`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/login-gates`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/seal`, `@mod/subject-revocation`, `@mod/upstreams` |
+| `@mod/federation-grants` | feature | `@mod/audit`, `@mod/clients`, `@mod/csrf`, `@mod/erasure-extensions`, `@mod/http`, `@mod/kernel`, `@mod/login-gates`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/seal`, `@mod/subject-revocation`, `@mod/upstreams` |
 | `@mod/federation-grants-connect` | feature | `@mod/federation-grants`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/session`, `@mod/upstream-round-trip`, `@mod/upstreams`, `@mod/url-setting`, `@mod/users` |
 
 ### erasure

@@ -316,7 +316,12 @@ export async function connector(
 			version: `v-${n}`,
 			rotations: { from: now, count: 0 },
 		};
-		await stores.grants.create(grant.id, grant as unknown as StoredGrant, connectMs + retentionMs);
+		await stores.grants.create(
+			grant.id,
+			grant as unknown as StoredGrant,
+			connectMs + retentionMs,
+			grant.subject,
+		);
 		const link = `link-${grant.id}`;
 		const step = { format: 1, kind: "link", grant: grant.id, intent: intent.id };
 		await stores.steps.create(link, step as unknown as StoredStep, connectMs);

@@ -144,11 +144,21 @@ export function lodgingWith({
 			rotations: { from: now, count: 0 },
 		};
 		const connectMs = settings["connect-lifetime"] * 1000;
-		await p.grants.create(grant.id, records.stored(grant), connectMs + settings.retention * 1000);
+		const keptMs = connectMs + settings.retention * 1000;
+		// A subject erased here is one no intent is lodged for: refused, naming it nowhere.
+		if ((await p.grants.create(grant.id, records.stored(grant), keptMs, subject)) === "erased") {
+			const withheld = { client: client.id, outcome: "subject_unknown", withheld: "erased" };
+			record("federation.grant.request.denied", undefined, withheld, request);
+			return error(403, "access_denied", "subject_unknown");
+		}
 		await p.listed(grant, connectMs);
 		// Past the pair's cap, the intents that end first are pushed out, and end.
-		const { pushedOut } = await p.pending.add(`${client.id}\n${subject}`, grant.id, connectMs);
-		for (const id of pushedOut) await endIntent(id, "pushed_out");
+		const pair = `${client.id}\n${subject}`;
+		const added = await p.pending.add(pair, grant.id, connectMs, subject);
+		// Not listed, its subject erased meanwhile: passed as a failed listing is, the grant still pending.
+		if (typeof added !== "object") p.log.warn("federation-grants.listing_failed", { kind: added });
+		for (const id of typeof added === "object" ? added.pushedOut : [])
+			await endIntent(id, "pushed_out");
 		record(
 			"federation.grant.requested",
 			subject,

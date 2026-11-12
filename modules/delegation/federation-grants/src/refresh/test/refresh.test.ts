@@ -121,7 +121,7 @@ async function refresher(
 		obtainedAt: now,
 		scope: shown,
 	});
-	await stores.grants.create("g", records.stored({ ...grant, sealed }), 30 * day);
+	await stores.grants.create("g", records.stored({ ...grant, sealed }), 30 * day, grant.subject);
 	/** The grant as stored now. */
 	const stored = async () => records.grantOf(await stores.grants.read("g"));
 

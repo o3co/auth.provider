@@ -221,7 +221,9 @@ export type Records = ReturnType<typeof recordsWith>;
 export function listingWith(subjects: SubjectGrants, log: Log) {
 	return async (grant: Grant, lifetimeMs: number) => {
 		try {
-			await subjects.add(grant.subject, grant.id, lifetimeMs);
+			const added = await subjects.add(grant.subject, grant.id, lifetimeMs);
+			// Not listed, its subject erased or the listing another's: passed as a failed write is.
+			if (typeof added !== "object") log.warn("federation-grants.listing_failed", { kind: added });
 		} catch (error) {
 			const kind = error instanceof Error ? error.name : typeof error;
 			log.warn("federation-grants.listing_failed", { kind });

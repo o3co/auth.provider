@@ -3,7 +3,7 @@
 ## Responsibilities
 - Takes a confidential client's intent to act for a user at one connection, and owns its steps through the browser and upstream, which a browser half runs over `grantIntents`.
 - Holds the upstream credentials apart from any session, and hands the client the upstream's bearer token, refreshed under a lock within a rotation budget.
-- Seals again, for `seal`'s resealers (as `federation-grants`), credentials a `previous` key sealed: walking every grant, writing only over the credentials read and keeping the grant's lifetime, counting those no key opens. A refresh seals under the current key anyway.
+- Seals again, for `seal`'s resealers (as `federation-grants`), credentials a `previous` key sealed, as `grant`'s card says.
 - Answers a grant's status, renewal and revocation, and follows a subject's revocation.
 - Internal modules: `grant` (records, sealing, shared judgments), `api` (client routes and the follower), `sweep` (erasing credentials), `retention` (how long an unusable grant is kept), `intents` (for the browser half), `refresh` (tokens).
 
@@ -49,7 +49,7 @@
 - Tokens, secrets and upstream text reach neither answers, logs nor audit.
 
 ## Depends on
-- `kernel`, `http`, `request-source`, `clients`, `csrf`, `upstreams`, `seal`, `subject-revocation`, `rate-limit`, `audit`, `login-gates`, `redirect-uris` (`registrable`, the rule for return URIs)
+- `kernel`, `http`, `request-source`, `clients`, `csrf`, `upstreams`, `seal`, `subject-revocation`, `rate-limit`, `audit`, `login-gates`, `redirect-uris` (`registrable`, the rule for return URIs), `erasure-extensions`
 
 ## Vocabulary
 - intent: a client's asking for a grant, connected once by the user. connection: an entry of the operator's `connections`, and the user's steps for an intent.
