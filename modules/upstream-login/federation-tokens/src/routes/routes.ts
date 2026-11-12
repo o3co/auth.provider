@@ -58,7 +58,7 @@ export interface Flow {
 	readonly upstreams: Upstreams;
 	readonly audit: Audit;
 	readonly log: Pick<Log, "warn">;
-	/** The erasure fence's one write for a token answered: `erased` where the subject is. */
+	/** The erasure fence for a token answered, one fenced write where erasure is enabled: `erased` where the subject is. */
 	readonly fence: (subject: string) => Promise<"passed" | "erased">;
 }
 
@@ -139,7 +139,7 @@ export async function federationTokens(flow: Flow, request: HttpRequest): Promis
 			);
 		}
 		// The session may have closed, or fallen short of a requirement, while the upstream answered; a
-		// subject erased by then is answered alike, past the fence that one erasure's mark stops.
+		// subject erased by then is answered alike: the answer passes only where its subject is not erased.
 		if (
 			!(await flow.caller.stillEnters(caller)) ||
 			(await flow.fence(caller.subject)) === "erased"
@@ -208,7 +208,7 @@ export async function routesIn(c: BuildContext<Settings>, renewal: Renewal): Pro
 		upstreams: await c.get(upstreams),
 		audit: await c.get(audit),
 		log: c.log,
-		// Each answer's own receipt: 128 fresh random bits.
+		// Each answer's own receipt, written where erasure is enabled: 128 fresh random bits.
 		fence: (subject) =>
 			fenced.fence(subject, Buffer.from(c.random.bytes(16)).toString("base64url")),
 	};
