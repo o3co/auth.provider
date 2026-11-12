@@ -1,8 +1,8 @@
 import type { SetReading } from "@mod/erasure-extensions";
 import type { Json, Space } from "@mod/store";
 import { expect, it, vi } from "vitest";
-import { migrateSets, subjectKeyedSetsIn } from "../src/subject-records.ts";
-import { bucketOf, envelope, placed } from "./placed.ts";
+import { bucketOf, envelope, placed } from "../../../test/placed.ts";
+import { migrateSets, subjectKeyedSetsIn } from "../../subject-records.ts";
 
 const g = ["durable"] as const;
 const indexed: Space = { name: "sets-test", guarantees: g, subjectData: "online-indexed" };
