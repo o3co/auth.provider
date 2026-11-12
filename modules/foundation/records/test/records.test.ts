@@ -994,3 +994,55 @@ it("refuses to open a space holding a subject's data through any plain door, and
 	expect(() => keyedSetsIn({ ...at("window"), cap: 1, clock: runtime.clock })).not.toThrow();
 	expect(() => deferredIn({ ...at(), shards: 1, perShard: 1 })).not.toThrow();
 });
+
+it("reads a stored set strictly, whole with every member's end, or unreadable where any part is malformed", () => {
+	const codec = keyedSetsIn.codec({ cap: 2, clock: { now: () => 10_000 } });
+	// Ended members and those awaiting are kept: nothing is dropped, nothing rebuilt.
+	expect(
+		codec.strict({
+			held: [
+				["a", 5_000],
+				["b", 20_000],
+			],
+			awaiting: [["c", 1]],
+		}),
+	).toEqual({
+		kind: "set",
+		held: [
+			["a", 5_000],
+			["b", 20_000],
+		],
+		awaiting: [["c", 1]],
+	});
+	// The first format: a bare list, all held.
+	expect(codec.strict([["a", 5_000]])).toEqual({ kind: "set", held: [["a", 5_000]], awaiting: [] });
+	expect(codec.strict({ held: [] })).toEqual({ kind: "set", held: [], awaiting: [] });
+	const malformed = [
+		undefined,
+		null,
+		"a",
+		7,
+		{ held: [["a", 1]], extra: [] },
+		{ held: "a" },
+		{ held: [["a"]] },
+		{ held: [["a", 1, 2]] },
+		{ held: [[1, 1]] },
+		{ held: [["a", "1"]] },
+		{ held: [["a", Number.POSITIVE_INFINITY]] },
+		{
+			held: [
+				["a", 1],
+				["a", 2],
+			],
+		},
+		{ awaiting: [["a", 1], "b"] },
+		[["a", 1], ["b"]],
+	];
+	for (const value of malformed) {
+		expect(codec.strict(value as never).kind, JSON.stringify(value)).toBe("unreadable");
+	}
+	// The lenient reads stay as they were: a malformed entry is left out, not refused.
+	expect(codec.members({ held: [["a", 20_000], ["b"]] } as never)).toEqual([
+		{ member: "a", remainingMs: 10_000 },
+	]);
+});
