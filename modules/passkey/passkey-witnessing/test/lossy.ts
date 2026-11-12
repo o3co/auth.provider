@@ -29,17 +29,27 @@ export function lossy(inner: PasskeyStore) {
 	};
 	const view = (space: Space, key: string | undefined, raw: StoredPasskey | undefined) =>
 		key !== undefined && shown[space].has(key) ? shown[space].get(key) : raw;
+	type Saved = Parameters<PasskeyRecords["save"]>;
+	/** The arguments each key was last saved with, so a save `put` makes again takes them whole. */
+	const savedWith: Record<Space, Map<string, Saved>> = {
+		credentials: new Map(),
+		subjects: new Map(),
+	};
 	/** Writes `record` under `key` in `inner`, whatever it holds, and shows `inner` again. */
 	const put = async (space: Space, key: string, record: StoredPasskey) => {
 		shown[space].delete(key);
 		if ((await inner[space].update(key, () => ({ value: record }))) === undefined) {
-			await inner[space].save(key, record, "endless");
+			const [, , ...rest] = savedWith[space].get(key) ?? [key, record, "endless"];
+			await inner[space].save(...([key, record, ...rest] as Saved));
 		}
 	};
 	const records = (space: Space): PasskeyRecords => ({
 		read: async (key) => view(space, key, await inner[space].read(key)),
-		save: async (key, record, lifetimeMs) => {
-			if (!shown[space].has(key)) return inner[space].save(key, record, lifetimeMs);
+		// Its arguments forwarded whole, whatever the store's `save` takes.
+		save: async (...given) => {
+			const [key, record] = given;
+			savedWith[space].set(key, given);
+			if (!shown[space].has(key)) return inner[space].save(...given);
 			if (shown[space].get(key) !== undefined) return "exists";
 			await put(space, key, record);
 			return "created";
@@ -54,6 +64,8 @@ export function lossy(inner: PasskeyStore) {
 			return { before, after: next.value };
 		},
 	});
+	// Read whether the inner store's port requires it or offers it optionally.
+	const together = inner.updateTogether?.bind(inner);
 	const store: PasskeyStore = {
 		credentials: records("credentials"),
 		subjects: records("subjects"),
@@ -66,7 +78,8 @@ export function lossy(inner: PasskeyStore) {
 				credentials: read.credentials.map((r, i) => view("credentials", all("credentials")[i], r)),
 				subjects: read.subjects.map((r, i) => view("subjects", all("subjects")[i], r)),
 			});
-			const changed = await inner.updateTogether(keys, {
+			if (together === undefined) throw new Error("the inner store offers no updateTogether");
+			const changed = await together(keys, {
 				watch: (read) => {
 					watched = {};
 					watched = p.watch(viewed(read));
