@@ -7,6 +7,9 @@ import {
 	erasureMarks,
 	type ForgottenReport,
 	forgottenIn,
+	type MigrationReport,
+	type OwnerStopped,
+	ownerStopped,
 	type SpaceReport,
 	type SubjectOf,
 	type SubjectReading,
@@ -75,4 +78,18 @@ it("takes an owner's step for an orphan: what a record holds, kept outside the s
 	await elsewhere("k", { issuer: "https://idp.example" });
 	await elsewhere("k", { issuer: "https://idp.example" });
 	expect([...kept]).toEqual([["k", { issuer: "https://idp.example" }]]);
+});
+
+it("makes an owner's stop of a migration, which no cast makes a MigrationReport", async () => {
+	const stopped: OwnerStopped = ownerStopped("federation-tokens-store.tokens", "no port");
+	expect(stopped).toEqual({
+		kind: "owner-stopped",
+		space: "federation-tokens-store.tokens",
+		reason: "no port",
+	});
+	const answer: Awaited<ReturnType<Eraser["migrate"]>> = [stopped];
+	expect(answer).toEqual([stopped]);
+	// @ts-expect-error The owner's stop states nothing written: a brand-free object is never a MigrationReport.
+	const stretched: MigrationReport = stopped;
+	expect(stretched.kind).toBe("owner-stopped");
 });

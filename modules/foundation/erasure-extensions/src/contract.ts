@@ -52,6 +52,24 @@ export type MigrationReport = ReportMade &
 	);
 
 /**
+ * An owner's answer for a space it cannot migrate yet, by the space's declared name and why: not
+ * finished, as `stopped` is, the reason saying what is missing or when to run again. Made by the
+ * owner through `ownerStopped`, with no brand: it states nothing `subject-records` wrote.
+ */
+export interface OwnerStopped {
+	readonly kind: "owner-stopped";
+	readonly space: string;
+	readonly reason: string;
+}
+
+/** An owner's stop of a space's migration, by its declared name and why. */
+export const ownerStopped = (space: string, reason: string): OwnerStopped => ({
+	kind: "owner-stopped",
+	space,
+	reason,
+});
+
+/**
  * Whose a record written before indexing is, as its owner reads it: a subject's; an orphan, which
  * the owner proves has none, and which a migration removes; or unreadable, which proves nothing,
  * so the migration stops that space with `reason` and removes nothing.
@@ -123,7 +141,7 @@ export interface Eraser {
 	/** Under the maintenance key: the same for each subject, walking where an index cannot reach. */
 	window(subjects: readonly string[], walk: Walk, signal: AbortSignal): Promise<Erased>;
 	/** Once, under the maintenance key: puts the records written before indexing into the index. */
-	migrate(walk: Walk, signal: AbortSignal): Promise<readonly MigrationReport[]>;
+	migrate(walk: Walk, signal: AbortSignal): Promise<readonly (MigrationReport | OwnerStopped)[]>;
 }
 
 export const erasers = extensionPoint<Eraser>("erasure.erasers", {
