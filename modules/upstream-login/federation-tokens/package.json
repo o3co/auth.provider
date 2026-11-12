@@ -25,6 +25,7 @@
 		"@mod/session": "workspace:*",
 		"@mod/session-participants": "workspace:*",
 		"@mod/session-tokens": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"@mod/upstreams": "workspace:*",
 		"zod": "4.6.7"
@@ -44,7 +45,6 @@
 		"@mod/secret-hash": "workspace:*",
 		"@mod/session-requirements": "workspace:*",
 		"@mod/store": "workspace:*",
-		"@mod/subject-revocation": "workspace:*",
 		"vitest": "5.0.5"
 	}
 }

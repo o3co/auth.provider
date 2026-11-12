@@ -5299,6 +5299,9 @@ importers:
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../../oauth/session-tokens
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
       '@mod/tokens':
         specifier: workspace:*
         version: link:../../oauth/tokens
@@ -5327,9 +5330,6 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
-      '@mod/subject-revocation':
-        specifier: workspace:*
-        version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))

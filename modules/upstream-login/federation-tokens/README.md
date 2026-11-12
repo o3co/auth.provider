@@ -24,7 +24,6 @@
 - Route `POST /oauth/federation/<idp>/logout` (form: `post_logout_redirect_uri?`, `state?`): `303` to the upstream's end of session, or `200 {"disconnected": true}` where it has none or fails; taken from other sites as the token route is.
   - Errors as the token route's, without `403`.
   - While a kind answers `429` (`dpop`'s count), refused, the entry kept; `/session/logout` reads no access token, so no count holds it.
-- Both routes answer `no-store` and are limited per source by `rate-limit`'s requests policy.
 - Client metadata section `federation-tokens`: `receives` (default false), `post-logout-redirect-uris` (default none; each one a client may register to be sent back to, by `redirect-uris`' rule).
 - Operator section: `refresh-before` (default `30s`), `max-lifetime` (default `1d`), `lock-lifetime` (default `5s`), `requests` in `window`; times written with their unit, a bare number refused.
 - Store interfaces, which the assembly wires; the store never reads a record.
@@ -36,7 +35,7 @@
 ## Invariants
 - A token goes out only to a client whose `receives` is set; each such client is warned at every start (`federation-tokens.receives`, naming it). Any other is answered `403`: its body's `error` is the route's own word, `forbidden`, and its challenge RFC 6750's, `insufficient_scope`, in its token's scheme.
 - A token goes out only for a presented access token `caller` accepts: its audience names its client, its family has not ended, and its session enters at `use` for the same subject (one short of a requirement does not).
-- The session is checked again before answering.
+- The session is checked again before answering, then the erasure fence (`routes`).
 - Only a bearer token goes out (any case). Any other type answers `502`, and the record stays.
 - A session's record lives no longer than the session (the end of its entry at `session`).
 - Nothing is kept for a session that lets nobody in at `use` (one short of a requirement included), even one that closes while a login's tokens are written.
@@ -52,7 +51,7 @@
 ## Data
 
 ## Depends on
-- `kernel`, `http`, `request-source`, `clients`, `redirect-uris`, `upstreams`, `rate-limit`, `audit`, `session`, `session-participants`, `erasure-extensions`, and through its internal modules `tokens`, `sender-binding`, `session-tokens`, `seal`
+- `kernel`, `http`, `request-source`, `clients`, `redirect-uris`, `upstreams`, `rate-limit`, `audit`, `session`, `session-participants`, `erasure-extensions`, `subject-revocation`, and through its internal modules `tokens`, `sender-binding`, `session-tokens`, `seal`
 
 ## Vocabulary
 - entry: one IdP's sealed tokens in a session's record, with its version.
