@@ -11,7 +11,8 @@ export const tokensSubjectOf =
 		if (subject !== undefined) return { kind: "subject", subject };
 		return {
 			kind: "unreadable",
-			reason: "a record whose session has no record: it ends by its own lifetime; run again then",
+			reason:
+				"a record whose session has no record naming its subject: it ends by its own lifetime; run again then",
 		};
 	};
 
