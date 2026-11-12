@@ -84,6 +84,13 @@ export type SubjectOf =
 export type SubjectReading = (key: string, value: unknown) => Promise<SubjectOf>;
 
 /**
+ * The owner's reading of a keyed set's subject from its key alone: the owner never sees how a set
+ * is kept. An orphan set is proven by its key's form, never by what the set holds. It writes
+ * nothing; a lookup it makes may fail, and a failure is `unreadable`, never `orphan`.
+ */
+export type SetReading = (key: string) => Promise<SubjectOf>;
+
+/**
  * The owner's step for a record its reading answered `orphan`, before the migration removes it:
  * it keeps what the record holds outside the space being migrated, where the owner still needs it.
  * It runs on the value a confirmed change held, never on an unconfirmed read; it writes only

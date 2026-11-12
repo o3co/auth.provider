@@ -10,6 +10,7 @@ import {
 	type MigrationReport,
 	type OwnerStopped,
 	ownerStopped,
+	type SetReading,
 	type SpaceReport,
 	type SubjectOf,
 	type SubjectReading,
@@ -88,4 +89,18 @@ it("makes an owner's stop of a migration, which no cast makes a MigrationReport"
 	// @ts-expect-error The owner's stop states nothing written: a brand-free object is never a MigrationReport.
 	const stretched: MigrationReport = stopped;
 	expect(stretched.kind).toBe("owner-stopped");
+});
+
+it("reads a set's subject from its key alone, with the record reading's answers", async () => {
+	const reading: SetReading = async (key) => {
+		const [kind, subject] = key.split(":");
+		if (kind === "login" && subject) return { kind: "subject", subject };
+		if (kind === "gone") return { kind: "orphan" };
+		return { kind: "unreadable", reason: "a key of another form" };
+	};
+	expect(await reading("login:alice")).toEqual({ kind: "subject", subject: "alice" });
+	expect(await reading("gone:x")).toEqual({ kind: "orphan" });
+	expect((await reading("other")).kind).toBe("unreadable");
+	const answers: SubjectOf[] = [await reading("login:bob")];
+	expect(answers).toHaveLength(1);
 });
