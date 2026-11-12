@@ -37,7 +37,8 @@ export const useOf = (code: string): Match =>
 	storeWrite({
 		prefix,
 		space: "mfa-store.factors",
-		operations: ["replaceIf"],
+		// A change of records kept raw is a batch on their own partition, as subject-records writes it.
+		operations: ["replaceIf", "batch"],
 		value: (v) =>
 			((v as FactorList).factors ?? []).some(
 				(f) =>
@@ -55,7 +56,7 @@ export const factorListWritten: Match = storeWrite({
 	prefix,
 	space: "mfa-store.factors",
 	name: "record",
-	operations: ["putIfAbsent", "replaceIf"],
+	operations: ["putIfAbsent", "replaceIf", "batch"],
 });
 
 /** A read of a subject's revocation boundary: a session's check, comparing its authentication with it. */
