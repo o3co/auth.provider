@@ -8,7 +8,7 @@ import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
 import { factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
-import { mfaConfig, updatingTogether } from "@mod/mfa/testing";
+import { mfaConfig, updatingAsOne } from "@mod/mfa/testing";
 import { factorBinding } from "@mod/mfa-binding";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
@@ -81,7 +81,7 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 			read: stand.records.read,
 			update: stand.records.change,
 			scan: stand.records.scan,
-			updateTogether: updatingTogether(stand.records),
+			updateAsOne: updatingAsOne(stand.records),
 		})),
 	]);
 	const input = {
