@@ -573,6 +573,20 @@ export function sessionsContract(
 			expect((await place.sessions.entryOf(live.session.id)).kind).toBe("entered");
 		});
 
+		it("reads, where offered, the subject of a record kept past its session's lifetime, writing nothing", async (context) => {
+			const place = await open();
+			const { subjectOf } = place.sessions;
+			if (!subjectOf) return context.skip();
+			const done = openedOf(await place.sessions.open(place.request(), facts(place, "carol")));
+			place.advance(place.lifetimeMs + 1);
+			const subject = await subjectOf.call(place.sessions, done.session.id);
+			// A place whose store ends the record with its lifetime holds none to read past it.
+			if (subject === undefined) return context.skip();
+			expect(subject).toBe("carol");
+			// Nothing was written: the close finds the record still open, never ended by the read.
+			expect((await place.sessions.close(done.session.id)).from).toBe("open");
+		});
+
 		it("closes the session a request's cookie points to, and destroys the cookie", async () => {
 			const place = await open();
 			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
