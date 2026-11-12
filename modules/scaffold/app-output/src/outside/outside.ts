@@ -220,7 +220,7 @@ function guideOf(modules: readonly OutsideRecord[], scoped: boolean): string {
 		"",
 		...(scoped
 			? [
-					`\`${npmrcFile}\` names the registry of each scope recorded, by its origin, and holds no credential; commit it, and write a registry served under a path in it by hand. Keep credentials in your own \`~/.npmrc\`. The image's install stage copies \`${npmrcFile}\` and takes credentials as a build secret, so neither reaches the image the app runs in: \`docker build --secret id=npmrc,src=$HOME/.npmrc -t auth-provider .\`.`,
+					`\`${npmrcFile}\` names the registry of each scope recorded, by its origin, and holds no credential; commit it, and write a registry served under a path in it by hand. Keep credentials in your own \`~/.npmrc\`. The image's install stage copies \`${npmrcFile}\` and takes credentials as a build secret, so neither reaches the image the app runs in: \`docker build --pull --no-cache-filter=runtime --secret id=npmrc,src=$HOME/.npmrc -t auth-provider .\`.`,
 					"",
 				]
 			: []),
