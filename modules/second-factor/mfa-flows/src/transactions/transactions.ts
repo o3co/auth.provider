@@ -7,6 +7,7 @@ import type { Settings } from "../section.ts";
 import {
 	type TransactionListings,
 	type TransactionStore,
+	transactionLifetimeMaxMs,
 	transactionListings,
 	transactionStore,
 } from "../store.ts";
@@ -66,6 +67,9 @@ export const transactionsIn = async (c: BuildContext<Settings>) =>
 
 export function transactionsOver(parts: TransactionParts) {
 	const { store, listings, jar, random, clock, ttlMs, attempts } = parts;
+	if (!(ttlMs > 0 && ttlMs <= transactionLifetimeMaxMs)) {
+		throw new TypeError("mfa-flows: a transaction is kept 1 ms to transactionLifetimeMaxMs");
+	}
 	/**
 	 * The browser's cookie: the transaction it names and the browser's secret, or the secret alone as
 	 * an earlier one was written. An empty part or another dot is no cookie.
@@ -124,10 +128,12 @@ export function transactionsOver(parts: TransactionParts) {
 				startedAt: now,
 				deadline: now + ttlMs,
 			};
-			const saved = await store.save(id, stored(value), ttlMs);
+			const saved = await store.save(id, stored(value), ttlMs, value.subject);
 			if (saved !== "created") throw new Unavailable("mfa-flows");
 			// Listed after it is kept, so a listed one is always found; past the cap the one ending first leaves.
-			await listings.add(holderOf(value), hashOf(id), ttlMs);
+			const listed = await listings.add(holderOf(value), hashOf(id), ttlMs, value.subject);
+			// Refused: kept unlisted, it never counts, and ends by its lifetime.
+			if (typeof listed === "string") throw new Unavailable("mfa-flows");
 			return {
 				id,
 				deadline: value.deadline,

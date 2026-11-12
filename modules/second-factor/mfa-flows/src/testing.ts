@@ -49,8 +49,8 @@ export function transactionStoreContract(
 			const { transactions } = await open();
 			const key = fresh();
 			const odd = asStored({ state: "unheard-of", nested: { list: [1, "two"] } });
-			expect(await transactions.save(key, odd, 60_000)).toBe("created");
-			expect(await transactions.save(key, asStored({ n: 1 }), 60_000)).toBe("exists");
+			expect(await transactions.save(key, odd, 60_000, "alice")).toBe("created");
+			expect(await transactions.save(key, asStored({ n: 1 }), 60_000, "alice")).toBe("exists");
 			expect(await transactions.read(key)).toEqual(odd);
 			expect(await transactions.update(key, () => undefined)).toEqual({ before: odd, after: odd });
 			expect(await transactions.update(fresh(), plus(1))).toBeUndefined();
@@ -60,7 +60,7 @@ export function transactionStoreContract(
 		it("changes a transaction only from what it holds, again after a racing writer", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.transactions.save(key, asStored({ n: 1 }), 60_000);
+			await place.transactions.save(key, asStored({ n: 1 }), 60_000, "alice");
 			expect(await place.transactions.update(key, plus(1))).toEqual({
 				before: asStored({ n: 1 }),
 				after: asStored({ n: 2 }),
@@ -72,14 +72,14 @@ export function transactionStoreContract(
 		it("ends a transaction at exactly the lifetime it was saved with, however it changed", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.transactions.save(key, asStored({ n: 1 }), 1000);
+			await place.transactions.save(key, asStored({ n: 1 }), 1000, "alice");
 			place.advance(999);
 			await place.transactions.update(key, plus(1));
 			expect(await place.transactions.read(key)).toEqual(asStored({ n: 2 }));
 			place.advance(1);
 			expect(await place.transactions.read(key)).toBeUndefined();
 			expect(await place.transactions.update(key, plus(1))).toBeUndefined();
-			expect(await place.transactions.save(key, asStored({ n: 3 }), 1000)).toBe("created");
+			expect(await place.transactions.save(key, asStored({ n: 3 }), 1000, "alice")).toBe("created");
 		});
 
 		it("never gives a transaction's identifier to what the place holds, in clear", async (context) => {
@@ -87,10 +87,26 @@ export function transactionStoreContract(
 			const { holds } = place;
 			if (!holds) return context.skip();
 			const [id, kept] = [fresh(), fresh()];
-			await place.transactions.save(id, asStored({ kept }), 60_000);
+			await place.transactions.save(id, asStored({ kept }), 60_000, "alice");
 			await place.transactions.read(id);
 			await place.transactions.update(id, (record) => ({ value: record }));
 			expect([holds(kept), holds(id)]).toEqual([true, false]);
+		});
+
+		it("refuses, where the store erases, every transaction saved for a subject it erased, and only for that subject", async (context) => {
+			const { transactions } = await open();
+			if (!transactions.erase) return context.skip();
+			await transactions.save(fresh(), asStored({ n: 1 }), 60_000, "erin");
+			const report = await transactions.erase.call(
+				transactions,
+				"erin",
+				new AbortController().signal,
+			);
+			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+			if (report.kind === "stopped") return context.skip();
+			expect(["erased", "fenced"]).toContain(report.kind);
+			expect(await transactions.save(fresh(), asStored({ n: 2 }), 60_000, "erin")).toBe("erased");
+			expect(await transactions.save(fresh(), asStored({ n: 3 }), 60_000, "finn")).toBe("created");
 		});
 
 		it("keeps transactions through a restart and through memory pressure", async (context) => {
@@ -98,7 +114,7 @@ export function transactionStoreContract(
 			const { restart, pressMemory } = place;
 			if (!restart || !pressMemory) return context.skip();
 			const key = fresh();
-			await place.transactions.save(key, asStored({ n: 1 }), 60_000);
+			await place.transactions.save(key, asStored({ n: 1 }), 60_000, "alice");
 			await restart();
 			await pressMemory();
 			expect(await place.transactions.read(key)).toEqual(asStored({ n: 1 }));
@@ -110,7 +126,9 @@ export function transactionStoreContract(
 			if (!lose || !failover) return context.skip();
 			const key = fresh();
 			lose();
-			expect(await place.transactions.save(key, asStored({ n: 1 }), 60_000)).toBe("created");
+			expect(await place.transactions.save(key, asStored({ n: 1 }), 60_000, "alice")).toBe(
+				"created",
+			);
 			lose();
 			expect((await place.transactions.update(key, plus(1)))?.after).toEqual(asStored({ n: 2 }));
 			await failover();
@@ -143,13 +161,19 @@ export function transactionListingsContract(name: string, open: () => Promise<Li
 	const membersOf = async (listings: TransactionListings, key: string) =>
 		(await listings.members(key)).map(({ member }) => member).sort();
 
+	/** What an add answered, for a subject the place has not erased. */
+	const listedOf = (added: Awaited<ReturnType<TransactionListings["add"]>>) => {
+		if (typeof added === "string") throw new Error(`listed as ${added}`);
+		return added;
+	};
+
 	describe(`mfa-flows' listings: ${name}`, () => {
 		it("lists a holder's members each for its lifetime, until one is removed, apart from other holders", async () => {
 			const { listings, advance } = await open();
 			const [key, other, ending, lasting] = [fresh(), fresh(), fresh(), fresh()];
-			expect((await listings.add(key, ending, 1000)).pushedOut).toEqual([]);
-			await listings.add(key, lasting, 60_000);
-			await listings.add(other, ending, 60_000);
+			expect(listedOf(await listings.add(key, ending, 1000, "alice")).pushedOut).toEqual([]);
+			await listings.add(key, lasting, 60_000, "alice");
+			await listings.add(other, ending, 60_000, "alice");
 			expect(await membersOf(listings, key)).toEqual([ending, lasting].sort());
 			advance(1000);
 			expect(await membersOf(listings, key)).toEqual([lasting]);
@@ -165,12 +189,28 @@ export function transactionListingsContract(name: string, open: () => Promise<Li
 			const key = fresh();
 			const kept = Array.from({ length: cap }, () => fresh());
 			for (const [i, member] of kept.entries()) {
-				expect((await listings.add(key, member, 60_000 + i)).pushedOut).toEqual([]);
+				expect(listedOf(await listings.add(key, member, 60_000 + i, "alice")).pushedOut).toEqual(
+					[],
+				);
 			}
 			// The one added ends before every one listed, yet stays.
 			const added = fresh();
-			expect((await listings.add(key, added, 1000)).pushedOut).toEqual([kept[0]]);
+			expect(listedOf(await listings.add(key, added, 1000, "alice")).pushedOut).toEqual([kept[0]]);
 			expect(await membersOf(listings, key)).toEqual([added, ...kept.slice(1)].sort());
+		});
+
+		it("refuses, where the listings erase, every add for a subject they erased, and only for that subject", async (context) => {
+			const { listings } = await open();
+			if (!listings.erase) return context.skip();
+			const [key, other] = [fresh(), fresh()];
+			await listings.add(key, fresh(), 60_000, "erin");
+			const report = await listings.erase.call(listings, "erin", new AbortController().signal);
+			// A Store that erases nothing now (its sets not indexed yet) says so, and fences nothing.
+			if (report.kind === "stopped") return context.skip();
+			expect(report).toMatchObject({ kind: "erased", removed: 1 });
+			expect(await membersOf(listings, key)).toEqual([]);
+			expect(await listings.add(key, fresh(), 60_000, "erin")).toBe("erased");
+			expect(listedOf(await listings.add(other, fresh(), 60_000, "finn")).pushedOut).toEqual([]);
 		});
 
 		it("keeps members through a restart and through memory pressure", async (context) => {
@@ -178,7 +218,7 @@ export function transactionListingsContract(name: string, open: () => Promise<Li
 			const { restart, pressMemory } = place;
 			if (!restart || !pressMemory) return context.skip();
 			const [key, member] = [fresh(), fresh()];
-			await place.listings.add(key, member, 60_000);
+			await place.listings.add(key, member, 60_000, "alice");
 			await restart();
 			await pressMemory();
 			expect(await membersOf(place.listings, key)).toEqual([member]);
@@ -190,8 +230,8 @@ export function transactionListingsContract(name: string, open: () => Promise<Li
 			if (!lose || !failover) return context.skip();
 			const [key, member] = [fresh(), fresh()];
 			lose();
-			await place.listings.add(key, member, 60_000).catch(() => undefined);
-			await place.listings.add(key, member, 60_000);
+			await place.listings.add(key, member, 60_000, "alice").catch(() => undefined);
+			await place.listings.add(key, member, 60_000, "alice");
 			await failover();
 			expect(await membersOf(place.listings, key)).toEqual([member]);
 		});

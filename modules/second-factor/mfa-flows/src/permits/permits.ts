@@ -1,5 +1,5 @@
 import type { Clock } from "@mod/kernel";
-import type { StoredTransaction, TransactionStore } from "../store.ts";
+import { heldLifetimeMaxMs, type StoredTransaction, type TransactionStore } from "../store.ts";
 import { hashOf } from "../transactions/records.ts";
 
 /** What a used permit's release answered: released, or a fixed hold left standing since `fixedAt`. */
@@ -24,24 +24,31 @@ export interface PermitParts {
 	readonly clock: Clock;
 	/** Whether a proof at that time is still recent (`session`'s window). */
 	readonly recent: (at: number) => boolean;
-	/** How long a session's record lives from its first permit: the longest recent window. */
+	/** How long a session's record lives from its first permit: the longest recent window, at most `heldLifetimeMaxMs`. */
 	readonly keepMs: number;
 }
 
 export type Permits = ReturnType<typeof permitsOver>;
 
 export function permitsOver(p: PermitParts) {
+	if (!(p.keepMs > 0 && p.keepMs <= heldLifetimeMaxMs)) {
+		throw new TypeError("mfa-flows: a permit is kept 1 ms to heldLifetimeMaxMs");
+	}
 	const keyOf = (handle: string) => hashOf(`release-permit\n${handle}`);
 	const permitOf = (record: StoredTransaction | undefined) =>
 		record as unknown as Permit | undefined;
 	const stored = (permit: Permit) => permit as unknown as StoredTransaction;
 	return {
-		/** Grants the session a permit from a proof passing now; a later proof's replaces it, used or not. */
-		grant: async (handle: string) => {
+		/**
+		 * Grants the session a permit from a proof passing now; a later proof's replaces it, used or not.
+		 * Saved for the session's subject, for the fence alone: the permit holds none. `erased` keeps none.
+		 */
+		grant: async (handle: string, subject: string) => {
 			const key = keyOf(handle);
 			const fresh = stored({ proofAt: p.clock.now() });
 			if (await p.store.update(key, () => ({ value: fresh }))) return;
-			if ((await p.store.save(key, fresh, p.keepMs)) === "created") return;
+			const saved = await p.store.save(key, fresh, p.keepMs, subject);
+			if (saved === "created" || saved === "erased") return;
 			// Another request saved one first: this later proof replaces it.
 			await p.store.update(key, () => ({ value: fresh }));
 		},

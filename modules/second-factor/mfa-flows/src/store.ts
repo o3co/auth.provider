@@ -1,4 +1,12 @@
+import type {
+	MigrationReport,
+	SetReading,
+	SpaceReport,
+	SubjectReading,
+	Walk,
+} from "@mod/erasure-extensions";
 import { contract } from "@mod/kernel";
+import { longestRecentMs } from "@mod/session";
 
 declare const storedTransaction: unique symbol;
 /** A transaction as the store keeps it: only mfa-flows opens it. */
@@ -11,14 +19,45 @@ export interface ChangedTransaction {
 
 /** Transactions by their identifier, never kept in clear, each kept for its lifetime and changed only from what it holds. Every call throws Unavailable when the place cannot tell. */
 export interface TransactionStore {
-	save(id: string, record: StoredTransaction, lifetimeMs: number): Promise<"created" | "exists">;
+	/**
+	 * Keeps a new record for its lifetime, at most `heldLifetimeMaxMs`, and its subject,
+	 * unless the identifier holds one already (`exists`) or, where the Store fences saves past a
+	 * subject's erasure, the subject is erased there (`erased`). The subject comes last.
+	 */
+	save(
+		id: string,
+		record: StoredTransaction,
+		lifetimeMs: number,
+		subject: string,
+	): Promise<"created" | "exists" | "erased">;
 	read(id: string): Promise<StoredTransaction | undefined>;
-	/** Changes the transaction from what it holds; `change` runs again on a race, so it is pure; none leaves it. Nothing when gone. */
+	/**
+	 * Changes the transaction from what it holds; `change` runs again on a race, so it is pure; none
+	 * leaves it. Nothing when gone, or, where the Store fences saves past a subject's erasure, when
+	 * its subject is erased.
+	 */
 	update(
 		id: string,
 		change: (record: StoredTransaction) => ChangedTransaction | undefined,
 	): Promise<{ readonly before: StoredTransaction; readonly after: StoredTransaction } | undefined>;
+	/**
+	 * Erases a subject's transactions here, where the Store can: optional in 0.20, required in 0.22,
+	 * as a Store not built through `subject-records` cannot be erased. This store's `erase` and
+	 * `migrate` and the listings' come together or none; a part refuses the boot.
+	 */
+	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
+	/** Once, under the maintenance key, each transaction read by mfa-flows' reading; optional as `erase` is. */
+	migrate?(walk: Walk, subjectOf: SubjectReading, signal: AbortSignal): Promise<MigrationReport>;
 }
+
+/** The longest a transaction may be kept: the section's ceiling, refused past it by the transactions. */
+export const transactionLifetimeMaxMs = 1_800_000;
+
+/**
+ * The longest the transaction store keeps a record: the longer of a transaction's ceiling and a
+ * release permit's (`session`'s longest recent window), the bound a Store fencing the store declares.
+ */
+export const heldLifetimeMaxMs = Math.max(transactionLifetimeMaxMs, longestRecentMs);
 
 export const transactionStore = contract<TransactionStore>("mfa-flows.transaction-store");
 
@@ -37,14 +76,24 @@ export const transactionStoreNeeds = {
  * when the place cannot tell.
  */
 export interface TransactionListings {
-	/** Lists the member for its lifetime; answers the others pushed out over the cap, never the one being added. */
+	/**
+	 * Lists the member for its lifetime, for the holder's subject, last; answers the others pushed out
+	 * over the cap, never the one being added. Where the Store fences saves past a subject's erasure,
+	 * `erased` for an erased subject; a Store may answer `another-subject` where the listing under
+	 * the key is another subject's. Either is a refusal.
+	 */
 	add(
 		key: string,
 		member: string,
 		lifetimeMs: number,
-	): Promise<{ readonly pushedOut: readonly string[] }>;
+		subject: string,
+	): Promise<{ readonly pushedOut: readonly string[] } | "erased" | "another-subject">;
 	members(key: string): Promise<readonly { readonly member: string }[]>;
 	remove(key: string, member: string): Promise<void>;
+	/** Erases a subject's listings here, where the Store can; with the transaction store's ports, or none. */
+	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
+	/** Once, under the maintenance key, each raw listing read by its key; optional as `erase` is. */
+	migrate?(walk: Walk, reading: SetReading, signal: AbortSignal): Promise<MigrationReport>;
 }
 
 export const transactionListings = contract<TransactionListings>("mfa-flows.transaction-listings");
