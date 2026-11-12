@@ -189,7 +189,9 @@ describe("what an app beside packages outside the release is given", () => {
 				mount: "--mount=type=secret,id=npmrc,target=/root/.npmrc",
 			});
 			expect(guide).toContain("`.npmrc` names the registry of each scope recorded");
-			expect(guide).toContain("docker build --secret id=npmrc,src=$HOME/.npmrc");
+			expect(guide).toContain(
+				"`docker build --pull --no-cache-filter=runtime --secret id=npmrc,src=$HOME/.npmrc -t auth-provider .`",
+			);
 		});
 
 		it("gives an app with no such record none of it", () => {
