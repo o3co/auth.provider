@@ -16,7 +16,7 @@ Internal module of `session-lifecycle`: erasing a subject's sessions and listing
 
 ## Invariants
 - The session store's `erase` and `migrate` and the listing's come together or none, so sessions are never erased under a listing that still names the subject; a part refuses the boot. With none, the eraser is not erasable and answers empty reports.
-- `logoutGaps` counts each session record the erase removed closing, open within the lifetime in force, or unreadable (counted high), as one whose participants were never told; a closed one is none, and so is an open one past its lifetime, owed no logout as none is called on its end alone. It counts sessions, not (session, RP) notices, so it is low for a session several RPs hold. A crash between a removal and its count loses it: counts after an interrupted run are lower bounds.
+- `logoutGaps` counts each session record the erase removed closing, open within the lifetime in force, or unreadable (counted high), as one whose participants were never told; a closed one is none, and so is an open one past its lifetime, owed no logout as none is called on its end alone. A session closing when erased counts here, and rp-logout may count it too. A crash between a removal and its count loses it: counts after an interrupted run are lower bounds.
 
 ## Depends on
 - `erasure-extensions` (the eraser and its reports); `lifecycle`'s record codec; `session-lifecycle`'s store interfaces.
