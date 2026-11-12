@@ -138,3 +138,28 @@ it("erases and migrates the space at the phase read, unavailable until it reads,
 		removed: 0,
 	});
 });
+
+it("erases and migrates a sets space at the phase read, as records' builder does", async () => {
+	const { place } = await opened();
+	const { state, control: c } = control("indexed");
+	state.down = true;
+	const sets = await phasedKeyedSetsIn(
+		{ ...place(), cap: 5, clock: { now: () => Date.now() } },
+		subjectRecordsPhase.once(c),
+		"w",
+		refuse,
+	);
+	const signal = new AbortController().signal;
+	await expect(sets.erase("bob", signal)).rejects.toThrow(Unavailable);
+	state.down = false;
+	expect(await sets.add("bob", "m", 60_000, "bob")).toEqual({ pushedOut: [] });
+	expect(await sets.erase("bob", signal)).toMatchObject({ kind: "erased" });
+	expect(await sets.add("bob", "n", 60_000, "bob")).toBe("erased");
+	const walk = { sweep: async () => ({ keys: [], server: "one" }) };
+	// An online-keyed space has no raw set to index.
+	expect(await sets.migrate(walk, async () => ({ kind: "orphan" }), signal)).toMatchObject({
+		kind: "migrated",
+		indexed: 0,
+		removed: 0,
+	});
+});

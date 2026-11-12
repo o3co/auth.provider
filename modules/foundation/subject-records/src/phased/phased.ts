@@ -1,9 +1,9 @@
-import type { Elsewhere, SubjectReading, Walk } from "@mod/erasure-extensions";
+import type { Elsewhere, SetReading, SubjectReading, Walk } from "@mod/erasure-extensions";
 import { type Clock, isUnavailable, Unavailable } from "@mod/kernel";
 import type { Json } from "@mod/store";
 import { eraseSubject } from "../erase/erase.ts";
 import type { Phase, SubjectPlace } from "../index/index.ts";
-import { migrateRecords } from "../migrate/migrate.ts";
+import { migrateRecords, migrateSets } from "../migrate/migrate.ts";
 import type { PhaseOnce } from "../phase/phase.ts";
 import { subjectKeyedSetsIn } from "../sets/sets.ts";
 import { subjectRecordsIn } from "../writes/writes.ts";
@@ -122,11 +122,25 @@ export const phasedKeyedSetsIn = (
 ) =>
 	phased(
 		phase,
-		(read, told) => subjectKeyedSetsIn({ ...place, phase: read }, where, told),
+		(read, told) => {
+			const at = { ...place, phase: read };
+			return {
+				...subjectKeyedSetsIn(at, where, told),
+				erase: (subject: string, signal: AbortSignal) => eraseSubject(at, subject, { signal }),
+				migrate: (walk: Walk, reading: SetReading, signal: AbortSignal) =>
+					migrateSets(at, walk, reading, { signal }),
+			};
+		},
 		refuse,
 		place,
-		{ add: true, members: true, remove: true, awaiting: true, settled: true } satisfies Record<
-			keyof ReturnType<typeof subjectKeyedSetsIn>,
-			true
-		>,
+		// Every method the builder has, or the typecheck fails: none is left unrouted.
+		{
+			add: true,
+			members: true,
+			remove: true,
+			awaiting: true,
+			settled: true,
+			erase: true,
+			migrate: true,
+		} satisfies Record<keyof ReturnType<typeof subjectKeyedSetsIn> | "erase" | "migrate", true>,
 	);
