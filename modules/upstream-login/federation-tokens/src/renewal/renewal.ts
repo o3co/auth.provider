@@ -116,11 +116,13 @@ export function renewalWith(parts: Parts) {
 	 * What is left of the session, so its record never outlives it; none once it lets nobody in at
 	 * use: closed, ended, revoked, or short of a requirement.
 	 */
-	const lifetimeOf = async (session: string) => {
+	const liveOf = async (session: string) => {
 		const entry = await parts.sessions.entryOf(session);
-		const left = entry.kind === "entered" ? entry.endsAt - parts.clock.now() : 0;
-		return left > 0 ? left : undefined;
+		if (entry.kind !== "entered") return undefined;
+		const leftMs = entry.endsAt - parts.clock.now();
+		return leftMs > 0 ? { leftMs, subject: entry.session.context.subject } : undefined;
 	};
+	const lifetimeOf = async (session: string) => (await liveOf(session))?.leftMs;
 
 	/** Rewrites one IdP's entry, only while it holds `version` (or none, when none is answered). */
 	const rewrite = async (
@@ -149,14 +151,15 @@ export function renewalWith(parts: Parts) {
 		if ((await lifetimeOf(session)) === undefined) await store.remove(session);
 	};
 
-	/** Writes a login's entry into the record, or as its first; false for a session that lets nobody in. */
+	/** Writes a login's entry into the record, or as its first for the session's subject; false where none is kept. */
 	const keep = async (session: string, idp: string, entry: Entry) => {
 		for (let attempt = 0; attempt < keepAttempts; attempt++) {
 			if (await rewrite(session, idp, entry)) return true;
-			const lifetimeMs = await lifetimeOf(session);
-			if (lifetimeMs === undefined) return false;
+			const live = await liveOf(session);
+			if (live === undefined) return false;
 			const record = vault.recordOf({ [idp]: entry });
-			if ((await store.save(session, record, lifetimeMs)) === "created") return true;
+			const saved = await store.save(session, record, live.leftMs, live.subject);
+			if (saved !== "exists") return saved === "created";
 		}
 		return false;
 	};
@@ -292,7 +295,9 @@ export function renewalWith(parts: Parts) {
 		withdraw: async (session: string, idp: string, receipt: string | undefined) => {
 			if (receipt !== undefined) await forget(session, idp, receipt);
 		},
-		close: (session: string) => store.remove(session),
+		close: async (session: string) => {
+			await store.remove(session);
+		},
 	};
 }
 

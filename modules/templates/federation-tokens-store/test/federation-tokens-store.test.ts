@@ -49,7 +49,7 @@ describe("the spaces federation-tokens-store declares", () => {
 	it("keeps records and locks when memory runs short", async () => {
 		const { simulated, records, locks } = await opened();
 		const record = { format: 1, idps: {} } as never;
-		await records.save("s-1", record, 60_000);
+		await records.save("s-1", record, 60_000, "alice");
 		await locks.hold("s-1\ncorp", "a", 60_000);
 		await simulated.pressMemory();
 		expect(await records.read("s-1")).toEqual(record);

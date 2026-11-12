@@ -27,7 +27,7 @@
 - Client metadata section `federation-tokens`: `receives` (default false), `post-logout-redirect-uris` (default none; each one a client may register to be sent back to, by `redirect-uris`' rule).
 - Operator section: `refresh-before` (default `30s`), `max-lifetime` (default `1d`), `lock-lifetime` (default `5s`), `requests` in `window`; times written with their unit, a bare number refused.
 - Store interfaces, which the assembly wires; the store never reads a record.
-  - Upstream tokens: one record per session handle, saved once, read, changed from what it holds with a new lifetime or its own, removed, and the sessions whose records live walked by pages. Needs: no eviction, never rolled back by failover.
+  - Upstream tokens: one record per session handle, saved once for the session's subject (or `erased`), read, changed from what it holds with a new lifetime or its own, removed, and the sessions whose records live walked by pages; `erase` and `migrate` optional in 0.20, required in 0.22. Needs: no eviction, never rolled back by failover.
   - Refresh locks: held under their holder's mark unless held, for a lifetime, and changed only from the mark they hold. Needs: no eviction.
 - Audit events with the subject, `idp`, `client` and the source when determined: `federation.token.succeeded` (`refreshed`), `federation.token.failed` (`reason`), `federation.logout.succeeded` (`redirected`).
 - Test configuration builders and the contract test of both store interfaces (`./testing`).
@@ -51,7 +51,7 @@
 ## Data
 
 ## Depends on
-- `kernel`, `http`, `request-source`, `clients`, `redirect-uris`, `upstreams`, `rate-limit`, `audit`, `session`, `session-participants`, and through its internal modules `tokens`, `sender-binding`, `session-tokens`, `seal`
+- `kernel`, `http`, `request-source`, `clients`, `redirect-uris`, `upstreams`, `rate-limit`, `audit`, `session`, `session-participants`, `erasure-extensions`, and through its internal modules `tokens`, `sender-binding`, `session-tokens`, `seal`
 
 ## Vocabulary
 - entry: one IdP's sealed tokens in a session's record, with its version.

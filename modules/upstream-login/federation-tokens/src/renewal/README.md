@@ -26,7 +26,7 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 - An entry that does not open is removed.
 - A refresh asks for the granted scope.
 - A refresh answer narrower than the grant is kept; one with no scope means the grant; a wider or unreadable one is refused, its access token neither kept nor handed.
-- A record is written for what is left of its session, and not at all once the session lets nobody in at `use`: closed, ended, revoked, or short of a requirement.
+- A record is written for what is left of its session, and not at all once the session lets nobody in at `use`: closed, ended, revoked, or short of a requirement. A first record is saved for the session's subject; a save answered `erased`, its subject's erasure fencing it, keeps nothing, and the login's tokens are not kept.
 - A login's tokens are checked against their session once written; when it closed or fell short of a requirement meanwhile, they are withdrawn.
 
 ## Depends on
