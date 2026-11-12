@@ -30,7 +30,13 @@ export default defineModule(
 				log: c.log,
 				random: c.random,
 			});
-			return { nameOf: records.nameOf, save: records.named.create, update: records.named.change };
+			// Created by the code, a secret, under the name records make of it, as `save` keeps it by name.
+			return {
+				nameOf: records.nameOf,
+				save: records.named.create,
+				create: (code, record, lifetimeMs) => records.create(code, record, lifetimeMs),
+				update: records.named.change,
+			};
 		}),
 		m.provide(voidList).by(async (c) =>
 			deferredIn({
