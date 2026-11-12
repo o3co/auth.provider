@@ -9,7 +9,7 @@ import {
 	toStored,
 	toStoredLink,
 } from "../record.ts";
-import type { Settings } from "../section.ts";
+import { familyLifetimeMaxMs, type Settings } from "../section.ts";
 import {
 	type FamilyStore,
 	familyStore,
@@ -38,7 +38,13 @@ const unownedSave =
 	(id, record, lifetimeMs) =>
 		(families.save as unknown as SaveUnowned).call(families, id, record, lifetimeMs);
 
-export function settling(stores: Stores, tokens: Tokens, now: () => number, lifetimeMs: number) {
+/**
+ * How long a mark with no record is kept: the longest a family may live, and an allowance, so a 0.19
+ * founder whose link's reply was lost, resuming within it, finds the mark and founds nothing.
+ */
+const markMs = familyLifetimeMaxMs + allowanceMs;
+
+export function settling(stores: Stores, tokens: Tokens, now: () => number) {
 	/** Ties an access token to the family that issued it, so the family's mark refuses it. */
 	const recordAccess = async (id: string, access: { id: string; expiresAt: number }) => {
 		const remainingMs = access.expiresAt - now() + allowanceMs;
@@ -59,7 +65,7 @@ export function settling(stores: Stores, tokens: Tokens, now: () => number, life
 		const revoked = toStored({ format: 1, revoked: true });
 		const marked = await stores.families.update(id, () => ({ value: revoked }));
 		if (marked) return;
-		const written = await saveMark(id, revoked, lifetimeMs);
+		const written = await saveMark(id, revoked, markMs);
 		// A family placed meanwhile is marked when the revocation is tried again.
 		if (written !== "created" && written !== "closed") throw new Unavailable("refresh");
 	};
@@ -95,7 +101,7 @@ export async function settlingIn(c: BuildContext<Settings>) {
 		);
 	}
 	const lifetimeMs = c.section.lifetime * 1000;
-	const revoker = settling(stores, issuing, c.clock.now, lifetimeMs);
+	const revoker = settling(stores, issuing, c.clock.now);
 	return { stores, revoker, lifetimeMs };
 }
 

@@ -15,7 +15,7 @@ Internal module of `refresh`: the stores, the revoker, and what revokes families
 
 ## Invariants
 - Revocation is the mark alone; its access tokens are not revoked by id, nor is it listed or swept. No record: gone by its end, by its subject's erasure, or never founded; each reads as ended, and nothing is marked.
-- Until 0.22 a mark is still saved there, for a 0.19 founder that writes a redemption's link before the family: through the store's deprecated `unowned`, `closed` (the space indexed) marking nothing; on a store offering none of its erasure ports, through its `save` with no subject, the fallback from before 0.20.
+- Until 0.22 a mark is still saved there, for a 0.19 founder that writes a redemption's link before the family: through the store's deprecated `unowned`, `closed` (the space indexed) marking nothing; on a store offering none of its erasure ports, through its `save` with no subject, the fallback from before 0.20. The mark is kept for the longest a family may live, 365 days, and an allowance: a 0.19 founder whose link's reply was lost, resuming within it, finds the mark and founds nothing.
 - A revocation `token-control` asks of a family already marked writes the mark again, confirmed, before it is answered `done`, whoever asks, as one read before its write was confirmed could be lost in a failover; another client's live family is left alone and answered `done` too.
 
 - A family is saved for its subject. A save the family store answers `erased`, its subject's erasure fencing it, is unavailable, never `exists`, and no family starts; a retry never passes. The family store's `erase` and `migrate` are optional in 0.20 and required in 0.22.

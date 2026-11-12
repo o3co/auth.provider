@@ -1,7 +1,11 @@
 import { Unavailable } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
+import { allowanceMs } from "../../record.ts";
+import { familyLifetimeMaxMs } from "../../section.ts";
 import type { FamilyStore } from "../../store.ts";
 import { settling } from "../settle.ts";
+
+const markMs = familyLifetimeMaxMs + allowanceMs;
 
 /** A family store with no record, offering its ports whole with `unowned` answering as given, or none; what it was asked. */
 function revokerOver(answer: "created" | "exists" | "closed" | undefined) {
@@ -23,7 +27,7 @@ function revokerOver(answer: "created" | "exists" | "closed" | undefined) {
 					},
 				}),
 	};
-	const revoker = settling({ families } as never, {} as never, () => 0, 1000);
+	const revoker = settling({ families } as never, {} as never, () => 0);
 	return { revoke: () => revoker.revokeFamily("fam"), asked };
 }
 
@@ -36,6 +40,20 @@ describe("revoking a family with no record", () => {
 		}
 	});
 
+	it("keeps the mark past the longest family a 0.19 founder may still save, an allowance more", async () => {
+		const kept: number[] = [];
+		const families = {
+			update: async () => undefined,
+			save: async (_id: string, _record: unknown, lifetimeMs: number) => {
+				kept.push(lifetimeMs);
+				return "created";
+			},
+		};
+		await settling({ families } as never, {} as never, () => 0).revokeFamily("fam");
+		expect(kept).toEqual([markMs]);
+		expect(markMs).toBe(365 * 86_400_000 + allowanceMs);
+	});
+
 	it("is unavailable where a record was placed meanwhile, so the revocation is tried again", async () => {
 		await expect(revokerOver("exists").revoke()).rejects.toBeInstanceOf(Unavailable);
 	});
@@ -43,6 +61,6 @@ describe("revoking a family with no record", () => {
 	it("saves the mark through save with no subject on a store offering none of its ports, as before 0.20", async () => {
 		const r = revokerOver(undefined);
 		await r.revoke();
-		expect(r.asked).toEqual([["save", "fam", { format: 1, revoked: true }, 1000]]);
+		expect(r.asked).toEqual([["save", "fam", { format: 1, revoked: true }, markMs]]);
 	});
 });
