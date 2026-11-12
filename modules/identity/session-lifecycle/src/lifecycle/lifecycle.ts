@@ -24,7 +24,7 @@ import type {
 	SubjectSessions,
 } from "../store.ts";
 import { listingOver } from "./listing/listing.ts";
-import { fromStored, type SessionRecord, toStored } from "./record.ts";
+import { closedFrom, fromStored, type SessionRecord, toStored } from "./record.ts";
 import { retryingWith } from "./retrying.ts";
 import { freshToken, secretsWith } from "./secrets.ts";
 
@@ -108,9 +108,9 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 	const sessionOf = (handle: string, record: AuthContext): Session =>
 		Object.freeze({ id: handle, context: contextOf(record) });
 	const endedAt = (record: OpenRecord, at: number) => record.openedAt + lifetimeMs <= at;
-	/** Closed, and kept for the lifetime from now. */
+	/** Closed, keeping only its subject and what 0.19 reads, for the lifetime from now. */
 	const closedOf = (was: SessionRecord): ChangedSession => ({
-		value: toStored({ ...was, state: "closed" }),
+		value: toStored(closedFrom(was)),
 		lifetimeMs,
 	});
 	/** Goes on only when the place answered created; anything else, `erased` included, is unavailable, never tried again. */

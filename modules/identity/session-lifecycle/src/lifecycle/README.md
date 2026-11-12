@@ -46,6 +46,7 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 ## Data
 - Session record, per handle: format 2, state, the opening time, authentication context (attributes as `session-lifecycle` keeps them), when closing began and when to retry.
 - A format 1 record is read as opened at its authentication time, which is read as unknown.
+- A closed record keeps its subject and what 0.19 needs to read it; a login's attributes, amr, raise and times are dropped at close (the authentication time read as unknown).
 - Every read checks the record: one of another format or shape lets nobody in, and closing it is unavailable.
 - A record lives for the lifetime from login, without end while closing, and for the lifetime again once closed.
 - Cookie index, by the cookie's secret: the handle, for the session's lifetime.
