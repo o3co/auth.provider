@@ -34,8 +34,8 @@ export interface CodePlace {
 
 /**
  * What code-grant needs from any implementation of its store interfaces: records kept whole and
- * once, changed only from what they hold, ended at exactly their lifetime, and voids kept until
- * done, through lost answers and failovers, never pushed out to make room.
+ * once, changed only from what they hold, ended at exactly their lifetime (a change keeps it),
+ * and voids kept until done, through lost answers and failovers, never pushed out to make room.
  */
 export function codeStoreContract(name: string, open: () => Promise<CodePlace>): void {
 	let n = 0;
@@ -97,15 +97,15 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			expect((await place.codes.update(name, plus(1)))?.after).toEqual(held({ n: 21 }));
 		});
 
-		it("ends a record at exactly its lifetime, counted from the write that last set one", async () => {
+		it("ends a record at exactly its lifetime, a change keeping its end", async () => {
 			const place = await open();
 			const code = fresh();
 			const name = place.codes.nameOf(code);
 			await place.codes.create(code, held({ n: 1 }), 1000, "alice");
-			place.advance(999);
-			await place.codes.update(name, (record) => ({ value: record, lifetimeMs: 1000 }));
-			place.advance(999);
-			expect(await place.codes.update(name, () => undefined)).toBeDefined();
+			place.advance(500);
+			await place.codes.update(name, plus(1));
+			place.advance(499);
+			expect((await place.codes.update(name, () => undefined))?.after).toEqual(held({ n: 2 }));
 			place.advance(1);
 			expect(await place.codes.update(name, () => undefined)).toBeUndefined();
 			expect(await place.codes.create(code, held({ n: 2 }), 1000, "alice")).toBe("created");

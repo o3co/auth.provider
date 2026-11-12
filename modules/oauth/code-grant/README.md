@@ -16,7 +16,7 @@
 - Extension point: session redemptions, told the session's handle and the client of each code redeemed in a session.
 - Extension point: redemption hooks, one per name: pinned with the redemption's name once the code is used up, then told the redemption facts after the additions.
 - Extension point: additions, one per answer field (one on the answer's own fields refuses boot): redemption facts → value or none, and optionally a revocation by redemption name.
-- Store interfaces, wired by the assembly, never shown what a record holds: codes by a name made from the code, created by the code for its subject (rewrite from the current contents, answering before and after); the void list (add, done, go through in order).
+- Store interfaces, wired by the assembly, never shown what a record holds: codes by a name made from the code, created by the code for its subject (rewrite from the current contents, answering before and after); each redemption record by that name, alike (`redemption-record`); the void list (add, done, go through in order). Their `erase` and `migrate` come all four or none (`erasure`), else boot is refused.
 - Operator section: `code-lifetime` (10s–10m, default `10m`), `sweep-interval` (retry of failed revocations, 1s–1h, default `30s`). Times are written with their unit; a bare number is refused.
 - `./testing`: configuration builders, and the store interfaces' contract test for every implementation (records whole and once, changed only from what they hold, ended at exactly their lifetime; voids kept until done, refused when full; lost answers, failovers, restarts and memory pressure where the place has them).
 
@@ -26,14 +26,15 @@
 - A redemption is told to the session redemptions after issuing, which has the token recorded to the code's session, and before that second check.
 - The audience asked (`grants`' `target`, within the code's), then the issuance policies, are asked before the code is used up, only for its client, redirect URI and verifier (a refusal leaves it unused), and again when issuing (a refusal then leaves it used up, giving nothing). The access token and the additions carry the code's amr, authentication time (or that it is not known) and acr, from the code's session; the access token ends no later than that session.
 - A record that vanished during a redemption is refused and never written back (the code would be unused again). A record of a format or shape not known is a code that cannot be used: refused (not unavailable), or logged and removed from the list.
-- A code is voided (`voiding`) when it comes again, or when a session redemption, the ID token, an addition or a hook's `redeemed` fails, however it fails. Issuing that fails leaves it used up, giving nothing.
-- A redemption is pinned to each hook after the code is used up, presented right and its session entered, and before its token is issued; a failed pin voids the code and issues nothing. A code whose record ends before its token is recorded is refused there, before the ID token, the additions and `redeemed`, so a pin that found its hook's holding gone reaches none of them.
+- A code is voided (`voiding`) when it comes again, its own record there or ended, or when a session redemption, the ID token, an addition or a hook's `redeemed` fails, however it fails. Issuing that fails leaves it used up, giving nothing.
+- A redemption is pinned to each hook after the code is used up, presented right and its session entered, and before its token is issued; a failed pin voids the code and issues nothing.
+- A redemption whose code ended or redemption record went (erased) before its token is noted is refused there, before the ID token, the additions and `redeemed`: no hook is told of a code that is gone, and a pin that found its hook's holding gone reaches none of them. Until 0.22, the void check after issuing reads the code too.
 - A configuration that cannot revoke access tokens refuses boot.
 - Boot is refused where nothing contributes to `grants`' session issuances: its tokens are issued from the code's session and must be recorded there, so that a logout ends them; `combinations` composes `session-tokens` for it.
 - Trade-offs: whoever holds a leaked code can revoke the legitimate tokens while the code lives; a client that resends a redemption by itself fails it.
 
 ## Data
-- Codes: a record per code name until its expiry; one that gave a token, until that token's end plus 120 seconds for clock drift (`kernel`'s clock; syncing hosts is the deployment's). The void list: until each code is settled.
+- Codes: a record per code name until its expiry. Redemption records: each for `storedRecordMaxMs`, the longest token, then 120 s for clock drift and 120 s from use-up to issue (`kernel`'s clock; syncing hosts is the deployment's). The void list: until each code is settled.
 - Needs: no eviction (tokens to revoke would be lost), a crash survived, no rollback on failover (a used code would come back), names derived from the code.
 
 ## Depends on

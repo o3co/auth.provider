@@ -14,15 +14,18 @@ import {
 	codes,
 	idTokens,
 	redemptionHooks,
+	redemptionRecords,
 	sessionRedemptions,
 	voidList,
 } from "./contract.ts";
+import { portsRefused } from "./erasure/ports.ts";
 import { answerFields, codeGrant } from "./grant.ts";
 import { section } from "./section.ts";
 import { voiding } from "./voiding/voiding.ts";
 
 const takes = [
 	codeStore,
+	redemptionRecords,
 	voidList,
 	sessions,
 	clients,
@@ -107,17 +110,21 @@ export default defineModule({ name: "code-grant", replicaSafe: true, section, ta
 		const taken = contributed.find((a) => answerFields.has(a.field));
 		if (taken) return c.refuse("code-grant", `the response field ${taken.field} already exists`);
 		const store = await c.get(codeStore);
+		const records = await c.get(redemptionRecords);
+		const ports = portsRefused({ codes: store, redemptionRecords: records });
+		if (ports) return c.refuse("code-grant", ports);
 		const voids = voiding({
 			store,
+			redemptionRecords: records,
 			voids: await c.get(voidList),
 			tokens: issuing,
 			log: c.log,
-			now: c.clock.now,
 			additions: contributed,
 		});
 		c.every(c.section["sweep-interval"] * 1000, () => voids.sweep());
 		return codeGrant({
 			store,
+			redemptionRecords: records,
 			sessions: await c.get(sessions),
 			settle: voids.settle,
 			now: c.clock.now,

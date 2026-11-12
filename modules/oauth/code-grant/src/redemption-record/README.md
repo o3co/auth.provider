@@ -3,7 +3,7 @@
 Internal module of `code-grant`: each redemption's record, which holds its token and outlives its code.
 
 ## Responsibilities
-- The redemption record's format, and its steps: created for its subject, bounding its token's end, then holding its token; marked void.
+- The redemption record's format, and its steps in a redemption: created once the code is used up, bounding its token's end, then holding its token; marked void on a reuse.
 
 ## Not here
 - Deciding a code was used up or came again (the grant). Revoking the token (`voiding`). Where the record is kept (the Store).
@@ -13,8 +13,10 @@ Internal module of `code-grant`: each redemption's record, which holds its token
 - `RedemptionRecord` and its stored form (`toStoredRedemptionRecord`, `fromStoredRedemptionRecord`, checked on every read).
 
 ## Invariants
-- A token ends at least 120 s before its record, the creation's time read before its write.
+- Use-up, then the record is created, under its subject's tombstone, then the token is issued, then noted on the record: a reuse that finds no token has nothing yet to revoke, right only by that order. A subject erased meanwhile gets no record, so no token: the code is refused and voided.
+- Its token ends at least 120 s before the record, the creation's time read before its write; it ends no later than its session as well.
 - A note or a mark rewrites what the record holds and keeps its end; a record gone is never written back.
+- Until 0.22, the token is noted on the code's own record too, keeping the code's end and never deciding a use, so a 0.19 instance that takes a reuse while the code lives revokes it, and its sweep loses no revocation.
 
 ## Depends on
 - `zod`; the package's store interfaces and `storedRecordMaxMs`.
