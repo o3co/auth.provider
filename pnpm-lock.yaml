@@ -4188,6 +4188,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
     devDependencies:
       vitest:
         specifier: 5.0.5
