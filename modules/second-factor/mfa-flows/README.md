@@ -17,10 +17,10 @@
 - `mfa.email_address_mismatch` (`kind`) when a kind refuses a factor whose contact changed. `mfa.lock.recovered` when a release clears something (fields in `release`'s card).
 - Operator section: `transaction-lifetime` (1m–30m, default `10m`), `attempts-per-transaction` (2–10, default 5), `requests` (POSTs per source in each window, over every route, 1–100000, default 60), `window` (1s–1d, default `5m`).
 - `lockout` in the section holds the lockout numbers (by default `threshold` 5, `backoff` `15m`, `max-backoff` `1d`, `budget` 10, `budget-window` `7d`, `hard-limit` 100, `memory` `1d`): `threshold`, `budget` and `hard-limit` at most 100, the most consecutive failures NIST SP 800-63B rev 4 §3.2.2 allows, and `memory` at least `1h`; `rate-limit` judges their shape, refusing boot when it does not fit.
-- Store interface for transactions by their unguessable identifier, never kept in clear: save for a lifetime, read, change from what it holds (the lifetime stays). Contents are not shown to it. Its needs: never evicted, survives a crash, never back after a failover.
-- Store interface for each holder's live transactions (a session's handle, or a held login's subject), each by a digest of its identifier for its lifetime: add (answering those pushed out past its cap, the wiring's), members, remove. Its needs: never evicted, survives a crash and a failover, confirmed reads.
+- Store interfaces for transactions and for each holder's live transactions, their needs and erasure ports, `transactionLifetimeMaxMs` and `storedLifetimeMaxMs`: `transactions`' card.
 - Extension point `enrollmentFlow` (exactly one, boot refused otherwise): the handlers of `POST enrollment` and `POST enrollment/complete`, and the answer to a challenge in an enrollment's transaction. `mfa-enrollment` contributes it, coming wherever this package is composed.
 - Its lockout to `subjectLockouts` (`wiring`).
+- Its eraser `mfa-flows` (internal module `erasure`), contributed to `erasure-extensions`' `erasers`: a subject's transactions and permits fenced, its listings erased, through the stores' ports.
 - Contract `flowParts`, for the module binding factors: the transactions, the resume of a held login, recording through this package's declaration, the common answers, the request helpers, and the lockout's name and policy (`seams`' card).
 - `./testing`: test configuration builders and the section's keys (`flowKeys`), and the store interfaces' contract tests for every implementation (see `transactions`' card).
 
@@ -43,7 +43,7 @@
 - Transactions: one per identifier (256 random bits), kept for `transaction-lifetime`. Its needs say what the place must keep it through (a taken one coming back could finish a login twice); the wiring side meets them.
 
 ## Depends on
-- `kernel`, `http`, `cookies`, `request-source`, `csrf`, `session`, `login-gates`, `subject-revocation`, `rate-limit`, `audit`, `mfa` (composed with it; `proofSteps`, `fenceFollower`), `mfa-reading` (the reading and proving of factors), `mfa-extensions` (`secondFactorAmr`), `subject-attributes` (`vouches`)
+- `kernel`, `http`, `cookies`, `request-source`, `csrf`, `session`, `login-gates`, `subject-revocation`, `rate-limit`, `audit`, `mfa` (composed with it; `proofSteps`, `fenceFollower`), `mfa-reading` (the reading and proving of factors), `mfa-extensions` (`secondFactorAmr`), `subject-attributes` (`vouches`), `erasure-extensions` (`erasers`, `ownerStopped`, the store ports' erasure types)
 
 ## Vocabulary
 - Transaction: a short-lived record waiting for second-factor confirmation. Its purpose is login, login with a first enrollment, step-up, or enrollment.

@@ -22,9 +22,9 @@ export function verifyWith(
 	resumeLogin: ReturnType<typeof resumeOver>,
 ): Handler {
 	/** Grants the session a release; one that cannot be written leaves the login as it is, with none. */
-	const grant = async (handle: string) => {
+	const grant = (subject: string) => async (handle: string) => {
 		try {
-			await p.permits.grant(handle);
+			await p.permits.grant(handle, subject);
 		} catch (error) {
 			if (!isUnavailable(error)) throw error;
 			p.log.warn("mfa-flows.release_permit_unrecorded", {});
@@ -105,7 +105,7 @@ export function verifyWith(
 		});
 		if ("status" in outcome) return outcome;
 		// A local proof of a factor guessing cannot beat lets this session release its lockout.
-		const granting = guessable ? undefined : grant;
+		const granting = guessable ? undefined : grant(t.subject);
 		return t.purpose === "step-up"
 			? raiseSession(request, outcome.amr, granting)
 			: resumeLogin(request, t, outcome.amr, undefined, granting);

@@ -94,3 +94,27 @@ it("starts and finds nothing while the listing cannot answer, and logs a removal
 	expect(await transactions.take(listed.id)).toBe(true);
 	expect(logged.lines().map((line) => line.event)).toEqual(["mfa-flows.listing_failed"]);
 });
+
+it("fails a start its subject's erasure refused, at the save or at the listing, never trying it again", async () => {
+	const { kept, transactions } = opened();
+	kept.erased.transactions.add("erin");
+	await expect(transactions.start({ subject: "erin", purpose: "login" })).rejects.toSatisfy(
+		isUnavailable,
+	);
+	expect(kept.saves.count).toBe(0);
+	// Saved, then refused at the listing: never listed, so it never counts, and it ends by its lifetime.
+	kept.erased.listings.add("finn");
+	await expect(transactions.start({ subject: "finn", purpose: "login" })).rejects.toSatisfy(
+		isUnavailable,
+	);
+	expect(kept.saves.count).toBe(1);
+	expect(await kept.listings.members("login:finn")).toEqual([]);
+});
+
+it("refuses to keep a transaction past the store's ceiling for transactions", () => {
+	const kept = memoryTransactions(() => 0);
+	const over = { store: kept.transactions, listings: kept.listings, jar, log: recordingLog().log };
+	const parts = { ...over, random, clock: { now: () => 0 }, attempts: 2 };
+	expect(() => transactionsOver({ ...parts, ttlMs: 1_800_001 })).toThrow(TypeError);
+	expect(() => transactionsOver({ ...parts, ttlMs: 1_800_000 })).not.toThrow();
+});

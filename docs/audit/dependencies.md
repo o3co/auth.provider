@@ -247,7 +247,7 @@ flowchart LR
 | `@mod/mfa-enrollment` | feature | `@mod/http`, `@mod/kernel`, `@mod/labels`, `@mod/mfa`, `@mod/mfa-binding`, `@mod/mfa-binding-proof`, `@mod/mfa-extensions`, `@mod/mfa-flows`, `@mod/mfa-managing`, `@mod/session`, `@mod/subject-revocation` |
 | `@mod/mfa-entry` | feature | `@mod/kernel`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading`, `@mod/session`, `@mod/session-requirements` |
 | `@mod/mfa-extensions` | feature | `@mod/kernel` |
-| `@mod/mfa-flows` | feature | `@mod/audit`, `@mod/cookies`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/login-gates`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading`, `@mod/rate-limit`, `@mod/request-source`, `@mod/session`, `@mod/subject-attributes`, `@mod/subject-revocation` |
+| `@mod/mfa-flows` | feature | `@mod/audit`, `@mod/cookies`, `@mod/csrf`, `@mod/erasure-extensions`, `@mod/http`, `@mod/kernel`, `@mod/login-gates`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading`, `@mod/rate-limit`, `@mod/request-source`, `@mod/session`, `@mod/subject-attributes`, `@mod/subject-revocation` |
 | `@mod/mfa-management` | feature | `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/mfa`, `@mod/mfa-entry`, `@mod/mfa-managing`, `@mod/mfa-reading`, `@mod/rate-limit`, `@mod/session` |
 | `@mod/mfa-managing` | feature | `@mod/kernel`, `@mod/mfa-reading` |
 | `@mod/mfa-reading` | feature | `@mod/kernel`, `@mod/mfa-extensions` |
@@ -285,7 +285,7 @@ flowchart LR
 | `@mod/federation-grants-store` | wiring | `@mod/federation-grants`, `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-records` |
 | `@mod/federation-tokens-store` | wiring | `@mod/federation-tokens`, `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-records` |
 | `@mod/jwt-bearer-store` | wiring | `@mod/jwt-bearer`, `@mod/kernel`, `@mod/records`, `@mod/store` |
-| `@mod/mfa-flows-store` | wiring | `@mod/kernel`, `@mod/mfa-flows`, `@mod/records`, `@mod/store` |
+| `@mod/mfa-flows-store` | wiring | `@mod/kernel`, `@mod/mfa-flows`, `@mod/store`, `@mod/subject-records` |
 | `@mod/mfa-store` | wiring | `@mod/kernel`, `@mod/mfa`, `@mod/records`, `@mod/store` |
 | `@mod/refresh-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/refresh`, `@mod/store`, `@mod/subject-records` |
 | `@mod/rp-logout-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/rp-logout`, `@mod/store` |

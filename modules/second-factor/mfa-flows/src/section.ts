@@ -1,5 +1,6 @@
 import { setting } from "@mod/kernel";
 import { z } from "zod";
+import { transactionLifetimeMaxMs } from "./store.ts";
 
 /** A time written with its unit, read in whole seconds. */
 const seconds = () => setting.duration("s").pipe(z.number().int());
@@ -12,7 +13,13 @@ const memoryMin = 3600;
 export const section = z.strictObject({
 	"transaction-lifetime": setting
 		.duration("s")
-		.pipe(z.number().int().min(60).max(1800))
+		.pipe(
+			z
+				.number()
+				.int()
+				.min(60)
+				.max(transactionLifetimeMaxMs / 1000),
+		)
 		.prefault("10m")
 		.describe(
 			"How long a transaction waits for its factor, from 1m to 30m in whole seconds, such as `10m`.",

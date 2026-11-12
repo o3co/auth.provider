@@ -15,6 +15,7 @@
 		"@mod/audit": "workspace:*",
 		"@mod/cookies": "workspace:*",
 		"@mod/csrf": "workspace:*",
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/login-gates": "workspace:*",
