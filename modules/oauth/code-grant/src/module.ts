@@ -1,5 +1,6 @@
 import { clientAllowance } from "@mod/client-allowance";
 import { clients } from "@mod/clients";
+import { erasers } from "@mod/erasure-extensions";
 import { grants, sessionIssuances } from "@mod/grants";
 import { issuer } from "@mod/issuer";
 import { defineModule, Unavailable } from "@mod/kernel";
@@ -18,6 +19,7 @@ import {
 	sessionRedemptions,
 	voidList,
 } from "./contract.ts";
+import { codeGrantEraser } from "./erasure/eraser.ts";
 import { portsRefused } from "./erasure/ports.ts";
 import { answerFields, codeGrant } from "./grant.ts";
 import { section } from "./section.ts";
@@ -134,4 +136,11 @@ export default defineModule({ name: "code-grant", replicaSafe: true, section, ta
 			hooks: await c.collect(redemptionHooks),
 		});
 	}),
+	// Its build takes only its places, collecting no probes: the erasure gate collects erasers.
+	m.contribute(erasers).by(async (c) =>
+		codeGrantEraser({
+			codes: await c.get(codeStore),
+			redemptionRecords: await c.get(redemptionRecords),
+		}),
+	),
 ]);
