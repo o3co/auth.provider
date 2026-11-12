@@ -14,6 +14,7 @@
 	},
 	"dependencies": {
 		"@mod/cookies": "workspace:*",
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/login-attributes": "workspace:*",

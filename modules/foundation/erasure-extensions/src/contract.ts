@@ -101,10 +101,15 @@ export type SetReading = (key: string) => Promise<SubjectOf>;
  */
 export type Elsewhere = (key: string, value: unknown) => Promise<void>;
 
-/** An eraser's answer: its spaces' reports, and the logout notices it could not tell were delivered. */
+/** An eraser's answer: its spaces' reports, and the sessions it removed whose participants were never told. */
 export interface Erased {
 	readonly reports: readonly (SpaceReport | ForgottenReport)[];
-	/** Counted high where unsure; 0 for an eraser with no notices to lose. */
+	/**
+	 * Sessions whose participants were never told, each counted once; summed across erasers, the
+	 * sessions whose logout may not have reached all their RPs. High for a record it could not read,
+	 * and for a session closing when erased (another eraser may count it too); low after an
+	 * interrupted run. 0 for an eraser with no sessions to lose.
+	 */
 	readonly logoutGaps: number;
 }
 

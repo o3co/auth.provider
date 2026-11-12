@@ -144,7 +144,7 @@ flowchart LR
 | `@mod/login-gates` | feature | `@mod/http`, `@mod/kernel`, `@mod/session`, `@mod/url-setting` |
 | `@mod/login-password` | feature | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/login-gates`, `@mod/rate-limit`, `@mod/request-source`, `@mod/users` |
 | `@mod/session` | feature | `@mod/cookies`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/subject-revocation` |
-| `@mod/session-lifecycle` | adapter | `@mod/cookies`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/session`, `@mod/subject-revocation` |
+| `@mod/session-lifecycle` | adapter | `@mod/cookies`, `@mod/erasure-extensions`, `@mod/http`, `@mod/kernel`, `@mod/login-attributes`, `@mod/session`, `@mod/subject-revocation` |
 | `@mod/session-participants` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/session-requirements` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/subject-attributes` | feature | `@mod/kernel`, `@mod/login-attributes`, `@mod/session`, `@mod/users` |
@@ -289,7 +289,7 @@ flowchart LR
 | `@mod/mfa-store` | wiring | `@mod/kernel`, `@mod/mfa`, `@mod/records`, `@mod/store` |
 | `@mod/refresh-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/refresh`, `@mod/store`, `@mod/subject-records` |
 | `@mod/rp-logout-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/rp-logout`, `@mod/store` |
-| `@mod/session-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-lifecycle`, `@mod/store` |
+| `@mod/session-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-lifecycle`, `@mod/store`, `@mod/subject-records` |
 | `@mod/session-tokens-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-tokens`, `@mod/store` |
 | `@mod/subject-revocation-store` | wiring | `@mod/erasure-extensions`, `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-revocation` |
 | `@mod/tokens-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/tokens` |

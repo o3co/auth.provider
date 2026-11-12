@@ -53,6 +53,11 @@ export function sessionStoreContract(name: string, open: () => Promise<SessionSt
 	const plus = (by: number) => (record: StoredSession) => ({
 		value: held({ n: counted(record) + by }),
 	});
+	/** What an add answered, for a subject the place has not erased. */
+	const listedOf = (added: Awaited<ReturnType<SubjectSessions["add"]>>) => {
+		if (typeof added === "string") throw new Error(`listed as ${added}`);
+		return added;
+	};
 	const closingsIn = async (closings: ClosingList) => {
 		const found: string[] = [];
 		await closings.each(async (handle) => {
@@ -66,8 +71,8 @@ export function sessionStoreContract(name: string, open: () => Promise<SessionSt
 			const { sessions } = await open();
 			const handle = fresh();
 			const odd = held({ state: "unheard-of", nested: { list: [1, "two"] } });
-			expect(await sessions.save(handle, odd, 60_000)).toBe("created");
-			expect(await sessions.save(handle, held({ n: 1 }), 60_000)).toBe("exists");
+			expect(await sessions.save(handle, odd, 60_000, "alice")).toBe("created");
+			expect(await sessions.save(handle, held({ n: 1 }), 60_000, "alice")).toBe("exists");
 			expect(await sessions.read(handle)).toEqual(odd);
 			expect(await sessions.update(handle, () => undefined)).toEqual({ before: odd, after: odd });
 			expect(await sessions.update(fresh(), plus(1))).toBeUndefined();
@@ -77,7 +82,7 @@ export function sessionStoreContract(name: string, open: () => Promise<SessionSt
 		it("changes a record only from what it holds, again after a racing writer", async () => {
 			const place = await open();
 			const handle = fresh();
-			await place.sessions.save(handle, held({ n: 1 }), 60_000);
+			await place.sessions.save(handle, held({ n: 1 }), 60_000, "alice");
 			expect(await place.sessions.update(handle, plus(1))).toEqual({
 				before: held({ n: 1 }),
 				after: held({ n: 2 }),
@@ -89,8 +94,8 @@ export function sessionStoreContract(name: string, open: () => Promise<SessionSt
 		it("ends a record at exactly its lifetime, or never when it is left without one", async () => {
 			const place = await open();
 			const [ending, endless] = [fresh(), fresh()];
-			await place.sessions.save(ending, held({ n: 1 }), 1000);
-			await place.sessions.save(endless, held({ n: 1 }), 1000);
+			await place.sessions.save(ending, held({ n: 1 }), 1000, "alice");
+			await place.sessions.save(endless, held({ n: 1 }), 1000, "alice");
 			place.advance(999);
 			await place.sessions.update(ending, (record) => ({ value: record, lifetimeMs: 1000 }));
 			await place.sessions.update(endless, (record) => ({ value: record, lifetimeMs: "endless" }));
@@ -132,7 +137,7 @@ export function sessionStoreContract(name: string, open: () => Promise<SessionSt
 			const [subject, other, ending, lasting] = [fresh(), fresh(), fresh(), fresh()];
 			const members = async (of: string) =>
 				(await subjects.members(of)).map(({ member }) => member).sort();
-			expect((await subjects.add(subject, ending, 1000)).pushedOut).toEqual([]);
+			expect(listedOf(await subjects.add(subject, ending, 1000)).pushedOut).toEqual([]);
 			await subjects.add(subject, lasting, 60_000);
 			await subjects.add(other, ending, 60_000);
 			expect(await members(subject)).toEqual([ending, lasting].sort());
@@ -150,13 +155,36 @@ export function sessionStoreContract(name: string, open: () => Promise<SessionSt
 			// Each handle ends before every one listed earlier, so the one ending first is the one being added.
 			for (let n = 0; n < 10_000; n++) {
 				const handle = fresh();
-				const { pushedOut } = await subjects.add(subject, handle, 1_000_000 - n);
+				const { pushedOut } = listedOf(await subjects.add(subject, handle, 1_000_000 - n));
 				if (pushedOut.length === 0) continue;
 				expect(pushedOut).not.toContain(handle);
 				expect((await subjects.members(subject)).map(({ member }) => member)).toContain(handle);
 				return;
 			}
 			throw new Error("the listing pushed none out");
+		});
+
+		it("refuses, where the stores erase, every session saved and every listing added for a subject they erased, and only for that subject", async (context) => {
+			const { sessions, subjects } = await open();
+			if (!sessions.erase || !subjects.erase) return context.skip();
+			const [handle, other] = [fresh(), fresh()];
+			await sessions.save(handle, held({ n: 1 }), 60_000, "erin");
+			await subjects.add("erin", handle, 60_000);
+			const signal = new AbortController().signal;
+			const told: StoredSession[] = [];
+			const report = await sessions.erase.call(sessions, "erin", signal, (record) => {
+				told.push(record);
+			});
+			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+			if (report.kind === "stopped") return context.skip();
+			expect(report).toMatchObject({ kind: "erased", removed: 1 });
+			expect(told).toEqual([held({ n: 1 })]);
+			expect(await subjects.erase.call(subjects, "erin", signal)).toMatchObject({ kind: "erased" });
+			expect(await sessions.read(handle)).toBeUndefined();
+			expect(await subjects.members("erin")).toEqual([]);
+			expect(await sessions.save(fresh(), held({ n: 2 }), 60_000, "erin")).toBe("erased");
+			expect(await subjects.add("erin", other, 60_000)).toBe("erased");
+			expect(await sessions.save(other, held({ n: 3 }), 60_000, "finn")).toBe("created");
 		});
 
 		it("keeps closings until done, and a closing whose handling failed", async () => {
@@ -184,7 +212,7 @@ export function sessionStoreContract(name: string, open: () => Promise<SessionSt
 			const { restart, pressMemory } = place;
 			if (!restart || !pressMemory) return context.skip();
 			const [handle, secret, kept] = [fresh(), fresh(), fresh()];
-			await place.sessions.save(handle, held({ n: 1 }), 60_000);
+			await place.sessions.save(handle, held({ n: 1 }), 60_000, "alice");
 			await place.cookies.save(secret, handle, 60_000);
 			await place.closings.add(kept);
 			await place.subjects.add(secret, handle, 60_000);
@@ -210,7 +238,7 @@ export function sessionStoreContract(name: string, open: () => Promise<SessionSt
 				fresh(),
 			];
 			lose();
-			expect(await place.sessions.save(handle, held({ n: 1 }), 60_000)).toBe("created");
+			expect(await place.sessions.save(handle, held({ n: 1 }), 60_000, "alice")).toBe("created");
 			lose();
 			expect((await place.sessions.update(handle, plus(1)))?.after).toEqual(held({ n: 2 }));
 			await failover();

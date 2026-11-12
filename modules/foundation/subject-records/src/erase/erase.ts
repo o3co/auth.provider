@@ -37,7 +37,8 @@ interface Settled {
 /**
  * Settles `entries` of a space as one write, each by what it names holds: removed as `settle`
  * says, those leaving taken out of `bucket`, which goes with its last entry. Every target is held
- * as read. Answers what was removed that was held, and the entries that left.
+ * as read. Answers what was removed that was held, as the write that committed held it, and how
+ * many entries left.
  */
 async function settled(
 	place: SubjectPlace,
@@ -45,18 +46,22 @@ async function settled(
 	entries: readonly Entry[],
 	settle: (held: Json | undefined) => Settled,
 ) {
-	let answer = { removed: 0, left: 0 };
+	let answer: { readonly removed: readonly Json[]; readonly left: number } = {
+		removed: [],
+		left: 0,
+	};
 	await changeRecords({
 		targets: [...(bucket ? [bucket] : []), ...entries.map((e) => targetOf(place, e))],
 		decide: (read) => {
 			const [listed, ...held] = bucket ? read : [undefined, ...read];
 			const leaving = new Set<Entry>();
-			let removed = 0;
+			const removed: Json[] = [];
 			const next = entries.map((entry, at): Next<Json> => {
 				const one = settle(held[at]);
 				if (one.leaves) leaving.add(entry);
 				if (!one.remove) return undefined;
-				if (held[at] !== undefined) removed += 1;
+				const was = held[at];
+				if (was !== undefined) removed.push(was);
 				return { remove: true };
 			});
 			answer = { removed, left: leaving.size };
@@ -78,11 +83,20 @@ async function settled(
  * itself; in one declaring `bounded`, nothing: its records end by the tombstone's deadline, the
  * space's `boundedMs` and the clock allowance. Stops between writes where `signal` aborts; the
  * tombstone stands, and erasing again finishes. A place the builders would refuse throws TypeError.
+ *
+ * `eachRemoved`, where given, is called synchronously once a write has committed, once for each
+ * record or set that write removed, with the owner's value opened from its envelope, never the
+ * envelope; never from a decision tried again, for one read absent, or for one left as another
+ * subject's. In a run answering `erased` it is called exactly `removed` times; a crash between a
+ * commit and its calls loses them. It must not throw and must not write: it only counts.
  */
 export async function eraseSubject(
 	place: SubjectPlace,
 	subject: string,
-	options: { readonly signal?: AbortSignal } = {},
+	options: {
+		readonly signal?: AbortSignal;
+		readonly eachRemoved?: (value: Json) => void;
+	} = {},
 ): Promise<SpaceReport> {
 	const category = checkedSubjectPlace(
 		place,
@@ -100,6 +114,12 @@ export async function eraseSubject(
 	const stopped = (reason: string) => report({ kind: "stopped", space, reason });
 	if (place.phase !== "indexed") return stopped("not-indexed");
 	const { tombOf, bucketsOf } = indexOver(place, place.space, place.index);
+	/** Each value a committed write removed, opened, to `eachRemoved`; answers how many. */
+	const told = (removed: readonly Json[]) => {
+		// A value held is opened to a value: its envelope's, or itself.
+		for (const held of removed) options.eachRemoved?.(opened(held, true).value as Json);
+		return removed.length;
+	};
 	try {
 		if (options.signal?.aborted) return stopped("aborted");
 		// The tombstone's deadline bounds its commit on the store clock, as a write commits by its deadline.
@@ -131,17 +151,17 @@ export async function eraseSubject(
 				witnessOf(subject, "record"),
 				witnessOf(subject, "set"),
 			];
-			let removed = 0;
+			let removed: readonly Json[] = [];
 			await changeRecords({
 				targets: under,
 				decide: (read) => {
-					removed = read.slice(0, 2).filter((held) => held !== undefined).length;
+					removed = read.slice(0, 2).filter((held): held is Json => held !== undefined);
 					return {
 						targets: read.map((held) => (held === undefined ? undefined : { remove: true })),
 					};
 				},
 			});
-			return report({ kind: "erased", space, removed });
+			return report({ kind: "erased", space, removed: told(removed) });
 		}
 		const theirs = (held: Json | undefined): Settled => ({
 			remove: held === undefined || opened(held, true).subject === subject,
@@ -154,7 +174,7 @@ export async function eraseSubject(
 				const { entry } = await place.store.get(changeRecords.keyOf(bucket));
 				const entries = entriesIn(entry?.value, space).slice(0, perBatch);
 				if (entries.length === 0) break;
-				removed += (await settled(place, bucket, entries, theirs)).removed;
+				removed += told((await settled(place, bucket, entries, theirs)).removed);
 			}
 		}
 		return report({ kind: "erased", space, removed });

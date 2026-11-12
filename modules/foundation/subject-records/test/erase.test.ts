@@ -114,17 +114,27 @@ it("erases a subject's records and sets its index lists, past a tombstone no cre
 	for (const key of keys) await records.create(key, 1, 60_000, "alice");
 	await sets.add("grp", "m", 60_000, "alice");
 	await records.create("b", 2, 60_000, "bob");
-	expect(await eraseSubject(at(indexed), "alice")).toEqual({
+	const removed: Json[] = [];
+	const eachRemoved = (value: Json) => void removed.push(value);
+	expect(await eraseSubject(at(indexed), "alice", { eachRemoved })).toEqual({
 		kind: "erased",
 		space: indexed.name,
 		removed: 41,
 	});
+	// Once per record or set removed, each the owner's value out of its envelope.
+	expect(removed).toHaveLength(41);
+	expect(removed.filter((value) => value === 1)).toHaveLength(40);
+	expect(removed.some((value) => JSON.stringify(value).includes("records:v"))).toBe(false);
 	expect(Object.keys(await indexOf(indexed, "alice"))).toEqual(["tomb"]);
 	expect(await raw(indexed, "a0")).toBeUndefined();
 	expect(await raw(indexed, "grp", "set")).toBeUndefined();
 	expect(await records.read("b")).toBe(2);
 	expect(await records.create("again", 1, 60_000, "alice")).toBe("erased");
-	expect(await eraseSubject(at(indexed), "alice")).toMatchObject({ kind: "erased", removed: 0 });
+	expect(await eraseSubject(at(indexed), "alice", { eachRemoved })).toMatchObject({
+		kind: "erased",
+		removed: 0,
+	});
+	expect(removed).toHaveLength(41);
 });
 
 it("leaves another subject's record created at a listed key between the erase's read and its write", async () => {
@@ -148,11 +158,15 @@ it("leaves another subject's record created at a listed key between the erase's 
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
-	expect(await eraseSubject(at(indexed, racing), "alice")).toMatchObject({
+	// Never for a decision tried again, nor for a record left as another subject's.
+	const removed: Json[] = [];
+	const eachRemoved = (value: Json) => void removed.push(value);
+	expect(await eraseSubject(at(indexed, racing), "alice", { eachRemoved })).toMatchObject({
 		kind: "erased",
 		removed: 0,
 	});
 	expect(raced).toBe(true);
+	expect(removed).toEqual([]);
 	expect(await raw(indexed, "k")).toEqual({ "records:v": 1, subject: "bob", value: 7 });
 	expect(Object.keys(await indexOf(indexed, "alice"))).toEqual(["tomb"]);
 	expect(await indexOf(indexed, "bob")).toEqual({ [bucketOf("k")]: [["k", "record"]] });
@@ -169,7 +183,14 @@ it("erases the record and the set keyed by the subject itself, no keys asked", a
 		"witness.record",
 		"witness.set",
 	]);
-	expect(await eraseSubject(at(keyed), "alice")).toMatchObject({ kind: "erased", removed: 2 });
+	const removed: Json[] = [];
+	const eachRemoved = (value: Json) => void removed.push(value);
+	expect(await eraseSubject(at(keyed), "alice", { eachRemoved })).toMatchObject({
+		kind: "erased",
+		removed: 2,
+	});
+	expect(removed).toHaveLength(2);
+	expect(removed).toContain(1);
 	expect(await raw(keyed, "alice")).toBeUndefined();
 	expect(await raw(keyed, "alice", "set")).toBeUndefined();
 	// The witnesses go with what they witness; only the tombstone stays.
@@ -179,7 +200,11 @@ it("erases the record and the set keyed by the subject itself, no keys asked", a
 	simulated.shiftClock(10);
 	expect(await raw(keyed, "dan")).toBeUndefined();
 	expect(Object.keys(await indexOf(keyed, "dan"))).toEqual(["witness.record"]);
-	expect(await eraseSubject(at(keyed), "dan")).toMatchObject({ kind: "erased", removed: 0 });
+	expect(await eraseSubject(at(keyed), "dan", { eachRemoved })).toMatchObject({
+		kind: "erased",
+		removed: 0,
+	});
+	expect(removed).toHaveLength(2);
 	expect(Object.keys(await indexOf(keyed, "dan"))).toEqual(["tomb"]);
 	expect(await sets.add("alice", "m", 60_000, "alice")).toBe("erased");
 });

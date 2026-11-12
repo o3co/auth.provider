@@ -18,7 +18,7 @@ export type SessionRecord = {
 	| (Full & { readonly state: "open" })
 	| (Full & { readonly state: "closing" })
 	| (Full & { readonly state: "closed" })
-	/** The mark a close leaves where there was no record. */
+	/** 0.19's raw closed mark, holding no subject: read, never written. */
 	| { readonly state: "closed" }
 );
 
@@ -43,6 +43,19 @@ const markShape = z.strictObject({ format: z.literal([1, 2]), state: z.literal("
 const recordShape = z.union([fullShape, fullShapeBefore, markShape]);
 
 export const toStored = (record: SessionRecord) => record as unknown as StoredSession;
+/** Closed: its subject and what 0.19 reads; a login's attributes, amr, raise and times dropped. */
+export const closedFrom = (was: SessionRecord): SessionRecord =>
+	"subject" in was
+		? {
+				format: 2,
+				state: "closed",
+				subject: was.subject,
+				amr: [],
+				authenticatedAt: was.openedAt,
+				authenticatedAtUnknown: true,
+				openedAt: was.openedAt,
+			}
+		: { format: 2, state: "closed" };
 /** The record a kept value holds, checked on every read; nothing for a format or shape this does not know. */
 export const fromStored = (stored: StoredSession | undefined): SessionRecord | undefined => {
 	const read = recordShape.safeParse(stored);
