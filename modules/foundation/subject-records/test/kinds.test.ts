@@ -1,10 +1,8 @@
-import { createHash, randomBytes } from "node:crypto";
-import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
-import { type Space, type Store, spaces, store } from "@mod/store";
-import { simulatedStore } from "@mod/store/testing";
+import { createHash } from "node:crypto";
+import type { Space, Store } from "@mod/store";
 import { expect, it } from "vitest";
 import { indexSpaceOf, subjectKeyedSetsIn, subjectRecordsIn } from "../src/subject-records.ts";
+import { bucketOf, part, placed } from "./placed.ts";
 
 const g = ["durable"] as const;
 const bounded: Space = {
@@ -15,64 +13,28 @@ const bounded: Space = {
 };
 const indexed: Space = { name: "moved-test", guarantees: g, subjectData: "online-indexed" };
 const keyed: Space = { name: "listed-test", guarantees: g, subjectData: "online-keyed" };
-const held = contract<Store>("test.store");
 const refuse = (where: string, reason: string): never => {
 	throw new Error(`${where}: ${reason}`);
 };
 const clock = { now: () => Date.now() };
 
 async function opened() {
-	const app = await assemble({
-		modules: [
-			simulatedStore().module,
-			defineModule({ name: "user", replicaSafe: false, takes: [store] }, (m) => [
-				...[bounded, indexed, keyed].flatMap((space) => [
-					m.contribute(spaces).by(() => space),
-					m.contribute(spaces).by(() => indexSpaceOf(space)),
-				]),
-				m.provide(held).by((c) => c.get(store)),
-			]),
-		],
-		config: kernelConfig(),
-		runtime: quietRuntime(),
-	});
-	const s = app.get(held);
-	const random = { bytes: (n: number) => new Uint8Array(randomBytes(n)) };
-	const at = (space: Space, phase: "reader" | "indexed" = "indexed") => ({
-		store: s,
-		space,
-		index: indexSpaceOf(space),
-		random,
-		phase,
-	});
-	const part = (space: Space, subject: string) =>
-		`1.${createHash("sha256").update(`${space.name}\n${subject}`).digest("base64url")}`;
-	const indexEntry = async (space: Space, subject: string, name: string) =>
-		(
-			await s.get({
-				space: indexSpaceOf(space),
-				partition: `${part(space, subject)}.${name}`,
-				name: "record",
-			})
-		).entry?.value;
+	const p = await placed([bounded, indexed, keyed]);
 	return {
-		s,
-		at,
-		indexEntry,
-		raw: async (space: Space, partition: string, name = "record") =>
-			(await s.get({ space, partition, name })).entry,
+		s: p.s,
+		at: (space: Space, phase: "reader" | "indexed" = "indexed") => p.at(space, phase),
+		indexEntry: p.index,
+		raw: p.raw,
 		erase: async (space: Space, subject: string) => {
 			const tomb = {
 				space: indexSpaceOf(space),
 				partition: `${part(space, subject)}.tomb`,
 				name: "record",
 			};
-			await s.putIfAbsent(tomb, { at: 1 }, { expiry: { kind: "never" } });
+			await p.s.putIfAbsent(tomb, { at: 1 }, { expiry: { kind: "never" } });
 		},
 	};
 }
-
-const bucketOf = (key: string) => `m${createHash("sha256").update(key).digest("hex")[0]}`;
 
 it("creates a bounded record raw, within its space's ceiling, fenced by its subject's tombstone, its end kept on a change", async () => {
 	const { at, raw, erase } = await opened();

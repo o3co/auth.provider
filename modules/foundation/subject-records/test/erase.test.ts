@@ -1,8 +1,6 @@
-import { createHash, randomBytes } from "node:crypto";
-import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
-import { type Control, type Json, type Space, type Store, spaces, store } from "@mod/store";
-import { simulatedStore } from "@mod/store/testing";
+import { randomBytes } from "node:crypto";
+import { Unavailable } from "@mod/kernel";
+import type { Control, Json, Space, Store } from "@mod/store";
 import { expect, it } from "vitest";
 import { clockAllowanceMs } from "../src/erase/erase.ts";
 import {
@@ -13,6 +11,7 @@ import {
 	subjectRecordsPhase,
 	sweepIndex,
 } from "../src/subject-records.ts";
+import { bucketOf, part, placed } from "./placed.ts";
 
 const g = ["durable"] as const;
 const indexed: Space = { name: "erased-test", guarantees: g, subjectData: "online-indexed" };
@@ -23,39 +22,19 @@ const bounded: Space = {
 	subjectData: "bounded",
 	boundedMs: 60_000,
 };
-const held = contract<Store>("test.store");
 const refuse = (where: string, reason: string): never => {
 	throw new Error(`${where}: ${reason}`);
 };
 const clock = { now: () => Date.now() };
 const random = { bytes: (n: number) => new Uint8Array(randomBytes(n)) };
-const part = (space: Space, subject: string) =>
-	`1.${createHash("sha256").update(`${space.name}\n${subject}`).digest("base64url")}`;
-const bucketOf = (key: string) => `m${createHash("sha256").update(key).digest("hex")[0]}`;
 
 async function opened() {
-	const simulated = simulatedStore();
-	const app = await assemble({
-		modules: [
-			simulated.module,
-			defineModule({ name: "user", replicaSafe: false, takes: [store] }, (m) => [
-				...[indexed, keyed, bounded].flatMap((space) => [
-					m.contribute(spaces).by(() => space),
-					m.contribute(spaces).by(() => indexSpaceOf(space)),
-				]),
-				m.provide(held).by((c) => c.get(store)),
-			]),
-		],
-		config: kernelConfig(),
-		runtime: quietRuntime(),
-	});
-	const s = app.get(held);
+	const p = await placed([indexed, keyed, bounded]);
+	const { s, simulated } = p;
 	const at = (space: Space, over: Store = s, phase: "reader" | "indexed" = "indexed") => ({
+		...p.at(space, phase),
 		store: over,
-		space,
-		index: indexSpaceOf(space),
 		random,
-		phase,
 	});
 	/** What a subject's part of the index holds, by name after the part. */
 	const indexOf = async (space: Space, subject: string) => {

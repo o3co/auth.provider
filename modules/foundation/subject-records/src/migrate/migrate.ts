@@ -245,7 +245,8 @@ async function migrating(
 		let cursor: string | undefined;
 		let server: string | undefined;
 		let started = 0;
-		do {
+		// Ends only after a page is taken with no cursor on: a start-over goes round again from the first page.
+		for (;;) {
 			if (options.signal?.aborted) return stopped("aborted");
 			const page = await walk.sweep(space, cursor);
 			if (server !== undefined && page.server !== server) {
@@ -267,7 +268,8 @@ async function migrating(
 				if (one.kind === "removed") removed += 1;
 			}
 			cursor = page.cursor;
-		} while (cursor !== undefined);
+			if (cursor === undefined) break;
+		}
 	} catch (error) {
 		if (error instanceof Unavailable) return stopped("unavailable");
 		if (error instanceof UnreadableIndex) return stopped("index-unreadable");
