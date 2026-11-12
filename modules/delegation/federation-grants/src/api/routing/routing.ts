@@ -33,7 +33,7 @@ export interface ById {
 
 /** A grant's routes by id: who owns it judged first, then its boundary and its end, then the route. */
 export function routingWith(
-	{ p, records, secret, record }: ApiCommon,
+	{ p, records, secret, record, recordAbout }: ApiCommon,
 	{ reauthorize, token, status, revoke }: Handlers,
 ) {
 	/** The grant when it is this client's and this subject's; none for any other, alike. */
@@ -140,8 +140,9 @@ export function routingWith(
 		if (!route.judged) return route.handle(request, client, found, body);
 		const backstopped = await backstop(found);
 		const grant = await lapse(backstopped.grant);
+		// Ended here before the subject's tombstone, after its mark: audited without it where so.
 		if (backstopped.ended) {
-			record(
+			await recordAbout(
 				"federation.grant.revoked",
 				grant.subject,
 				{ client: client.id, connection: grant.connection, outcome: "backstop" },

@@ -14,7 +14,7 @@ Internal module of `api`: a grant lodged, and a grant renewed.
 ## Invariants
 - An intent's return URI is one the client lists; its scopes lie within the connection's, `openid` among them, and `offline_access` where the connection asks it.
 - Lodgings and renewals are counted together per client, whatever subject they name; past the pair's cap, the intents that end first are pushed out, and end.
-- A lodging for a subject erased here (the grant store answers `erased`) is `403 access_denied` (`subject_unknown`), keeping nothing, audited as `request.denied` without the subject (`withheld` `erased`); a pending listing refused so is logged and passed (`federation-grants.listing_failed`). A renewal of a grant whose subject is erased answers 503 until its eraser removes it.
+- A lodging for a subject erased here (the grant store answers `erased`) is `403 access_denied` (`subject_unknown`), keeping nothing, audited as `request.denied` without the subject (`withheld` `erased`); a pending listing refused so is logged and passed (`federation-grants.listing_failed`).
 
 ## Depends on
 - `clients`, `http`; `grant`, `body.ts`, the api's common parts.

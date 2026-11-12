@@ -27,13 +27,19 @@ export function memoryStores(now: () => number = () => 0, cap = 16) {
 	const sets = memoryRecords<true>(now, size).keyedSets(cap);
 	const listed = memoryRecords<true>(now, size).keyedSets(100);
 	const down = unavailableSwitch<GrantStore>("records");
-	/** Subjects erased: a grant created for one is answered `erased`, as a Store that erases does. */
+	/**
+	 * Subjects with a tombstone here: a grant created for one is answered `erased`, and a change of
+	 * one's grant answers nothing, the grant held, as a Store that erases does.
+	 */
 	const erased = new Set<string>();
+	const subjectOf = async (id: string) =>
+		((await grants.records.read(id)) as { subject?: string } | undefined)?.subject ?? "";
 	const grantRecords: GrantStore = down.wrap({
 		create: async (id, record, lifetimeMs, subject) =>
 			erased.has(subject) ? "erased" : grants.records.create(id, record, lifetimeMs),
 		read: grants.records.read,
-		change: grants.records.change,
+		change: async (id, how) =>
+			erased.has(await subjectOf(id)) ? undefined : grants.records.change(id, how),
 		// One grant a page, so a walk must go on by its cursor.
 		scan: async (cursor) => {
 			const keys = (await grants.records.scan()).keys.toSorted();

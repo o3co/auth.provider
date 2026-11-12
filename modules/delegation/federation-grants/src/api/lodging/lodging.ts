@@ -20,6 +20,7 @@ export function lodgingWith({
 	secret,
 	connections,
 	record,
+	recordAbout,
 	stateRefusal,
 }: ApiCommon) {
 	/** An intent from a lodging's or a renewal's body, or the refusal that answers it. */
@@ -107,25 +108,30 @@ export function lodgingWith({
 		const name = body.text("connection");
 		if (!subject) return error(400, "invalid_request", "sub_required");
 		if (!name) return error(400, "invalid_request", "connection_required");
-		const denied = (outcome: string) => {
-			record("federation.grant.request.denied", subject, { client: client.id, outcome }, request);
-		};
+		// The subject a client names may be erased: audited without it where so.
+		const denied = (outcome: string) =>
+			recordAbout(
+				"federation.grant.request.denied",
+				subject,
+				{ client: client.id, outcome },
+				request,
+			);
 		if (!permits(client, name)) {
-			denied("connection_not_permitted");
+			await denied("connection_not_permitted");
 			return error(403, "access_denied", "connection_not_permitted");
 		}
 		const configured = connections.configured(name);
 		if (!configured) return error(503, "temporarily_unavailable", "connection_not_configured");
 		const asked = intentFrom(body, client, configured.connection, "initial");
 		if (asked.kind === "refused") {
-			denied("invalid_request");
+			await denied("invalid_request");
 			return asked.answer;
 		}
 		const { intent } = asked;
 		// Counted per client, whatever subject it names, so no client fills the store.
 		const counted = await p.lodges.hit("federation-grants.lodges", client.id, lodgeWindow());
 		if (counted.kind === "limited") {
-			denied("rate_limited");
+			await denied("rate_limited");
 			const after = String(Math.ceil(counted.retryAfterMs / 1000));
 			return error(429, "rate_limited", "provider", { "retry-after": after });
 		}
@@ -159,7 +165,8 @@ export function lodgingWith({
 		if (typeof added !== "object") p.log.warn("federation-grants.listing_failed", { kind: added });
 		for (const id of typeof added === "object" ? added.pushedOut : [])
 			await endIntent(id, "pushed_out");
-		record(
+		// Created before the subject's tombstone, after its mark: audited without it where so.
+		await recordAbout(
 			"federation.grant.requested",
 			subject,
 			{ client: client.id, connection: name, outcome: "initial" },

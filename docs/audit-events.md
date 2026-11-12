@@ -49,11 +49,11 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | `federation.grant.authorization_failed` | `client`, `connection`, `outcome`, `source` | a connection fails, with why (`outcome`) |
 | `federation.grant.authorized` | `client`, `connection`, `outcome`, `source` | the user connects a new grant, with the identity check that applied (`outcome`) |
 | `federation.grant.reauthorized` | `account_changed`, `client`, `connection`, `outcome`, `source` | the user connects a renewal, with the identity check that applied (`outcome`), and which of the grant's account differs from what it held (`account_changed`: `issuer` or `subject`), if any |
-| `federation.grant.request.denied` | `client`, `outcome`, `source`, `withheld` | a client's intent is refused, with why (`outcome`); without the subject, `withheld` `erased`, where the subject named is erased (`subject_unknown`) |
-| `federation.grant.requested` | `client`, `connection`, `outcome`, `source` | a client lodges an intent, for a new grant (`initial`) or a renewal (`reauthorization`) |
+| `federation.grant.request.denied` | `client`, `outcome`, `source`, `withheld` | a client's intent is refused, with why (`outcome`); without the subject, `withheld` `erased` or `unread`, where the subject named is erased (`subject_unknown` among them) or that cannot be read |
+| `federation.grant.requested` | `client`, `connection`, `outcome`, `source`, `withheld` | a client lodges an intent, for a new grant (`initial`) or a renewal (`reauthorization`); without the subject, `withheld` `erased` or `unread`, where it is erased or that cannot be read |
 | `federation.grant.revoke.denied` | `client`, `reason`, `source` | a client's revoke is refused before the grant is found, with why (`reason`), by the client only |
-| `federation.grant.revoked` | `client`, `connection`, `outcome`, `source`, `withheld` | a grant ends, revoked by its client or by the subject's revocation (`outcome`); without the subject, `withheld` `erased`, where the revocation said it is erased |
-| `federation.grant.token.denied` | `client`, `connection`, `reason`, `source` | a client is refused a grant's token or renewal, with why (`reason`); by the client only before the grant is found |
+| `federation.grant.revoked` | `client`, `connection`, `outcome`, `source`, `withheld` | a grant ends, revoked by its client or by the subject's revocation (`outcome`); without the subject, `withheld` `erased` or `unread`, where the revocation said it is erased, or it is or cannot be read so |
+| `federation.grant.token.denied` | `client`, `connection`, `reason`, `source`, `withheld` | a client is refused a grant's token or renewal, with why (`reason`); by the client only before the grant is found; without the subject, `withheld` `erased` or `unread`, where it is erased (the erasure fence's `backstop` among them) or that cannot be read |
 | `federation.grant.token.success` | `client`, `connection`, `refreshed`, `source` | a client is handed a grant's upstream token, refreshed first or not (`refreshed`) |
 
 ## @mod/federation-link

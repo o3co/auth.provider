@@ -20,6 +20,7 @@ Internal module of `federation-grants`: the client routes, and the revocation fo
 - A grant the boundary covers is written revoked, without credentials, before anything else; a grant read past its end loses its credentials, under a new version, so a refresh that read it before writes nothing back.
 - A refused client authentication is recorded through `clients`' `recordRefusedAuthentication`; a known public client is no such refusal.
 - Every refused token request is audited once with a reason naming the refusal; before the owner is known, by the client only.
+- An event about a subject that may be erased (a refused token, a lodging, a revocation, the backstop's) names it only where it is not: one erased is withheld (`withheld` `erased`), one that cannot be read so too (`unread`); `subject-revocation`'s `erasedSubjects` tells, never deciding access.
 - A revocation is `204` in any state and audited once, written and unlisted by `retention`'s rules, as the backstop's is; a pending grant's status needs the client to still be allowed.
 - Lodgings are counted per client before they are written; pushed-out intents end.
 - The follower writes only over the state it judged, ends a covered grant or pending intent, and leaves an established grant kept with only its renewal ended.

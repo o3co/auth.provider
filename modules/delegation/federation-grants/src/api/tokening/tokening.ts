@@ -23,21 +23,24 @@ const refusals: Record<
 };
 
 /** A grant's token handed, its use noted, and its status as the client asks it. */
-export function tokeningWith({ p, records, connections, record, stateRefusal }: ApiCommon) {
+export function tokeningWith({
+	p,
+	records,
+	connections,
+	record,
+	recordAbout,
+	stateRefusal,
+}: ApiCommon) {
 	const token = async (
 		request: HttpRequest,
 		client: Client,
 		grant: Grant,
 		body: Extract<Body, { kind: "read" }>,
 	) => {
-		/** Audits the refusal by why, and answers it. */
-		const refuse = (why: string, refusal: HttpResponse) => {
-			record(
-				"federation.grant.token.denied",
-				grant.subject,
-				{ client: client.id, connection: grant.connection, reason: why },
-				request,
-			);
+		/** Audits the refusal by why, naming no erased subject, and answers it. */
+		const refuse = async (why: string, refusal: HttpResponse) => {
+			const attributes = { client: client.id, connection: grant.connection, reason: why };
+			await recordAbout("federation.grant.token.denied", grant.subject, attributes, request);
 			return refusal;
 		};
 		const refused = stateRefusal(grant);
@@ -79,9 +82,9 @@ export function tokeningWith({ p, records, connections, record, stateRefusal }: 
 		});
 		if (current.kind === "handed") {
 			// The hand-out passes only where its subject is not erased: answered as a grant its subject's
-			// revocation ended, recording nothing about an erased subject.
+			// revocation ended, audited as every refusal is.
 			if ((await p.fence(grant.subject)) === "erased")
-				return error(410, "grant_revoked", "backstop");
+				return refuse("backstop", error(410, "grant_revoked", "backstop"));
 			await used(grant);
 			record(
 				"federation.grant.token.success",

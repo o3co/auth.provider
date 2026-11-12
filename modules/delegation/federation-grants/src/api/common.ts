@@ -1,5 +1,6 @@
 import { declaredAudit } from "@mod/audit";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
+import { isUnavailable } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import events from "../audit-events.ts";
 import { connectionsIn, type Grant, secretFrom } from "../grant/grant.ts";
@@ -39,6 +40,26 @@ export function apiCommonWith(p: ApiParts) {
 			attributes: { ...attributes, ...(from ? { source: from } : {}) },
 		});
 	};
+	/**
+	 * Records an event about a subject that may be erased, as every route that names one does: without
+	 * the subject where it is erased (`withheld` `erased`), or where that cannot be read (`unread`).
+	 */
+	const recordAbout = async (
+		kind: keyof typeof events,
+		subject: string,
+		attributes: Record<string, string>,
+		request: HttpRequest,
+	) => {
+		const withheld = await p.erased.erased(subject).then(
+			(erased) => (erased ? "erased" : undefined),
+			(thrown: unknown) => {
+				if (isUnavailable(thrown)) return "unread";
+				throw thrown;
+			},
+		);
+		if (withheld === undefined) return record(kind, subject, attributes, request);
+		record(kind, undefined, { ...attributes, withheld }, request);
+	};
 	/** What a grant's own record says before anything is asked of it, as every grant route answers it, and why. */
 	const stateRefusal = (
 		grant: Grant,
@@ -52,7 +73,7 @@ export function apiCommonWith(p: ApiParts) {
 			return { why: "grant_expired", answer: error(410, "grant_expired", "lifetime") };
 		return undefined;
 	};
-	return { p, records, settings, secret, connections, record, stateRefusal };
+	return { p, records, settings, secret, connections, record, recordAbout, stateRefusal };
 }
 
 export type ApiCommon = ReturnType<typeof apiCommonWith>;

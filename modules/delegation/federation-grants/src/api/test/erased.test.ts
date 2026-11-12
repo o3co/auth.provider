@@ -33,4 +33,31 @@ it("hands no token for a subject erased once the grant was judged, answered as a
 	expect(said(await h.grantCall(id, "token"))).toBe("410 grant_revoked backstop");
 	expect(read).toBe(2);
 	expect(h.events.some((e) => e.kind === "federation.grant.token.success")).toBe(false);
+	// Audited once, as every refused token request is, naming no erased subject.
+	const denied = h.events.filter((e) => e.kind === "federation.grant.token.denied");
+	expect(denied.map((e) => [e.subject, e.attributes?.reason, e.attributes?.withheld])).toEqual([
+		[undefined, "backstop", "erased"],
+	]);
+});
+
+it("audits a token, a renewal and a revocation of an erased subject's grant without the subject, held or not", async () => {
+	for (const tombstone of [false, true]) {
+		const h = await harness();
+		const { id } = await h.connected();
+		await h.app.get(subjectErasure).markErased("alice");
+		const marked = h.events.length;
+		// With its tombstone and no eraser run yet (one aborted), the grant is held and answered revoked.
+		if (tombstone) h.stores.erased.add("alice");
+		expect(said(await h.grantCall(id, "token"))).toBe("410 grant_revoked backstop");
+		expect((await h.grantCall(id, "revoke")).status).toBe(204);
+		// Since the mark nothing names the subject: every event about it says why it is withheld.
+		const since = h.events.slice(marked);
+		expect(
+			since.map((e) => [e.kind, e.subject, e.attributes?.withheld]),
+			String(tombstone),
+		).toEqual([
+			...(tombstone ? [] : [["federation.grant.revoked", undefined, "erased"]]),
+			["federation.grant.token.denied", undefined, "erased"],
+		]);
+	}
 });
