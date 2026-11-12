@@ -26,7 +26,7 @@
 - Keys of any length are taken; a name keeps its windows apart, where names hold no line feed (a name and a key are joined by one).
 - A wait is a hint: at least a second, or the whole window where it is shorter, and never longer than the window, which the store's clock judges.
 - How a lockout holds, counts, hands back and releases, and how its state is kept: internal module `lockout`.
-- A dropped key is unavailable at every entry point, `failed` and `releaseUnder` (`whole` included) among them, and none writes it again. Only a request racing its subject's erasure meets one: that 503 is not an outage. A subject id is never issued again, so a key stays dropped for good. Only keys under the names composed at erasure are dropped.
+- A dropped key is unavailable at every entry point, `failed` and `releaseUnder` (`whole` included) among them, and none writes it again. Only a request racing its subject's erasure meets one: that 503 is not an outage. A subject id is never issued again, so a key stays dropped for good. Only keys under the names composed at erasure are dropped. A write meeting a dropped key fails closed and writes nothing, so the drop holds whatever eraser runs after.
 
 ## Data
 - Limit windows: no eviction, so a flood cannot reset a count; not replicated, as no credential depends on them.
