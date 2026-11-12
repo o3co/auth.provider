@@ -17,9 +17,16 @@ import {
 	subjectGrants,
 	type subjectGrantsNeeds,
 } from "@mod/federation-grants";
-import { type BuildContext, defineModule } from "@mod/kernel";
-import { keyedSetsIn, recordsIn, secretRecordsIn } from "@mod/records";
-import { type Guarantee, type Space, spaces, store } from "@mod/store";
+import { type BuildContext, contract, defineModule, optional, probes } from "@mod/kernel";
+import { recordsIn, secretRecordsIn } from "@mod/records";
+import { type Guarantee, type Space, spaces, store, storeControl } from "@mod/store";
+import {
+	indexSpaceOf,
+	phasedKeyedSetsIn,
+	phasedRecordsIn,
+	subjectRecordsPhase,
+	tombstoneFloor,
+} from "@mod/subject-records";
 import { section } from "./section.ts";
 
 /** Each need federation-grants states for its grants, as the guarantee a space declares for it. */
@@ -46,22 +53,32 @@ const listedGuaranteeFor: Record<keyof typeof subjectGrantsNeeds, Guarantee> = {
 const locksGuaranteeFor: Record<keyof typeof refreshLockStoreNeeds, Guarantee> = {
 	neverEvicted: "no-eviction",
 };
+/** Each a subject's: grants, pending pairs and listings indexed by it, erased by federation-grants, at the tombstone's floor. */
+const ofSubjects = (guarantees: readonly Guarantee[]) => ({
+	guarantees: [...new Set([...guarantees, ...tombstoneFloor])],
+	erasedBy: "federation-grants",
+});
 const grants: Space = {
 	name: "federation-grants-store.grants",
-	guarantees: Object.values(grantsGuaranteeFor),
+	...ofSubjects(Object.values(grantsGuaranteeFor)),
+	subjectData: "online-indexed",
 };
 const steps: Space = {
 	name: "federation-grants-store.steps",
 	guarantees: Object.values(stepsGuaranteeFor),
 	subjectData: "none",
 };
+/** Pending pairs, keyed by client and subject, so indexed; the floor adds durable and replicated to their no eviction. */
 const pending: Space = {
 	name: "federation-grants-store.pending",
-	guarantees: Object.values(pendingGuaranteeFor),
+	...ofSubjects(Object.values(pendingGuaranteeFor)),
+	subjectData: "online-indexed",
 };
+/** Each subject's listing, keyed by the subject itself. */
 const listed: Space = {
 	name: "federation-grants-store.subjects",
-	guarantees: Object.values(listedGuaranteeFor),
+	...ofSubjects(Object.values(listedGuaranteeFor)),
+	subjectData: "online-keyed",
 };
 const locks: Space = {
 	name: "federation-grants-store.locks",
@@ -77,44 +94,96 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
+/** The phase, read once for the three builders over it. */
+const phase = contract<ReturnType<typeof subjectRecordsPhase.once>>(
+	"federation-grants-store.phase",
+);
+/** Each builder over the phase, built once, so the probe and the stores share it. */
+const placed = contract<{
+	readonly grants: Awaited<ReturnType<typeof phasedRecordsIn<StoredGrant>>>;
+	readonly pending: Awaited<ReturnType<typeof phasedKeyedSetsIn>>;
+	readonly listed: Awaited<ReturnType<typeof phasedKeyedSetsIn>>;
+}>("federation-grants-store.placed");
+
 export default defineModule(
 	// Safe on many instances: a record's expiry is set by the writing instance's clock, kept in step with the
 	// others' by the operator (deployment-guarantees, Several instances).
-	{ name: "federation-grants-store", replicaSafe: true, section, takes: [store] },
+	{
+		name: "federation-grants-store",
+		replicaSafe: true,
+		section,
+		takes: [store, optional(storeControl)],
+	},
 	(m) => [
 		m.contribute(spaces).by(() => grants),
+		m.contribute(spaces).by(() => indexSpaceOf(grants)),
 		m.contribute(spaces).by(() => steps),
 		m.contribute(spaces).by(() => pending),
+		m.contribute(spaces).by(() => indexSpaceOf(pending)),
 		m.contribute(spaces).by(() => listed),
+		m.contribute(spaces).by(() => indexSpaceOf(listed)),
 		m.contribute(spaces).by(() => locks),
+		m.provide(phase).by(async (c) => subjectRecordsPhase.once(await c.getOptional(storeControl))),
+		m.provide(placed).by(async (c) => {
+			const read = await c.get(phase);
+			const where = "federation-grants-store";
+			const setsIn = async (space: Space, cap: number) =>
+				phasedKeyedSetsIn(
+					{ ...(await placeIn(c, space)), index: indexSpaceOf(space), cap, clock: c.clock },
+					read,
+					where,
+					c.refuse,
+				);
+			return {
+				grants: await phasedRecordsIn<StoredGrant>(
+					{ ...(await placeIn(c, grants)), index: indexSpaceOf(grants) },
+					read,
+					where,
+					c.refuse,
+				),
+				pending: await setsIn(pending, c.section["pending-per-client-and-subject"]),
+				listed: await setsIn(listed, c.section["grants-per-subject"]),
+			};
+		}),
 		m.provide(grantStore).by(async (c): Promise<GrantStore> => {
-			const records = recordsIn<StoredGrant>(await placeIn(c, grants));
+			const { grants: records } = await c.get(placed);
 			return {
 				create: records.create,
 				read: records.read,
 				change: records.change,
 				scan: records.scan,
+				erase: records.erase,
+				migrate: records.migrate,
 			};
+		}),
+		// Out of traffic until the phase reads: no call is judged on a phase not read.
+		m.contribute(probes).by(async (c) => {
+			const built = await c.get(placed);
+			const check = async () => {
+				await built.grants.ready();
+				await built.pending.ready();
+				await built.listed.ready();
+			};
+			return { name: "federation-grants-store.phase", check };
 		}),
 		m.provide(stepStore).by(async (c): Promise<StepStore> => {
 			const records = stepRecordsFor<StoredStep>(await placeIn(c, steps));
 			return { create: records.create, read: records.read, change: records.change };
 		}),
 		m.provide(pendingIntents).by(async (c): Promise<PendingIntents> => {
-			const sets = keyedSetsIn({
-				...(await placeIn(c, pending)),
-				cap: c.section["pending-per-client-and-subject"],
-				clock: c.clock,
-			});
-			return { add: sets.add, remove: sets.remove };
+			const { pending: sets } = await c.get(placed);
+			return { add: sets.add, remove: sets.remove, erase: sets.erase, migrate: sets.migrate };
 		}),
 		m.provide(subjectGrants).by(async (c): Promise<SubjectGrants> => {
-			const sets = keyedSetsIn({
-				...(await placeIn(c, listed)),
-				cap: c.section["grants-per-subject"],
-				clock: c.clock,
-			});
-			return { add: sets.add, members: sets.members, remove: sets.remove };
+			const { listed: sets } = await c.get(placed);
+			return {
+				// A listing is keyed by its subject itself.
+				add: (subject, grant, lifetimeMs) => sets.add(subject, grant, lifetimeMs, subject),
+				members: sets.members,
+				remove: sets.remove,
+				erase: sets.erase,
+				migrate: sets.migrate,
+			};
 		}),
 		m.provide(refreshLockStore).by(async (c): Promise<RefreshLockStore> => {
 			const records = recordsIn<string>(await placeIn(c, locks));
