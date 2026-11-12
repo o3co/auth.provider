@@ -57,6 +57,7 @@ export interface Lifecycle {
 	secretIn(request: HttpRequest): string | undefined;
 	/** The record, while it is open and after the subject's revocation boundary. */
 	liveAt(handle: string): Promise<OpenRecord | undefined>;
+	subjectOf(handle: string): Promise<string | undefined>;
 	entryAt(handle: string, level: EntryLevel): Promise<Entry>;
 	entryIn(request: HttpRequest, level: EntryLevel): Promise<Entry>;
 	/** As `open` over the request's earlier session, the proof's start compared once saved. */
@@ -216,6 +217,14 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		const revoked = (await revocation.check(found.subject, found.openedAt)) === "revoked";
 		return revoked ? undefined : found;
 	};
+	/** None where no record is, or it names no subject (a closed mark); a record it cannot read is Unavailable. */
+	const subjectOf = async (handle: string) => {
+		const stored = await kept.read(handle);
+		if (stored === undefined) return undefined;
+		const record = fromStored(stored);
+		if (!record) throw new Unavailable("session");
+		return "subject" in record ? record.subject : undefined;
+	};
 	const entryAt = async (handle: string, level: EntryLevel): Promise<Entry> => {
 		const found = await liveAt(handle);
 		if (!found) return { kind: "absent" };
@@ -268,6 +277,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		handleIn,
 		secretIn,
 		liveAt,
+		subjectOf,
 		entryAt,
 		entryIn,
 		open,

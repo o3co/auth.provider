@@ -867,6 +867,21 @@ describe("session closing", () => {
 		await expect(s.close(handle)).rejects.toSatisfy(isUnavailable);
 	});
 
+	it("reads a record's subject without entering it: none for a closed mark or no record, unavailable for one it cannot read", async () => {
+		const { s, stores, login, handleOf } = await boot();
+		const subjectOf = (handle: string) => s.subjectOf?.(handle);
+		const handle = await handleOf(await login());
+		expect(await subjectOf(handle)).toBe("alice");
+		const mark = { format: 1, state: "closed" } as unknown as StoredSession;
+		await stores.kept.records.create("marked", mark, 60_000);
+		expect(await subjectOf("marked")).toBeUndefined();
+		expect(await subjectOf("none")).toBeUndefined();
+		await stores.kept.records.change(handle, (r) => ({
+			value: { ...(r as object), format: 3 } as unknown as StoredSession,
+		}));
+		await expect(subjectOf(handle)).rejects.toSatisfy(isUnavailable);
+	});
+
 	it("puts off a closing whose record it cannot read, as one whose participants fail", async () => {
 		const recorded = recordingLog();
 		const { s, stores, login, app, handleOf } = await boot({ "sweep-interval": "1s" }, [], {

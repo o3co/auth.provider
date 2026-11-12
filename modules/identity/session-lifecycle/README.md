@@ -19,6 +19,7 @@
 - `./testing`: the configuration builder, and contract tests of its store interfaces.
 
 ## Invariants
+- `subjectOf` is one read of the record by handle: it never ends an open record past its lifetime, and reads a closing or closed one as an open one.
 - A login naming its authentication time `opening` is taken as authenticated at the opening, known. One whose time is neither epoch milliseconds (0 to 8.64e15), `opening` nor unknown is a `TypeError`, naming no value, before an earlier session is closed or a new one opened. A login through `open` that gives `provenSince` is compared with the subject's revocation boundary once its record is saved, before its cookie is made: revoked, the session is closed and the login answered `revoked`.
 - A login's attributes are kept as `login-attributes` keeps them under the section's `attributes`, a frozen copy taken at login, kept unchanged (a raise included) until the session closes; each read keeps them again, so a cap lowered since drops a value past it.
 - It asks the entry requirements through `session`'s `entryJudge` and calls the participants through its `closingParticipants`; boot is refused, naming each, where either has no contribution, never taken as no rule. The seams take at most one, so `kernel`'s preflight leaves them be: this refusal comes as the sessions are built, in a boot no other gap refused first.

@@ -78,6 +78,7 @@ export default defineModule(
 				raise: raiseOver({ lifecycle, kept, clock: c.clock, lifetimeMs }),
 				// The cookie's index alone: no session record is read before a close.
 				handleOf: lifecycle.handleIn,
+				subjectOf: lifecycle.subjectOf,
 				closeRequest: lifecycle.closeIn,
 				close: lifecycle.close,
 				recent,
