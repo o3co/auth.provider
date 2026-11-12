@@ -61,3 +61,12 @@ it("audits a token, a renewal and a revocation of an erased subject's grant with
 		]);
 	}
 });
+
+it("passes a lodging whose pending pair's add its subject's erasure refused, logging it as the pending pair's", async () => {
+	const h = await harness();
+	const pending = h.stores.pending as { add: unknown };
+	pending.add = async () => "erased";
+	expect((await h.lodge({ sub: "carol" })).status).toBe(201);
+	const logged = h.logs().filter((l) => l.event === "federation-grants.pending_failed");
+	expect(logged.map((l) => l.fields)).toEqual([{ kind: "erased" }]);
+});

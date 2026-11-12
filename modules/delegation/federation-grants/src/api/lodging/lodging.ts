@@ -161,8 +161,8 @@ export function lodgingWith({
 		// Past the pair's cap, the intents that end first are pushed out, and end.
 		const pair = `${client.id}\n${subject}`;
 		const added = await p.pending.add(pair, grant.id, connectMs, subject);
-		// Not listed, its subject erased meanwhile: passed as a failed listing is, the grant still pending.
-		if (typeof added !== "object") p.log.warn("federation-grants.listing_failed", { kind: added });
+		// A pending pair's add refused, its subject erased meanwhile: logged and passed, the grant still pending.
+		if (typeof added !== "object") p.log.warn("federation-grants.pending_failed", { kind: added });
 		for (const id of typeof added === "object" ? added.pushedOut : [])
 			await endIntent(id, "pushed_out");
 		// Created before the subject's tombstone, after its mark: audited without it where so.
