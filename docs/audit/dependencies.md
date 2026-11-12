@@ -277,7 +277,7 @@ flowchart LR
 | `@mod/authorize-store` | wiring | `@mod/kernel`, `@mod/reauth`, `@mod/records`, `@mod/store` |
 | `@mod/claims-selection-store` | wiring | `@mod/claims-selection`, `@mod/kernel`, `@mod/records`, `@mod/store` |
 | `@mod/client-assertion-store` | wiring | `@mod/client-assertion`, `@mod/kernel`, `@mod/records`, `@mod/store` |
-| `@mod/code-grant-store` | wiring | `@mod/code-grant`, `@mod/kernel`, `@mod/records`, `@mod/store` |
+| `@mod/code-grant-store` | wiring | `@mod/code-grant`, `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-records` |
 | `@mod/consent-store` | wiring | `@mod/consent`, `@mod/kernel`, `@mod/store`, `@mod/subject-records` |
 | `@mod/device-grant-store` | wiring | `@mod/device-grant`, `@mod/kernel`, `@mod/records`, `@mod/store` |
 | `@mod/dpop-store` | wiring | `@mod/dpop`, `@mod/kernel`, `@mod/records`, `@mod/store` |
