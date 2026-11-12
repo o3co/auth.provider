@@ -17,6 +17,7 @@ import {
 	vaultFrom,
 	vaultTakes,
 } from "../vault/vault.ts";
+import { portsRefused } from "./ports.ts";
 import { bearer, endOf, renewWith, scopeOf, text } from "./renewing.ts";
 
 /** What a request for a session's upstream token comes to. */
@@ -316,8 +317,11 @@ export const renewalTakes = [
 export async function renewalIn(c: BuildContext<Settings>): Promise<Renewal> {
 	// Late: session collects this module's participant, which uses the keeper.
 	const lateSessions = c.late(sessions);
+	const store = await c.get(upstreamTokenStore);
+	const ports = portsRefused(store);
+	if (ports !== undefined) return c.refuse("federation-tokens", ports);
 	return renewalWith({
-		store: await c.get(upstreamTokenStore),
+		store,
 		locks: await c.get(refreshLocks),
 		upstreams: await c.get(upstreams),
 		sessions: { entryOf: (handle, level) => lateSessions().entryOf(handle, level) },

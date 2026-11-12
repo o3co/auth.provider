@@ -1,6 +1,7 @@
 import type { Eraser, SubjectReading } from "@mod/erasure-extensions";
 import type { Sessions } from "@mod/session";
 import type { UpstreamTokenStore } from "../store.ts";
+import { portsOf } from "./ports.ts";
 
 /** Whose a record written before indexing is: its session's subject, as the card gives it. */
 export const tokensSubjectOf =
@@ -20,8 +21,8 @@ export function tokensEraser(
 	store: UpstreamTokenStore,
 	sessions: Pick<Sessions, "entryOf">,
 ): Eraser {
-	const { erase, migrate } = store;
-	if (!erase || !migrate) {
+	const ports = portsOf(store);
+	if (!ports) {
 		const none = { reports: [], logoutGaps: 0 };
 		return {
 			name: "federation-tokens",
@@ -32,7 +33,7 @@ export function tokensEraser(
 		};
 	}
 	const online = async (subject: string, signal: AbortSignal) => ({
-		reports: [await erase.call(store, subject, signal)],
+		reports: [await ports.erase(subject, signal)],
 		logoutGaps: 0,
 	});
 	return {
@@ -45,8 +46,6 @@ export function tokensEraser(
 			for (const subject of subjects) reports.push(...(await online(subject, signal)).reports);
 			return { reports, logoutGaps: 0 };
 		},
-		migrate: async (walk, signal) => [
-			await migrate.call(store, walk, tokensSubjectOf(sessions), signal),
-		],
+		migrate: async (walk, signal) => [await ports.migrate(walk, tokensSubjectOf(sessions), signal)],
 	};
 }

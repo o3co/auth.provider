@@ -11,7 +11,8 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 
 ## Offers
 - `renewalIn` (the build context) builds it, taking the stores, `upstreams`, the vault and `session`'s entries (late) itself.
-- `tokensEraser` (the store, `session`'s entries by handle) → the eraser `federation-tokens`, contributed to `erasure-extensions`' `erasers`: a subject's records erased through the store's `erase`, a window doing so for each subject; `erasable` only where the store offers `erase` and `migrate`, else empty reports.
+- `tokensEraser` (the store, `session`'s entries by handle) → the eraser `federation-tokens`, contributed to `erasure-extensions`' `erasers`: a subject's records erased through the store's `erase`, a window doing so for each subject; `erasable` only where the store offers the pair, else empty reports.
+- `portsRefused` (the store) → why its ports cannot be used, or none: `erase` and `migrate` come together or neither, one alone refused at build in `renewalIn`; `portsOf` → the pair, whole, or none.
 - `tokensSubjectOf` (`session`'s entries) → the migration's reading: a record's key is its session's handle and its value holds only the upstream's tokens, so its subject is its session's, read at level `none`, which no requirement falls short of. A session that no longer enters proves nothing: unreadable, as the record ends with it and a rerun then finds none.
 - `renewalWith` (store, locks, `upstreams`, `session`'s entries by handle, vault, `kernel`'s runtime, settings): `current` (session, IdP → handed / an outcome the routes answer), `receive`, `disconnect` (→ the id_token, or not linked), `withdraw`, `close`
 

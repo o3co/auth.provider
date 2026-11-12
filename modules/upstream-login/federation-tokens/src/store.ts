@@ -38,11 +38,12 @@ export interface UpstreamTokenStore {
 	scan(cursor?: string): Promise<{ readonly keys: readonly string[]; readonly cursor?: string }>;
 	/**
 	 * Erases a subject's records here, where the Store can: optional in 0.20, required in 0.22, as a
-	 * Store not built through `subject-records` cannot be erased. Offered with `migrate`, or neither.
+	 * Store not built through `subject-records` cannot be erased. Offered with `migrate`, or neither;
+	 * one alone refuses the boot.
 	 */
 	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
 	/** Once, under the maintenance key, each record read by federation-tokens' reading; optional as `erase` is. */
-	migrate?(walk: Walk, subjectOf: SubjectReading, signal: AbortSignal): Promise<MigrationReport>;
+	migrate?(walk: Walk, reading: SubjectReading, signal: AbortSignal): Promise<MigrationReport>;
 }
 
 export const upstreamTokenStore = contract<UpstreamTokenStore>(
