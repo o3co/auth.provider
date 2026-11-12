@@ -13,7 +13,7 @@
   - A request's challenge says whether it named credentials, and `assert` reads that from it alone: keep it on the server and hand back what was kept, never a value the client sent. One remade from the client's answer, as `passkeys` remakes it, reads as none named; an ending it did not write is `malformed`.
   - A challenge kept bare, with no ending saying it named credentials, reads as none named: an answer without a handle is refused, and a new challenge passes.
 - `credentialOf`: a value read as a credential in the shape webauthn writes, with its fields alone and the canonical checks and limits of its id, key and handle (`isCanonical`, `credentialLimits`); nothing for any other value. `freshHandle`: a new user handle from the randomness given, by the rule webauthn makes its own by.
-- Operator section: `rp-id`, `rp-name`, `origins` (required), `top-origins` (default none), `challenge-lifetime` (10s–10m, default `2m`, written with its unit), `algorithms` (`EdDSA`, `ES256`, `RS256`, at least one, each once; default all three).
+- Operator section: `rp-id`, `rp-name`, `origins` (required), `top-origins` (default none), `challenge-lifetime` (10s–10m, default `2m`, written with its unit; `challengeLifetimeMaxMs`, its ceiling, the bound a Store keeping challenges declares), `algorithms` (`EdDSA`, `ES256`, `RS256`, at least one, each once; default all three).
 - `./testing`: `webauthnConfig`, a test configuration builder with the origin `testOrigin`, the ceremonies over a relying party a test gives (`testCeremonies`), and a software authenticator behind a browser (`softwareAuthenticator`), which answers options as a browser does and takes twists for refusal tests; `statingCertificate` is the twist of an attestation stating a certificate.
 
 ## Invariants

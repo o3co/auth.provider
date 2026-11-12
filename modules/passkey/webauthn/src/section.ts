@@ -1,6 +1,7 @@
 import { setting } from "@mod/kernel";
 import { z } from "zod";
 import { algorithmNames } from "./ceremony/ceremony.ts";
+import { challengeLifetimeMaxMs } from "./contract.ts";
 
 /** An origin as a browser serializes it: https, or http on localhost; a domain, never an IP literal. */
 const origin = z.string().refine((entry) => {
@@ -41,7 +42,13 @@ export const section = z
 			),
 		"challenge-lifetime": setting
 			.duration("s")
-			.pipe(z.number().int().min(10).max(600))
+			.pipe(
+				z
+					.number()
+					.int()
+					.min(10)
+					.max(challengeLifetimeMaxMs / 1000),
+			)
 			.prefault("2m")
 			.describe("How long a ceremony's challenge can be answered, from 10s to 10m."),
 		algorithms: z
