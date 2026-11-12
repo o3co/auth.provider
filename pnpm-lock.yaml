@@ -4363,6 +4363,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
