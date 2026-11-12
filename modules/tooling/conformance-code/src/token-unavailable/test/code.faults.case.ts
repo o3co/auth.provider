@@ -15,7 +15,13 @@ import {
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { type Answer, type Code, codeAt, on, redeemAt, said } from "../../faults/test/faults.ts";
-import { codeRead, codeReadSettled, codeUse, isStoreOperation } from "../../faults/test/wire.ts";
+import {
+	clockRead,
+	codeRead,
+	codeReadSettled,
+	codeUse,
+	isStoreOperation,
+} from "../../faults/test/wire.ts";
 
 // The area lets requests go uncounted where the store fails (rate-limit's fail-mode open), so each
 // scene reaches the redemption's own decision: the read of the code's record, then its use.
@@ -82,8 +88,9 @@ describe("the token endpoint issuing no token for a code while the store cannot 
 			const resumed = performance.now();
 			i.relay.resume();
 			noToken(answer);
-			// Its read of the code reached Redis, which answered it before the endpoint gave up; the answer was held.
-			expect(i.relay.executions(codeRead).some((e) => e.at > stalled && e.at < answer.at)).toBe(
+			// Its look at the code began on Redis, which answered the clock read it starts with before
+			// the endpoint gave up; the answer was held, so the code was never read.
+			expect(i.relay.executions(clockRead).some((e) => e.at > stalled && e.at < answer.at)).toBe(
 				true,
 			);
 			expect(resumed).toBeGreaterThan(answer.at);
@@ -122,10 +129,14 @@ describe("the token endpoint issuing no token for a code while the store cannot 
 			const answer = await redeemedAt(i, c);
 			i.relay.delay(0, "both");
 			noToken(answer);
-			// Its read of the code was answered only after the endpoint had given up on it.
+			// Its look at the code, from the clock read it starts with, was answered only after the
+			// endpoint had given up on it; the code was never read before.
 			await ready(i);
-			const read = i.relay.executions(codeRead).find((e) => e.at > delayed);
-			expect(read?.at).toBeGreaterThan(answer.at);
+			const started = i.relay.executions(clockRead).filter((e) => e.at > delayed);
+			expect(started.some((e) => e.at > answer.at)).toBe(true);
+			expect(
+				i.relay.executions(codeRead).filter((e) => e.at > delayed && e.at < answer.at),
+			).toEqual([]);
 			expect(successes(i, codeUse(c))).toEqual([]);
 			await healed(d, i);
 		});
