@@ -4,9 +4,9 @@ import type { FamilyStore, StoredFamily } from "../store.ts";
 import { portsOf } from "./ports.ts";
 
 /**
- * Whose a family's record is, as the migration reads it: a family's subject, the one it holds; a
- * revoked mark, `{ format: 1, revoked: true }` and nothing else, holds no subject's data, an orphan
- * by its shape; anything else is unreadable, as it may hold a subject's data.
+ * Whose a family's record is, as the migration reads it: the subject it holds; a revoked mark alone,
+ * an orphan by its shape, removed safely as the migration runs after the epoch lockout, with no 0.19
+ * founder in flight for it to stop; anything else unreadable, as it may hold a subject's data.
  */
 export const familySubjectOf: SubjectReading = async (_key, value) => {
 	const kept = fromStored(value as StoredFamily);
