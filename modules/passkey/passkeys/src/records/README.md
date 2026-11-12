@@ -20,6 +20,8 @@ Internal module of `passkeys`: the passkey records, read in the shape written, a
 - A count moves on only over the passkey judged (its subject, key and count), as the record before the change tells; a removed or pending record has none, and one registered again by another subject is not the one judged.
 - A name is set only on a passkey the subject's holder lists and that names the subject.
 - `listed` follows the holder's list in its order, leaving out each id whose record is not the subject's passkey.
+- A pending record is no passkey to every read: none to assert (`unknown-credential`), list or rename, and its sign count never moves.
+- A removed passkey leaves its holder's list, which ends its use. Every read takes it as removed: no passkey (`unknown-credential`), a count `raced`, an id a new registration may take over.
 
 ## Data
 - Passkeys under `c-` and subjects under `s-`, each followed by the SHA-256 of the id or the subject in base64url, in the passkey store's two spaces.

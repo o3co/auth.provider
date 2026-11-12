@@ -24,13 +24,9 @@
 - `./testing`: the section's test configuration builder, and the contract tests of both store interfaces.
 
 ## Invariants
-- A challenge is taken once, within `webauthn`'s `lifetimeMs` on `kernel`'s clock, whatever the store's expiry. An assertion's challenge is made for a requester: who asks, by its own name, and an id of its own; redeemed by the same alone, another module's with the same id is `challenge`, after it is taken. An assertion challenge is kept as format 2: who asked (`by`) and the id's SHA-256. A format 1 one, as 0.18 opened them, is read, taken and refused as `challenge`, since it names no asker.
 - `registrations`' creation options require a discoverable credential, as `passkeys` lists none to ask for. `passkeys` refuses an assertion without a user handle before any store is read; the handle must be its holder's, judged after the signature.
 - A user handle is made on a subject's first options, or by `cleared` where the subject has no holder, and kept; a credential is listed only on the holder whose handle it was made under. A record read in another shape is unavailable.
-- A credential id its holder lists is refused at registration; one no holder lists (removed, or left by 0.18) can be registered. Options exclude the subject's own. `conflict` tells the caller that some subject lists an id; ids are high-entropy, made by the authenticator: it answers only for an id known.
-- The count is written only over the passkey judged, its subject, key and count; a lost race, or its id taken over by another meanwhile, is `raced`.
-- A pending record is no passkey to every read: none to assert (`unknown-credential`), list or rename, and its sign count never moves.
-- A removed passkey leaves its holder's list, which ends its use. Every read takes it as removed: no passkey (`unknown-credential`), a count `raced`, an id a new registration may take over.
+- A challenge's taking and asker, a registration's refusals and counts, and a pending or removed record's reads: the internal modules `challenges`', `registration`'s and `records`' cards.
 - A store that cannot tell is unavailable (`passkeys`), never a refusal; so is the witnessing, wherever a settle runs.
 - With a witnessing, a registration and a removal settle after their write: a registration whose settle fails keeps the passkey written and answers unavailable. A passkey witness composed with no witnessing to ask it refuses boot: a lost store would read as holding none.
 

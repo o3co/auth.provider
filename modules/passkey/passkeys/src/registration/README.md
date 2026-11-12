@@ -19,6 +19,8 @@ Internal module of `passkeys`: registering passkeys.
 - A passkey is made usable only after both of the caller's asks admitted it; anything stopping the registration before leaves its record pending.
 - The first ask comes before the record and its listing are written, as one, so a revoked registration writes nothing.
 - What is left open: a revocation after the second ask is not seen; a registration stopped, or failing to end, leaves its record pending: if listed, it counts toward `max-credentials` until removed or `cleared`.
+- A credential id its holder lists is refused at registration; one no holder lists (removed, or left by 0.18) can be registered. Options exclude the subject's own. `conflict` tells the caller that some subject lists an id; ids are high-entropy, made by the authenticator: it answers only for an id known.
+- The count is written only over the passkey judged, its subject, key and count; a lost race, or its id taken over by another meanwhile, is `raced`.
 
 ## Depends on
 - `webauthn` (the ceremonies); the package's contract and records, and the internal modules `challenges` and `holders` (their types)

@@ -18,6 +18,7 @@ Internal module of `passkeys`: the challenges that registrations and assertions 
 - A challenge ends on `kernel`'s clock, whatever the store's expiry, as a late write gives it the store's full lifetime again.
 - The purpose is kept as given: an assertion's asker (`by`) and its id's digest, which the package's assertion makes and compares apart. A format 1 assertion names no asker; a format 1 registration reads as one of format 2.
 - A record in another shape reads as none.
+- A challenge is taken once, within `webauthn`'s `lifetimeMs` on `kernel`'s clock, whatever the store's expiry. An assertion's challenge is made for a requester: who asks, by its own name, and an id of its own; redeemed by the same alone, another module's with the same id is `challenge`, after it is taken. An assertion challenge is kept as format 2: who asked (`by`) and the id's SHA-256. A format 1 one, as 0.18 opened them, is read, taken and refused as `challenge`, since it names no asker.
 
 ## Data
 - A challenge's record (`v` 2, its kind, the subject or the asker and its id's digest, and when it was made; `v` 1, the format before, read), then the taken mark in its place, through the challenge store.
