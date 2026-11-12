@@ -3,6 +3,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import {
 	erasedSubjects,
+	erasureGuards,
 	revocationFollowers,
 	revocations,
 	subjectErasure,
@@ -29,14 +30,21 @@ function telling() {
 }
 
 /** subject-revocation over the records stand-in, its store as given, and a follower noting each call. */
-async function boot(wrap: (store: BoundaryStore) => BoundaryStore = (store) => store) {
+async function boot(
+	wrap: (store: BoundaryStore) => BoundaryStore = (store) => store,
+	reads: { readonly on?: boolean; readonly unreadable?: boolean } = {},
+) {
 	const stores = memoryBoundaries(() => now);
+	// As the store reads erasure at this process's start, which holds it.
+	Object.assign(stores.erasure, reads);
 	const follower = telling();
 	const app = await assemble({
 		modules: [
 			revocationModule,
 			defineModule({ name: "boundaries", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(boundaryStore).by(() => wrap(stores.boundaries)),
+				// Guarded, as a composition where erasure may be enabled is.
+				m.contribute(erasureGuards).by(() => ({ name: "test" })),
 			]),
 			follower.module,
 		],
@@ -105,7 +113,7 @@ it("is unavailable, telling no follower, where the record carries a mark that is
 });
 
 it("reads erased from the mark alone: a mark of a time beside a part that cannot be read is erased; none, or no record, is not", async () => {
-	const { erasedSubjects: port, kept } = await boot();
+	const { erasedSubjects: port, kept } = await boot(undefined, { on: true });
 	await kept.records.create("alice", { sessions: "soon", erasedAt: now } as never, "endless");
 	await kept.records.create("bob", { sessions: now } as never, "endless");
 	expect(await port.erased("alice")).toBe(true);
@@ -114,9 +122,31 @@ it("reads erased from the mark alone: a mark of a time beside a part that cannot
 });
 
 it("is unavailable where the record carries a mark that is no time, never not erased", async () => {
-	const { erasedSubjects: port, kept, down } = await boot();
+	const { erasedSubjects: port, kept, down } = await boot(undefined, { on: true });
 	await kept.records.create("alice", { sessions: now, erasedAt: "soon" } as never, "endless");
 	await expect(port.erased("alice")).rejects.toSatisfy(isUnavailable);
 	down.failNext("read");
 	await expect(port.erased("bob")).rejects.toSatisfy(isUnavailable);
+});
+
+it("reads nothing where erasure was read off at start, answering not erased; reads the store once read on, or while unread", async () => {
+	let reads = 0;
+	const counted = (store: BoundaryStore) => ({
+		...store,
+		read: async (subject: string) => {
+			reads += 1;
+			return store.read(subject);
+		},
+	});
+	const off = await boot(counted);
+	await off.kept.records.create("alice", { sessions: now, erasedAt: now } as never, "endless");
+	expect(await off.erasedSubjects.erased("alice")).toBe(false);
+	expect(reads).toBe(0);
+	const unread = await boot(counted, { unreadable: true });
+	expect(await unread.erasedSubjects.erased("bob")).toBe(false);
+	expect(reads).toBe(1);
+	const on = await boot(counted, { on: true });
+	await on.kept.records.create("alice", { sessions: now, erasedAt: now } as never, "endless");
+	expect(await on.erasedSubjects.erased("alice")).toBe(true);
+	expect(reads).toBe(2);
 });

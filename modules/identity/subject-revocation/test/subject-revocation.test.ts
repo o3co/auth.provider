@@ -4,6 +4,7 @@ import { expect, it } from "vitest";
 import {
 	erasedSubjects,
 	erasureFence,
+	erasureGuards,
 	revocations,
 	subjectErasure,
 	subjectRevocation,
@@ -40,14 +41,21 @@ function movable() {
 }
 
 /** subject-revocation over the records stand-in, on a clock the test moves; `front` may stand in front of the store. */
-async function boot(front: (boundaries: BoundaryStore) => BoundaryStore = (b) => b) {
+async function boot(
+	front: (boundaries: BoundaryStore) => BoundaryStore = (b) => b,
+	readsOn = false,
+) {
 	const { clock, runtime, adapter } = movable();
 	const stores = memoryBoundaries(() => clock.at);
+	// As the store reads erasure at this process's start, which holds it.
+	stores.erasure.on = readsOn;
 	const app = await assemble({
 		modules: [
 			revocationModule,
 			defineModule({ name: "boundaries", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(boundaryStore).by(() => front(stores.boundaries)),
+				// Guarded where erasure reads on, as such a composition must be.
+				...(readsOn ? [m.contribute(erasureGuards).by(() => ({ name: "test" }))] : []),
 			]),
 		],
 		config: kernelConfig(),
@@ -226,7 +234,8 @@ it("is unavailable when another request's first boundary is gone before it moves
 });
 
 subjectRevocationContract("subject-revocation over the records stand-in", async () => {
-	const { adapter, revocation, revocations, erasure, erasedSubjects } = await boot();
+	// Read on, so a subject's mark is read: where erasure reads off at start, no subject is marked.
+	const { adapter, revocation, revocations, erasure, erasedSubjects } = await boot(undefined, true);
 	// A boundary is its write's deadline: an authentication counts as after it a patience later.
 	return {
 		revocation,

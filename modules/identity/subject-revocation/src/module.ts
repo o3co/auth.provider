@@ -94,7 +94,12 @@ export default defineModule(
 		m
 			.provide(subjectErasure)
 			.by(async (c) => ({ markErased: markedIn(await c.get(boundaryStore)) })),
-		m.provide(erasedSubjects).by(async (c) => ({ erased: erasedIn(await c.get(boundaryStore)) })),
+		// Where this process read erasure off at its start, no subject is marked (TLC's A2): no read.
+		m.provide(erasedSubjects).by(async (c) => {
+			const marked = erasedIn(await c.get(boundaryStore));
+			const { read } = await c.get(erasureReading);
+			return { erased: async (subject) => ((await read()) === "off" ? false : marked(subject)) };
+		}),
 		m
 			.provide(erasureFence)
 			.by(async (c) => fenceOver(await c.get(boundaryStore), (await c.get(erasureReading)).read)),
