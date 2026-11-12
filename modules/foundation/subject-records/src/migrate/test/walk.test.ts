@@ -1,8 +1,8 @@
 import type { SetReading, SubjectReading, Walk } from "@mod/erasure-extensions";
 import type { Key, Space } from "@mod/store";
 import { expect, it } from "vitest";
-import { eraseSubject, migrateRecords, migrateSets } from "../src/subject-records.ts";
-import { placed } from "./placed.ts";
+import { placed } from "../../../test/placed.ts";
+import { eraseSubject, migrateRecords, migrateSets } from "../../subject-records.ts";
 
 // A walk whose server changes starts over and finishes: it never ends at the change (#2826's walk).
 const g = ["durable"] as const;

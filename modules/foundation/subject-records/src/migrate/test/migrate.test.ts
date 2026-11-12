@@ -1,8 +1,8 @@
 import type { Elsewhere, SubjectReading } from "@mod/erasure-extensions";
 import type { Json, Space } from "@mod/store";
 import { expect, it } from "vitest";
-import { migrateRecords, subjectRecordsIn } from "../src/subject-records.ts";
-import { bucketOf, envelope, placed } from "./placed.ts";
+import { bucketOf, envelope, placed } from "../../../test/placed.ts";
+import { migrateRecords, subjectRecordsIn } from "../../subject-records.ts";
 
 const g = ["durable"] as const;
 const indexed: Space = { name: "migrated-test", guarantees: g, subjectData: "online-indexed" };

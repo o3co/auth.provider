@@ -22,7 +22,7 @@ import { type Json, type Key, type Space, type Store, spaces, store } from "@mod
 import { simulatedStore } from "@mod/store/testing";
 import fc from "fast-check";
 import { expect, it, vi } from "vitest";
-import { eraseSubject, indexSpaceOf, migrateRecords } from "../src/subject-records.ts";
+import { eraseSubject, indexSpaceOf, migrateRecords } from "../../subject-records.ts";
 
 const seed = Number(process.env.FC_SEED ?? 20261111);
 const numRuns = Number(process.env.FC_RUNS ?? 200);
