@@ -36,7 +36,7 @@ describe("refresh's eraser", () => {
 		}
 	});
 
-	it("states that it cannot erase where the store lacks the ports, answering empty reports", async () => {
+	it("states that it cannot erase where the store offers none of its ports, answering empty reports", async () => {
 		const eraser = familyEraser(plain as unknown as FamilyStore);
 		expect([eraser.name, eraser.erasable]).toEqual(["refresh", false]);
 		expect(await eraser.online("alice", signal)).toEqual({ reports: [], logoutGaps: 0 });
@@ -55,6 +55,7 @@ describe("refresh's eraser", () => {
 				asked.push((await reading("f", family)).kind);
 				return { kind: "migrated", space: "families", indexed: 1, removed: 0 } as MigrationReport;
 			},
+			unowned: async () => "closed" as const,
 		};
 		const eraser = familyEraser(families as unknown as FamilyStore);
 		expect(eraser.erasable).toBe(true);

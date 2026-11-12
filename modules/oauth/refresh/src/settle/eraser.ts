@@ -1,6 +1,7 @@
 import type { Eraser, SubjectReading } from "@mod/erasure-extensions";
 import { fromStored } from "../record.ts";
 import type { FamilyStore, StoredFamily } from "../store.ts";
+import { portsOf } from "./ports.ts";
 
 /**
  * Whose a family's record is, as the migration reads it: a family's subject, the one it holds; a
@@ -16,12 +17,12 @@ export const familySubjectOf: SubjectReading = async (_key, value) => {
 
 /**
  * refresh's eraser, `refresh`, as its space's `erasedBy` names it: a subject's families erased through
- * the family store's own ports. `erasable` only where the store offers `erase` and `migrate`; one that
+ * the family store's own ports. `erasable` only where the store offers its ports whole; one that
  * does not answers empty reports, the field carrying the fact.
  */
 export function familyEraser(families: FamilyStore): Eraser {
-	const { erase, migrate } = families;
-	if (!erase || !migrate) {
+	const ports = portsOf(families);
+	if (!ports) {
 		const none = { reports: [], logoutGaps: 0 };
 		return {
 			name: "refresh",
@@ -32,7 +33,7 @@ export function familyEraser(families: FamilyStore): Eraser {
 		};
 	}
 	const online = async (subject: string, signal: AbortSignal) => ({
-		reports: [await erase.call(families, subject, signal)],
+		reports: [await ports.erase(subject, signal)],
 		logoutGaps: 0,
 	});
 	return {
@@ -45,6 +46,6 @@ export function familyEraser(families: FamilyStore): Eraser {
 			for (const subject of subjects) reports.push(...(await online(subject, signal)).reports);
 			return { reports, logoutGaps: 0 };
 		},
-		migrate: async (walk, signal) => [await migrate.call(families, walk, familySubjectOf, signal)],
+		migrate: async (walk, signal) => [await ports.migrate(walk, familySubjectOf, signal)],
 	};
 }

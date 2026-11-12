@@ -19,6 +19,7 @@ import {
 	type TokenFamilies,
 	tokenFamilies,
 } from "../store.ts";
+import { portsOf, portsRefused } from "./ports.ts";
 
 export interface Stores {
 	readonly families: FamilyStore;
@@ -26,8 +27,16 @@ export interface Stores {
 	readonly tokenFamilies: TokenFamilies;
 }
 
-/** A family store's save seen without a subject: a store offering no `unowned` keeps no subject, and a mark holds none. */
 type SaveUnowned = (id: string, record: StoredFamily, lifetimeMs: number) => Promise<string>;
+
+/**
+ * refresh's view of the family store's `save` with no subject, as before 0.20, for a mark holds none:
+ * a type over the same method, never one an implementation writes; on a store with none of its ports.
+ */
+const unownedSave =
+	(families: FamilyStore): SaveUnowned =>
+	(id, record, lifetimeMs) =>
+		(families.save as unknown as SaveUnowned).call(families, id, record, lifetimeMs);
 
 export function settling(stores: Stores, tokens: Tokens, now: () => number, lifetimeMs: number) {
 	/** Ties an access token to the family that issued it, so the family's mark refuses it. */
@@ -40,16 +49,17 @@ export function settling(stores: Stores, tokens: Tokens, now: () => number, life
 			if (!kept || fromStoredLink(kept)?.family !== id) throw new Unavailable("refresh");
 		}
 	};
+	// Through the store's `unowned` where it offers the ports, else its `save` with no subject (0.19's).
+	const saveMark = portsOf(stores.families)?.unowned ?? unownedSave(stores.families);
 	// Revokes a family by its mark alone, which refuses every token of it from then. No record: gone by
 	// its end, by its subject's erasure, or never founded, each read as ended. Until 0.22 a mark is still
-	// saved there, for a 0.19 founder writing the redemption's link first; `closed` marks nothing.
+	// saved there, for a 0.19 founder writing the redemption's link first; `closed`, the space indexed,
+	// marks nothing.
 	const revokeFamily = async (id: string) => {
 		const revoked = toStored({ format: 1, revoked: true });
 		const marked = await stores.families.update(id, () => ({ value: revoked }));
 		if (marked) return;
-		const written = stores.families.unowned
-			? await stores.families.unowned(id, revoked, lifetimeMs)
-			: await (stores.families.save as unknown as SaveUnowned)(id, revoked, lifetimeMs);
+		const written = await saveMark(id, revoked, lifetimeMs);
 		// A family placed meanwhile is marked when the revocation is tried again.
 		if (written !== "created" && written !== "closed") throw new Unavailable("refresh");
 	};
@@ -74,6 +84,8 @@ export async function settlingIn(c: BuildContext<Settings>) {
 		redemptions: await c.get(redemptionStore),
 		tokenFamilies: await c.get(tokenFamilies),
 	};
+	const ports = portsRefused(stores.families);
+	if (ports !== undefined) return c.refuse("refresh", ports);
 	const issuing = await c.get(tokens);
 	// A round that fails once its access token is issued withdraws it; without a denylist it could not.
 	if (!issuing.revocable()) {

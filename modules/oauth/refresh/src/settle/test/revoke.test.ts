@@ -3,18 +3,20 @@ import { describe, expect, it } from "vitest";
 import type { FamilyStore } from "../../store.ts";
 import { settling } from "../settle.ts";
 
-/** A family store with no record, whose `unowned` answers as given; what it was asked. */
+/** A family store with no record, offering its ports whole with `unowned` answering as given, or none; what it was asked. */
 function revokerOver(answer: "created" | "exists" | "closed" | undefined) {
-	const asked: string[] = [];
+	const asked: unknown[] = [];
 	const families: Partial<FamilyStore> = {
 		update: async () => undefined,
-		save: async () => {
-			asked.push("save");
+		save: async (...args: unknown[]) => {
+			asked.push(["save", ...args]);
 			return "created";
 		},
 		...(answer === undefined
 			? {}
 			: {
+					erase: async () => ({}) as never,
+					migrate: async () => ({}) as never,
 					unowned: async () => {
 						asked.push("unowned");
 						return answer;
@@ -38,9 +40,9 @@ describe("revoking a family with no record", () => {
 		await expect(revokerOver("exists").revoke()).rejects.toBeInstanceOf(Unavailable);
 	});
 
-	it("saves the mark with no subject on a store offering no unowned, which keeps none", async () => {
+	it("saves the mark through save with no subject on a store offering none of its ports, as before 0.20", async () => {
 		const r = revokerOver(undefined);
 		await r.revoke();
-		expect(r.asked).toEqual(["save"]);
+		expect(r.asked).toEqual([["save", "fam", { format: 1, revoked: true }, 1000]]);
 	});
 });
