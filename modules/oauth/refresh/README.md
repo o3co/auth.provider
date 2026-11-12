@@ -8,9 +8,9 @@
 - The access token format and its revocation (`tokens`). Whether a client is allowed a grant (`client-allowance`). The session lifecycle (`session`).
 
 ## Offers
-- Grant `refresh_token` for `grants`, taking its audience from the request; a `code-grant` addition `refresh_token`, for a client allowed the grant; taking it back revokes the family its redemption started, or marks that none may start.
+- Grant `refresh_token` for `grants`, taking its audience from the request; a `code-grant` addition `refresh_token`, for a client allowed the grant; taking it back revokes the family its redemption started, or writes `taken` (none may start).
 - A `tokens` access condition: a token whose family has ended is revoked.
-- A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family; how each is answered, `settle`'s card says.
+- A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family; `settle` says how each is answered.
 - `grants`' token tie `family`: a token's family, `ended` (`family has ended`) or held to its end, naming the family's session, if any, to issue from; a token issued from it is adopted.
 - The eraser `refresh` (internal module `settle`).
 - Contract `lineage`: `start(...)` → a family's first refresh token, or nothing for a client not allowed to refresh.

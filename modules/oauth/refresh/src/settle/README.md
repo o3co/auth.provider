@@ -15,12 +15,11 @@ Internal module of `refresh`: the stores, the revoker, and what revokes families
 
 ## Invariants
 - Revocation is the mark alone; its access tokens are not revoked by id, nor is it listed or swept. No record: gone by its end, by its subject's erasure, or never founded; each reads as ended, and nothing is marked.
+- A family whose subject is erased but not yet removed by its eraser is refused at every use by the subject's mark, which account erasure writes before any eraser runs: the grant's `check`, and tokens' subject check, composed wherever erasure is enabled. A revocation of it answers as written, and the eraser's rerun removes it.
 - Until 0.22 a mark is still saved there, for a 0.19 founder that writes a redemption's link before the family: through the store's deprecated `unowned`, `closed` (the space indexed) marking nothing; on a store offering none of its erasure ports, through its `save` with no subject, the fallback from before 0.20. The mark is kept for the longest a family may live, 365 days, and an allowance: a 0.19 founder whose link's reply was lost, resuming within it, finds the mark and founds nothing.
 - A revocation by its client is answered as written, so it is audited. One `token-control` asks of a family already marked writes the mark again, confirmed, before it is answered `done`, whoever asks, as one read before its write was confirmed could be lost in a failover; another client's live family is left alone and answered `done` too.
-
-- A family is saved for its subject. A save the family store answers `erased`, its subject's erasure fencing it, is unavailable, never `exists`, and no family starts; a retry never passes. The family store's `erase` and `migrate` are optional in 0.20 and required in 0.22.
-
-- A family its eraser removed is gone: a later reuse of a code pointing to it, or a revocation of its token, finds nothing to revoke, which is right, as no record reads as ended. A 0.19 revoked mark the migration removes reads so too: `token-control`'s revocation then answers `unknown` where it answered `done`, and the endpoint tries its other kinds and answers 200 as before.
+- The family store keeps each family for its subject; its `erase` and `migrate` are optional in 0.20 and required in 0.22.
+- A family its eraser removed is gone: a later reuse of a code pointing to it, or a revocation of its token, finds nothing to revoke. A 0.19 revoked mark the migration removes is gone too: `token-control`'s revocation then answers `unknown` where it answered `done`, and the endpoint tries its other kinds and answers 200 as before.
 
 ## Deprecated
 - The family store's `unowned`, and the revoked mark saved where no record is, through it or a `save` with no subject: kept for 0.19 founders, which write a redemption's link before the family. Removed in 0.22.

@@ -47,11 +47,11 @@ export function starting(
 	};
 }
 
-/** Ends the family a redemption started; with none yet, marks that none may start. */
+/** Ends the family a redemption started; with none yet, writes `taken`, so none may start. */
 export function takingBack(stores: Stores, revoker: Revoker, lifetimeMs: number) {
 	return async (redemption: string) => {
-		const mark = toStoredRedemption({ format: 1, taken: true });
-		await stores.redemptions.save(redemption, mark, lifetimeMs + allowanceMs);
+		const taken = toStoredRedemption({ format: 1, taken: true });
+		await stores.redemptions.save(redemption, taken, lifetimeMs + allowanceMs);
 		// save keeps whichever came first; read back to see which.
 		const stored = await stores.redemptions.read(redemption);
 		if (stored === undefined) return;
