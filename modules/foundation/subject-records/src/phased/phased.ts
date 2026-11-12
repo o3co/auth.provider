@@ -88,7 +88,15 @@ export const phasedRecordsIn = <T extends Json>(
 			const at = { ...place, phase: read };
 			return {
 				...subjectRecordsIn<T>(at, where, told, options),
-				erase: (subject: string, signal: AbortSignal) => eraseSubject(at, subject, { signal }),
+				// A value removed is one this builder kept as T, or one kept raw under the subject's key.
+				erase: (subject: string, signal: AbortSignal, eachRemoved?: (value: T) => void) =>
+					eraseSubject(
+						at,
+						subject,
+						eachRemoved
+							? { signal, eachRemoved: eachRemoved as (value: Json) => void }
+							: { signal },
+					),
 				migrate: (
 					walk: Walk,
 					subjectOf: SubjectReading,
