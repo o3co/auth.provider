@@ -144,13 +144,13 @@ export function exchangeGrant(parts: Parts): Grant {
 	};
 
 	/**
-	 * Joins the issued token, for its subject, to each of the subject token's ties in order; at the
-	 * first that ended meanwhile, revokes it.
+	 * Joins the issued token, for the account it was issued to, to each of the subject token's ties in
+	 * order; at the first that ended meanwhile, revokes it.
 	 */
-	const join = async (tie: Tie, issued: IssuedAccess, subject: string) => {
+	const join = async (tie: Tie, issued: IssuedAccess, account: string) => {
 		const reference = { id: issued.id, expiresAt: issued.expiresAt };
 		for (const one of tie.joins) {
-			if (await one(reference, subject)) continue;
+			if (await one(reference, account)) continue;
 			// Its answer is not read: a tie may have revoked the token already.
 			await parts.tokens.revokeAccess(issued.token);
 			return false;
