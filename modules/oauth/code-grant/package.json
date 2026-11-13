@@ -16,6 +16,7 @@
 	"dependencies": {
 		"@mod/client-allowance": "workspace:*",
 		"@mod/clients": "workspace:*",
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/grants": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",

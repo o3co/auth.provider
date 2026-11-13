@@ -1366,6 +1366,9 @@ importers:
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/grants':
         specifier: workspace:*
         version: link:../grants
@@ -4027,6 +4030,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
       zod:
         specifier: 4.6.7
         version: 4.6.7

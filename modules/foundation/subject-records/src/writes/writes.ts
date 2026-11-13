@@ -1,7 +1,22 @@
-import { type Attempt, type Changed, changeRecords, type Target } from "@mod/records";
+import { type Attempt, type Changed, changeRecords, type Place, type Target } from "@mod/records";
 import type { Json } from "@mod/store";
 import { checkedSubjectPlace, type SubjectPlace } from "../index/index.ts";
 import { type Rule, rulesOf } from "./rules.ts";
+
+/**
+ * How a record is reached: by its key (`recordOf`), a secret where `secret` keys the space, or by
+ * its name (`recordNamed`); and that name (`nameOf`), records' digest of the secret read off the
+ * target written, a 0.19 instance's record's too. Elsewhere a key is its name. Needs no phase.
+ */
+export const recordTargetsIn = (place: Place, options: { readonly secret?: true } = {}) => {
+	const recordOf = (key: string): Target =>
+		options.secret ? { place, secret: key } : { place, key };
+	const recordNamed = (name: string): Target =>
+		options.secret ? { place, secretName: name } : { place, key: name };
+	const nameOf = (key: string) =>
+		options.secret ? changeRecords.keyOf(recordOf(key)).partition : key;
+	return { recordOf, recordNamed, nameOf };
+};
 
 /**
  * A subject's records in a space declaring `online-indexed` (its keys in its subject's index),
@@ -29,13 +44,12 @@ export function subjectRecordsIn<T extends Json>(
 	const bounded = category === "bounded";
 	if (options.secret && !bounded) refuse(where, "only a bounded space keys its records by secrets");
 	const rules = rulesOf(place, category);
-	const recordOf = (key: string): Target =>
-		options.secret ? { place, secret: key } : { place, key };
+	const { recordOf, recordNamed } = recordTargetsIn(place, options);
 	/** Runs one rule on one record, as one change: its needs read beside it, its writes in one write. */
-	const ruled = async <A>(key: string, rule: Rule<A>): Promise<A> => {
+	const ruledAt = async <A>(target: Target, rule: Rule<A>): Promise<A> => {
 		let answer: A | undefined;
 		await changeRecords({
-			targets: [recordOf(key)],
+			targets: [target],
 			watch: ([held]) => rule.needs(held),
 			decide: ([held], needed, attempt) => {
 				const decided = rule.decide(held, needed, attempt);
@@ -47,6 +61,15 @@ export function subjectRecordsIn<T extends Json>(
 			},
 		});
 		return answer as A;
+	};
+	const ruled = <A>(key: string, rule: Rule<A>): Promise<A> => ruledAt(recordOf(key), rule);
+	/** Changes the record at `target` from what it holds, answering before and after; nothing when gone. */
+	const changeAt = async (
+		target: Target,
+		change: (current: T, attempt: Attempt) => Changed<T> | undefined,
+	): Promise<{ readonly before: T; readonly after: T } | undefined> => {
+		const answer = await ruledAt(target, rules.change(change));
+		return answer.kind === "changed" ? { before: answer.before, after: answer.after } : undefined;
 	};
 	return {
 		/**
@@ -102,13 +125,15 @@ export function subjectRecordsIn<T extends Json>(
 		 * indexes or removes every raw record before a tombstone can be written (account erasure
 		 * §3.3, §5.1).
 		 */
-		change: async (
-			key: string,
-			change: (current: T, attempt: Attempt) => Changed<T> | undefined,
-		): Promise<{ readonly before: T; readonly after: T } | undefined> => {
-			const answer = await ruled(key, rules.change(change));
-			return answer.kind === "changed" ? { before: answer.before, after: answer.after } : undefined;
-		},
+		change: (key: string, change: (current: T, attempt: Attempt) => Changed<T> | undefined) =>
+			changeAt(recordOf(key), change),
+		/**
+		 * `change` by the record's name, which `nameOf` gives a space keyed by secrets: the same record
+		 * and rule, its end and fence alike, for an owner that keeps names, never secrets (code-grant).
+		 * Elsewhere a name is the key itself.
+		 */
+		changeNamed: (name: string, change: (current: T, attempt: Attempt) => Changed<T> | undefined) =>
+			changeAt(recordNamed(name), change),
 		/**
 		 * Removes the record, and its entry from its subject's bucket as one; a set under the key
 		 * keeps its own. No tombstone stops it. Where `when` is given, only a record whose value, raw

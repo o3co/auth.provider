@@ -7,7 +7,7 @@ import { jointRecordsIn } from "../joint/joint.ts";
 import { migrateRecords, migrateSets } from "../migrate/migrate.ts";
 import type { PhaseOnce } from "../phase/phase.ts";
 import { subjectKeyedSetsIn } from "../sets/sets.ts";
-import { subjectRecordsIn } from "../writes/writes.ts";
+import { recordTargetsIn, subjectRecordsIn } from "../writes/writes.ts";
 
 type Refuse = (where: string, reason: string) => never;
 /** A builder's methods, each answering a promise. */
@@ -78,14 +78,14 @@ async function phased<B extends Methods>(
  * `erase` and `migrate` at that phase, as an owner's store ports take them: the wiring never
  * handles the phase.
  */
-export const phasedRecordsIn = <T extends Json>(
+export const phasedRecordsIn = async <T extends Json>(
 	place: Omit<SubjectPlace, "phase">,
 	phase: PhaseOnce,
 	where: string,
 	refuse: Refuse,
 	options: { readonly secret?: true } = {},
-) =>
-	phased(
+) => ({
+	...(await phased(
 		phase,
 		(read, told) => {
 			const at = { ...place, phase: read };
@@ -116,12 +116,16 @@ export const phasedRecordsIn = <T extends Json>(
 			unowned: true,
 			read: true,
 			change: true,
+			changeNamed: true,
 			remove: true,
 			scan: true,
 			erase: true,
 			migrate: true,
 		} satisfies Record<keyof ReturnType<typeof subjectRecordsIn<T>> | "erase" | "migrate", true>,
-	);
+	)),
+	/** The name a record is kept by (`writes`' `recordTargetsIn`), needing no phase. */
+	nameOf: recordTargetsIn(place, options).nameOf,
+});
 
 /** `subjectKeyedSetsIn` over the phase the process reads once (see `phased`). */
 export const phasedKeyedSetsIn = (

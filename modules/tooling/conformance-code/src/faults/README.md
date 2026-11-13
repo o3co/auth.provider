@@ -13,7 +13,7 @@ Internal module of `conformance-code`: what the area's fault scenes share in the
 
 ## Offers
 - `faultScene`, `on` (`conformance`'s, on `faultScene` by default), `pkce` (a verifier of its own and its challenge), `browserOn`, `codeAt`, `tokenAt`, `redeemAt`, `familyAt`, `refreshAt`, `said`, and the scene's `issuer`, `callback` and client `app`.
-- From `test/wire.ts`: `prefix`, `codeRecord`, `codeKept`, `codeRead`, `codeReadSettled`, `cookieRead`, `codeUse`, `codeNoted`, `rotationFrom`, `familyRead`, `sessionRead`, `added`, `recordAs`, `revocationOf`, `closingOf`, `doneWith`, `Closing`, `isStoreOperation`, `boundaryOf`, `boundaryCreated`, `closingAdded`, `proofSpent`, `proofsCounted`.
+- From `test/wire.ts`: `prefix`, `codeRecord`, `codeKept`, `codeRead`, `codeReadSettled`, `clockRead`, `cookieRead`, `codeUse`, `codeNoted`, `rotationFrom`, `familyRead`, `sessionRead`, `added`, `recordAs`, `revocationOf`, `closingOf`, `doneWith`, `Closing`, `isStoreOperation`, `boundaryOf`, `boundaryCreated`, `closingAdded`, `proofSpent`, `proofsCounted`.
 
 ## Invariants
 - Each code has a challenge of its own, so a match on it never takes another code's write.

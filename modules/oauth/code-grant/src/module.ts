@@ -1,5 +1,6 @@
 import { clientAllowance } from "@mod/client-allowance";
 import { clients } from "@mod/clients";
+import { erasers } from "@mod/erasure-extensions";
 import { grants, sessionIssuances } from "@mod/grants";
 import { issuer } from "@mod/issuer";
 import { defineModule, Unavailable } from "@mod/kernel";
@@ -14,14 +15,19 @@ import {
 	codes,
 	idTokens,
 	redemptionHooks,
+	redemptionRecords,
 	sessionRedemptions,
 	voidList,
 } from "./contract.ts";
-import { answerFields, codeGrant, voiding } from "./grant.ts";
+import { codeGrantEraser } from "./erasure/eraser.ts";
+import { portsRefused } from "./erasure/ports.ts";
+import { answerFields, codeGrant } from "./grant.ts";
 import { section } from "./section.ts";
+import { voiding } from "./voiding/voiding.ts";
 
 const takes = [
 	codeStore,
+	redemptionRecords,
 	voidList,
 	sessions,
 	clients,
@@ -35,7 +41,7 @@ const takes = [
 ];
 
 // Safe on many instances: every instance runs the sweep over the shared void list, and settling a void twice
-// does no harm (test/voids.test.ts).
+// does no harm (voiding/test/voids.test.ts).
 export default defineModule({ name: "code-grant", replicaSafe: true, section, takes }, (m) => [
 	m.provide(codes).by(async (c) => {
 		const store = await c.get(codeStore);
@@ -69,12 +75,14 @@ export default defineModule({ name: "code-grant", replicaSafe: true, section, ta
 					authenticatedAt: context.authenticatedAt,
 					...(context.authenticatedAtUnknown ? { authenticatedAtUnknown: true } : {}),
 				};
-				const saved = await store.save(
-					store.nameOf(code),
+				// Created for its subject: one erased here meanwhile gets no code, answered as a session gone.
+				const created = await store.create(
+					code,
 					toStored(record),
 					c.section["code-lifetime"] * 1000,
+					facts.subject,
 				);
-				if (saved !== "created") throw new Unavailable("code-grant");
+				if (created !== "created") throw new Unavailable("code-grant");
 				return code;
 			},
 			redemptionOf: (code) => store.nameOf(code),
@@ -104,17 +112,21 @@ export default defineModule({ name: "code-grant", replicaSafe: true, section, ta
 		const taken = contributed.find((a) => answerFields.has(a.field));
 		if (taken) return c.refuse("code-grant", `the response field ${taken.field} already exists`);
 		const store = await c.get(codeStore);
+		const records = await c.get(redemptionRecords);
+		const ports = portsRefused({ codes: store, redemptionRecords: records });
+		if (ports) return c.refuse("code-grant", ports);
 		const voids = voiding({
 			store,
+			redemptionRecords: records,
 			voids: await c.get(voidList),
 			tokens: issuing,
 			log: c.log,
-			now: c.clock.now,
 			additions: contributed,
 		});
 		c.every(c.section["sweep-interval"] * 1000, () => voids.sweep());
 		return codeGrant({
 			store,
+			redemptionRecords: records,
 			sessions: await c.get(sessions),
 			settle: voids.settle,
 			now: c.clock.now,
@@ -124,4 +136,11 @@ export default defineModule({ name: "code-grant", replicaSafe: true, section, ta
 			hooks: await c.collect(redemptionHooks),
 		});
 	}),
+	// Its build takes only its places, collecting no probes: the erasure gate collects erasers.
+	m.contribute(erasers).by(async (c) =>
+		codeGrantEraser({
+			codes: await c.get(codeStore),
+			redemptionRecords: await c.get(redemptionRecords),
+		}),
+	),
 ]);

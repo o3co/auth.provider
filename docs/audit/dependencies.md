@@ -174,7 +174,7 @@ flowchart LR
 | `@mod/client-assertion` | feature | `@mod/clients`, `@mod/external-jwt`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/token-endpoint`, `@mod/url-setting` |
 | `@mod/client-credentials` | feature | `@mod/client-allowance`, `@mod/grants`, `@mod/issuer`, `@mod/kernel` |
 | `@mod/clients-cimd` | feature | `@mod/client-allowance`, `@mod/client-documents`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/host-entries`, `@mod/issuer`, `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/refresh`, `@mod/url-setting` |
-| `@mod/code-grant` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/tokens` |
+| `@mod/code-grant` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/erasure-extensions`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/tokens` |
 | `@mod/consent` | feature | `@mod/audit`, `@mod/client-documents`, `@mod/clients`, `@mod/csrf`, `@mod/erasure-extensions`, `@mod/http`, `@mod/kernel`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/url-setting` |
 | `@mod/device-grant` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/clients`, `@mod/csrf`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/rate-limit`, `@mod/request-source`, `@mod/session`, `@mod/subject-revocation`, `@mod/token-endpoint`, `@mod/tokens`, `@mod/url-setting` |
 | `@mod/discovery` | feature | `@mod/http`, `@mod/issuer`, `@mod/kernel` |
@@ -277,7 +277,7 @@ flowchart LR
 | `@mod/authorize-store` | wiring | `@mod/kernel`, `@mod/reauth`, `@mod/records`, `@mod/store` |
 | `@mod/claims-selection-store` | wiring | `@mod/claims-selection`, `@mod/kernel`, `@mod/records`, `@mod/store` |
 | `@mod/client-assertion-store` | wiring | `@mod/client-assertion`, `@mod/kernel`, `@mod/records`, `@mod/store` |
-| `@mod/code-grant-store` | wiring | `@mod/code-grant`, `@mod/kernel`, `@mod/records`, `@mod/store` |
+| `@mod/code-grant-store` | wiring | `@mod/code-grant`, `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-records` |
 | `@mod/consent-store` | wiring | `@mod/consent`, `@mod/kernel`, `@mod/store`, `@mod/subject-records` |
 | `@mod/device-grant-store` | wiring | `@mod/device-grant`, `@mod/kernel`, `@mod/records`, `@mod/store` |
 | `@mod/dpop-store` | wiring | `@mod/dpop`, `@mod/kernel`, `@mod/records`, `@mod/store` |

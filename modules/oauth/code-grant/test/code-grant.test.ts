@@ -52,12 +52,19 @@ import {
 	idTokens,
 	type Redeemed,
 	redemptionHooks,
+	redemptionRecords,
 	type StoredCode,
+	type StoredRedemptionRecord,
 	sessionRedemptions,
+	storedRecordMaxMs,
 	type VoidList,
 	voidList,
 } from "../src/contract.ts";
 import codeGrantModule from "../src/module.ts";
+import {
+	fromStoredRedemptionRecord,
+	markVoid,
+} from "../src/redemption-record/redemption-record.ts";
 import { codeGrantConfig, codeStoreContract } from "../src/testing.ts";
 
 const grantsSeen = contract<readonly Grant[]>("grants-seen");
@@ -78,10 +85,16 @@ const runtime = quietRuntime({
 let stop = async () => {};
 /** A code's name as a place might make it: not the code, so a test that peeks by code finds nothing. */
 const nameOf = (code: string) => `n.${createHash("sha256").update(code).digest("base64url")}`;
-/** code-grant's stores on the records stand-in, with its clock from the composition; the void list behind a switch. */
+/**
+ * code-grant's stores on the records stand-in, with its clock from the composition; the void list
+ * behind a switch, and redemption records that may answer a subject erased.
+ */
 const memoryStores = () => {
 	let clock = () => 0;
 	const stand = memoryRecords<StoredCode>(() => clock(), { shards: 16, perShard: 100 });
+	const redeemed = memoryRecords<StoredRedemptionRecord>(() => clock(), { shards: 1, perShard: 1 });
+	/** Subjects erased: no redemption record is created for them. */
+	const erased = new Set<string>();
 	const voids = unavailableSwitch<VoidList>("void list");
 	/** Whether the next change finds nothing, as a read that has not yet seen the record. */
 	let missing = false;
@@ -93,11 +106,27 @@ const memoryStores = () => {
 	const module = defineModule({ name: "code-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(codeStore).by((c) => {
 			clock = c.clock.now;
-			return { nameOf, save: stand.records.create, update };
+			// Created by the code, under its name, as a Store keyed by secrets names it.
+			const create: CodeStore["create"] = (code, record, lifetimeMs) =>
+				stand.records.create(nameOf(code), record, lifetimeMs);
+			return { nameOf, create, update };
 		}),
 		m.provide(voidList).by(() => voids.wrap(stand.deferred)),
+		m.provide(redemptionRecords).by(() => ({
+			create: async (name, record, lifetimeMs, subject) =>
+				erased.has(subject) ? "erased" : redeemed.records.create(name, record, lifetimeMs),
+			read: redeemed.records.read,
+			update: redeemed.records.change,
+		})),
 	]);
-	return { module, ...stand, voids, missNextChange: () => (missing = true) };
+	return {
+		module,
+		...stand,
+		voids,
+		missNextChange: () => (missing = true),
+		redeemed,
+		erase: (subject: string) => erased.add(subject),
+	};
 };
 afterEach(async () => {
 	shift = 0;
@@ -109,8 +138,18 @@ codeStoreContract("records stand-in", async () => {
 	let now = 0;
 	const size = { shards: 4, perShard: 5 };
 	const stand = memoryRecords<StoredCode>(() => now, size);
+	const redeemed = memoryRecords<StoredRedemptionRecord>(() => now, size);
 	return {
-		codes: { nameOf, save: stand.records.create, update: stand.records.change },
+		codes: {
+			nameOf,
+			create: (code, record, lifetimeMs) => stand.records.create(nameOf(code), record, lifetimeMs),
+			update: stand.records.change,
+		},
+		redemptionRecords: {
+			create: (name, record, lifetimeMs) => redeemed.records.create(name, record, lifetimeMs),
+			read: redeemed.records.read,
+			update: redeemed.records.change,
+		},
 		voids: stand.deferred,
 		advance: (ms) => {
 			now += ms;
@@ -270,6 +309,9 @@ const keptOf = (s: Served, code: string) => {
 	const kept = s.stores.peek(nameOf(code));
 	return kept && fromStored(kept);
 };
+/** What a code's redemption record holds now. */
+const redeemedOf = (s: Served, code: string) =>
+	fromStoredRedemptionRecord(s.stores.redeemed.peek(nameOf(code)));
 
 const revoked = async (s: Served, token: string) =>
 	(await s.app.get(tokens).verifyAccess(token)).kind === "invalid";
@@ -468,7 +510,7 @@ it("refuses a resource outside the code's audience when the look before use miss
 		error: "invalid_target",
 		error_description: "not https://other",
 	});
-	expect(keptOf(s, code)?.token).toBeUndefined();
+	expect(redeemedOf(s, code)?.token).toBeUndefined();
 });
 
 it("takes the resource the rule refuses to a grant that takes no audience, as one that asks it", async () => {
@@ -505,7 +547,7 @@ it("refuses a code the policies refuse once it is used up, issuing nothing", asy
 		error_description: "refused here",
 	});
 	expect(keptOf(s, code)).toMatchObject({ state: "consumed" });
-	expect(keptOf(s, code)?.token).toBeUndefined();
+	expect(redeemedOf(s, code)?.token).toBeUndefined();
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 });
 
@@ -527,7 +569,7 @@ it("keeps neither the code nor the token it gave in code-grant's own record of t
 	for (const secret of [code, String(redeemed.body.access_token)]) {
 		expect(stored).not.toContain(secret);
 	}
-	expect(Object.keys(keptOf(s, code)?.token ?? {}).sort()).toEqual(["expiresAt", "reference"]);
+	expect(Object.keys(redeemedOf(s, code)?.token ?? {}).sort()).toEqual(["expiresAt", "reference"]);
 });
 
 it("refuses a code another exchange used up while this one was turning it, and lists and marks it void [rfc6749-4.1.2-d]", async () => {
@@ -599,7 +641,7 @@ it("refuses a code whose subject was revoked after it signed in", async () => {
 	shift = 1000;
 	await s.app.get(revocations).record("alice");
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
-	expect(keptOf(s, code)?.token).toBeUndefined();
+	expect(redeemedOf(s, code)?.token).toBeUndefined();
 });
 it("refuses a code issued to another client, or presented with another redirect URI [rfc6749-4.1.3-c] [rfc6749-4.1.3-e]", async () => {
 	const s = await serve();
@@ -636,7 +678,7 @@ it("issues nothing for a code whose session closed before the exchange", async (
 	const code = await s.issue();
 	await s.app.get(sessions).close(s.session.id, carrying(s.cookies));
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
-	expect(keptOf(s, code)?.token).toBeUndefined();
+	expect(redeemedOf(s, code)?.token).toBeUndefined();
 });
 
 /** A requirement a session falls short of at use while `short.now` is set. */
@@ -656,7 +698,7 @@ it("issues nothing for a code whose session falls short of a requirement to be u
 	const code = await s.issue();
 	short.now = true;
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
-	expect(keptOf(s, code)?.token).toBeUndefined();
+	expect(redeemedOf(s, code)?.token).toBeUndefined();
 	await expect(s.app.get(codes).issue(s.facts), "a code for it").rejects.toThrow(Unavailable);
 });
 
@@ -669,16 +711,19 @@ it("keeps an unused code for code-lifetime, and no longer [oidc-core-16.9-a]", a
 	expect(keptOf(s, code)).toBeUndefined();
 });
 
-it("keeps a redeemed code's record past its token's end by the allowance for clock drift", async () => {
+it("keeps a redemption record past its token's end by the allowance for clock drift, for storedRecordMaxMs, and a redeemed code no longer than issued", async () => {
 	const s = await serve();
 	const code = await s.issue();
+	const before = Date.now();
 	const answer = await s.redeem(code);
 	const checked = await s.app.get(tokens).verifyAccess(String(answer.body.access_token));
 	if (checked.kind !== "valid") throw new Error("not valid");
-	shift = checked.expiresAt - Date.now() + 60_000;
-	expect(keptOf(s, code)?.token).toBeDefined();
-	shift = checked.expiresAt - Date.now() + 130_000;
-	expect(keptOf(s, code)).toBeUndefined();
+	shift = checked.expiresAt - Date.now() + 120_000;
+	expect([keptOf(s, code), redeemedOf(s, code)?.token]).toEqual([undefined, expect.anything()]);
+	shift = before - Date.now() + storedRecordMaxMs - 1000;
+	expect(redeemedOf(s, code)).toBeDefined();
+	shift = before - Date.now() + storedRecordMaxMs + 1000;
+	expect(redeemedOf(s, code)).toBeUndefined();
 });
 
 it("voids the token it issued when the code is used again while the token is made", async () => {
@@ -691,6 +736,25 @@ it("voids the token it issued when the code is used again while the token is mad
 			if (issued.kind === "refused") return { kind: "refused", refusal: issued };
 			given.push(issued.access.token);
 			expect((await s.redeem(code)).body).toEqual(refusedBody);
+			return issued;
+		},
+	});
+	expect(answer).toEqual(refusedOutcome);
+	expect(await revoked(s, given[0] as string)).toBe(true);
+});
+
+it("voids the token it issued when a 0.19 instance, marking the code alone, voided it while the token was made", async () => {
+	const s = await serve();
+	const code = await s.issue();
+	const given: string[] = [];
+	const answer = await handleDirectly(s, code, {
+		issue: async (g) => {
+			const issued = await s.app.get(tokens).issue({ grant: g, grantType: "authorization_code" });
+			if (issued.kind === "refused") return { kind: "refused", refusal: issued };
+			given.push(issued.access.token);
+			await s.stores.records.change(nameOf(code), (kept) => ({
+				value: overwritten(kept, { void: true }),
+			}));
 			return issued;
 		},
 	});
@@ -836,7 +900,7 @@ it("lists a reused code until it is settled, and drops one that issued nothing o
 	expect(s.stores.pending()).toHaveLength(0);
 });
 
-it("never brings back a code that expired while it was being redeemed", async () => {
+it("never brings back a code that expired while it was being redeemed, and answers no token", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	const answer = await handleDirectly(s, code, {
@@ -849,6 +913,109 @@ it("never brings back a code that expired while it was being redeemed", async ()
 	});
 	expect(answer).toEqual(refusedOutcome);
 	expect(s.stores.peek(nameOf(code))).toBeUndefined();
+});
+
+it("revokes, on a reuse after the code's own record ended, the token its redemption record holds", async () => {
+	const s = await serve({ codeGrant: { "code-lifetime": "10s", "sweep-interval": "1s" } });
+	const code = await s.issue();
+	const first = await s.redeem(code);
+	expect(first.status).toBe(200);
+	shift = 11_000;
+	expect(keptOf(s, code)).toBeUndefined();
+	expect((await s.redeem(code)).body).toEqual(refusedBody);
+	await afterSweep();
+	expect(await revoked(s, String(first.body.access_token))).toBe(true);
+	expect(s.stores.pending()).toEqual([]);
+});
+
+it("notes the token on the code's own record too, until 0.22, keeping the code's end", async () => {
+	const s = await serve({ codeGrant: { "code-lifetime": "10s", "sweep-interval": "1s" } });
+	const code = await s.issue();
+	const first = await s.redeem(code);
+	// What a 0.19 instance reads on a reuse: the token, on the code, so it revokes it itself.
+	expect(keptOf(s, code)?.token).toEqual(redeemedOf(s, code)?.token);
+	shift = 11_000;
+	expect([keptOf(s, code), redeemedOf(s, code)?.token]).toEqual([undefined, expect.anything()]);
+	expect(first.status).toBe(200);
+});
+
+it("revokes from the redemption record a token whose code a 0.19 instance marked void and listed", async () => {
+	const s = await serve();
+	const code = await s.issue();
+	const first = await s.redeem(code);
+	// A 0.19 reuse: the code marked void and listed, the 0.20 sweep settling it.
+	await s.stores.records.change(nameOf(code), (kept) => ({
+		value: overwritten(kept, { void: true }),
+	}));
+	await s.stores.deferred.add(nameOf(code));
+	await afterSweep();
+	expect(await revoked(s, String(first.body.access_token))).toBe(true);
+	expect(s.stores.pending()).toEqual([]);
+});
+
+it("leaves, until 0.22, a token whose revocation failed to its normal end once a 0.19 sweep drops the listing of its ended code", async () => {
+	// No 0.20 sweep in between: the 0.19 one, which runs without traffic, comes first.
+	const s = await serve({ codeGrant: { "code-lifetime": "10s", "sweep-interval": "1h" } });
+	const code = await s.issue();
+	const first = await s.redeem(code);
+	const token = String(first.body.access_token);
+	// A 0.20 reuse whose revocation failed: listed, marked void on both records, its token alive.
+	shift = 1_000;
+	await s.stores.deferred.add(nameOf(code));
+	const marked = (kept: StoredCode) => ({ value: overwritten(kept, { void: true }) });
+	await s.stores.records.change(nameOf(code), marked);
+	await markVoid(s.app.get(redemptionRecords), nameOf(code));
+	// A 0.19 sweep after the code ended: it marks the code, finds none, and drops the listing.
+	shift = 11_000;
+	await s.stores.deferred.each(async (name) => {
+		if (!(await s.stores.records.change(name, marked))) await s.stores.deferred.done(name);
+	});
+	expect(s.stores.pending()).toEqual([]);
+	expect(redeemedOf(s, code)).toMatchObject({ void: true, token: expect.anything() });
+	expect(await revoked(s, token)).toBe(false);
+	// Nothing is left to revoke it: it lives to its normal end, and no longer.
+	const end = Number(first.body.expires_in) * 1000;
+	shift = end - 1_000;
+	expect(await revoked(s, token)).toBe(false);
+	shift = end + 1_000;
+	expect(await revoked(s, token)).toBe(true);
+});
+
+it("refuses a code whose subject was erased once it was used up, issuing nothing, and settles it", async () => {
+	const s = await serve();
+	const code = await s.issue();
+	s.stores.erase("alice");
+	expect((await s.redeem(code)).body).toEqual(refusedBody);
+	expect([keptOf(s, code)?.void, redeemedOf(s, code)]).toEqual([true, undefined]);
+	await afterSweep();
+	expect(s.stores.pending()).toEqual([nameOf(code)]);
+});
+
+it("keeps a reused code listed void while a crash left it used up with no redemption record, until the code ends", async () => {
+	const s = await serve({ codeGrant: { "code-lifetime": "10s", "sweep-interval": "1s" } });
+	const code = await s.issue();
+	await s.stores.records.change(nameOf(code), (kept) => ({
+		value: overwritten(kept, { state: "consumed" }),
+	}));
+	expect((await s.redeem(code)).body).toEqual(refusedBody);
+	await afterSweep();
+	expect(s.stores.pending()).toEqual([nameOf(code)]);
+	shift = 11_000;
+	await afterSweep();
+	expect(s.stores.pending()).toEqual([]);
+});
+
+it("revokes, on a reuse, the token a 0.19 instance kept on the code's own record", async () => {
+	const s = await serve();
+	const [code, older] = [await s.issue(), await s.issue()];
+	const given = await s.redeem(older);
+	const token = redeemedOf(s, older)?.token;
+	await s.stores.records.change(nameOf(code), (kept) => ({
+		value: overwritten(kept, { state: "consumed", token }),
+	}));
+	expect((await s.redeem(code)).body).toEqual(refusedBody);
+	expect(await revoked(s, String(given.body.access_token))).toBe(true);
+	expect(s.stores.pending()).toEqual([]);
 });
 
 it("adds what a contribution issues alongside, under its own field, from the redeemed facts", async () => {
@@ -1089,6 +1256,23 @@ describe("redemption hooks", () => {
 		expect(seen).toEqual([`pin ${name}`, "issue", `addition ${name}`, `redeemed ${name}`]);
 		expect(redeemedSeen).toMatchObject([{ redemption: name, subject: "alice", scope: ["read"] }]);
 		expect(redeemedSeen[0]?.access.id).toEqual(expect.any(String));
+	});
+
+	it("tells no hook of a code whose own record ended after its use-up, and answers no token", async () => {
+		const seen: string[] = [];
+		const s = await serve({ extra: [hooking(seen)] });
+		const code = await s.issue();
+		const name = nameOf(code);
+		const answer = await handleDirectly(s, code, {
+			issue: async (g) => {
+				const issued = await s.app.get(tokens).issue({ grant: g, grantType: "authorization_code" });
+				// The code's ten minutes run out between its use-up and its token being noted.
+				shift += 601_000;
+				return issued.kind === "refused" ? { kind: "refused", refusal: issued } : issued;
+			},
+		});
+		expect(answer).toEqual(refusedOutcome);
+		expect(seen).toEqual([`pin ${name}`]);
 	});
 
 	it("pins nothing for a code refused before it is used up, or used up by a wrong verifier", async () => {

@@ -44,9 +44,9 @@ const recordShape = z.strictObject({
 
 /** A record as the store keeps it; only code-grant reads what it holds. */
 export const toStored = (record: CodeRecord) => record as unknown as StoredCode;
-/** A kept value's record, checked on every read; nothing for an unknown format, state or shape. */
-export const fromStored = (kept: StoredCode): CodeRecord | undefined => {
-	const read = recordShape.safeParse(kept);
+/** A stored value's record, checked on every read; nothing for an unknown format, state or shape. */
+export const fromStored = (stored: StoredCode): CodeRecord | undefined => {
+	const read = recordShape.safeParse(stored);
 	return read.success ? (read.data as CodeRecord) : undefined;
 };
 
