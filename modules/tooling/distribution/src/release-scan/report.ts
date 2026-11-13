@@ -19,7 +19,13 @@ export interface Finding {
 
 /** A list read: how many packages Trivy read in it and its findings, or why it is told as not scanned. */
 export type Read =
-	| { readonly list: string; readonly packages: number; readonly findings: readonly Finding[] }
+	| {
+			readonly list: string;
+			readonly packages: number;
+			/** Packages read per Trivy's class of result (`os-pkgs`, `lang-pkgs`). */
+			readonly classes: Readonly<Record<string, number>>;
+			readonly findings: readonly Finding[];
+	  }
 	| { readonly list: string; readonly notScanned: string };
 
 export const severities = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"] as const;
@@ -41,15 +47,29 @@ export function readScan(scanned: Scanned): Read {
 		return { list: scanned.list, notScanned: "Trivy's output is not its report" };
 	if (results !== undefined && !Array.isArray(results))
 		return { list: scanned.list, notScanned: "Trivy's report holds no list of results" };
-	const read = ((results ?? []) as { Packages?: unknown }[]).reduce(
-		(n, r) => n + (Array.isArray(r.Packages) ? r.Packages.length : 0),
-		0,
-	);
+	const each = (results ?? []) as {
+		Class?: unknown;
+		Packages?: unknown;
+		Vulnerabilities?: unknown;
+	}[];
+	const formed = (v: unknown) => v === undefined || v === null || Array.isArray(v);
+	if (each.some((r) => !formed(r.Packages) || !formed(r.Vulnerabilities)))
+		return {
+			list: scanned.list,
+			notScanned: "Trivy's report holds a result that is not its form",
+		};
+	const text = (v: unknown) => (typeof v === "string" ? v : "");
+	const classes: Record<string, number> = {};
+	for (const r of each) {
+		const n = Array.isArray(r.Packages) ? r.Packages.length : 0;
+		const named = text(r.Class) || "unclassed";
+		classes[named] = (classes[named] ?? 0) + n;
+	}
+	const read = Object.values(classes).reduce((n, c) => n + c, 0);
 	if (read === 0) return { list: scanned.list, notScanned: "Trivy read no packages" };
-	const all = ((results ?? []) as { Vulnerabilities?: unknown }[]).flatMap((r) =>
+	const all = each.flatMap((r) =>
 		Array.isArray(r.Vulnerabilities) ? (r.Vulnerabilities as Record<string, unknown>[]) : [],
 	);
-	const text = (v: unknown) => (typeof v === "string" ? v : "");
 	const findings = new Map<string, Finding>();
 	for (const v of all) {
 		const finding: Finding = {
@@ -63,7 +83,7 @@ export function readScan(scanned: Scanned): Read {
 		};
 		findings.set(`${finding.id} ${finding.pkg} ${finding.installed}`, finding);
 	}
-	return { list: scanned.list, packages: read, findings: [...findings.values()] };
+	return { list: scanned.list, packages: read, classes, findings: [...findings.values()] };
 }
 
 /** The report in Markdown: what was scanned with what, the counts, and the fixable critical and high findings. */
@@ -98,6 +118,15 @@ ${fixable.length === 0 ? "None." : `| List | Severity | Package | Installed | Fi
 `;
 }
 
-const rank = (f: Finding) => (f.severity === "CRITICAL" ? 0 : 1);
+export const rank = (f: Finding) => (f.severity === "CRITICAL" ? 0 : 1);
 /** Text kept to one table cell. */
-const cell = (s: string) => s.replace(/\s+/g, " ").replaceAll("|", "\\|").trim();
+export const cell = (s: string) => s.replace(/\s+/g, " ").replaceAll("|", "\\|").trim();
+/** A failure's reason as one short line: the last its tool wrote. */
+export const reasonOf = (told: string) =>
+	(
+		told
+			.trim()
+			.split("\n")
+			.filter((l) => l.trim() !== "")
+			.at(-1) ?? "no reason given"
+	).slice(0, 300);
