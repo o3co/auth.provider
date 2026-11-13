@@ -353,7 +353,7 @@ function selectionStores() {
 		/** Runs before each read, with the name read. */
 		beforeRead: undefined as ((name: string) => void) | undefined,
 		/** Runs after each write, with the name written; the write answers once it has. */
-		afterSave: undefined as ((name: string) => void | Promise<void>) | undefined,
+		afterWrite: undefined as ((name: string) => void | Promise<void>) | undefined,
 	};
 	const { module } = claimsSelectionInMemory({
 		around: (records) => ({
@@ -365,7 +365,7 @@ function selectionStores() {
 				if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
 				if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
 				const made = await records.create(name, value, ms, subject);
-				await state.afterSave?.(name);
+				await state.afterWrite?.(name);
 				return made;
 			},
 		}),
@@ -476,11 +476,11 @@ describe("a code's selection through its family", () => {
 
 	it("ends a family whose session closes while its selection is kept, before its session lists it, giving no refresh token", async () => {
 		const s = await serve();
-		s.selections.state.afterSave = async (name) => {
+		s.selections.state.afterWrite = async (name) => {
 			if (name.startsWith("f.")) await s.app.get(sessions).close(s.session.id);
 		};
 		const answer = await s.redeem("app", {}, { selection: selected });
-		s.selections.state.afterSave = undefined;
+		s.selections.state.afterWrite = undefined;
 		expect(answer.refresh_token).toBeUndefined();
 		const family = (await familyOf(s, answer.redemption)) ?? "";
 		expect(liveFamily(await s.stores.kept.records.read(family))).toBeUndefined();
@@ -519,11 +519,11 @@ describe("a code's selection through its family", () => {
 	it("never lets a family outlive its selection, however late the family is written after its selection", async () => {
 		const s = await serve({ lifetime: 600 });
 		// The family's record is written 130 seconds after its selection, past the two minutes' allowance.
-		s.selections.state.afterSave = (name) => {
+		s.selections.state.afterWrite = (name) => {
 			if (name.startsWith("f.")) shift += 130_000;
 		};
 		const first = await s.redeem("app", {}, { selection: selected });
-		s.selections.state.afterSave = undefined;
+		s.selections.state.afterWrite = undefined;
 		// Ten seconds before the family's end, which leaves its access token time.
 		shift += 600_000 - 130_000 - 10_000;
 		const live = await s.refresh(first.refresh_token);

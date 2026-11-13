@@ -269,7 +269,7 @@ export function refreshStoreContract(name: string, open: () => Promise<RefreshSt
 			const absence = await peekedAcross(place, erasing, gone, erasure);
 			// A Store that erases nothing now (its records not indexed yet) writes nothing to confirm.
 			if (absence) expect(await families.update(gone, () => undefined)).toEqual(absence.answered);
-			// A store answering unconfirmed waits out the writer's retries first: about ten seconds each.
+			// A writer gone retries until it gives up: about ten seconds for the erasure, and for a store answering unconfirmed.
 		}, 60_000);
 
 		// Each interface fails over after its own writes: a later write in another space would
