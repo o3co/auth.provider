@@ -17,21 +17,28 @@ const scratch = mkdtempSync(join(tmpdir(), "image-scan-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 const scan = join(import.meta.dirname, "..", "scan.ts");
 
-/** An entrance of its own, packed: its command writes an app with a Dockerfile and a manifest. */
-const entranceTarball = (into: string) => {
-	const at = join(scratch, "entrance-src");
+/** Packs `files` into `into` as `<name>-9.9.9.tgz`; `cli.mjs`, where given, made executable. */
+const packed = (into: string, name: string, files: Readonly<Record<string, string>>) => {
+	const at = join(scratch, `${name}-src`);
 	mkdirSync(join(at, "package"), { recursive: true });
-	writeFileSync(
-		join(at, "package", "package.json"),
-		JSON.stringify({
+	for (const [path, text] of Object.entries(files)) writeFileSync(join(at, "package", path), text);
+	if (files["cli.mjs"]) chmodSync(join(at, "package", "cli.mjs"), 0o755);
+	execFileSync("tar", ["-czf", join(into, `${name}-9.9.9.tgz`), "package"], { cwd: at });
+};
+
+/**
+ * An entrance of its own, packed with its bundle, whose `combinations` opts nothing in: its command
+ * writes an app with a Dockerfile and a manifest.
+ */
+const entranceTarball = (into: string) => {
+	packed(into, "o3co-create-auth-provider", {
+		"package.json": JSON.stringify({
 			name: "@o3co/create-auth-provider",
 			version: "9.9.9",
 			bin: { "create-auth-provider": "cli.mjs" },
+			dependencies: { "@o3co/auth-provider-scaffold": "9.9.9" },
 		}),
-	);
-	writeFileSync(
-		join(at, "package", "cli.mjs"),
-		`#!/usr/bin/env node
+		"cli.mjs": `#!/usr/bin/env node
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const app = process.argv[2];
@@ -39,10 +46,15 @@ mkdirSync(app, { recursive: true });
 writeFileSync(join(app, "package.json"), '{"name":"app","private":true}');
 writeFileSync(join(app, "Dockerfile"), "FROM scratch AS runtime\\n");
 `,
-	);
-	chmodSync(join(at, "package", "cli.mjs"), 0o755);
-	execFileSync("tar", ["-czf", join(into, "o3co-create-auth-provider-9.9.9.tgz"), "package"], {
-		cwd: at,
+	});
+	packed(into, "o3co-auth-provider-scaffold", {
+		"package.json": JSON.stringify({
+			name: "@o3co/auth-provider-scaffold",
+			version: "9.9.9",
+			type: "module",
+			exports: { "./combinations": "./combinations.js" },
+		}),
+		"combinations.js": "export const optIns = () => [];\n",
 	});
 };
 
