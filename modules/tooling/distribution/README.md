@@ -17,7 +17,7 @@
 - `pnpm release:evidence-fetch <fetched>` and `pnpm release:evidence-judge <fetched> <dir>`: before anything is published, the evidence of the CI run that tested the tag's tree, fetched with a token and judged without one, or the release stopped; see the internal module `release-evidence`.
 - `pnpm release:sbom <tarballs> <dir>`: before anything is published, the release's lists of what it ships, made from its tarballs; see the internal module `release-sbom`.
 - `pnpm release:scan <lists> <dir>`: after the lists are made, a report of the known vulnerabilities in them, which stops and delays nothing; see the internal module `release-scan`.
-- `pnpm image:scan <tarballs> <dir>`: the image of the app the packed release makes, built as its guide says and scanned for critical and high vulnerabilities with a fix, any failing it; see the internal module `image-scan`.
+- `pnpm image:scan <tarballs> <dir>`: the image of the app the packed release makes, built as its guide says and scanned for critical and high vulnerabilities with a fix, and its Node held to Node's security releases, any failing it; see the internal module `image-scan`.
 - `pnpm release:listed <tarballs> <tarballs.json>`: where the release publishes, the tarballs held to those the lists were made of; see the internal module `release-listed`.
 - `pnpm release:notes <version> <file>`: where the release publishes, its notes from the version's section of the changelog; see the internal module `release-notes`.
 
@@ -36,7 +36,7 @@
 
 ## Depends on
 - `create-app` (its patterns, for the release check), `trial` (the layer the release check boots each image on), `combinations` (the features that opt in, for the release's lists); `workspace-packages` lists the workspace's packages; it reads their manifests, and compiles with TypeScript. Sealing reads the lockfile with `yaml` and tarballs with `tar`; the publish check asks the registry with `npm view`.
-- The release check builds and runs images with Docker, through `docker-client`; its outside scene serves its packages through `local-registry`.
+- The release check builds and runs images with Docker, through `docker-client`; its outside scene serves its packages through `local-registry`. The image scan reads Node's release index from `nodejs.org`.
 
 ## Vocabulary
 - bundle: the distribution unit of one concern directory.
