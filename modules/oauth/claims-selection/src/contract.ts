@@ -77,6 +77,24 @@ export const claimScopes = extensionPoint<ClaimScopes>("claims-selection.claim-s
 	multiplicity: "many",
 });
 
+/**
+ * Whose a family is, as the module keeping families reads its own record: the subject's; or ended
+ * for good (no record, or revoked), which only an answer its store confirmed may give.
+ */
+export type FamilySubject =
+	| { readonly kind: "subject"; readonly subject: string }
+	| { readonly kind: "ended" };
+
+/** Whose each family is, for erasure's migration of a family's target kept without its subject. */
+export interface FamilySubjects {
+	/** Throws when it cannot tell, a family record of another shape included: never `ended`. */
+	subjectOf(familyId: string): Promise<FamilySubject>;
+}
+
+export const familySubjects = extensionPoint<FamilySubjects>("claims-selection.family-subjects", {
+	multiplicity: "many",
+});
+
 export { selectionLimits } from "./limits.ts";
 export * from "./store.ts";
 export { withinLimits } from "./stored.ts";

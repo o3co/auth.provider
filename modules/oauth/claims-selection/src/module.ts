@@ -1,11 +1,17 @@
 import { redemptionHooks } from "@mod/code-grant";
 import { tokenTies } from "@mod/grants";
 import { type BuildContext, defineModule } from "@mod/kernel";
-import { claimScopes, claimsSelections, selectionConsents, selectionRecords } from "./contract.ts";
+import {
+	claimScopes,
+	claimsSelections,
+	familySubjects,
+	selectionConsents,
+	selectionRecords,
+} from "./contract.ts";
 import { portsRefused } from "./ports.ts";
 import { selectionsWith } from "./selections.ts";
 
-const takes = [selectionRecords, selectionConsents, claimScopes];
+const takes = [selectionRecords, selectionConsents, claimScopes, familySubjects];
 
 const built = async (c: Pick<BuildContext<unknown>, "get" | "collect" | "clock">) => {
 	const [consent] = await c.collect(selectionConsents);
@@ -25,6 +31,9 @@ export default defineModule({ name: "claims-selection", replicaSafe: true, takes
 		}
 		if ((await c.collect(claimScopes)).length > 1) {
 			return c.refuse("claims-selection", "more than one table of claim scopes");
+		}
+		if ((await c.collect(familySubjects)).length > 1) {
+			return c.refuse("claims-selection", "more than one reading of whose a family is");
 		}
 		const refused = portsRefused(await c.get(selectionRecords));
 		if (refused) return c.refuse("claims-selection", refused);

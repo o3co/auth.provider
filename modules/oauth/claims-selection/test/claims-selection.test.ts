@@ -16,6 +16,7 @@ import { afterEach, expect, it } from "vitest";
 import {
 	claimScopes,
 	claimsSelections,
+	familySubjects,
 	type Selection,
 	type SelectionConsent,
 	selectionConsents,
@@ -492,6 +493,23 @@ it("names a claim's scope as the contributed table does, none without one, and r
 	const twice = serve([scoping({}), scoping({}, "second-scoping")]);
 	await expect(twice).rejects.toMatchObject({
 		refusals: [expect.objectContaining({ reason: "more than one table of claim scopes" })],
+	});
+});
+
+/** A reading of whose a family is, as the module keeping families contributes it. */
+const familyReading = (name: string) =>
+	defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
+		m
+			.contribute(familySubjects)
+			.by(() => ({ subjectOf: async () => ({ kind: "ended" as const }) })),
+	]);
+
+it("starts with one reading of whose a family is, and refuses to start with two", async () => {
+	await serve([familyReading("families")]);
+	await stop();
+	const twice = serve([familyReading("families"), familyReading("second-families")]);
+	await expect(twice).rejects.toMatchObject({
+		refusals: [expect.objectContaining({ reason: "more than one reading of whose a family is" })],
 	});
 });
 

@@ -16,7 +16,7 @@
   - `follow`: the pinned userinfo target kept for the family founded from a redemption, for the pin's subject.
   - `forRefreshed`: a refreshed token kept its family's target, its names cut to what is allowed and agreed to now.
 - `selectionLimits`, `withinLimits` (whether a selection keeps within them) and the types `Selection`, `Target`, `Named`, `Constraint` and `Scalar`.
-- Extension points, two of either refusing boot: the judge of consent, `consented(client, subject, scope)`; the table of claim scopes, `scopeOf(claim)`, from the module releasing claims.
+- Extension points, two of any refusing boot: the judge of consent, `consented(client, subject, scope)`; the table of claim scopes, `scopeOf(claim)`, from the module releasing claims; whose a family is, `subjectOf(familyId)` (`familySubjects`), from the module keeping families: the subject, or ended (no record, or revoked) only on an answer its store confirmed, throwing when it cannot tell.
 - Contribution to `code-grant`'s redemption hooks: the pin, for the code's subject, and a redeemed code's token kept the pinned userinfo target, for the pin's subject.
 - Contribution to `grants`' token ties: a token with constraints ties a token exchanged from it, which keeps those constraints and none of its names.
 - Store interface, wired by the assembly: records by name, each created once for its lifetime and its subject (`create`, `erased` past the subject's erasure); `erase` and `migrate` together or neither, optional until 0.22; a part refuses the boot. `./testing` holds its contract test for every implementation (`selectionRecordsContract`, through faults), and claims-selection composed over records in memory (`claimsSelectionInMemory`), which a test may wrap.
