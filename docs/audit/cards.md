@@ -190,6 +190,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `page` (`src/page`): the two routes the deployment's consent page calls.
 - `@mod/device-grant` (feature, `modules/oauth/device-grant`): Provides the OAuth 2.0 Device Authorization Grant (RFC 8628): device authorization, the verification interface the deployment's page calls, and the `device_code` grant.
   - `authorization` (`src/authorization`): device authorization (RFC 8628 §3.1–3.2), where a device asks for its codes.
+  - `erasure` (`src/erasure`): erasing a subject's approvals, and checking the devices for any 0.19 approval kept on them.
   - `grant` (`src/grant`): the `device_code` grant (RFC 8628 §3.4–3.5), which a device polls until its code is decided or ends.
   - `verification` (`src/verification`): the interface the deployment's page calls, where a signed-in user looks up, approves or denies a code.
 - `@mod/discovery` (feature, `modules/oauth/discovery`): Builds the discovery document from `issuer`'s URL and metadata items, and publishes it.

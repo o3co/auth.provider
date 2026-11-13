@@ -1,8 +1,15 @@
 import { randomUUID } from "node:crypto";
+import type { Walk } from "@mod/erasure-extensions";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import type { section } from "./section.ts";
-import type { DeviceStore, StoredDevice, UserCodes } from "./store.ts";
+import type {
+	ApprovalRecords,
+	DeviceStore,
+	StoredApproval,
+	StoredDevice,
+	UserCodes,
+} from "./store.ts";
 
 export type DeviceGrantSettings = z.input<typeof section>;
 
@@ -16,6 +23,10 @@ export function deviceGrantConfig(settings: Partial<DeviceGrantSettings> = {}) {
 export interface DevicePlace {
 	readonly devices: DeviceStore;
 	readonly userCodes: UserCodes;
+	/** The place's approvals, where it offers them: checked as devices are, on the same clock and faults. */
+	readonly approvals?: ApprovalRecords;
+	/** Where the devices can be walked: the walk a maintenance tool would hand in, over this store. */
+	readonly walkOf?: () => Walk;
 	/** Moves the store's clock on, so lifetimes run out. */
 	advance(ms: number): void;
 	/** Before the next update of `name` writes, another writer changes its record as given. */
@@ -42,6 +53,7 @@ export function deviceStoreContract(name: string, open: () => Promise<DevicePlac
 	const held = (value: object) => value as unknown as StoredDevice;
 	const counted = (record: StoredDevice) => (record as unknown as { n: number }).n;
 	const plus = (record: StoredDevice) => ({ value: held({ n: counted(record) + 1 }) });
+	const approved = (value: object) => value as unknown as StoredApproval;
 
 	describe(`device-grant's store interfaces: ${name}`, () => {
 		it("names a device code the same way every time, never as the code, and apart from another", async () => {
@@ -111,6 +123,58 @@ export function deviceStoreContract(name: string, open: () => Promise<DevicePlac
 			await pressMemory();
 			expect(await store.devices.read(name)).toEqual(held({ n: 1 }));
 			expect(await store.userCodes.read(code)).toBe(name);
+		});
+
+		it("keeps an approval whole and once per name, read as kept, for its lifetime exactly", async (context) => {
+			const place = await open();
+			const { approvals } = place;
+			if (!approvals) return context.skip();
+			const [name, other] = [fresh(), fresh()];
+			const odd = approved({ state: "unheard-of", nested: { list: [1, "two"] } });
+			expect(await approvals.create(name, odd, 1000, "alice")).toBe("created");
+			expect(await approvals.create(name, approved({ n: 1 }), 1000, "alice")).toBe("exists");
+			expect([await approvals.read(name), await approvals.read(other)]).toEqual([odd, undefined]);
+			place.advance(999);
+			expect(await approvals.read(name)).toEqual(odd);
+			place.advance(1);
+			expect(await approvals.read(name)).toBeUndefined();
+			expect(await approvals.create(name, approved({ n: 2 }), 1000, "alice")).toBe("created");
+		});
+
+		it("keeps approvals through a restart, memory pressure, lost answers and a failover", async (context) => {
+			const place = await open();
+			const { approvals, restart, pressMemory, loseNextAnswer: lose, failover } = place;
+			if (!approvals || !restart || !pressMemory || !lose || !failover) return context.skip();
+			const [kept, settled] = [fresh(), fresh()];
+			await approvals.create(kept, approved({ n: 1 }), 60_000, "alice");
+			await restart();
+			await pressMemory();
+			lose();
+			expect(await approvals.create(settled, approved({ n: 2 }), 60_000, "alice")).toBe("created");
+			await failover();
+			expect(await approvals.read(kept)).toEqual(approved({ n: 1 }));
+			expect(await approvals.read(settled)).toEqual(approved({ n: 2 }));
+		});
+
+		it("walks every device record, handing each over, and stops where the visitor does", async (context) => {
+			const place = await open();
+			const { walk } = place.devices;
+			if (!walk || !place.walkOf) return context.skip();
+			const signal = new AbortController().signal;
+			const names = [fresh(), fresh(), fresh()];
+			for (const [n, name] of names.entries()) await place.devices.save(name, held({ n }), 60_000);
+			const seen: number[] = [];
+			const all = await walk.call(
+				place.devices,
+				place.walkOf(),
+				(r) => (seen.push(counted(r)), true),
+				signal,
+			);
+			expect(all).toEqual({ kind: "walked" });
+			expect(seen.sort()).toEqual(expect.arrayContaining([0, 1, 2]));
+			let left = 1;
+			const one = await walk.call(place.devices, place.walkOf(), () => left-- > 0, signal);
+			expect(one).toEqual({ kind: "stopped" });
 		});
 
 		// Each interface fails over after its own writes: a later write in another space would
