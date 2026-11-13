@@ -401,6 +401,9 @@ it("takes a format-2 record's own subject, refusing as unavailable a caller's th
 	await expect(
 		s.hook.redeemed({ ...redeemedOf("r-1", "tok-1"), subject: "bob" }),
 	).rejects.toSatisfy(isUnavailable);
+	// Told no subject, a redemption's differs from its pin's: unavailable, as data, not a caller's bug.
+	const untold = { ...redeemedOf("r-1", "tok-1"), subject: undefined } as unknown as Redeemed;
+	await expect(s.hook.redeemed(untold)).rejects.toSatisfy(isUnavailable);
 	await s.hook.redeemed(redeemedOf("r-1", "tok-1"));
 	const tie = await s.tie.tieOf("tok-1");
 	if (tie.kind !== "held") throw new Error("not held");

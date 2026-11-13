@@ -24,7 +24,7 @@ export function selectionRecordsContract(name: string, open: () => Promise<Recor
 	let n = 0;
 	const fresh = () => `r-${++n}-${Math.random().toString(36).slice(2)}`;
 	describe(`claims-selection's store interface: ${name}`, () => {
-		it("keeps the first record saved under a name for exactly its lifetime", async () => {
+		it("keeps the first record created under a name for exactly its lifetime", async () => {
 			const place = await open();
 			const [kept, other] = [fresh(), fresh()];
 			expect(await place.records.create(kept, value(1), 1000, "alice")).toBe("created");

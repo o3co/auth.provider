@@ -18,7 +18,7 @@ const unreadable = (reason: string): SubjectOf => ({ kind: "unreadable", reason 
 /** Each kind's read: a family's target is read as a token's. */
 const readOf = { code: read.code, pin: read.pin, family: read.target, token: read.target };
 
-/** A record 0.19 kept without its subject: unreadable until every one has ended. */
+/** A record 0.19 kept without its subject: unreadable until every one has run out. */
 const legacy = (kind: keyof typeof kindNamed) =>
 	unreadable(
 		`${kindNamed[kind]} a 0.19 instance kept without its subject; run again ${legacyBoundSeconds.toLocaleString("en")} s after the last 0.19 instance stopped, and if it persists past that, a 0.19 instance is still writing`,

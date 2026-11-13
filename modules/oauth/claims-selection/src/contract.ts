@@ -79,7 +79,9 @@ export const claimScopes = extensionPoint<ClaimScopes>("claims-selection.claim-s
 
 /**
  * Whose a family is, as the module keeping families reads its own record: the subject's; or ended
- * for good (no record, or revoked), which only an answer its store confirmed may give.
+ * for good, which only an answer its store confirmed may give: no token of the family is refreshed
+ * again, and its id is never issued again, so nothing reads its target again. Which of its states
+ * mean that is that module's to say, a family whose subject is erased among them.
  */
 export type FamilySubject =
 	| { readonly kind: "subject"; readonly subject: string }
