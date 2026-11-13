@@ -124,11 +124,11 @@ export const composed = (p: {
 });
 
 /**
- * The composition of `composed`, assembled, with the tests' default redemption (`r-test`) pinned, as
- * code-grant pins each redemption before an ID token is made for it.
+ * The composition of `composed`, assembled, with the tests' default redemption (`r-test`) pinned for
+ * their default subject (`a`), as code-grant pins each redemption before an ID token is made for it.
  */
 export async function booted(p: Parameters<typeof composed>[0]) {
 	const app = await assemble(composed(p));
-	for (const hook of app.get(hooks)) await hook.pin("r-test");
+	for (const hook of app.get(hooks)) await hook.pin("r-test", "a");
 	return app;
 }
