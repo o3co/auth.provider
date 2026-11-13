@@ -48,12 +48,12 @@ export interface CodePlace {
 export function codeStoreContract(name: string, open: () => Promise<CodePlace>): void {
 	let n = 0;
 	const fresh = () => `code-${++n}-${Math.random().toString(36).slice(2)}`;
-	const held = (value: object) => value as unknown as StoredCode;
+	const stored = (value: object) => value as unknown as StoredCode;
 	const redeemed = (value: object) => value as unknown as StoredRedemptionRecord;
 	const rewrite = (value: object) => () => ({ value: redeemed(value) });
 	const counted = (record: StoredCode) => (record as unknown as { n: number }).n;
 	const plus = (by: number) => (record: StoredCode) => ({
-		value: held({ n: counted(record) + by }),
+		value: stored({ n: counted(record) + by }),
 	});
 	const listed = async (voids: VoidList) => {
 		const found: string[] = [];
@@ -77,7 +77,7 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			if (!holds) return context.skip();
 			const [code, kept] = [fresh(), fresh()];
 			const name = place.codes.nameOf(code);
-			await place.codes.create(code, held({ kept }), 60_000, "alice");
+			await place.codes.create(code, stored({ kept }), 60_000, "alice");
 			await place.codes.update(name, (record) => ({ value: record }));
 			await place.voids.add(name);
 			expect([holds(kept), holds(name), holds(code)]).toEqual([true, true, false]);
@@ -87,9 +87,9 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			const { codes } = await open();
 			const code = fresh();
 			const name = codes.nameOf(code);
-			const odd = held({ state: "unheard-of", nested: { list: [1, "two"] } });
+			const odd = stored({ state: "unheard-of", nested: { list: [1, "two"] } });
 			expect(await codes.create(code, odd, 60_000, "alice")).toBe("created");
-			expect(await codes.create(code, held({ n: 1 }), 60_000, "alice")).toBe("exists");
+			expect(await codes.create(code, stored({ n: 1 }), 60_000, "alice")).toBe("exists");
 			expect(await codes.update(name, () => undefined)).toEqual({ before: odd, after: odd });
 			expect(await codes.update(fresh(), plus(1))).toBeUndefined();
 		});
@@ -98,27 +98,27 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			const place = await open();
 			const code = fresh();
 			const name = place.codes.nameOf(code);
-			await place.codes.create(code, held({ n: 1 }), 60_000, "alice");
+			await place.codes.create(code, stored({ n: 1 }), 60_000, "alice");
 			expect(await place.codes.update(name, plus(1))).toEqual({
-				before: held({ n: 1 }),
-				after: held({ n: 2 }),
+				before: stored({ n: 1 }),
+				after: stored({ n: 2 }),
 			});
-			place.raceNextUpdate(name, (record) => held({ n: counted(record) * 10 }));
-			expect((await place.codes.update(name, plus(1)))?.after).toEqual(held({ n: 21 }));
+			place.raceNextUpdate(name, (record) => stored({ n: counted(record) * 10 }));
+			expect((await place.codes.update(name, plus(1)))?.after).toEqual(stored({ n: 21 }));
 		});
 
 		it("ends a record at exactly its lifetime, a change keeping its end", async () => {
 			const place = await open();
 			const code = fresh();
 			const name = place.codes.nameOf(code);
-			await place.codes.create(code, held({ n: 1 }), 1000, "alice");
+			await place.codes.create(code, stored({ n: 1 }), 1000, "alice");
 			place.advance(500);
 			await place.codes.update(name, plus(1));
 			place.advance(499);
-			expect((await place.codes.update(name, () => undefined))?.after).toEqual(held({ n: 2 }));
+			expect((await place.codes.update(name, () => undefined))?.after).toEqual(stored({ n: 2 }));
 			place.advance(1);
 			expect(await place.codes.update(name, () => undefined)).toBeUndefined();
-			expect(await place.codes.create(code, held({ n: 2 }), 1000, "alice")).toBe("created");
+			expect(await place.codes.create(code, stored({ n: 2 }), 1000, "alice")).toBe("created");
 		});
 
 		it("keeps a redemption record whole and once per name, read as kept, changed only from what it holds", async () => {
@@ -183,11 +183,11 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			if (!restart || !pressMemory) return context.skip();
 			const [code, kept] = [fresh(), fresh()];
 			const name = place.codes.nameOf(code);
-			await place.codes.create(code, held({ n: 1 }), 60_000, "alice");
+			await place.codes.create(code, stored({ n: 1 }), 60_000, "alice");
 			await place.voids.add(kept);
 			await restart();
 			await pressMemory();
-			expect((await place.codes.update(name, () => undefined))?.after).toEqual(held({ n: 1 }));
+			expect((await place.codes.update(name, () => undefined))?.after).toEqual(stored({ n: 1 }));
 			expect(await listed(place.voids)).toEqual([kept]);
 		});
 
@@ -222,11 +222,11 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			const [code, kept, settled] = [fresh(), fresh(), fresh()];
 			const name = place.codes.nameOf(code);
 			lose();
-			expect(await place.codes.create(code, held({ n: 1 }), 60_000, "alice")).toBe("created");
+			expect(await place.codes.create(code, stored({ n: 1 }), 60_000, "alice")).toBe("created");
 			lose();
-			expect((await place.codes.update(name, plus(1)))?.after).toEqual(held({ n: 2 }));
+			expect((await place.codes.update(name, plus(1)))?.after).toEqual(stored({ n: 2 }));
 			await failover();
-			expect((await place.codes.update(name, () => undefined))?.after).toEqual(held({ n: 2 }));
+			expect((await place.codes.update(name, () => undefined))?.after).toEqual(stored({ n: 2 }));
 			lose();
 			await place.voids.add(kept);
 			await place.voids.add(settled);

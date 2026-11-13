@@ -22,8 +22,8 @@ export function voiding(parts: {
 	 */
 	const mark = async (name: string) => {
 		const fromRecord = await markVoid(redemptionRecords, name);
-		const coded = await store.update(name, (held) => {
-			const r = fromStored(held);
+		const coded = await store.update(name, (stored) => {
+			const r = fromStored(stored);
 			return r && { value: toStored({ ...r, void: true }) };
 		});
 		// TODO(0.22): stop reading a token here; until then, one a 0.19 instance kept on its code, or
