@@ -21,7 +21,13 @@ import {
 	pollAt,
 	said,
 } from "../../faults/test/faults.ts";
-import { confirmedOf, decisionOf, isStoreCall, takeOf } from "../../faults/test/wire.ts";
+import {
+	approvalOf,
+	confirmedOf,
+	decisionOf,
+	isStoreCall,
+	takeOf,
+} from "../../faults/test/wire.ts";
 
 const issued = [200, "Bearer"];
 // A taken code answers no description, as an unknown one does; an expired one answers `expired_token`.
@@ -77,6 +83,33 @@ const lostOnly = (i: Instance, match: Match) => {
 };
 
 describe("a device code decided and redeemed once under faults", () => {
+	for (const [what, written] of [
+		["the decision's", (d: Device) => decisionOf(d, "approved")],
+		["the approval's create", approvalOf],
+	] as const) {
+		it(`issues once for a device whose approval had ${what} answer lost once, the resend taking the first answer [guarantee-5-f] {fault:Lr}`, async () => {
+			await on(
+				{ name: `device-code-once-lr-${what === "the decision's" ? "decision" : "approval"}` },
+				async (d) => {
+					const i = instanceOf(d);
+					await control(i);
+					const dv = await deviceAt(i);
+					const drop = i.relay.dropReplyTo(written(dv));
+					const decided = await decideAt(i, await loginAt(i), "approve", dv);
+					const dropped = await drop.first;
+					expect(dropped.collateral.filter((x) => isStoreCall(x.command))).toEqual([]);
+					expect(decided.status).toBe(200);
+					expect(successes(i, written(dv)).every((e) => sameMark(dropped.command, e.command))).toBe(
+						true,
+					);
+					expect(said(await pollAt(i, dv))).toEqual(issued);
+					expect(successes(i, takeOf(dv))).toHaveLength(1);
+					await refusedAsTaken(i, dv);
+				},
+			);
+		});
+	}
+
 	it("issues once for a device whose take's answer is lost once, the resend taking the first answer [guarantee-5-f] {fault:Lr}", async () => {
 		await on({ name: "device-code-once-lr" }, async (d) => {
 			const i = instanceOf(d);
