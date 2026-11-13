@@ -18,7 +18,7 @@
 - The release check refuses a tarball without its `LICENSE`.
 - The release check boots each app in the image its Dockerfile builds; only the `deps` stage is replaced, by the same `--prod` install from the tarballs in the `base` stage, as the registry has none of them yet. That install runs as the runner's own user, in directories the check made, so what it writes is the runner's to remove.
 - A `fresh` build (`images`' `build`, which the release check does not ask for) is the app's guide's: Node's image pulled and the `runtime` stage built again, a stage a generated app's Dockerfile is held by a test to have.
-- Each app's image is looked in before it boots, with no network: a package manager it holds but apk is a problem told (npm, npx, corepack, pnpm or yarn on its PATH, or the npm, the corepack and the yarn Node's image bundles where it keeps them), as the app runs node alone.
+- Each app's image is looked in before it boots, with no network: a package manager it holds but apk, where `carried` looks, is a problem told, as the app runs node alone.
 - Without Docker, the release check exits 1 at once: no boot is skipped.
 - The helpers scene is the internal module `helpers`.
 - Every docker command, and each container, goes through `containers`: a command within a minute (a build fifteen); the install's container and each boot's run under one deadline (fifteen minutes; three for a boot, a minute of it to be ready or end, failing where it does neither, each look five seconds) and are removed at the end, however the work ends.
