@@ -74,3 +74,21 @@ export async function pollAt0191(
 	if (answer !== "issue") return answer;
 	return before.approval ? "issue" : "invalid_grant";
 }
+
+/** v0.19.1's decision of a device, approving with its approval on the record: only a pending, living device is decided. */
+export async function approveAt0191(
+	devices: DeviceStore,
+	name: string,
+	approval: object,
+	now: number,
+): Promise<"decided" | "already"> {
+	const changed = await devices.update(name, (stored) => {
+		const held = readAt0191(stored);
+		const left =
+			held && held.state === "pending" && held.expiresAt > now
+				? { ...held, state: "approved" as const, approval }
+				: undefined;
+		return left && { value: left as unknown as StoredDevice };
+	});
+	return readAt0191(changed?.before)?.state === "pending" ? "decided" : "already";
+}

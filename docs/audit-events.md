@@ -29,6 +29,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | Kind | Attributes | Recorded when |
 |---|---|---|
 | `device.approval_refused` | `client`, `policy`, `reason`, `source` | an issuance policy refuses an approval |
+| `device.approval_withheld` | `client`, `outcome`, `withheld`, `source` | an approval is refused as its subject is erased; recorded with no subject |
 | `device.approved` | `client`, `scope`, `source` | a code is approved; `scope` space-joined |
 | `device.decision_outcome_unknown` | `action`, `client`, `source` | a decision's write fails and may or may not have landed |
 | `device.denied` | `client`, `scope`, `source` | a code is denied |

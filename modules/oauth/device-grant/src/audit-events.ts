@@ -11,6 +11,10 @@ export default auditEvents({
 		attributes: ["client", "policy", "reason", "source"],
 		when: "an issuance policy refuses an approval",
 	},
+	"device.approval_withheld": {
+		attributes: ["client", "outcome", "withheld", "source"],
+		when: "an approval is refused as its subject is erased; recorded with no subject",
+	},
 	"device.rate_limited": {
 		attributes: ["action", "source"],
 		when: "the subject is over its attempt limit",
