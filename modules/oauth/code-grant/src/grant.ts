@@ -171,7 +171,8 @@ export function codeGrant(parts: {
 			// Noted on its record, which keeps its end; one gone meanwhile (erased) gets no token answered.
 			const after = await noteToken(redemptionRecords, name, given);
 			// TODO(0.22): noted on the code too, keeping its end (never the arbiter), so a 0.19 instance
-			// that takes a reuse while the code lives finds the token, and its sweep loses no revocation.
+			// that takes a reuse while the code lives finds the token; what is left is on
+			// `redemption-record`'s card.
 			const coded = await store.update(name, (stored) => {
 				const r = fromStored(stored);
 				return r && changed({ ...r, token: given });

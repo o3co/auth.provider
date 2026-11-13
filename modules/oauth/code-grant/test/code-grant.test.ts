@@ -61,7 +61,10 @@ import {
 	voidList,
 } from "../src/contract.ts";
 import codeGrantModule from "../src/module.ts";
-import { fromStoredRedemptionRecord } from "../src/redemption-record/redemption-record.ts";
+import {
+	fromStoredRedemptionRecord,
+	markVoid,
+} from "../src/redemption-record/redemption-record.ts";
 import { codeGrantConfig, codeStoreContract } from "../src/testing.ts";
 
 const grantsSeen = contract<readonly Grant[]>("grants-seen");
@@ -942,6 +945,34 @@ it("revokes from the redemption record a token whose code a 0.19 instance marked
 	await afterSweep();
 	expect(await revoked(s, String(first.body.access_token))).toBe(true);
 	expect(s.stores.pending()).toEqual([]);
+});
+
+it("leaves, until 0.22, a token whose revocation failed to its normal end once a 0.19 sweep drops the listing of its ended code", async () => {
+	// No 0.20 sweep in between: the 0.19 one, which runs without traffic, comes first.
+	const s = await serve({ codeGrant: { "code-lifetime": "10s", "sweep-interval": "1h" } });
+	const code = await s.issue();
+	const first = await s.redeem(code);
+	const token = String(first.body.access_token);
+	// A 0.20 reuse whose revocation failed: listed, marked void on both records, its token alive.
+	shift = 1_000;
+	await s.stores.deferred.add(nameOf(code));
+	const marked = (kept: StoredCode) => ({ value: overwritten(kept, { void: true }) });
+	await s.stores.records.change(nameOf(code), marked);
+	await markVoid(s.app.get(redemptionRecords), nameOf(code));
+	// A 0.19 sweep after the code ended: it marks the code, finds none, and drops the listing.
+	shift = 11_000;
+	await s.stores.deferred.each(async (name) => {
+		if (!(await s.stores.records.change(name, marked))) await s.stores.deferred.done(name);
+	});
+	expect(s.stores.pending()).toEqual([]);
+	expect(redeemedOf(s, code)).toMatchObject({ void: true, token: expect.anything() });
+	expect(await revoked(s, token)).toBe(false);
+	// Nothing is left to revoke it: it lives to its normal end, and no longer.
+	const end = Number(first.body.expires_in) * 1000;
+	shift = end - 1_000;
+	expect(await revoked(s, token)).toBe(false);
+	shift = end + 1_000;
+	expect(await revoked(s, token)).toBe(true);
 });
 
 it("refuses a code whose subject was erased once it was used up, issuing nothing, and settles it", async () => {
