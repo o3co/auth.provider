@@ -57,17 +57,14 @@ const opened = <T>(shape: z.ZodType<T>, kept: StoredSelection): T => {
 	return read.data;
 };
 
-/** Format 2 with the subject where one is given; format 1 without, until every write gives one. */
-const formatOf = (subject: string | undefined) =>
-	subject === undefined ? { format: 1 } : { format: 2, subject };
-
+/** Each record written in format 2, with its subject. */
 export const stored = {
-	code: (s: Selection, subject?: string) =>
-		({ ...formatOf(subject), selection: s }) as unknown as StoredSelection,
-	pin: (s: Selection | undefined, subject?: string) =>
-		({ ...formatOf(subject), ...(s ? { selection: s } : {}) }) as unknown as StoredSelection,
-	target: (t: Target, subject?: string) =>
-		({ ...formatOf(subject), target: t }) as unknown as StoredSelection,
+	code: (s: Selection, subject: string) =>
+		({ format: 2, subject, selection: s }) as unknown as StoredSelection,
+	pin: (s: Selection | undefined, subject: string) =>
+		({ format: 2, subject, ...(s ? { selection: s } : {}) }) as unknown as StoredSelection,
+	target: (t: Target, subject: string) =>
+		({ format: 2, subject, target: t }) as unknown as StoredSelection,
 };
 
 /** A record's own subject: format 2's; none for format 1. */

@@ -19,19 +19,6 @@ export interface RecordsPlace {
 
 const value = (n: number) => ({ format: 1, n }) as unknown as StoredSelection;
 
-/** Keeps a record through whichever of `create` and `save` the place offers, `create` for `subject`. */
-const put = (
-	records: SelectionRecords,
-	name: string,
-	kept: StoredSelection,
-	ms: number,
-	subject = "alice",
-) => {
-	if (records.create) return records.create(name, kept, ms, subject);
-	if (records.save) return records.save(name, kept, ms);
-	throw new TypeError("a place offering neither save nor create");
-};
-
 /** What claims-selection needs from any implementation: each record kept once, for exactly its lifetime, through faults. */
 export function selectionRecordsContract(name: string, open: () => Promise<RecordsPlace>): void {
 	let n = 0;
@@ -40,8 +27,8 @@ export function selectionRecordsContract(name: string, open: () => Promise<Recor
 		it("keeps the first record saved under a name for exactly its lifetime", async () => {
 			const place = await open();
 			const [kept, other] = [fresh(), fresh()];
-			expect(await put(place.records, kept, value(1), 1000)).toBe("created");
-			expect(await put(place.records, kept, value(2), 5000)).toBe("exists");
+			expect(await place.records.create(kept, value(1), 1000, "alice")).toBe("created");
+			expect(await place.records.create(kept, value(2), 5000, "alice")).toBe("exists");
 			expect(await place.records.read(kept)).toEqual(value(1));
 			expect(await place.records.read(other)).toBeUndefined();
 			place.advance(999);
@@ -55,9 +42,9 @@ export function selectionRecordsContract(name: string, open: () => Promise<Recor
 			const { loseNextAnswer: lose, failover, restart, pressMemory } = place;
 			if (!lose || !failover || !restart || !pressMemory) return context.skip();
 			const [kept, settled] = [fresh(), fresh()];
-			await put(place.records, kept, value(1), 60_000);
+			await place.records.create(kept, value(1), 60_000, "alice");
 			lose();
-			expect(await put(place.records, settled, value(2), 60_000)).toBe("created");
+			expect(await place.records.create(settled, value(2), 60_000, "alice")).toBe("created");
 			await failover();
 			await restart();
 			await pressMemory();
@@ -68,7 +55,7 @@ export function selectionRecordsContract(name: string, open: () => Promise<Recor
 		it("refuses, where the place erases, every record created for a subject it erased, and only for that subject", async (context) => {
 			const { records } = await open();
 			const { create, erase } = records;
-			if (!create || !erase) return context.skip();
+			if (!erase) return context.skip();
 			await create.call(records, fresh(), value(1), 60_000, "erin");
 			const report = await erase.call(records, "erin", new AbortController().signal);
 			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
@@ -81,17 +68,11 @@ export function selectionRecordsContract(name: string, open: () => Promise<Recor
 }
 
 /**
- * The records in memory offer `create`, filing nothing by subject and fencing no erasure; `erase`
- * and `migrate` need `subject-records`, which a template's store is built on.
- */
-type InMemoryRecords = SelectionRecords & Required<Pick<SelectionRecords, "create">>;
-
-/**
  * claims-selection's store in memory, on the composition's clock, for tests that compose the module;
  * `around` wraps the records the composition is given, as a test that fails or watches them does.
  */
 export function claimsSelectionInMemory(
-	options: { readonly around?: (records: InMemoryRecords) => SelectionRecords } = {},
+	options: { readonly around?: (records: SelectionRecords) => SelectionRecords } = {},
 ) {
 	let now = () => 0;
 	const entries = new Map<string, { readonly value: StoredSelection; readonly ends: number }>();
@@ -99,7 +80,9 @@ export function claimsSelectionInMemory(
 		const found = entries.get(name);
 		return found && found.ends > now() ? found : undefined;
 	};
-	const records: InMemoryRecords = {
+	// Filing nothing by subject and fencing no erasure: `erase` and `migrate` need `subject-records`,
+	// which a template's store is built on.
+	const records: SelectionRecords = {
 		create: async (name, kept, lifetimeMs) => {
 			if (live(name)) return "exists";
 			entries.set(name, { value: kept, ends: now() + lifetimeMs });

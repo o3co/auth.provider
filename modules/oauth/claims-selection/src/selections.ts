@@ -37,36 +37,26 @@ export function selectionsWith(parts: {
 	readonly now: () => number;
 }) {
 	const { records, consent, scopes, now } = parts;
-	/**
-	 * Keeps a record once, a name already holding one keeping the first, through the store's one
-	 * writing port: one filing by subject takes no write without its subject, the caller's bug.
-	 */
-	const write = async (
-		name: string,
-		value: StoredSelection,
-		lifetimeMs: number,
-		subject?: string,
-	) => {
-		const ms = Math.max(1, lifetimeMs);
-		if (records.create) {
-			if (subject === undefined) {
-				throw new TypeError("claims-selection: a record without its subject");
-			}
-			return records.create(name, value, ms, subject);
+	/** Keeps a record once for its subject, a name already holding one keeping the first. */
+	const write = (name: string, value: StoredSelection, lifetimeMs: number, subject: string) =>
+		records.create(name, value, Math.max(1, lifetimeMs), subject);
+	/** A subject a caller past the types left out is its bug: nothing is written without one. */
+	const given = (subject: string | undefined) => {
+		if (subject === undefined) {
+			throw new TypeError("claims-selection: a record without its subject");
 		}
-		if (records.save) return records.save(name, value, ms);
-		throw new TypeError("claims-selection: a store offering neither save nor create");
+		return subject;
 	};
 	/** A write past its subject's erasure keeps nothing that would hold a claim back: it fails. */
 	const unlessErased = (made: "created" | "exists" | "erased") => {
 		if (made === "erased") throw new Unavailable("claims-selection: the subject is erased");
 	};
 	/** A record's own subject wins: a caller's that differs would file it where that erasure never looks. */
-	const ownerOf = (own: string | undefined, given: string | undefined) => {
-		if (own !== undefined && given !== undefined && own !== given) {
+	const ownerOf = (own: string | undefined, theirs: string) => {
+		if (own !== undefined && own !== theirs) {
 			throw new Unavailable("claims-selection: a record kept for another subject");
 		}
-		return own ?? given;
+		return theirs;
 	};
 	const agreed = async (client: Client, subject: string, scope: string) =>
 		clientAllowance.allowsScope(client, scope) &&
@@ -96,7 +86,7 @@ export function selectionsWith(parts: {
 		}
 		return { selection: pin.selection, subject: pin.subject };
 	};
-	const tokenWrite = async (access: Issued, target: Target, subject: string | undefined) =>
+	const tokenWrite = async (access: Issued, target: Target, subject: string) =>
 		holds(target)
 			? write(
 					nameOf.token(access.id),
@@ -105,7 +95,7 @@ export function selectionsWith(parts: {
 					subject,
 				)
 			: "created";
-	const keepForToken = async (access: Issued, target: Target, subject: string | undefined) =>
+	const keepForToken = async (access: Issued, target: Target, subject: string) =>
 		unlessErased(await tokenWrite(access, target, subject));
 	const tokenRecord = async (tokenId: string) => {
 		const found = await records.read(nameOf.token(tokenId));
@@ -123,11 +113,12 @@ export function selectionsWith(parts: {
 		keepForCode: async (redemption, selection, lifetimeMs, subject) => {
 			bounded(selection);
 			if (!holds(selection.idToken) && !holds(selection.userinfo)) return;
+			const owner = given(subject);
 			const made = await write(
 				nameOf.code(redemption),
-				stored.code(selection, subject),
+				stored.code(selection, owner),
 				lifetimeMs + codeMarginMs,
-				subject,
+				owner,
 			);
 			// A code's name is made fresh for it: one already kept is not this code's.
 			if (made !== "created") throw new Unavailable("claims-selection");
@@ -150,10 +141,10 @@ export function selectionsWith(parts: {
 	};
 	const hook: RedemptionHook = {
 		name: "claims-selection",
-		pin: async (redemption, given) => {
+		pin: async (redemption, theirs) => {
 			const found = await records.read(nameOf.code(redemption));
 			const code = found === undefined ? undefined : read.code(found);
-			const subject = ownerOf(code?.subject, given);
+			const subject = ownerOf(code?.subject, given(theirs));
 			const pin = stored.pin(code?.selection, subject);
 			unlessErased(await write(nameOf.pin(redemption), pin, pinHoldMs, subject));
 		},
@@ -174,7 +165,7 @@ export function selectionsWith(parts: {
 			return {
 				kind: "held",
 				join: async (issued, subject) => {
-					const owner = ownerOf(found.subject, subject);
+					const owner = ownerOf(found.subject, given(subject));
 					// Erased meanwhile: the tie ended, and the exchange takes back what it issued.
 					return (await tokenWrite(issued, { names: [], constraints }, owner)) !== "erased";
 				},

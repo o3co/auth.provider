@@ -339,15 +339,10 @@ it("reads a record of either format alike: 2 keeping its subject, 1 as 0.19 wrot
 	await expect(s.selections.forToken("tok-5")).rejects.toSatisfy(isUnavailable);
 });
 
-it("writes format 2, keeping the subject, where one is given; format 1 without, until every write gives one", () => {
+it("writes every record in format 2, keeping its subject", () => {
 	expect(stored.code(asked, "alice")).toEqual({ format: 2, subject: "alice", selection: asked });
 	expect(stored.pin(undefined, "alice")).toEqual({ format: 2, subject: "alice" });
 	expect(stored.target(none, "alice")).toEqual({ format: 2, subject: "alice", target: none });
-	expect([stored.code(asked), stored.pin(undefined), stored.target(none)]).toEqual([
-		{ format: 1, selection: asked },
-		{ format: 1 },
-		{ format: 1, target: none },
-	]);
 	expect(read.code(stored.code(asked, "alice"))).toEqual({ selection: asked, subject: "alice" });
 });
 
@@ -360,30 +355,7 @@ const fencing = (erased: Set<string>) =>
 				erased.has(subject) ? "erased" : records.create(name, kept, ms, subject),
 		}),
 	});
-/** Records in memory offered through `save`, as a store not filing by subject. */
-const unfiled = () =>
-	claimsSelectionInMemory({
-		around: (records) => ({
-			read: records.read,
-			save: async (name, kept, ms) =>
-				(await records.create(name, kept, ms, "unfiled")) === "created" ? "created" : "exists",
-		}),
-	});
 const issuedAt = (id: string) => ({ id, expiresAt: runtime.clock.now() + 600_000 });
-
-it("writes format 2 wherever the subject is known, through save too", async () => {
-	const s = await serve(undefined, unfiled());
-	await s.selections.keepForCode("r-1", asked, 600_000);
-	await s.hook.pin("r-1", "alice");
-	expect(await s.stores.records.read("c.r-1")).toEqual({ format: 1, selection: asked });
-	expect(await s.stores.records.read("p.r-1")).toEqual({
-		format: 2,
-		subject: "alice",
-		selection: asked,
-	});
-	await s.selections.keepForCode("r-2", asked, 600_000, "alice");
-	expect(await s.stores.records.read("c.r-2")).toMatchObject({ format: 2, subject: "alice" });
-});
 
 it("refuses to keep a code's selection for an erased subject, as unavailable, apart from a name kept already", async () => {
 	const s = await serve(undefined, fencing(new Set(["erin"])));
@@ -450,34 +422,31 @@ it("refuses as unavailable a family or a token written from a pin without its su
 	expect(s.stores.names().filter((n) => !n.startsWith("p."))).toEqual([]);
 });
 
-it("throws a TypeError for a write without its subject to a store filing by subject: the caller's bug", async () => {
-	const s = await serve(undefined, fencing(new Set()));
-	await expect(s.selections.keepForCode("r-1", asked, 600_000)).rejects.toThrow(TypeError);
-	// As a caller past the types would.
-	const untyped = s.hook.pin as (redemption: string) => Promise<void>;
-	await expect(untyped("r-1")).rejects.toThrow(TypeError);
+it("throws a TypeError for a write a caller past the types gives no subject, its bug, writing nothing", async () => {
+	const s = await serve();
+	const keep = s.selections.keepForCode as (r: string, s: Selection, ms: number) => Promise<void>;
+	await expect(keep("r-1", asked, 600_000)).rejects.toThrow(TypeError);
+	const pin = s.hook.pin as (redemption: string) => Promise<void>;
+	await expect(pin("r-1")).rejects.toThrow(TypeError);
+	await s.selections.keepForCode("r-2", asked, 600_000, "alice");
+	await s.hook.pin("r-2", "alice");
+	await s.hook.redeemed(redeemedOf("r-2", "tok-1"));
+	const tie = await s.tie.tieOf("tok-1");
+	if (tie.kind !== "held") throw new Error("not held");
+	const join = tie.join as (issued: { id: string; expiresAt: number }) => Promise<boolean>;
+	await expect(join(issuedAt("tok-2"))).rejects.toThrow(TypeError);
+	expect(s.stores.names().filter((n) => !["c.r-2", "p.r-2", "t.tok-1"].includes(n))).toEqual([]);
 });
 
-it("refuses to start on a store offering both or neither of save and create, or part of erase and migrate", async () => {
-	const { module: kept, records } = claimsSelectionInMemory();
-	const offering = (offered: object) =>
-		claimsSelectionInMemory({ around: () => ({ read: records.read, ...offered }) as never });
-	const create = async () => "created" as const;
-	const save = async () => "created" as const;
+it("refuses to start on a store offering part of erase and migrate", async () => {
 	const erase = async () => {
 		throw new Error("not called");
 	};
-	expect(kept).toBeDefined();
-	for (const [offered, reason] of [
-		[{ save, create }, "exactly one"],
-		[{}, "exactly one"],
-		[{ create, erase }, "both, or neither"],
-	] as const) {
-		const refused = await serve(undefined, offering(offered)).catch((e: unknown) => e);
-		expect(refused, reason).toMatchObject({
-			refusals: [expect.objectContaining({ reason: expect.stringContaining(reason) })],
-		});
-	}
+	const partial = claimsSelectionInMemory({ around: (records) => ({ ...records, erase }) });
+	const refused = await serve(undefined, partial).catch((e: unknown) => e);
+	expect(refused).toMatchObject({
+		refusals: [expect.objectContaining({ reason: expect.stringContaining("both, or neither") })],
+	});
 });
 
 it("fails closed on 0.19.1, which reads a format-2 record as unavailable, never as none", () => {
@@ -490,8 +459,8 @@ it("fails closed on 0.19.1, which reads a format-2 record as unavailable, never 
 	for (const [reading, record] of written) {
 		expect(() => reading(record)).toThrow(Unavailable);
 	}
-	// Format 1, as 0.20 still writes it without a subject, reads there as before.
-	expect(readAt0191.code(stored.code(asked))).toEqual({ format: 1, selection: asked });
+	// Its own format 1 reads there as before.
+	expect(readAt0191.code({ format: 1, selection: asked })).toEqual({ format: 1, selection: asked });
 });
 
 it("has no section: a configuration that writes one is refused at boot", async () => {

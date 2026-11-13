@@ -9,7 +9,7 @@ selectionRecordsContract("records stand-in", async () => {
 	let now = 0;
 	const { records } = memoryRecords<StoredSelection>(() => now, { shards: 1, perShard: 1 });
 	return {
-		records: { save: records.create, read: records.read },
+		records: { create: (name, kept, ms) => records.create(name, kept, ms), read: records.read },
 		advance: (ms) => {
 			now += ms;
 		},

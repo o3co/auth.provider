@@ -6,18 +6,15 @@ declare const stored: unique symbol;
 export type StoredSelection = { readonly [stored]: true };
 
 /**
- * Where selections are kept, by name, offering exactly one of `create` and `save`, and `erase` and
- * `migrate` together or neither; another set refuses the boot. Every call throws Unavailable when
- * the place cannot tell.
+ * Where selections are kept, by name, offering `erase` and `migrate` together or neither; a part
+ * refuses the boot. Every call throws Unavailable when the place cannot tell.
  */
 export interface SelectionRecords {
-	/** Keeps a record for its lifetime, unless the name holds one already; for a store not filing by subject. */
-	save?(name: string, record: StoredSelection, lifetimeMs: number): Promise<"created" | "exists">;
 	/**
 	 * Keeps a record for its lifetime and its subject, unless the name holds one already (`exists`)
 	 * or, where the Store fences creation past a subject's erasure, the subject is erased (`erased`).
 	 */
-	create?(
+	create(
 		name: string,
 		record: StoredSelection,
 		lifetimeMs: number,

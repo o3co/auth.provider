@@ -40,15 +40,12 @@ export interface ClaimsSelections {
 	scopeOf(claim: string): string | undefined;
 	/** The names the client is allowed and the subject agreed to, by their scopes; the constraints as they are. */
 	select(client: Client, subject: string, asked: Selection): Promise<Selection>;
-	/**
-	 * Keeps a code's selection by its redemption's name, for the code's subject (optional until its
-	 * callers give it), for the code's lifetime and a minute more.
-	 */
+	/** Keeps a code's selection by its redemption's name, for its subject, for the code's lifetime and a minute more. */
 	keepForCode(
 		redemption: string,
 		selection: Selection,
 		lifetimeMs: number,
-		subject?: string,
+		subject: string,
 	): Promise<void>;
 	/** The selection pinned to a redemption: none for a code without one; throws once the pin is gone. */
 	forCode(redemption: string): Promise<Selection | undefined>;
