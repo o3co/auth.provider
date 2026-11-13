@@ -9,13 +9,16 @@ name: Image scan
 #
 # The targets are `develop`, what the next release will ship; `latest`, the
 # latest release; and each older minor still supported, as `X.Y`, which is
-# that minor's newest release tag. Each target is packed from its own
-# checkout; the scanner is the commit this workflow runs on, as a release tag
-# may predate it. A `schedule` event runs the copy of this file on the
-# default branch, main.
+# that minor's newest release tag. Each target is checked out by its full ref,
+# so no branch named as a tag stands in for it, and packed by its own code
+# with its own pnpm. The scanner is develop on a schedule, as a release tag may
+# predate it, and the branch run on a manual run. A `schedule` event runs the
+# copy of this file on the default branch, main.
 #
-# No input selects a ref, so no code but this commit's, develop's and release
-# tags' runs here. It restores and saves no cache.
+# No input selects a ref, so no code but develop's, release tags' and a
+# manually run branch's runs here. The target's code runs in the scan's job
+# before the scanner: the targets are trusted refs, and nothing here isolates
+# the scanner from them. No step restores or saves a cache.
 on:
   schedule:
     - cron: '41 3 * * *'
@@ -26,7 +29,8 @@ permissions:
 
 jobs:
   # `latest` is GitHub's latest release, never a prerelease or a draft. A minor
-  # `X.Y` is its highest release tag vX.Y.Z. This job checks out nothing.
+  # `X.Y` is its highest release tag vX.Y.Z. This job checks out nothing, and
+  # is the only one whose steps are given the run's token.
   resolve:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -49,7 +53,7 @@ jobs:
           for target in $TARGETS; do
             case "$target" in
               develop)
-                rows+=("$(jq -cn --arg t develop '{target: $t, ref: $t}')")
+                rows+=("$(jq -cn '{target: "develop", ref: "refs/heads/develop"}')")
                 continue
                 ;;
               latest)
@@ -68,7 +72,7 @@ jobs:
               echo "::error::$target has no release tag vX.Y.Z: '$tag'"
               exit 1
             fi
-            rows+=("$(jq -cn --arg t "$target" --arg r "$tag" '{target: $t, ref: $r}')")
+            rows+=("$(jq -cn --arg t "$target" --arg r "refs/tags/$tag" '{target: $t, ref: $r}')")
           done
           if [ "${#rows[@]}" -eq 0 ]; then
             echo "::error::no target to scan"
@@ -90,6 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ github.event_name == 'schedule' && 'refs/heads/develop' || '' }}
           path: scanner
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -97,20 +102,25 @@ jobs:
           ref: ${{ matrix.ref }}
           path: target
           persist-credentials: false
-      # The scanner's pnpm; in the target, pnpm runs the version its manifest names.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          package_json_file: scanner/package.json
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
-      - name: Pack the target's release
+      # Each checkout is installed by the pnpm its manifest pins; the later
+      # setup comes first on the path.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: target/package.json
+          dest: ~/setup-pnpm-target
+      - name: Pack the target
         working-directory: target
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm bundles
           .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: scanner/package.json
       - name: Build and scan the app's image
         working-directory: scanner
         run: |

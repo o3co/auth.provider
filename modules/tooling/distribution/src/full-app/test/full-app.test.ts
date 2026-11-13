@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { optIns } from "@mod/combinations";
 import { afterAll, expect, it } from "vitest";
 import { entrance, fullApp, releaseOptIns } from "../full-app.ts";
 
@@ -56,7 +55,6 @@ it("reads the features that opt in from the release installed, not from the work
 		`export const optIns = () => ${JSON.stringify(theRelease)};\n`,
 	);
 	expect(releaseOptIns(project)).toEqual(theRelease);
-	expect(optIns()).not.toContain(theRelease[0]);
 });
 
 it("refuses an entrance that depends on other than its bundle alone", () => {

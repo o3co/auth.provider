@@ -54,7 +54,7 @@ it("runs on its daily schedule and a manual run alone, the manual run taking no 
 	expect(workflow.permissions).toEqual({ contents: "read" });
 });
 
-it("resolves its targets in a job that runs no code of the repository, the only one given the run's token", () => {
+it("resolves its targets in a job that runs no code of the repository, the only one whose steps are given the run's token", () => {
 	const only = resolve.steps ?? [];
 	expect(only).toHaveLength(1);
 	expect(only[0]?.uses).toBeUndefined();
@@ -83,10 +83,14 @@ it("scans each target in a job of its own, reading alone, within a time, one fai
 	expect(scan["continue-on-error"]).toBeUndefined();
 });
 
-it("packs the target from its own checkout, and scans it with the scanner of the commit the workflow runs on", () => {
+it("packs the target from its own checkout with its own pnpm, and scans it with develop's scanner on a schedule and the branch's on a manual run", () => {
 	const checkout = steps.filter((s) => s.uses?.startsWith("actions/checkout@"));
 	expect(checkout.map((s) => s.with)).toEqual([
-		{ path: "scanner", "persist-credentials": false },
+		{
+			ref: "${{ github.event_name == 'schedule' && 'refs/heads/develop' || '' }}",
+			path: "scanner",
+			"persist-credentials": false,
+		},
 		{ ref: "${{ matrix.ref }}", path: "target", "persist-credentials": false },
 	]);
 	const at = (command: string) => steps.findIndex((s) => s.run?.includes(command));
@@ -107,11 +111,18 @@ it("packs the target from its own checkout, and scans it with the scanner of the
 		'pnpm image:scan "$RUNNER_TEMP/tarballs" "$RUNNER_TEMP/image-scan"',
 	);
 	expect(at("pnpm image:scan")).toBeGreaterThan(at("pnpm bundles"));
-	const pnpm = steps.find((s) => s.uses?.startsWith("pnpm/action-setup@"));
-	expect(pnpm?.with).toEqual({ package_json_file: "scanner/package.json" });
+	// Each install runs the pnpm its checkout pins, set up just before it.
+	const setups = steps.flatMap((s, i) => (s.uses?.startsWith("pnpm/action-setup@") ? [i] : []));
+	expect(setups.map((i) => steps[i]?.with)).toEqual([
+		{ package_json_file: "target/package.json", dest: "~/setup-pnpm-target" },
+		{ package_json_file: "scanner/package.json" },
+	]);
+	expect(setups[0]).toBeLessThan(at("pnpm bundles"));
+	expect(setups[1]).toBeGreaterThan(at("pnpm bundles"));
+	expect(setups[1]).toBeLessThan(at("pnpm image:scan"));
 });
 
-it("restores and saves no cache", () => {
+it("has no cache step, and its setups cache nothing", () => {
 	expect(steps.filter((s) => s.uses?.startsWith("actions/cache"))).toEqual([]);
 	for (const step of steps.filter((s) =>
 		/^(actions\/setup-node|pnpm\/action-setup)@/.test(s.uses ?? ""),
@@ -153,6 +164,8 @@ for ((i = 1; i <= $#; i++)); do
 		repos/*) path="\${!i}" ;;
 	esac
 done
+# An answer GitHub cut off: a tag written, then a failure.
+if [ -n "\${FAKE_FAIL:-}" ]; then echo v0.19.9; exit 1; fi
 case "$1" in
 	release) jq -cn --arg t "$FAKE_LATEST" '{tagName: $t}' | jq -r "$jq_expr" ;;
 	api)
@@ -167,7 +180,7 @@ esac
 	const script = join(scratch, "resolve.sh");
 	writeFileSync(script, (resolve.steps ?? [])[0]?.run ?? "");
 
-	const resolved = (targets: string, tags: string, latest = "v0.19.2") => {
+	const resolved = (targets: string, tags: string, latest = "v0.19.2", fail = "") => {
 		const output = join(scratch, `output-${Math.random().toString(36).slice(2)}`);
 		writeFileSync(output, "");
 		const ran = spawnSync("bash", ["-e", script], {
@@ -180,6 +193,7 @@ esac
 				GITHUB_REPOSITORY: "o3co/auth.provider",
 				FAKE_LATEST: latest,
 				FAKE_TAGS: tags,
+				FAKE_FAIL: fail,
 			},
 		});
 		const line = readFileSync(output, "utf8")
@@ -193,21 +207,21 @@ esac
 	};
 	const tags = "v0.18.4 v0.19.0-rc.1 v0.19.0 v0.19.2 v0.19.10 v0.19.11-rc.1 v0.190.1";
 
-	it("names develop as itself and the latest release by its tag", () => {
+	it("names develop by its branch and the latest release by its tag, each in full", () => {
 		expect(resolved("develop latest", tags)).toEqual({
 			status: 0,
 			told: "",
 			targets: [
-				{ target: "develop", ref: "develop" },
-				{ target: "latest", ref: "v0.19.2" },
+				{ target: "develop", ref: "refs/heads/develop" },
+				{ target: "latest", ref: "refs/tags/v0.19.2" },
 			],
 		});
 	});
 
 	it("takes a minor's highest release tag, by version, leaving out release candidates", () => {
 		expect(resolved("0.19 0.18", tags).targets).toEqual([
-			{ target: "0.19", ref: "v0.19.10" },
-			{ target: "0.18", ref: "v0.18.4" },
+			{ target: "0.19", ref: "refs/tags/v0.19.10" },
+			{ target: "0.18", ref: "refs/tags/v0.18.4" },
 		]);
 	});
 
@@ -230,6 +244,14 @@ esac
 		const { status, told } = resolved("latest", tags, "release-0.19.2");
 		expect(status).not.toBe(0);
 		expect(told).toContain("latest has no release tag vX.Y.Z: 'release-0.19.2'");
+	});
+
+	it("fails where GitHub's answer fails, whatever it wrote first", () => {
+		for (const target of ["latest", "0.19"]) {
+			const { status, targets } = resolved(target, tags, "v0.19.2", "yes");
+			expect(status).not.toBe(0);
+			expect(targets).toBeUndefined();
+		}
 	});
 
 	it("fails an empty list", () => {
