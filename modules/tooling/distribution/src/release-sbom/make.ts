@@ -18,11 +18,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { optIns } from "@mod/combinations";
 import { docker } from "@mod/docker-client";
+import { fullApp, installFromTarballs } from "../full-app/full-app.ts";
 import { largestOutputBytes } from "../limits.ts";
 import { packedOf } from "../release/seal.ts";
-import { buildWithin, commandWithin, images, overridesFile } from "../release-check/image.ts";
+import { buildWithin, commandWithin, images } from "../release-check/image.ts";
 import { readBundles } from "../workspace.ts";
 import { type Bom, coverageProblems, type Declared, insideBom, npmNamed } from "./boms.ts";
 import { endOf, notRemoved } from "./removal.ts";
@@ -60,18 +60,6 @@ const sbom = (dir: string, scope: "--prod" | "--dev") =>
 			{ cwd: dir, encoding: "utf8", maxBuffer: largestOutputBytes },
 		),
 	) as Bom;
-/** A project installed from the tarballs alone, as the release check installs one; nothing it holds runs. */
-const install = (dir: string) => {
-	writeFileSync(join(dir, "pnpm-workspace.yaml"), overridesFile(byName));
-	execFileSync(
-		"pnpm",
-		["install", "--prefer-offline", "--no-frozen-lockfile", "--ignore-scripts"],
-		{
-			cwd: dir,
-			stdio: ["ignore", "ignore", "inherit"],
-		},
-	);
-};
 const named = (bom: Bom, what: string) => {
 	const result = npmNamed(bom, packed);
 	if ("problems" in result) {
@@ -87,31 +75,13 @@ const write = (file: string, value: unknown) =>
 	);
 
 try {
-	// The entrance, installed alone, as an operator runs it with npx.
-	const entrance = "@o3co/create-auth-provider";
-	const tool = join(scratch, "entrance");
-	mkdirSync(tool);
-	writeFileSync(
-		join(tool, "package.json"),
-		JSON.stringify({
-			name: "entrance",
-			private: true,
-			dependencies: { [entrance]: `file:${byName[entrance]}` },
-		}),
-	);
-	install(tool);
+	// The entrance, installed alone, as an operator runs it with npx, and the operator's app it makes.
+	const { entrance: tool, app } = fullApp(byName, scratch);
 	const entranceBom = named(sbom(tool, "--prod"), "entrance");
 	write("entrance.cdx.json", entranceBom);
 	copyFileSync(join(tool, "pnpm-lock.yaml"), join(out, "entrance.pnpm-lock.yaml"));
 
-	// The operator's app: the full template with every feature that opts in, made by the entrance.
-	const app = join(scratch, "app");
-	execFileSync(
-		join(tool, "node_modules", ".bin", "create-auth-provider"),
-		[app, "--pattern", "full", ...optIns().flatMap((name) => ["--add", name])],
-		{ stdio: "pipe" },
-	);
-	install(app);
+	installFromTarballs(app, byName);
 	const appBom = named(sbom(app, "--prod"), "app");
 	write("app.cdx.json", appBom);
 	copyFileSync(join(app, "pnpm-lock.yaml"), join(out, "app.pnpm-lock.yaml"));
