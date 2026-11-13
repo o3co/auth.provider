@@ -30,8 +30,9 @@ describe("the package managers an app's image carries", () => {
 
 	it("are each path the image still finds one at", async () => {
 		const found =
-			"/usr/local/bin/corepack\n/usr/local/lib/node_modules/corepack\n/opt/yarn-v1.22.22\n";
+			"/usr/local/bin/npm\n/usr/local/bin/corepack\n/usr/local/lib/node_modules/corepack\n/opt/yarn-v1.22.22\n";
 		expect(await look(found)).toEqual([
+			"/usr/local/bin/npm",
 			"/usr/local/bin/corepack",
 			"/usr/local/lib/node_modules/corepack",
 			"/opt/yarn-v1.22.22",
@@ -45,8 +46,10 @@ describe("the package managers an app's image carries", () => {
 		const script = run.at(-1) ?? "";
 		expect(run.slice(-5, -1)).toEqual(["--entrypoint", "sh", "release-check-1:simple-web", "-c"]);
 		expect(run).toContain("--network=none");
-		for (const tool of ["corepack", "pnpm", "yarn", "yarnpkg"]) expect(script).toContain(tool);
-		expect(script).toContain("/usr/local/lib/node_modules/corepack");
+		for (const tool of ["npm", "npx", "corepack", "pnpm", "pnpx", "yarn", "yarnpkg"])
+			expect(script).toMatch(new RegExp(`for tool in [^;]*\\b${tool}\\b`));
+		for (const kept of ["npm", "corepack", "pnpm", "yarn"])
+			expect(script).toContain(`/usr/local/lib/node_modules/${kept}`);
 		expect(script).toContain("/opt/yarn-v*");
 	});
 });

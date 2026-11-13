@@ -3,7 +3,7 @@
 Internal module of `release-check`: which package managers an app's image holds.
 
 ## Responsibilities
-- Looks in an app's image for each package manager it holds, npm aside: corepack, pnpm or yarn on its PATH, or the corepack and the yarn Node's image bundles where it keeps them.
+- Looks in an app's image for each package manager it holds but apk: npm, npx, corepack, pnpm or yarn on its PATH, or the npm, the corepack and the yarn Node's image bundles where it keeps them, or a pnpm or yarn installed globally.
 
 ## Not here
 - Building the image, and telling what it holds as a problem: `release-check`. The container it looks in: `containers`.
