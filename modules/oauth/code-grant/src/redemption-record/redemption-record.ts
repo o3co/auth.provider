@@ -33,18 +33,25 @@ export const fromStoredRedemptionRecord = (
 const allowanceMs = 120_000;
 
 /**
- * Creates a redemption record for its subject, read at `created` before the write, so it ends
- * no earlier than `created` and `storedRecordMaxMs`.
+ * Creates a redemption record for its subject, for `storedRecordMaxMs`, reading the clock before the
+ * write: the record ends no earlier than that read and `storedRecordMaxMs`, so its token, ending by
+ * `tokenEnd`, ends at least the allowance before it.
  */
-export const createRedemptionRecord = (
+export const createRedemptionRecord = async (
 	records: RedemptionRecords,
 	name: string,
 	subject: string,
-): Promise<"created" | "exists" | "erased"> =>
-	records.create(name, toStoredRedemptionRecord({ format: 1 }), storedRecordMaxMs, subject);
-
-/** The latest a token may end, for a record created no earlier than `created`: the allowance before its end. */
-export const tokenEndFor = (created: number) => created + storedRecordMaxMs - allowanceMs;
+	now: () => number,
+): Promise<{ readonly made: "created" | "exists" | "erased"; readonly tokenEnd: number }> => {
+	const created = now();
+	const made = await records.create(
+		name,
+		toStoredRedemptionRecord({ format: 1 }),
+		storedRecordMaxMs,
+		subject,
+	);
+	return { made, tokenEnd: created + storedRecordMaxMs - allowanceMs };
+};
 
 /** Whether a redemption record is kept under the name: the code was redeemed, whatever became of it. */
 export const isRedeemed = async (records: RedemptionRecords, name: string): Promise<boolean> =>

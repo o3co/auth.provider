@@ -26,7 +26,8 @@ export function voiding(parts: {
 			const r = fromStored(held);
 			return r && { value: toStored({ ...r, void: true }) };
 		});
-		// Until 0.22, a token reference a 0.19 instance kept on its code is read and revoked too.
+		// TODO(0.22): stop reading a token here; until then, one a 0.19 instance kept on its code, or
+		// noted there too, is read and revoked too.
 		const fromCode = coded && fromStored(coded.after);
 		const token = fromRecord?.token ?? fromCode?.token;
 		return { found: fromRecord !== undefined || Boolean(fromCode), token };

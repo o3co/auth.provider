@@ -16,7 +16,7 @@
 - Extension point: session redemptions, told the session's handle and the client of each code redeemed in a session.
 - Extension point: redemption hooks, one per name: pinned with the redemption's name once the code is used up, then told the redemption facts after the additions.
 - Extension point: additions, one per answer field (one on the answer's own fields refuses boot): redemption facts → value or none, and optionally a revocation by redemption name.
-- Store interfaces, wired by the assembly, never shown what a record holds: codes by a name made from the code, created by the code for its subject (rewrite from the current contents, answering before and after); each redemption record by that name, alike (`redemption-record`); the void list (add, done, go through in order). Their `erase` and `migrate` back the eraser `code-grant` (`erasure`).
+- Store interfaces, wired by the assembly, never shown what a record holds: codes by a name made from the code, created by the code for its subject (rewrite from the current contents, answering before and after); each redemption record by that name, for its subject (create, read, rewrite; `redemption-record`); the void list (add, done, go through in order). Their `erase` and `migrate` back the eraser `code-grant` (`erasure`).
 - Operator section: `code-lifetime` (10s–10m, default `10m`), `sweep-interval` (retry of failed revocations, 1s–1h, default `30s`). Times are written with their unit; a bare number is refused.
 - `./testing`: configuration builders, and the store interfaces' contract test for every implementation (records whole and once, changed only from what they hold, ended at exactly their lifetime; voids kept until done, refused when full; lost answers, failovers, restarts and memory pressure where the place has them).
 
@@ -34,7 +34,7 @@
 - Trade-offs: whoever holds a leaked code can revoke the legitimate tokens while the code lives; a client that resends a redemption by itself fails it.
 
 ## Data
-- Codes: a record per code name until its expiry. Redemption records: each for `storedRecordMaxMs`, the longest token, then 120 s for clock drift and 120 s from use-up to issue (`kernel`'s clock; syncing hosts is the deployment's). The void list: until each code is settled.
+- Codes: a record per code name until its expiry, or until 0.22 as long as a 0.19 instance extends one it redeems or voids, within `storedRecordMaxMs`. Redemption records: each for `storedRecordMaxMs` (`kernel`'s clock; syncing hosts is the deployment's). The void list: until each code is settled.
 - Needs: no eviction (tokens to revoke would be lost), a crash survived, no rollback on failover (a used code would come back), names derived from the code.
 
 ## Depends on

@@ -16,7 +16,6 @@ import {
 	createRedemptionRecord,
 	isRedeemed,
 	noteToken,
-	tokenEndFor,
 } from "./redemption-record/redemption-record.ts";
 import type { ChangedCode, CodeStore, RedemptionRecords } from "./store.ts";
 
@@ -142,8 +141,12 @@ export function codeGrant(parts: {
 			if (again.kind === "error") return again;
 			// Its record is made once used up and before issuing (use-up, create, issue, note), under
 			// its subject's tombstone (`redemption-record`): a subject erased meanwhile gets no token.
-			const created = now();
-			const made = await createRedemptionRecord(redemptionRecords, name, record.subject);
+			const { made, tokenEnd } = await createRedemptionRecord(
+				redemptionRecords,
+				name,
+				record.subject,
+				now,
+			);
 			if (made === "erased") {
 				await settle(name);
 				return refused;
@@ -163,7 +166,7 @@ export function codeGrant(parts: {
 			// later than the allowance before its record's end.
 			const allowed = await issue(accessOf(record, client.id), {
 				session: record.session,
-				notAfter: Math.min(entry.endsAt, tokenEndFor(created)),
+				notAfter: Math.min(entry.endsAt, tokenEnd),
 			});
 			if (allowed.kind === "refused") return allowed;
 			const issued = allowed.access;
@@ -193,8 +196,8 @@ export function codeGrant(parts: {
 			for (const redemption of redemptions) {
 				await voidIfFails(() => redemption.redeemed(record.session, client.id));
 			}
-			// A reuse or a logout that came while the token was being made voids it; until 0.22, a 0.19
-			// instance's reuse marks the code alone.
+			// A reuse or a logout that came while the token was being made voids it.
+			// TODO(0.22): stop reading `left.void`; until then, a 0.19 instance's reuse marks the code alone.
 			if (after.void || left.void || !(await enters(record.session))) {
 				await settle(name);
 				return refused;
