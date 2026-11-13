@@ -10,6 +10,7 @@ Internal module of `subject-records`: a subject's records, by the category its s
 
 ## Offers
 - `subjectRecordsIn` (a place, its index space, the phase; where; the builder's `refuse`; `secret` for a bounded space) → `create` (a key, a value or its maker, a lifetime, its subject last: `created`, `exists` or `erased`), `read`, `change`, `changeNamed`, `remove` (a key, and optionally a check of its value: `removed`, `left` where the check said no, or `missing`), `scan`; and `unowned` (deprecated, below).
+- `recordTargetsIn` (a place, `secret`) → a record's target by its key (`recordOf`) or by the name it is kept by (`recordNamed`), and that name (`nameOf`): records' digest of a secret, read off the target written; elsewhere the key. Pure, needing no phase.
 - `rulesOf` (a place, its category) → each write's rule: the index records it reads besides the record, named from the record as read, and what it answers and writes from all it read. The one statement of the writes' conditions; `subjectRecordsIn` runs each op through it, one record at a time, and `joint` many as one.
 - `online-indexed`: each record's key in its subject's bucket. `online-keyed`: each record's key its subject itself, one per subject (any other key, TypeError). `bounded`: each written raw, fenced at creation by its subject's tombstone, gone by its end, at most the space's `boundedMs`.
 

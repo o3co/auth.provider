@@ -1,6 +1,5 @@
 import type { Elsewhere, SetReading, SubjectReading, Walk } from "@mod/erasure-extensions";
 import { type Clock, isUnavailable, Unavailable } from "@mod/kernel";
-import { changeRecords } from "@mod/records";
 import type { Json } from "@mod/store";
 import { eraseSubject } from "../erase/erase.ts";
 import type { Phase, SubjectPlace } from "../index/index.ts";
@@ -8,7 +7,7 @@ import { jointRecordsIn } from "../joint/joint.ts";
 import { migrateRecords, migrateSets } from "../migrate/migrate.ts";
 import type { PhaseOnce } from "../phase/phase.ts";
 import { subjectKeyedSetsIn } from "../sets/sets.ts";
-import { subjectRecordsIn } from "../writes/writes.ts";
+import { recordTargetsIn, subjectRecordsIn } from "../writes/writes.ts";
 
 type Refuse = (where: string, reason: string) => never;
 /** A builder's methods, each answering a promise. */
@@ -124,13 +123,8 @@ export const phasedRecordsIn = async <T extends Json>(
 			migrate: true,
 		} satisfies Record<keyof ReturnType<typeof subjectRecordsIn<T>> | "erase" | "migrate", true>,
 	)),
-	/**
-	 * The name a record keyed by a secret is kept by: records' own digest, read from the target the
-	 * builder writes, so a record a 0.19 instance wrote under a secret is the one found. Needs no
-	 * phase. Elsewhere a key is its own name.
-	 */
-	nameOf: (secret: string) =>
-		options.secret ? changeRecords.keyOf({ place, secret }).partition : secret,
+	/** The name a record is kept by (`writes`' `recordTargetsIn`), needing no phase. */
+	nameOf: recordTargetsIn(place, options).nameOf,
 });
 
 /** `subjectKeyedSetsIn` over the phase the process reads once (see `phased`). */
