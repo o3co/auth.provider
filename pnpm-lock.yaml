@@ -604,6 +604,10 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../store
+    devDependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../erasure-extensions
 
   modules/foundation/request-source:
     dependencies:

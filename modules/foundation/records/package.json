@@ -12,5 +12,7 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/store": "workspace:*"
 	},
-	"devDependencies": {}
+	"devDependencies": {
+		"@mod/erasure-extensions": "workspace:*"
+	}
 }
