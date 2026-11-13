@@ -9,6 +9,7 @@ import {
 	isUnavailable,
 	kernelConfig,
 	type Module,
+	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { afterEach, expect, it } from "vitest";
@@ -23,7 +24,9 @@ import {
 	withinLimits,
 } from "../src/contract.ts";
 import claimsSelectionModule from "../src/module.ts";
+import { read, stored } from "../src/stored.ts";
 import { claimsSelectionInMemory } from "../src/testing.ts";
+import { readAt0191 } from "./frozen-0.19.1.ts";
 
 let shift = 0;
 const runtime = quietRuntime({ clock: { now: () => 1_000_000 + shift } });
@@ -310,6 +313,51 @@ it("fails a read of a record it cannot read as unavailable, never taking it for 
 	await expect(s.selections.forCode("r-1")).rejects.toMatchObject(unreadable);
 	await expect(s.tie.tieOf("tok-1")).rejects.toMatchObject(unreadable);
 	await expect(s.selections.forToken("tok-1")).rejects.toSatisfy(isUnavailable);
+});
+
+it("reads a record of either format alike: 2 keeping its subject, 1 as 0.19 wrote it, without one", async () => {
+	const s = await serve();
+	for (const [n, format] of [
+		[1, { format: 1 }],
+		[2, { format: 2, subject: "alice" }],
+	] as const) {
+		s.stores.overwrite(`c.r-${n}`, { ...format, selection: asked });
+		s.stores.overwrite(`t.tok-${n}`, { ...format, target: asked.userinfo });
+		s.stores.overwrite(`p.r-${n + 2}`, { ...format, selection: asked });
+		await s.hook.pin(`r-${n}`);
+		expect(await s.selections.forCode(`r-${n}`)).toEqual(asked);
+		expect(await s.selections.forCode(`r-${n + 2}`)).toEqual(asked);
+		expect(await s.selections.forToken(`tok-${n}`)).toEqual(asked.userinfo);
+	}
+	// Format 2 without its subject is a record it cannot read.
+	s.stores.overwrite("t.tok-5", { format: 2, target: asked.userinfo });
+	await expect(s.selections.forToken("tok-5")).rejects.toSatisfy(isUnavailable);
+});
+
+it("writes format 2, keeping the subject, where one is given; format 1 without, until every write gives one", () => {
+	expect(stored.code(asked, "alice")).toEqual({ format: 2, subject: "alice", selection: asked });
+	expect(stored.pin(undefined, "alice")).toEqual({ format: 2, subject: "alice" });
+	expect(stored.target(none, "alice")).toEqual({ format: 2, subject: "alice", target: none });
+	expect([stored.code(asked), stored.pin(undefined), stored.target(none)]).toEqual([
+		{ format: 1, selection: asked },
+		{ format: 1 },
+		{ format: 1, target: none },
+	]);
+	expect(read.code(stored.code(asked, "alice"))).toEqual(asked);
+});
+
+it("fails closed on 0.19.1, which reads a format-2 record as unavailable, never as none", () => {
+	const written = [
+		[readAt0191.code, stored.code(asked, "alice")],
+		[readAt0191.pin, stored.pin(asked, "alice")],
+		[readAt0191.pin, stored.pin(undefined, "alice")],
+		[readAt0191.target, stored.target(asked.userinfo, "alice")],
+	] as const;
+	for (const [reading, record] of written) {
+		expect(() => reading(record)).toThrow(Unavailable);
+	}
+	// Format 1, as 0.20 still writes it without a subject, reads there as before.
+	expect(readAt0191.code(stored.code(asked))).toEqual({ format: 1, selection: asked });
 });
 
 it("has no section: a configuration that writes one is refused at boot", async () => {

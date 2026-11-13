@@ -34,10 +34,20 @@ export function withinLimits(asked: Selection): boolean {
 /** Whether a target asks for anything: a name to release or a constraint to hold. */
 export const holds = (t: Target) => t.names.length > 0 || t.constraints.length > 0;
 
-// Each record writes format 1, and reads only it: one of another format or shape fails the read.
-const codeRecord = z.strictObject({ format: z.literal(1), selection });
-const pinRecord = z.strictObject({ format: z.literal(1), selection: selection.optional() });
-const targetRecord = z.strictObject({ format: z.literal(1), target });
+/**
+ * A record's shape in either format: 2 keeps its subject, so erasure finds whose it is; 1, as 0.19
+ * wrote it, keeps none. One of another format or shape fails the read.
+ * TODO(0.22): drop format 1 for a code, a pin and a token. A family's target keeps reading it until
+ * the first release past refresh's family-lifetime ceiling after the last 0.19 instance stopped.
+ */
+const recordOf = <S extends z.ZodRawShape>(shape: S) =>
+	z.union([
+		z.strictObject({ format: z.literal(1), ...shape }),
+		z.strictObject({ format: z.literal(2), subject: z.string(), ...shape }),
+	]);
+const codeRecord = recordOf({ selection });
+const pinRecord = recordOf({ selection: selection.optional() });
+const targetRecord = recordOf({ target });
 
 const opened = <T>(shape: z.ZodType<T>, kept: StoredSelection): T => {
 	const read = shape.safeParse(kept);
@@ -47,11 +57,17 @@ const opened = <T>(shape: z.ZodType<T>, kept: StoredSelection): T => {
 	return read.data;
 };
 
+/** Format 2 with the subject where one is given; format 1 without, until every write gives one. */
+const formatOf = (subject: string | undefined) =>
+	subject === undefined ? { format: 1 } : { format: 2, subject };
+
 export const stored = {
-	code: (s: Selection) => ({ format: 1, selection: s }) as unknown as StoredSelection,
-	pin: (s: Selection | undefined) =>
-		({ format: 1, ...(s ? { selection: s } : {}) }) as unknown as StoredSelection,
-	target: (t: Target) => ({ format: 1, target: t }) as unknown as StoredSelection,
+	code: (s: Selection, subject?: string) =>
+		({ ...formatOf(subject), selection: s }) as unknown as StoredSelection,
+	pin: (s: Selection | undefined, subject?: string) =>
+		({ ...formatOf(subject), ...(s ? { selection: s } : {}) }) as unknown as StoredSelection,
+	target: (t: Target, subject?: string) =>
+		({ ...formatOf(subject), target: t }) as unknown as StoredSelection,
 };
 
 export const read = {
