@@ -32,7 +32,11 @@ const approvalGuaranteeFor: Record<keyof typeof approvalRecordsNeeds, Guarantee>
 	survivesCrash: guaranteeFor.survivesCrash,
 	survivesFailover: guaranteeFor.survivesFailover,
 };
-const devices: Space = { name: "device-grant-store.devices", guarantees };
+/**
+ * Devices hold no subject from 0.20; a record a 0.19 instance approved keeps its approval's subject,
+ * held only in `reader`, at most 7,200 s, device-grant's migration stopping until none is left.
+ */
+const devices: Space = { name: "device-grant-store.devices", guarantees, subjectData: "none" };
 const codes: Space = { name: "device-grant-store.user-codes", guarantees, subjectData: "none" };
 /** Each approval, by its device's name (a digest): `bounded` by `approvalRecordMaxMs`, fenced at creation by its subject's tombstone, erased by device-grant, at the tombstone's floor. */
 const approvals: Space = {
