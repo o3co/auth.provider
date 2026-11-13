@@ -1,0 +1,56 @@
+name: Image scan
+
+# The app the packed `create-auth-provider` makes, its image built as its
+# guide says and scanned (distribution's `image-scan`): a critical or high
+# vulnerability with a fix in its OS or Node packages, or a Node security
+# release its Node is behind, fails it. A fresh build alone does not take a
+# newer Node minor, an npm package's fix, or an Alpine package not yet fixed.
+# A `schedule` event runs on the default branch (main), what was released; a
+# manual run scans the branch it is run on. It runs the scanner of the commit
+# it scans.
+on:
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - name: Pack the release
+        run: |
+          set -euo pipefail
+          pnpm bundles
+          .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"
+      - name: Build and scan the app's image
+        run: pnpm image:scan "$RUNNER_TEMP/tarballs" "$RUNNER_TEMP/image-scan"
+      - name: What the scan found
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/image-scan/README.md" ]; then
+            cat "$RUNNER_TEMP/image-scan/README.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The scan wrote no verdict: see the steps above." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Keep Trivy's report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-scan-trivy
+          path: ${{ runner.temp }}/image-scan/image.trivy.json
+          if-no-files-found: ignore
+          retention-days: 7

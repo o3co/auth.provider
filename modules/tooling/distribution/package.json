@@ -14,6 +14,7 @@
 		"release-evidence-judge": "node src/release-evidence/judge.ts",
 		"release-sbom": "node src/release-sbom/make.ts",
 		"release-scan": "node src/release-scan/scan.ts",
+		"image-scan": "node src/image-scan/scan.ts",
 		"release-listed": "node src/release-listed/listed.ts",
 		"release-notes": "node src/release-notes/write.ts"
 	},

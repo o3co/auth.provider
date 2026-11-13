@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { docker, dockerWithin } from "@mod/docker-client";
 import { endOf } from "../release-sbom/removal.ts";
-import { type Read, readScan, reportOf, type Scanned } from "./report.ts";
+import { type Read, readScan, reasonOf, reportOf, type Scanned } from "./report.ts";
 
 const [given, into] = process.argv.slice(2);
 if (!given || !into) {
@@ -23,15 +23,6 @@ const lists = ["image.cdx.json", "app.cdx.json"];
 const sbom = resolve(given);
 const out = resolve(into);
 mkdirSync(out, { recursive: true });
-/** A failure's reason as one short line: the last its tool wrote. */
-const reasonOf = (told: string) =>
-	(
-		told
-			.trim()
-			.split("\n")
-			.filter((l) => l.trim() !== "")
-			.at(-1) ?? "no reason given"
-	).slice(0, 300);
 
 let trivy = "(not read)";
 let read: Read[];

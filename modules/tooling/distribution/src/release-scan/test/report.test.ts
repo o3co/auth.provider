@@ -5,8 +5,13 @@ const trivy = (vulns: Record<string, string>[]) =>
 	JSON.stringify({
 		SchemaVersion: 2,
 		Results: [
-			{ Target: "app", Packages: [{ Name: "a" }, { Name: "b" }], Vulnerabilities: vulns },
-			{ Target: "empty", Packages: [{ Name: "c" }] },
+			{
+				Target: "app",
+				Class: "lang-pkgs",
+				Packages: [{ Name: "a" }, { Name: "b" }],
+				Vulnerabilities: vulns,
+			},
+			{ Target: "empty", Class: "os-pkgs", Packages: [{ Name: "c" }] },
 		],
 	});
 const vuln = (id: string, pkg: string, severity: string, fixed = "") => ({
@@ -29,6 +34,7 @@ it("reads each finding once by its id, package and installed version", () => {
 	expect(read).toEqual({
 		list: "app.cdx.json",
 		packages: 3,
+		classes: { "lang-pkgs": 2, "os-pkgs": 1 },
 		findings: [
 			{ id: "CVE-1", pkg: "a", installed: "1.0.0", fixed: "1.0.1", severity: "HIGH" },
 			{ id: "CVE-2", pkg: "b", installed: "1.0.0", fixed: "", severity: "UNKNOWN" },
@@ -38,6 +44,7 @@ it("reads each finding once by its id, package and installed version", () => {
 	expect(readScan({ list: "x", output: trivy([]) })).toEqual({
 		list: "x",
 		packages: 3,
+		classes: { "lang-pkgs": 2, "os-pkgs": 1 },
 		findings: [],
 	});
 });
@@ -64,6 +71,40 @@ it("tells output that is not Trivy's report as not scanned, never as no findings
 			list: "x",
 			notScanned: "Trivy read no packages",
 		});
+	// A result whose packages or vulnerabilities are no list is a report not read as Trivy writes it.
+	for (const result of [
+		{ Target: "app", Packages: [{ Name: "a" }], Vulnerabilities: {} },
+		{ Target: "app", Packages: {} },
+	])
+		expect(
+			readScan({ list: "x", output: JSON.stringify({ SchemaVersion: 2, Results: [result] }) }),
+		).toEqual({ list: "x", notScanned: "Trivy's report holds a result that is not its form" });
+	// Each package and each vulnerability is a record of Trivy's form: one that is not is never counted.
+	const os = (packages: unknown[], vulnerabilities: unknown[] = []) => ({
+		Target: "image (alpine 3.24.4)",
+		Class: "os-pkgs",
+		Packages: packages,
+		Vulnerabilities: vulnerabilities,
+	});
+	for (const result of [
+		os([null]),
+		os([{ Name: "a", Version: "1" }, null]),
+		os([{ Version: "1" }]),
+		os([{ Name: "", Version: "1" }]),
+		os([{ Name: "a", Version: 1 }]),
+		os([{ Name: "a", Version: "1" }], [null]),
+		os([{ Name: "a", Version: "1" }], [{ PkgName: "a", Severity: "HIGH" }]),
+	])
+		expect(
+			readScan({ list: "x", output: JSON.stringify({ SchemaVersion: 2, Results: [result] }) }),
+		).toEqual({ list: "x", notScanned: "Trivy's report holds a record that is not its form" });
+	// Trivy leaves out a version it has none of.
+	expect(
+		readScan({
+			list: "x",
+			output: JSON.stringify({ SchemaVersion: 2, Results: [os([{ Name: "a" }])] }),
+		}),
+	).toEqual({ list: "x", packages: 1, classes: { "os-pkgs": 1 }, findings: [] });
 	expect(readScan({ list: "x", notScanned: "no network" })).toEqual({
 		list: "x",
 		notScanned: "no network",
@@ -76,6 +117,7 @@ it("writes the counts per list, a list not scanned with its reason, and the fixa
 			{
 				list: "app.cdx.json",
 				packages: 40,
+				classes: { "lang-pkgs": 40 },
 				findings: [
 					{ id: "CVE-3", pkg: "z", installed: "1", fixed: "2", severity: "HIGH" },
 					{ id: "CVE-4", pkg: "y", installed: "1", fixed: "", severity: "CRITICAL" },
@@ -94,9 +136,9 @@ it("writes the counts per list, a list not scanned with its reason, and the fixa
 	expect(report).toContain("| `image.cdx.json` | not scanned: timed out \\| twice ||||||");
 	const fixable = report.split("## Critical and high with a fix")[1] ?? "";
 	expect(fixable.match(/CVE-\d/g)).toEqual(["CVE-5", "CVE-3"]);
-	expect(reportOf([{ list: "a", packages: 1, findings: [] }], "t", "v")).toContain(
-		"with a fix\n\nNone.\n",
-	);
+	expect(
+		reportOf([{ list: "a", packages: 1, classes: { "lang-pkgs": 1 }, findings: [] }], "t", "v"),
+	).toContain("with a fix\n\nNone.\n");
 	// No version known: the title reads whole.
 	expect(reportOf([], "t", "")).toContain("# Known vulnerabilities in what auth-provider ships\n");
 });

@@ -467,6 +467,8 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/conformance-tunnel` (verification, `modules/tooling/conformance-tunnel`): Gives a harness's app a way out to a party on this machine that it may reach over https by its name alone: an HTTP CONNECT proxy on loopback, set as the app's `outbound.proxy`.
 - `@mod/distribution` (assembly, `modules/tooling/distribution`): Forms one distribution bundle per concern directory, whose members are the packages placed in it.
   - `fetched` (`src/fetched`): the packages of this version npm already holds, taken from the registry for a release run again.
+  - `full-app` (`src/full-app`): the app of the release with the most packages, made as an operator makes it.
+  - `image-scan` (`src/image-scan`): the known vulnerabilities in the image of an app the release makes, as an operator builds it on the day, a fixable critical or high one, or a Node behind a security release, failing the scan.
   - `outside-scene` (`src/outside-scene`): Composes a package outside the release as an operator does, beside the packed release, and checks that the app is held to what the release sealed.
   - `packed` (`src/packed`): a packed tarball read for what it is, its name, version and integrity.
   - `release` (`src/release`): Packs the release, the index sealed in between, into the tarballs it publishes.
