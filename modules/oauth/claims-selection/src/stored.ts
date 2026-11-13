@@ -34,6 +34,22 @@ export function withinLimits(asked: Selection): boolean {
 /** Whether a target asks for anything: a name to release or a constraint to hold. */
 export const holds = (t: Target) => t.names.length > 0 || t.constraints.length > 0;
 
+/** Each record's name, by its kind: a code's selection, a pin, a family's target, a token's. */
+export const nameOf = {
+	code: (redemption: string) => `c.${redemption}`,
+	pin: (redemption: string) => `p.${redemption}`,
+	family: (familyId: string) => `f.${familyId}`,
+	token: (tokenId: string) => `t.${tokenId}`,
+};
+
+/** A record's kind and what it was named for, from its name; none for a name of no kind. */
+export const kindOf = (name: string) => {
+	const kind = (Object.keys(nameOf) as (keyof typeof nameOf)[]).find((k) =>
+		name.startsWith(nameOf[k]("")),
+	);
+	return kind === undefined ? undefined : { kind, of: name.slice(nameOf[kind]("").length) };
+};
+
 /**
  * A record's shape in either format: 2 keeps its subject, so erasure finds whose it is; 1, as 0.19
  * wrote it, keeps none. One of another format or shape fails the read.

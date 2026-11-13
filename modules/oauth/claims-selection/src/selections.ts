@@ -12,7 +12,7 @@ import type {
 	Target,
 } from "./contract.ts";
 import type { SelectionRecords, StoredSelection } from "./store.ts";
-import { holds, read, stored, withinLimits } from "./stored.ts";
+import { holds, nameOf, read, stored, withinLimits } from "./stored.ts";
 
 /** A code's selection outlives the code by this much, so a code still alive finds it. */
 const codeMarginMs = 60_000;
@@ -20,13 +20,6 @@ const codeMarginMs = 60_000;
 const pinHoldMs = 300_000;
 /** A token's selection outlives the token by this much, for clock drift between hosts. */
 const tokenAllowanceMs = 120_000;
-
-const nameOf = {
-	code: (redemption: string) => `c.${redemption}`,
-	pin: (redemption: string) => `p.${redemption}`,
-	family: (familyId: string) => `f.${familyId}`,
-	token: (tokenId: string) => `t.${tokenId}`,
-};
 
 export function selectionsWith(parts: {
 	readonly records: SelectionRecords;

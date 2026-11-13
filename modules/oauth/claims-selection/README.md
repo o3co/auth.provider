@@ -9,7 +9,7 @@
 ## Offers
 - Contract `claimsSelections`:
   - `scopeOf`: a claim's scope, as the contributed table of claim scopes tells it; none without one.
-  - `select`: the names whose scope the client is allowed (`client-allowance`) and the subject agreed to; every constraint kept, since constraints only hold back.
+  - `select`: the names whose scope the client is allowed (`client-allowance`) and the subject agreed to, none without a judge of consent; every constraint kept, since constraints only hold back.
   - `keepForCode`, by the redemption's name, for the code's subject, for the code's lifetime and a minute more.
   - `forCode`: the selection pinned to a redemption; none for a code without one.
   - `forToken`: the userinfo target kept for an access token; none for a token without one.
@@ -19,11 +19,11 @@
 - Extension points, two of any refusing boot: the judge of consent, `consented(client, subject, scope)`; the table of claim scopes, `scopeOf(claim)`, from the module releasing claims; whose a family is, `subjectOf(familyId)` (`familySubjects`), from the module keeping families: the subject, or ended (no record, or revoked) only on an answer its store confirmed, throwing when it cannot tell.
 - Contribution to `code-grant`'s redemption hooks: the pin, for the code's subject, and a redeemed code's token kept the pinned userinfo target, for the pin's subject.
 - Contribution to `grants`' token ties: a token with constraints ties a token exchanged from it, which keeps those constraints and none of its names.
+- Contribution to `erasure-extensions`' erasers: `claims-selection` (internal module `erasure`), its migration reading whose each record is, after no other eraser.
 - Store interface, wired by the assembly: records by name, each created once for its lifetime and its subject (`create`, `erased` past the subject's erasure); `erase` and `migrate` together or neither, optional until 0.22; a part refuses the boot. `./testing` holds its contract test for every implementation (`selectionRecordsContract`, through faults), and claims-selection composed over records in memory (`claimsSelectionInMemory`), which a test may wrap.
 
 ## Invariants
 - A selection holds only scalar values: strings up to 256 characters, booleans and finite numbers; exactly one of `value` and a non-empty `values` of up to 16; 4 KiB whole. These are fixed, as a selection is stored and read back under the same bounds. Another is a `TypeError`.
-- Without a judge of consent, no name is agreed to.
 - An empty pin means the code had no selection kept, never that claims requests are not taken; every redemption is pinned.
 - A pin copies the code's selection, or marks it none, and holds it five minutes; the redemption's other reads use only the pin. A pin gone fails the read, never answering none.
 - A code still alive at its pin finds its selection, which outlives the code by a minute; a code past its life is refused by `code-grant` before anything reads its pin.

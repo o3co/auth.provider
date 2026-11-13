@@ -1,4 +1,5 @@
 import { redemptionHooks } from "@mod/code-grant";
+import { erasers } from "@mod/erasure-extensions";
 import { tokenTies } from "@mod/grants";
 import { type BuildContext, defineModule } from "@mod/kernel";
 import {
@@ -8,7 +9,8 @@ import {
 	selectionConsents,
 	selectionRecords,
 } from "./contract.ts";
-import { portsRefused } from "./ports.ts";
+import { selectionEraser } from "./erasure/eraser.ts";
+import { portsRefused } from "./erasure/ports.ts";
 import { selectionsWith } from "./selections.ts";
 
 const takes = [selectionRecords, selectionConsents, claimScopes, familySubjects];
@@ -41,4 +43,10 @@ export default defineModule({ name: "claims-selection", replicaSafe: true, takes
 	}),
 	m.contribute(redemptionHooks).by(async (c) => (await built(c)).hook),
 	m.contribute(tokenTies).by(async (c) => (await built(c)).tie),
+	// Its build takes only its store and the family reading, collecting no probes: the erasure gate collects erasers.
+	m
+		.contribute(erasers)
+		.by(async (c) =>
+			selectionEraser(await c.get(selectionRecords), (await c.collect(familySubjects))[0]),
+		),
 ]);

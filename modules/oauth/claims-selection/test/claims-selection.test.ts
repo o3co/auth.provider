@@ -1,5 +1,6 @@
 import type { Client } from "@mod/clients";
 import { type Redeemed, type RedemptionHook, redemptionHooks } from "@mod/code-grant";
+import { type Eraser, erasers } from "@mod/erasure-extensions";
 import { type TokenTie, tokenTies } from "@mod/grants";
 import {
 	assemble,
@@ -511,6 +512,20 @@ it("starts with one reading of whose a family is, and refuses to start with two"
 	await expect(twice).rejects.toMatchObject({
 		refusals: [expect.objectContaining({ reason: "more than one reading of whose a family is" })],
 	});
+});
+
+it("contributes its eraser, `claims-selection`, not erasable over a store without the ports", async () => {
+	const found = contract<readonly Eraser[]>("found-erasers");
+	const finder = defineModule({ name: "finder", replicaSafe: false, takes: [erasers] }, (m) => [
+		m.provide(found).by((c) => c.collect(erasers)),
+	]);
+	const s = await serve([finder]);
+	const [eraser] = s.app.get(found);
+	expect([eraser?.name, eraser?.erasable, eraser?.after]).toEqual([
+		"claims-selection",
+		false,
+		undefined,
+	]);
 });
 
 it("offers the bounds check a selection is held to", () => {
