@@ -1193,9 +1193,9 @@ describe("refresh tokens", () => {
 			audience: ["https://api"],
 			scope: ["read"],
 		});
-		// Pinned first, as code-grant pins every redemption before the additions run.
+		// Pinned first, with the code's subject, as code-grant pins every redemption before the additions run.
 		const start = async (redemption: string, unknown?: true) => {
-			for (const hook of pins) await hook.pin(redemption);
+			for (const hook of pins) await hook.pin(redemption, "alice");
 			return addition?.issue({
 				...(unknown ? { authenticatedAtUnknown: unknown } : {}),
 				redemption,
