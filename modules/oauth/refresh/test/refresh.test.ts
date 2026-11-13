@@ -305,7 +305,9 @@ async function serve(options: Options = {}) {
 			subject: "alice",
 		});
 		const redemption = app.get(codes).redemptionOf(code);
-		if (selection) await app.get(claimsSelections).keepForCode(redemption, selection, 600_000);
+		if (selection) {
+			await app.get(claimsSelections).keepForCode(redemption, selection, 600_000, "alice");
+		}
 		const exchange = async () =>
 			(
 				await grant("authorization_code", as, {
@@ -350,23 +352,34 @@ function selectionStores() {
 		failTokens: false,
 		/** Runs before each read, with the name read. */
 		beforeRead: undefined as ((name: string) => void) | undefined,
-		/** Runs after each save, with the name saved; the save answers once it has. */
+		/** Runs after each write, `save` or `create`, with the name written; the write answers once it has. */
 		afterSave: undefined as ((name: string) => void | Promise<void>) | undefined,
 	};
+	/** Fails or watches a write by its name, whichever of `save` and `create` the store offers. */
+	const writing = async <T>(name: string, write: () => Promise<T>) => {
+		if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
+		if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
+		const written = await write();
+		await state.afterSave?.(name);
+		return written;
+	};
 	const { module } = claimsSelectionInMemory({
-		around: (records) => ({
-			read: async (name) => {
-				state.beforeRead?.(name);
-				return records.read(name);
-			},
-			save: async (name, value, ms) => {
-				if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
-				if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
-				const saved = await records.save(name, value, ms);
-				await state.afterSave?.(name);
-				return saved;
-			},
-		}),
+		around: (records) => {
+			const { save, create } = records;
+			return {
+				read: async (name) => {
+					state.beforeRead?.(name);
+					return records.read(name);
+				},
+				...(save && {
+					save: (name, value, ms) => writing(name, () => save.call(records, name, value, ms)),
+				}),
+				...(create && {
+					create: (name, value, ms, subject) =>
+						writing(name, () => create.call(records, name, value, ms, subject)),
+				}),
+			};
+		},
 	});
 	return { module, state };
 }
@@ -1383,7 +1396,7 @@ describe("lineage", () => {
 		const first = await s.redeem();
 		const found = await familyOf(s, first);
 		const issued = await issue(s, found.ends);
-		expect(await found.join(issued)).toBe(true);
+		expect(await found.join(issued, "alice")).toBe(true);
 		expect(await tieOf(s, issued.id)).toMatchObject({ kind: "held" });
 		await s.refresh(first.refresh_token);
 		await s.refresh(first.refresh_token);
@@ -1394,11 +1407,11 @@ describe("lineage", () => {
 		const s = await serve();
 		const found = await familyOf(s, await s.redeem());
 		const issued = await issue(s, found.ends);
-		expect(await found.join(issued)).toBe(true);
-		expect(await found.join(issued)).toBe(true);
+		expect(await found.join(issued, "alice")).toBe(true);
+		expect(await found.join(issued, "alice")).toBe(true);
 		const taken = await issue(s, found.ends);
 		await s.stores.links.records.create(taken.id, { format: 1, family: "other" } as never, 60_000);
-		expect(isUnavailable(await found.join(taken).catch((e) => e))).toBe(true);
+		expect(isUnavailable(await found.join(taken, "alice").catch((e) => e))).toBe(true);
 	});
 
 	it("ties a token to its family as `family`: none, ended, or held to the family's end, joining one issued from it", async () => {
@@ -1409,12 +1422,12 @@ describe("lineage", () => {
 		expect(held.session).toBe(s.session.id);
 		expect(await tieOf(s, (await issue(s)).id)).toEqual({ kind: "none" });
 		const joined = await issue(s, held.ends);
-		expect(await held.join(joined)).toBe(true);
+		expect(await held.join(joined, "alice")).toBe(true);
 		expect((await tieOf(s, joined.id)).kind).toBe("held");
 		await s.post("/oauth/revoke", "app", { token: first.refresh_token ?? "" });
 		expect(await tieOf(s, joined.id)).toEqual(ended);
 		const late = await issue(s, held.ends);
-		expect(await held.join(late)).toBe(false);
+		expect(await held.join(late, "alice")).toBe(false);
 		expect(await s.active(late.token)).toBe(false);
 	});
 
@@ -1460,7 +1473,7 @@ describe("lineage", () => {
 		const found = await familyOf(s, first);
 		await s.post("/oauth/revoke", "app", { token: first.refresh_token ?? "" });
 		const issued = await issue(s, found.ends);
-		expect(await found.join(issued)).toBe(false);
+		expect(await found.join(issued, "alice")).toBe(false);
 		expect(await s.active(issued.token)).toBe(false);
 	});
 
@@ -1473,7 +1486,7 @@ describe("lineage", () => {
 		s.stores.landingBeforeLink(async () => {
 			await s.post("/oauth/revoke", "app", { token: first.refresh_token ?? "" });
 		});
-		expect(await found.join(issued)).toBe(false);
+		expect(await found.join(issued, "alice")).toBe(false);
 		expect(await s.active(issued.token)).toBe(false);
 	});
 
@@ -1481,7 +1494,7 @@ describe("lineage", () => {
 		const s = await serve({ lifetime: 60 });
 		const found = await familyOf(s, await s.redeem());
 		const issued = await issue(s);
-		await expect(found.join(issued)).rejects.toThrow();
+		await expect(found.join(issued, "alice")).rejects.toThrow();
 		expect(await s.active(issued.token)).toBe(false);
 	});
 
