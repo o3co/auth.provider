@@ -387,14 +387,15 @@ it("installs the dependencies in a stage of their own, with pnpm through a pinne
 	);
 	expect(runtime.indexOf("RUN rm -rf")).toBeLessThan(runtime.indexOf("USER node"));
 	expect(runtime).not.toMatch(/corepack@|corepack enable|pnpm/);
-	expect(runtime).not.toMatch(/(^RUN |&& |; )(npm|npx|corepack|yarn)\b/m);
+	expect(runtime).not.toMatch(/(^RUN |&& |\|\| |; )(npm|npx|corepack|yarn)\b/m);
+	expect(runtime).not.toMatch(/apk add[^\n]*\b(npm|yarn|nodejs-npm)\b/);
 	expect(runtime).toMatch(/^COPY --from=deps \/app\/node_modules \.\/node_modules$/m);
 	expect(runtime).toMatch(/^ENTRYPOINT \["\/sbin\/tini", "--"\]$/m);
 	for (const template of ["pattern-readme.md", "full-readme.md", "listed-readme.md"]) {
 		const written = await mkdtemp(join(tmpdir(), "app-output-"));
 		await writeDeployment(written, ["@mod/http"], fakePackages(), { ...readme, template });
 		expect(await read(written, "README.md"), template).toContain(
-			"It holds no package manager but apk: npm, npx, corepack and yarn are taken out, so `docker exec` cannot run them.",
+			"It holds no package manager but apk: npm, npx, corepack and yarn are taken out, so `docker exec` cannot run them. A scanner that reads the image's filesystem does not find the packages they bundle; one that reads every layer still lists them, as their files stay in Node's image's own layer.",
 		);
 	}
 });
