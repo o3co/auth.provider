@@ -4,6 +4,13 @@ Notable changes, newest first, in the form of [Keep a Changelog](https://keepach
 
 Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.provider/blob/v0.17.0/CHANGELOG.md).
 
+## [0.19.2] - 2026-11-13
+
+### Security
+
+- `app-output`: a generated app's image kept the Alpine packages of Node's image, which takes Alpine's fixes some time after Alpine publishes them, so the image could hold Alpine packages with known vulnerabilities that Alpine had already fixed (vulnerable components in the image). The stage the app runs in now takes Alpine's current packages at each build, and the guide, the README and the guide to packages outside the release build that stage uncached, with `docker build --pull --no-cache-filter=runtime` or its compose and CI equivalents. An app generated before adds one line to its Dockerfile, or is generated again, and its image is rebuilt and redeployed ([U-0.19-148](docs/migration.md#u-0.19-148)).
+- Test tooling and fixtures alone, nothing published: the Go client the interop tests run takes go-jose v4.1.9, and a test fixture of `combinations` names zod 4.6.7 (#2861).
+
 ## [0.19.1] - 2026-11-09
 
 ### Security
