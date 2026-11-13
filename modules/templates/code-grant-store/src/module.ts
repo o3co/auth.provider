@@ -27,18 +27,18 @@ const { namesFromSecret: keyedBy, ...guaranteeFor } = {
 } satisfies Record<keyof typeof codeStoreNeeds, Guarantee | { readonly secret: true }>;
 const guarantees = Object.values(guaranteeFor);
 const voids: Space = { name: "code-grant-store.voids", guarantees, subjectData: "none" };
-/** A subject's records, as code-grant keeps them: `bounded` as given, fenced at creation by the subject's tombstone, erased by code-grant, at the tombstone's floor. */
-const subjects = (name: string, boundedMs: number): Space => ({
+/** A space of a subject's records, as code-grant keeps them: `bounded` by `storedRecordMaxMs`, fenced at creation by the subject's tombstone, erased by code-grant, at the tombstone's floor. */
+const subjectSpace = (name: string): Space => ({
 	name,
 	guarantees: [...new Set([...guarantees, ...tombstoneFloor])],
 	subjectData: "bounded",
-	boundedMs,
+	boundedMs: storedRecordMaxMs,
 	erasedBy: "code-grant",
 });
 /** Each code, keyed by the code under records' digest: a code, a 0.19 one too, ends within `storedRecordMaxMs`. */
-const codes = subjects("code-grant-store.codes", storedRecordMaxMs);
+const codes = subjectSpace("code-grant-store.codes");
 /** Each redemption record, by the redemption's name (a digest, as its code's), past the longest token. */
-const redemptionRecordSpace = subjects("code-grant-store.redemption-records", storedRecordMaxMs);
+const redemptionRecordSpace = subjectSpace("code-grant-store.redemption-records");
 
 /** Both spaces' records over the phase this process reads once. */
 const placed = contract<{
@@ -83,35 +83,35 @@ export default defineModule(
 			};
 		}),
 		m.provide(redemptionRecords).by(async (c) => {
-			const { redemptionRecords: records } = await c.get(placed);
+			const { redemptionRecords: builder } = await c.get(placed);
 			return {
-				create: records.create,
-				read: records.read,
-				update: records.change,
-				erase: records.erase,
-				migrate: records.migrate,
+				create: builder.create,
+				read: builder.read,
+				update: builder.change,
+				erase: builder.erase,
+				migrate: builder.migrate,
 			};
 		}),
 		// Out of traffic until the phase reads: no call is judged on a phase not read.
 		m.contribute(probes).by(async (c) => {
-			const { codes: codeRecords, redemptionRecords: records } = await c.get(placed);
+			const builders = await c.get(placed);
 			return {
 				name: "code-grant-store.phase",
 				check: async () => {
-					await codeRecords.ready();
-					await records.ready();
+					await builders.codes.ready();
+					await builders.redemptionRecords.ready();
 				},
 			};
 		}),
 		// Created by the code, a secret; reached after by the name records make of it.
 		m.provide(codeStore).by(async (c) => {
-			const { codes: records } = await c.get(placed);
+			const { codes: builder } = await c.get(placed);
 			return {
-				nameOf: records.nameOf,
-				create: records.create,
-				update: records.changeNamed,
-				erase: records.erase,
-				migrate: records.migrate,
+				nameOf: builder.nameOf,
+				create: builder.create,
+				update: builder.changeNamed,
+				erase: builder.erase,
+				migrate: builder.migrate,
 			};
 		}),
 		m.provide(voidList).by(async (c) =>
