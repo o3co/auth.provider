@@ -80,6 +80,9 @@ for (const phase of ["reader", "indexed"] as const) {
 				crowd: { limit: settlesSize.perShard, ids: crowdingFor(settlesSize).jobs },
 				loseNextAnswer: () => simulated.loseNextReply(),
 				failover: () => simulated.failover(),
+				beforeFamilyConfirms: (run) =>
+					simulated.beforeConfirm(familyWrite, "refresh-store.families", run),
+				failWrites: (on) => simulated.failWrites(on),
 				restart: () => simulated.restart(),
 				pressMemory: () => simulated.pressMemory(),
 			};
