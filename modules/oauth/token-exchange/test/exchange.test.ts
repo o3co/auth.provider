@@ -78,8 +78,9 @@ function ties(during: () => void = () => {}) {
 	const open = new Set<string>();
 	/** Sessions that are open but short of a requirement to be used. */
 	const short = new Set<string>();
-	/** The ties joined, in order. */
+	/** The ties joined, in order, and the subject each join was given. */
 	const joined: string[] = [];
+	const joinedFor: (string | undefined)[] = [];
 	const family: TokenTie = {
 		name: "family",
 		tieOf: async (id) => {
@@ -89,8 +90,9 @@ function ties(during: () => void = () => {}) {
 			return {
 				kind: "held",
 				ends: now + 60_000,
-				join: async (issued) => {
+				join: async (issued, subject) => {
 					joined.push("family");
+					joinedFor.push(subject);
 					if (families.get(name)?.ended) return false;
 					memberOf.set(issued.id, name);
 					return true;
@@ -108,8 +110,9 @@ function ties(during: () => void = () => {}) {
 			return {
 				kind: "held",
 				session: handle,
-				join: async () => {
+				join: async (_issued, subject) => {
 					joined.push("session");
+					joinedFor.push(subject);
 					return open.has(handle);
 				},
 			};
@@ -122,6 +125,7 @@ function ties(during: () => void = () => {}) {
 		open,
 		short,
 		joined,
+		joinedFor,
 		module: defineModule({ name: "ties", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(tokenTies).by(() => family),
 			m.provide(sessions).by(() =>
@@ -1027,6 +1031,8 @@ describe("token-exchange: how the issued token ends", () => {
 			s.tied.sessionOf.set(subject.id, "h");
 			await s.issued(await s.exchange("app", subjectOf(subject.token)));
 			expect(s.tied.joined).toEqual(["family", "session"]);
+			// Each join is given the subject of the token it issued.
+			expect(s.tied.joinedFor).toEqual(["alice", "alice"]);
 		}
 		const tied = ties(() => tied.families.set("f", { ended: true }));
 		const s = await serve({ tied, reversed: true });
