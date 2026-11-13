@@ -169,7 +169,7 @@ export type TokenTieAnswer =
 			/** The session a token issued from it is issued from. */
 			readonly session?: string;
 			/** Adds a token issued from it, for its subject: false when the tie ended meanwhile. */
-			join(issued: Pick<IssuedAccess, "id" | "expiresAt">, subject?: string): Promise<boolean>;
+			join(issued: Pick<IssuedAccess, "id" | "expiresAt">, subject: string): Promise<boolean>;
 	  };
 
 /**
