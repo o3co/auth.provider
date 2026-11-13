@@ -12,6 +12,10 @@
 		"@mod/device-grant": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/records": "workspace:*",
-		"@mod/store": "workspace:*"
+		"@mod/store": "workspace:*",
+		"@mod/subject-records": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/erasure-extensions": "workspace:*"
 	}
 }
