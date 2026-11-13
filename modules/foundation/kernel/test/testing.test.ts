@@ -59,6 +59,18 @@ describe("unavailableSwitch", () => {
 		expect(kept.saved).toEqual(["c"]);
 	});
 
+	it("names an optional method the implementation offers, and fails it as any other", async () => {
+		interface Places {
+			read(): Promise<number>;
+			erase?(): Promise<number>;
+		}
+		const down = unavailableSwitch<Places>();
+		const places = down.wrap({ read: async () => 1, erase: async () => 2 });
+		down.unavailable("erase");
+		await expect(places.erase?.()).rejects.toSatisfy(isUnavailable);
+		expect(await places.read()).toBe(1);
+	});
+
 	it("fails every call of the named methods until restored; other methods answer", async () => {
 		const kept = new Recording();
 		const down = unavailableSwitch<Store>();

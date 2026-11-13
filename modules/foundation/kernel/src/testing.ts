@@ -51,9 +51,9 @@ export function recordingLog(): RecordingLog {
 	});
 }
 
-/** Names of T's members that are functions answering a promise. Sync methods and values are not switchable. */
+/** Names of T's members that are functions answering a promise, optional ones too. Sync methods and values are not switchable. */
 export type AsyncMethodOf<T> = {
-	[K in keyof T]-?: T[K] extends (...args: never[]) => Promise<unknown> ? K : never;
+	[K in keyof T]-?: NonNullable<T[K]> extends (...args: never[]) => Promise<unknown> ? K : never;
 }[keyof T] &
 	string;
 
