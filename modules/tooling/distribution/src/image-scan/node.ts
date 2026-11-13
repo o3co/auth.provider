@@ -50,16 +50,23 @@ export async function nodeChecked(
 			(r) =>
 				typeof r === "object" &&
 				r !== null &&
-				typeof (r as { version?: unknown }).version === "string" &&
-				typeof ((r as { security?: unknown }).security ?? false) === "boolean",
+				typeof (r as { version?: unknown }).version === "string",
 		);
 	if (!formed) return { notChecked: "Node's release index is not its form" };
-	const listed = releases as readonly { readonly version: string; readonly security?: boolean }[];
+	const listed = releases as readonly { readonly version: string; readonly security?: unknown }[];
 	if (!listed.some((r) => r.version === own))
 		return { notChecked: `Node's release index does not list ${own}` };
-	const ahead = listed
+	// Every release of the image's major newer than it carries its own security mark, true or false.
+	const later = listed
 		.map((r) => ({ release: r, at: parsed(r.version) }))
-		.filter((r) => r.release.security === true && r.at && r.at[0] === at[0] && newer(r.at, at))
+		.filter((r) => r.at !== undefined && r.at[0] === at[0] && newer(r.at, at));
+	const unmarked = later.find((r) => typeof r.release.security !== "boolean");
+	if (unmarked)
+		return {
+			notChecked: `Node's release index gives ${unmarked.release.version} no security mark`,
+		};
+	const ahead = later
+		.filter((r) => r.release.security === true)
 		.toSorted((a, b) => (newer(a.at ?? [], b.at ?? []) ? -1 : 1));
 	const newest = ahead[0];
 	if (!newest?.at) return { behind: false, version: own };

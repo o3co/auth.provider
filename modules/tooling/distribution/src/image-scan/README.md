@@ -15,7 +15,7 @@ Internal module of `distribution`: the known vulnerabilities in the image of an 
 - `trivyArguments` → Trivy's `docker run`; `nodeChecked` (the image's Node, Node's release index) → current, behind with the newest security release and the minor to move to, or not checked; `verdictOf` (Trivy's run, the Node check) → whether it passed, and the verdict in Markdown.
 
 ## Invariants
-- Passes only where Trivy ended clean, its report read OS and Node packages and holds no finding, and no security release of the image's Node major is newer than it. A scan that could not be made or read is told as not scanned, and a Node index that could not be fetched, read or that does not list the image's Node as not checked; each fails, never as clean.
+- Passes only where Trivy ended clean, its report read OS and Node packages and holds no finding, and no security release of the image's Node major is newer than it. A scan that could not be made or read is told as not scanned, and a Node index that could not be fetched or read, that does not list the image's Node, or that gives a newer release of its major no boolean `security`, as not checked; each fails, never as clean.
 - The image is built fresh (`--pull --no-cache-filter=runtime`), and removed however the scan ends.
 - Trivy runs in its pinned image on the image saved to a file, mounted read-only, and the image's Node with no network, neither with a token or setting of the run passed in.
 - Its workflow is held, by a test reading it, to run on the schedule and a manual run alone, on the commit it runs on, with `contents: read` alone and no secret or token, within a time, the verdict in the job's summary and Trivy's report kept however it ended.

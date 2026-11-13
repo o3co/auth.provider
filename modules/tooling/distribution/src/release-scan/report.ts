@@ -59,11 +59,29 @@ export function readScan(scanned: Scanned): Read {
 			notScanned: "Trivy's report holds a result that is not its form",
 		};
 	const text = (v: unknown) => (typeof v === "string" ? v : "");
+	const record = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+	const named = (v: unknown, key: string) =>
+		record(v) && typeof v[key] === "string" && v[key] !== "";
+	// A package names itself and, where Trivy writes one, its version as text; a vulnerability its id and package.
+	const packageFormed = (p: unknown) =>
+		named(p, "Name") && record(p) && (p.Version === undefined || typeof p.Version === "string");
+	const vulnerabilityFormed = (v: unknown) => named(v, "VulnerabilityID") && named(v, "PkgName");
+	if (
+		each.some(
+			(r) =>
+				(Array.isArray(r.Packages) && !r.Packages.every(packageFormed)) ||
+				(Array.isArray(r.Vulnerabilities) && !r.Vulnerabilities.every(vulnerabilityFormed)),
+		)
+	)
+		return {
+			list: scanned.list,
+			notScanned: "Trivy's report holds a record that is not its form",
+		};
 	const classes: Record<string, number> = {};
 	for (const r of each) {
 		const n = Array.isArray(r.Packages) ? r.Packages.length : 0;
-		const named = text(r.Class) || "unclassed";
-		classes[named] = (classes[named] ?? 0) + n;
+		const kind = text(r.Class) || "unclassed";
+		classes[kind] = (classes[kind] ?? 0) + n;
 	}
 	const read = Object.values(classes).reduce((n, c) => n + c, 0);
 	if (read === 0) return { list: scanned.list, notScanned: "Trivy read no packages" };

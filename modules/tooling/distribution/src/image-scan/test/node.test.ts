@@ -47,6 +47,28 @@ it("tells a malformed index, or one not listing the image's Node, as not checked
 	});
 });
 
+it("tells a newer release of the image's major with no security mark of its own as not checked", async () => {
+	for (const mark of [{}, { security: null }, { security: "true" }]) {
+		const releases = JSON.stringify([
+			{ version: "v24.22.4", ...mark },
+			{ version: "v24.22.3", security: false },
+		]);
+		expect(await nodeChecked("v24.22.3", async () => releases)).toEqual({
+			notChecked: "Node's release index gives v24.22.4 no security mark",
+		});
+	}
+	// A release of another major, or not newer, is not read for its mark.
+	const others = JSON.stringify([
+		{ version: "v26.0.0", security: null },
+		{ version: "v24.22.3", security: false },
+		{ version: "v24.22.2" },
+	]);
+	expect(await nodeChecked("v24.22.3", async () => others)).toEqual({
+		behind: false,
+		version: "v24.22.3",
+	});
+});
+
 it("tells an index that could not be fetched as not checked, never as passed", async () => {
 	const checked = await nodeChecked("v24.22.3", async () => {
 		throw new Error("fetch failed: ENOTFOUND nodejs.org");

@@ -79,6 +79,32 @@ it("tells output that is not Trivy's report as not scanned, never as no findings
 		expect(
 			readScan({ list: "x", output: JSON.stringify({ SchemaVersion: 2, Results: [result] }) }),
 		).toEqual({ list: "x", notScanned: "Trivy's report holds a result that is not its form" });
+	// Each package and each vulnerability is a record of Trivy's form: one that is not is never counted.
+	const os = (packages: unknown[], vulnerabilities: unknown[] = []) => ({
+		Target: "image (alpine 3.24.4)",
+		Class: "os-pkgs",
+		Packages: packages,
+		Vulnerabilities: vulnerabilities,
+	});
+	for (const result of [
+		os([null]),
+		os([{ Name: "a", Version: "1" }, null]),
+		os([{ Version: "1" }]),
+		os([{ Name: "", Version: "1" }]),
+		os([{ Name: "a", Version: 1 }]),
+		os([{ Name: "a", Version: "1" }], [null]),
+		os([{ Name: "a", Version: "1" }], [{ PkgName: "a", Severity: "HIGH" }]),
+	])
+		expect(
+			readScan({ list: "x", output: JSON.stringify({ SchemaVersion: 2, Results: [result] }) }),
+		).toEqual({ list: "x", notScanned: "Trivy's report holds a record that is not its form" });
+	// Trivy leaves out a version it has none of.
+	expect(
+		readScan({
+			list: "x",
+			output: JSON.stringify({ SchemaVersion: 2, Results: [os([{ Name: "a" }])] }),
+		}),
+	).toEqual({ list: "x", packages: 1, classes: { "os-pkgs": 1 }, findings: [] });
 	expect(readScan({ list: "x", notScanned: "no network" })).toEqual({
 		list: "x",
 		notScanned: "no network",
