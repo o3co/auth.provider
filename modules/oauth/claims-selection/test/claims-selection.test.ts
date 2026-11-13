@@ -357,13 +357,22 @@ const fencing = (erased: Set<string>) =>
 		around: (records) => ({
 			read: records.read,
 			create: async (name, kept, ms, subject) =>
-				erased.has(subject) ? "erased" : records.save(name, kept, ms),
+				erased.has(subject) ? "erased" : records.create(name, kept, ms, subject),
+		}),
+	});
+/** Records in memory offered through `save`, as a store not filing by subject. */
+const unfiled = () =>
+	claimsSelectionInMemory({
+		around: (records) => ({
+			read: records.read,
+			save: async (name, kept, ms) =>
+				(await records.create(name, kept, ms, "unfiled")) === "created" ? "created" : "exists",
 		}),
 	});
 const issuedAt = (id: string) => ({ id, expiresAt: runtime.clock.now() + 600_000 });
 
 it("writes format 2 wherever the subject is known, through save too", async () => {
-	const s = await serve();
+	const s = await serve(undefined, unfiled());
 	await s.selections.keepForCode("r-1", asked, 600_000);
 	await s.hook.pin("r-1", "alice");
 	expect(await s.stores.records.read("c.r-1")).toEqual({ format: 1, selection: asked });
@@ -454,12 +463,13 @@ it("refuses to start on a store offering both or neither of save and create, or 
 	const offering = (offered: object) =>
 		claimsSelectionInMemory({ around: () => ({ read: records.read, ...offered }) as never });
 	const create = async () => "created" as const;
+	const save = async () => "created" as const;
 	const erase = async () => {
 		throw new Error("not called");
 	};
 	expect(kept).toBeDefined();
 	for (const [offered, reason] of [
-		[{ save: records.save, create }, "exactly one"],
+		[{ save, create }, "exactly one"],
 		[{}, "exactly one"],
 		[{ create, erase }, "both, or neither"],
 	] as const) {

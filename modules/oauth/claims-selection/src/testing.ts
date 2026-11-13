@@ -80,8 +80,11 @@ export function selectionRecordsContract(name: string, open: () => Promise<Recor
 	});
 }
 
-/** The records in memory offer `save`: a store that does not file by subject. */
-type InMemoryRecords = SelectionRecords & Required<Pick<SelectionRecords, "save">>;
+/**
+ * The records in memory offer `create`, filing nothing by subject and fencing no erasure; `erase`
+ * and `migrate` need `subject-records`, which a template's store is built on.
+ */
+type InMemoryRecords = SelectionRecords & Required<Pick<SelectionRecords, "create">>;
 
 /**
  * claims-selection's store in memory, on the composition's clock, for tests that compose the module;
@@ -97,7 +100,7 @@ export function claimsSelectionInMemory(
 		return found && found.ends > now() ? found : undefined;
 	};
 	const records: InMemoryRecords = {
-		save: async (name, kept, lifetimeMs) => {
+		create: async (name, kept, lifetimeMs) => {
 			if (live(name)) return "exists";
 			entries.set(name, { value: kept, ends: now() + lifetimeMs });
 			return "created";
