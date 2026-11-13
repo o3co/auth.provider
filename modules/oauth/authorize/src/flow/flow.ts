@@ -260,7 +260,12 @@ export function flowWith(parts: FlowParts): Flow {
 		});
 		// Kept before the code goes out: one it cannot keep is never answered.
 		if (selection) {
-			await selections.keepForCode(issued.redemptionOf(code), selection, issued.lifetimeMs());
+			await selections.keepForCode(
+				issued.redemptionOf(code),
+				selection,
+				issued.lifetimeMs(),
+				session.context.subject,
+			);
 		}
 		return { kind: "code", code, subject: session.context.subject };
 	};
