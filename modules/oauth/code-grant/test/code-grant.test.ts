@@ -138,11 +138,17 @@ codeStoreContract("records stand-in", async () => {
 	let now = 0;
 	const size = { shards: 4, perShard: 5 };
 	const stand = memoryRecords<StoredCode>(() => now, size);
+	const redeemed = memoryRecords<StoredRedemptionRecord>(() => now, size);
 	return {
 		codes: {
 			nameOf,
 			create: (code, record, lifetimeMs) => stand.records.create(nameOf(code), record, lifetimeMs),
 			update: stand.records.change,
+		},
+		redemptionRecords: {
+			create: (name, record, lifetimeMs) => redeemed.records.create(name, record, lifetimeMs),
+			read: redeemed.records.read,
+			update: redeemed.records.change,
 		},
 		voids: stand.deferred,
 		advance: (ms) => {

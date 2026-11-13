@@ -2,7 +2,13 @@ import { isUnavailable } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import type { section } from "./section.ts";
-import type { CodeStore, StoredCode, VoidList } from "./store.ts";
+import type {
+	CodeStore,
+	RedemptionRecords,
+	StoredCode,
+	StoredRedemptionRecord,
+	VoidList,
+} from "./store.ts";
 
 export type CodeGrantSettings = z.input<typeof section>;
 
@@ -14,6 +20,8 @@ export function codeGrantConfig(settings: Partial<CodeGrantSettings> = {}) {
 export interface CodePlace {
 	readonly codes: CodeStore;
 	readonly voids: VoidList;
+	/** Where the place keeps redemption records: checked as codes are, on the same clock and faults. */
+	readonly redemptionRecords?: RedemptionRecords;
 	/** Moves the place's clock on, so lifetimes run out. */
 	advance(ms: number): void;
 	/** Before the next update of `name` writes, another writer changes its record as given. */
@@ -41,6 +49,8 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 	let n = 0;
 	const fresh = () => `code-${++n}-${Math.random().toString(36).slice(2)}`;
 	const held = (value: object) => value as unknown as StoredCode;
+	const redeemed = (value: object) => value as unknown as StoredRedemptionRecord;
+	const rewrite = (value: object) => () => ({ value: redeemed(value) });
 	const counted = (record: StoredCode) => (record as unknown as { n: number }).n;
 	const plus = (by: number) => (record: StoredCode) => ({
 		value: held({ n: counted(record) + by }),
@@ -111,6 +121,44 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			expect(await place.codes.create(code, held({ n: 2 }), 1000, "alice")).toBe("created");
 		});
 
+		it("keeps a redemption record whole and once per name, read as kept, changed only from what it holds", async (context) => {
+			const { redemptionRecords: records } = await open();
+			if (!records) return context.skip();
+			const [name, other] = [fresh(), fresh()];
+			const odd = redeemed({ state: "unheard-of", nested: { list: [1, "two"] } });
+			expect(await records.create(name, odd, 60_000, "alice")).toBe("created");
+			expect(await records.create(name, redeemed({ n: 1 }), 60_000, "alice")).toBe("exists");
+			expect(await records.read(name)).toEqual(odd);
+			expect(await records.update(name, rewrite({ n: 2 }))).toEqual({
+				before: odd,
+				after: redeemed({ n: 2 }),
+			});
+			expect(await records.update(name, () => undefined)).toEqual({
+				before: redeemed({ n: 2 }),
+				after: redeemed({ n: 2 }),
+			});
+			expect([await records.read(other), await records.update(other, rewrite({ n: 3 }))]).toEqual([
+				undefined,
+				undefined,
+			]);
+		});
+
+		it("ends a redemption record at exactly its lifetime, a change keeping its end", async (context) => {
+			const place = await open();
+			const { redemptionRecords: records } = place;
+			if (!records) return context.skip();
+			const name = fresh();
+			await records.create(name, redeemed({ n: 1 }), 1000, "alice");
+			place.advance(500);
+			await records.update(name, rewrite({ n: 2 }));
+			place.advance(499);
+			expect(await records.read(name)).toEqual(redeemed({ n: 2 }));
+			place.advance(1);
+			expect(await records.read(name)).toBeUndefined();
+			expect(await records.update(name, rewrite({ n: 3 }))).toBeUndefined();
+			expect(await records.create(name, redeemed({ n: 3 }), 1000, "alice")).toBe("created");
+		});
+
 		it("keeps voids until done, and a void whose handling failed", async () => {
 			const { voids } = await open();
 			const [failing, settled, handled] = [fresh(), fresh(), fresh()];
@@ -143,6 +191,28 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			await pressMemory();
 			expect((await place.codes.update(name, () => undefined))?.after).toEqual(held({ n: 1 }));
 			expect(await listed(place.voids)).toEqual([kept]);
+		});
+
+		it("keeps redemption records through a restart and through memory pressure", async (context) => {
+			const { restart, pressMemory, redemptionRecords: records } = await open();
+			if (!restart || !pressMemory || !records) return context.skip();
+			const name = fresh();
+			await records.create(name, redeemed({ n: 1 }), 60_000, "alice");
+			await restart();
+			await pressMemory();
+			expect(await records.read(name)).toEqual(redeemed({ n: 1 }));
+		});
+
+		it("settles a redemption record's writes whose answers were lost, and keeps them through a failover", async (context) => {
+			const { loseNextAnswer: lose, failover, redemptionRecords: records } = await open();
+			if (!lose || !failover || !records) return context.skip();
+			const name = fresh();
+			lose();
+			expect(await records.create(name, redeemed({ n: 1 }), 60_000, "alice")).toBe("created");
+			lose();
+			expect((await records.update(name, rewrite({ n: 2 })))?.after).toEqual(redeemed({ n: 2 }));
+			await failover();
+			expect(await records.read(name)).toEqual(redeemed({ n: 2 }));
 		});
 
 		// Each interface fails over after its own writes: a later write in another space would
