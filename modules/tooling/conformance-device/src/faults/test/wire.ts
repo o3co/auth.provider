@@ -38,9 +38,12 @@ const recordWrite = (d: Device, is: (r: DeviceRecord) => boolean): Match =>
 		value: (v) => is(v as DeviceRecord),
 	});
 
-/** The poll's write that takes the approval, before any token is made. */
-export const takeOf = (d: Device) =>
-	recordWrite(d, (r) => r.state === "taken" && r.approval !== undefined);
+/**
+ * The poll's write that takes the device, before any token is made: with its approval on the record,
+ * as before 0.20, or without, the approval kept apart. A denied device's take matches too; no scene
+ * counts one.
+ */
+export const takeOf = (d: Device) => recordWrite(d, (r) => r.state === "taken");
 
 /** The write that decides the device: approved, with alice's approval, or denied. */
 export const decisionOf = (d: Device, state: "approved" | "denied") =>
