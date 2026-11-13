@@ -98,6 +98,7 @@ const asked: Selection = {
 const redeemedOf = (redemption: string, id: string, expiresIn = 600_000) =>
 	({
 		redemption,
+		subject: "alice",
 		access: { id, expiresAt: runtime.clock.now() + expiresIn, expiresIn: 600, tokenType: "Bearer" },
 	}) as unknown as Redeemed;
 
@@ -154,7 +155,9 @@ it("refuses a selection past its bounds, or with a value no scalar", async () =>
 			s.selections.select(client, "alice", constrained(past)),
 			JSON.stringify(past),
 		).rejects.toThrow(TypeError);
-		await expect(s.selections.keepForCode("r", constrained(past), 1000)).rejects.toThrow(TypeError);
+		await expect(s.selections.keepForCode("r", constrained(past), 1000, "alice")).rejects.toThrow(
+			TypeError,
+		);
 	}
 	const many: Selection = {
 		idToken: none,
@@ -168,13 +171,13 @@ it("refuses a selection past its bounds, or with a value no scalar", async () =>
 
 it("pins a code's selection at its redemption, and answers that pin through the exchange, even past the code's own record", async () => {
 	const s = await serve();
-	await s.selections.keepForCode("r-1", asked, 10_000);
-	await s.hook.pin("r-1");
+	await s.selections.keepForCode("r-1", asked, 10_000, "alice");
+	await s.hook.pin("r-1", "alice");
 	// The code's record ends at its lifetime and a minute; the pin still answers.
 	shift = 10_000 + 60_000;
 	expect(await s.selections.forCode("r-1")).toEqual(asked);
 	// A code with no selection is pinned as none.
-	await s.hook.pin("r-2");
+	await s.hook.pin("r-2", "alice");
 	expect(await s.selections.forCode("r-2")).toBeUndefined();
 	// The pin holds five minutes, not as a deadline: after that, a read fails rather than answer none.
 	shift += 300_000;
@@ -186,28 +189,28 @@ it("pins a code's selection at its redemption, and answers that pin through the 
 
 it("keeps a code's selection for its lifetime and a minute more, so a code still alive at its pin finds it", async () => {
 	const s = await serve();
-	await s.selections.keepForCode("r-1", asked, 600_000);
-	await s.selections.keepForCode("r-2", asked, 600_000);
+	await s.selections.keepForCode("r-1", asked, 600_000, "alice");
+	await s.selections.keepForCode("r-2", asked, 600_000, "alice");
 	shift = 600_000 + 59_999;
-	await s.hook.pin("r-1");
+	await s.hook.pin("r-1", "alice");
 	expect(await s.selections.forCode("r-1")).toEqual(asked);
 	shift = 600_000 + 60_000;
-	await s.hook.pin("r-2");
+	await s.hook.pin("r-2", "alice");
 	expect(await s.selections.forCode("r-2")).toBeUndefined();
 });
 
 it("keeps nothing for a code whose selection holds no name and no constraint, and never a second for one name", async () => {
 	const s = await serve();
-	await s.selections.keepForCode("r-1", { idToken: none, userinfo: none }, 600_000);
+	await s.selections.keepForCode("r-1", { idToken: none, userinfo: none }, 600_000, "alice");
 	expect(s.stores.names()).toEqual([]);
-	await s.selections.keepForCode("r-2", asked, 600_000);
-	await expect(s.selections.keepForCode("r-2", asked, 600_000)).rejects.toThrow();
+	await s.selections.keepForCode("r-2", asked, 600_000, "alice");
+	await expect(s.selections.keepForCode("r-2", asked, 600_000, "alice")).rejects.toThrow();
 });
 
 it("keeps for a redeemed code's token the pinned userinfo target, until the token's end and two minutes more", async () => {
 	const s = await serve();
-	await s.selections.keepForCode("r-1", asked, 600_000);
-	await s.hook.pin("r-1");
+	await s.selections.keepForCode("r-1", asked, 600_000, "alice");
+	await s.hook.pin("r-1", "alice");
 	await s.hook.redeemed(redeemedOf("r-1", "tok-1", 3_600_000));
 	expect(await s.selections.forToken("tok-1")).toEqual(asked.userinfo);
 	shift = 3_600_000 + 119_999;
@@ -215,7 +218,7 @@ it("keeps for a redeemed code's token the pinned userinfo target, until the toke
 	shift = 3_600_000 + 120_000;
 	expect(await s.selections.forToken("tok-1")).toBeUndefined();
 	// None for a token whose code had no selection; a redemption whose pin is gone fails.
-	await s.hook.pin("r-2");
+	await s.hook.pin("r-2", "alice");
 	await s.hook.redeemed(redeemedOf("r-2", "tok-2"));
 	expect(await s.selections.forToken("tok-2")).toBeUndefined();
 	await expect(s.hook.redeemed(redeemedOf("r-3", "tok-3"))).rejects.toThrow();
@@ -226,8 +229,8 @@ it("keeps a family's target, and cuts a refreshed token's names to what is allow
 	const s = await serve([judging(agreed)]);
 	const scopes = ["openid", "profile"];
 	const client = clientAllowed(scopes);
-	await s.selections.keepForCode("r-1", asked, 600_000);
-	await s.hook.pin("r-1");
+	await s.selections.keepForCode("r-1", asked, 600_000, "alice");
+	await s.hook.pin("r-1", "alice");
 	await s.selections.follow("r-1", "fam-1", 86_400_000);
 	await s.selections.forRefreshed("fam-1", client, "alice", {
 		id: "tok-1",
@@ -270,7 +273,7 @@ it("keeps a family's target, and cuts a refreshed token's names to what is allow
 		constraints: asked.userinfo.constraints,
 	});
 	// A family founded from a code without a selection keeps none; its refreshed tokens none.
-	await s.hook.pin("r-2");
+	await s.hook.pin("r-2", "alice");
 	await s.selections.follow("r-2", "fam-2", 86_400_000);
 	await s.selections.forRefreshed("fam-2", client, "alice", {
 		id: "tok-5",
@@ -283,22 +286,24 @@ it("keeps a family's target, and cuts a refreshed token's names to what is allow
 
 it("ties an exchanged token to the constraints of its subject token, never to its names", async () => {
 	const s = await serve();
-	await s.selections.keepForCode("r-1", asked, 600_000);
-	await s.hook.pin("r-1");
+	await s.selections.keepForCode("r-1", asked, 600_000, "alice");
+	await s.hook.pin("r-1", "alice");
 	await s.hook.redeemed(redeemedOf("r-1", "tok-1"));
 	const tie = await s.tie.tieOf("tok-1");
 	if (tie.kind !== "held") throw new Error("not held");
 	expect(tie.ends).toBeUndefined();
 	expect(tie.session).toBeUndefined();
-	expect(await tie.join({ id: "tok-x", expiresAt: runtime.clock.now() + 600_000 })).toBe(true);
+	expect(await tie.join({ id: "tok-x", expiresAt: runtime.clock.now() + 600_000 }, "alice")).toBe(
+		true,
+	);
 	expect(await s.selections.forToken("tok-x")).toEqual({
 		names: [],
 		constraints: asked.userinfo.constraints,
 	});
 	// A token with names only, or with nothing, ties nothing.
 	const named: Selection = { idToken: none, userinfo: { names: [name], constraints: [] } };
-	await s.selections.keepForCode("r-2", named, 600_000);
-	await s.hook.pin("r-2");
+	await s.selections.keepForCode("r-2", named, 600_000, "alice");
+	await s.hook.pin("r-2", "alice");
 	await s.hook.redeemed(redeemedOf("r-2", "tok-2"));
 	expect(await s.tie.tieOf("tok-2")).toEqual({ kind: "none" });
 	expect(await s.tie.tieOf("tok-unknown")).toEqual({ kind: "none" });
@@ -324,7 +329,7 @@ it("reads a record of either format alike: 2 keeping its subject, 1 as 0.19 wrot
 		s.stores.overwrite(`c.r-${n}`, { ...format, selection: asked });
 		s.stores.overwrite(`t.tok-${n}`, { ...format, target: asked.userinfo });
 		s.stores.overwrite(`p.r-${n + 2}`, { ...format, selection: asked });
-		await s.hook.pin(`r-${n}`);
+		await s.hook.pin(`r-${n}`, "alice");
 		expect(await s.selections.forCode(`r-${n}`)).toEqual(asked);
 		expect(await s.selections.forCode(`r-${n + 2}`)).toEqual(asked);
 		expect(await s.selections.forToken(`tok-${n}`)).toEqual(asked.userinfo);
@@ -343,7 +348,126 @@ it("writes format 2, keeping the subject, where one is given; format 1 without, 
 		{ format: 1 },
 		{ format: 1, target: none },
 	]);
-	expect(read.code(stored.code(asked, "alice"))).toEqual(asked);
+	expect(read.code(stored.code(asked, "alice"))).toEqual({ selection: asked, subject: "alice" });
+});
+
+/** Records in memory offered through `create`, answering `erased` for a subject in `erased`. */
+const fencing = (erased: Set<string>) =>
+	claimsSelectionInMemory({
+		around: (records) => ({
+			read: records.read,
+			create: async (name, kept, ms, subject) =>
+				erased.has(subject) ? "erased" : records.save(name, kept, ms),
+		}),
+	});
+const issuedAt = (id: string) => ({ id, expiresAt: runtime.clock.now() + 600_000 });
+
+it("writes format 2 wherever the subject is known, through save too", async () => {
+	const s = await serve();
+	await s.selections.keepForCode("r-1", asked, 600_000);
+	await s.hook.pin("r-1", "alice");
+	expect(await s.stores.records.read("c.r-1")).toEqual({ format: 1, selection: asked });
+	expect(await s.stores.records.read("p.r-1")).toEqual({
+		format: 2,
+		subject: "alice",
+		selection: asked,
+	});
+	await s.selections.keepForCode("r-2", asked, 600_000, "alice");
+	expect(await s.stores.records.read("c.r-2")).toMatchObject({ format: 2, subject: "alice" });
+});
+
+it("refuses to keep a code's selection for an erased subject, as unavailable, apart from a name kept already", async () => {
+	const s = await serve(undefined, fencing(new Set(["erin"])));
+	await expect(s.selections.keepForCode("r-1", asked, 600_000, "erin")).rejects.toSatisfy(
+		isUnavailable,
+	);
+	expect(s.stores.names()).toEqual([]);
+	await s.selections.keepForCode("r-2", asked, 600_000, "alice");
+	await expect(s.selections.keepForCode("r-2", asked, 600_000, "alice")).rejects.toSatisfy(
+		isUnavailable,
+	);
+});
+
+it("fails every write past its subject's erasure as unavailable, except a join, which answers false", async () => {
+	const erased = new Set<string>();
+	const s = await serve(undefined, fencing(erased));
+	const client = clientAllowed(["openid", "profile"]);
+	await s.selections.keepForCode("r-1", asked, 600_000, "alice");
+	await s.hook.pin("r-1", "alice");
+	await s.selections.follow("r-1", "fam-1", 86_400_000);
+	await s.hook.redeemed(redeemedOf("r-1", "tok-1"));
+	const tie = await s.tie.tieOf("tok-1");
+	if (tie.kind !== "held") throw new Error("not held");
+	await s.selections.keepForCode("r-2", asked, 600_000, "alice");
+	erased.add("alice");
+	await expect(s.hook.pin("r-2", "alice")).rejects.toSatisfy(isUnavailable);
+	await expect(s.hook.redeemed(redeemedOf("r-1", "tok-2"))).rejects.toSatisfy(isUnavailable);
+	await expect(s.selections.follow("r-1", "fam-2", 86_400_000)).rejects.toSatisfy(isUnavailable);
+	await expect(
+		s.selections.forRefreshed("fam-1", client, "alice", issuedAt("tok-3")),
+	).rejects.toSatisfy(isUnavailable);
+	expect(await tie.join(issuedAt("tok-4"), "alice")).toBe(false);
+});
+
+it("takes a format-2 record's own subject, refusing as unavailable a caller's that differs", async () => {
+	const s = await serve();
+	const client = clientAllowed(["openid", "profile"]);
+	await s.selections.keepForCode("r-1", asked, 600_000, "alice");
+	await expect(s.hook.pin("r-1", "bob")).rejects.toSatisfy(isUnavailable);
+	await s.hook.pin("r-1", "alice");
+	await expect(
+		s.hook.redeemed({ ...redeemedOf("r-1", "tok-1"), subject: "bob" }),
+	).rejects.toSatisfy(isUnavailable);
+	await s.hook.redeemed(redeemedOf("r-1", "tok-1"));
+	const tie = await s.tie.tieOf("tok-1");
+	if (tie.kind !== "held") throw new Error("not held");
+	await expect(tie.join(issuedAt("tok-2"), "bob")).rejects.toSatisfy(isUnavailable);
+	expect(await tie.join(issuedAt("tok-3"), "alice")).toBe(true);
+	expect(await s.stores.records.read("t.tok-3")).toMatchObject({ format: 2, subject: "alice" });
+	await s.selections.follow("r-1", "fam-1", 86_400_000);
+	await expect(
+		s.selections.forRefreshed("fam-1", client, "bob", issuedAt("tok-4")),
+	).rejects.toSatisfy(isUnavailable);
+});
+
+it("refuses as unavailable a family or a token written from a pin without its subject, a defect", async () => {
+	const s = await serve();
+	s.stores.overwrite("p.r-1", { format: 1, selection: asked });
+	await expect(s.selections.follow("r-1", "fam-1", 86_400_000)).rejects.toSatisfy(isUnavailable);
+	await expect(s.hook.redeemed(redeemedOf("r-1", "tok-1"))).rejects.toSatisfy(isUnavailable);
+	// An empty pin without one is the same defect.
+	s.stores.overwrite("p.r-2", { format: 1 });
+	await expect(s.selections.follow("r-2", "fam-2", 86_400_000)).rejects.toSatisfy(isUnavailable);
+	expect(s.stores.names().filter((n) => !n.startsWith("p."))).toEqual([]);
+});
+
+it("throws a TypeError for a write without its subject to a store filing by subject: the caller's bug", async () => {
+	const s = await serve(undefined, fencing(new Set()));
+	await expect(s.selections.keepForCode("r-1", asked, 600_000)).rejects.toThrow(TypeError);
+	// As a caller past the types would.
+	const untyped = s.hook.pin as (redemption: string) => Promise<void>;
+	await expect(untyped("r-1")).rejects.toThrow(TypeError);
+});
+
+it("refuses to start on a store offering both or neither of save and create, or part of erase and migrate", async () => {
+	const { module: kept, records } = claimsSelectionInMemory();
+	const offering = (offered: object) =>
+		claimsSelectionInMemory({ around: () => ({ read: records.read, ...offered }) as never });
+	const create = async () => "created" as const;
+	const erase = async () => {
+		throw new Error("not called");
+	};
+	expect(kept).toBeDefined();
+	for (const [offered, reason] of [
+		[{ save: records.save, create }, "exactly one"],
+		[{}, "exactly one"],
+		[{ create, erase }, "both, or neither"],
+	] as const) {
+		const refused = await serve(undefined, offering(offered)).catch((e: unknown) => e);
+		expect(refused, reason).toMatchObject({
+			refusals: [expect.objectContaining({ reason: expect.stringContaining(reason) })],
+		});
+	}
 });
 
 it("fails closed on 0.19.1, which reads a format-2 record as unavailable, never as none", () => {

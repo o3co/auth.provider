@@ -70,9 +70,22 @@ export const stored = {
 		({ ...formatOf(subject), target: t }) as unknown as StoredSelection,
 };
 
+/** A record's own subject: format 2's; none for format 1. */
+const subjectOf = (r: { readonly format: 1 } | { readonly format: 2; readonly subject: string }) =>
+	r.format === 2 ? r.subject : undefined;
+
+/** Each record read, with its own subject where it keeps one. */
 export const read = {
-	code: (kept: StoredSelection): Selection => opened(codeRecord, kept).selection as Selection,
-	pin: (kept: StoredSelection): Selection | undefined =>
-		opened(pinRecord, kept).selection as Selection | undefined,
-	target: (kept: StoredSelection): Target => opened(targetRecord, kept).target as Target,
+	code: (kept: StoredSelection) => {
+		const r = opened(codeRecord, kept);
+		return { selection: r.selection as Selection, subject: subjectOf(r) };
+	},
+	pin: (kept: StoredSelection) => {
+		const r = opened(pinRecord, kept);
+		return { selection: r.selection as Selection | undefined, subject: subjectOf(r) };
+	},
+	target: (kept: StoredSelection) => {
+		const r = opened(targetRecord, kept);
+		return { target: r.target as Target, subject: subjectOf(r) };
+	},
 };

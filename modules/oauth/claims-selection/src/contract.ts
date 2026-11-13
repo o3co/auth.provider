@@ -40,13 +40,21 @@ export interface ClaimsSelections {
 	scopeOf(claim: string): string | undefined;
 	/** The names the client is allowed and the subject agreed to, by their scopes; the constraints as they are. */
 	select(client: Client, subject: string, asked: Selection): Promise<Selection>;
-	/** Keeps a code's selection by its redemption's name, for the code's lifetime and a minute more. */
-	keepForCode(redemption: string, selection: Selection, lifetimeMs: number): Promise<void>;
+	/**
+	 * Keeps a code's selection by its redemption's name, for the code's subject (optional until its
+	 * callers give it), for the code's lifetime and a minute more.
+	 */
+	keepForCode(
+		redemption: string,
+		selection: Selection,
+		lifetimeMs: number,
+		subject?: string,
+	): Promise<void>;
 	/** The selection pinned to a redemption: none for a code without one; throws once the pin is gone. */
 	forCode(redemption: string): Promise<Selection | undefined>;
 	/** The userinfo target kept for an access token; none for a token without one. */
 	forToken(tokenId: string): Promise<Target | undefined>;
-	/** Keeps the userinfo target pinned to a redemption for the family founded from it. */
+	/** Keeps the userinfo target pinned to a redemption for the family founded from it, for the pin's subject. */
 	follow(redemption: string, familyId: string, lifetimeMs: number): Promise<void>;
 	/** Keeps for a refreshed token its family's target, the names cut to what is allowed and agreed to now. */
 	forRefreshed(familyId: string, client: Client, subject: string, access: Issued): Promise<void>;

@@ -50,7 +50,7 @@ it("hands the composition its records through what a test wraps them in, on the 
 		runtime: quietRuntime({ clock: { now: () => now } }),
 	});
 	const kept = { format: 1 } as unknown as StoredSelection;
-	await app.get(selectionRecords).save("c.one", kept, 1000);
+	await app.get(selectionRecords).save?.("c.one", kept, 1000);
 	expect(seen).toEqual(["c.one"]);
 	expect(await stand.records.read("c.one")).toEqual(kept);
 	now = 1000;

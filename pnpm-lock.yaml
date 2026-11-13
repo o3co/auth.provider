@@ -1190,6 +1190,9 @@ importers:
       '@mod/code-grant':
         specifier: workspace:*
         version: link:../code-grant
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/grants':
         specifier: workspace:*
         version: link:../grants

@@ -37,9 +37,36 @@ export function selectionsWith(parts: {
 	readonly now: () => number;
 }) {
 	const { records, consent, scopes, now } = parts;
-	/** Keeps a record once; a name already holding one keeps the first. */
-	const save = async (name: string, value: StoredSelection, lifetimeMs: number) => {
-		await records.save(name, value, Math.max(1, lifetimeMs));
+	/**
+	 * Keeps a record once, a name already holding one keeping the first, through the store's one
+	 * writing port: one filing by subject takes no write without its subject, the caller's bug.
+	 */
+	const write = async (
+		name: string,
+		value: StoredSelection,
+		lifetimeMs: number,
+		subject?: string,
+	) => {
+		const ms = Math.max(1, lifetimeMs);
+		if (records.create) {
+			if (subject === undefined) {
+				throw new TypeError("claims-selection: a record without its subject");
+			}
+			return records.create(name, value, ms, subject);
+		}
+		if (records.save) return records.save(name, value, ms);
+		throw new TypeError("claims-selection: a store offering neither save nor create");
+	};
+	/** A write past its subject's erasure keeps nothing that would hold a claim back: it fails. */
+	const unlessErased = (made: "created" | "exists" | "erased") => {
+		if (made === "erased") throw new Unavailable("claims-selection: the subject is erased");
+	};
+	/** A record's own subject wins: a caller's that differs would file it where that erasure never looks. */
+	const ownerOf = (own: string | undefined, given: string | undefined) => {
+		if (own !== undefined && given !== undefined && own !== given) {
+			throw new Unavailable("claims-selection: a record kept for another subject");
+		}
+		return own ?? given;
 	};
 	const agreed = async (client: Client, subject: string, scope: string) =>
 		clientAllowance.allowsScope(client, scope) &&
@@ -55,23 +82,34 @@ export function selectionsWith(parts: {
 	const bounded = (asked: Selection) => {
 		if (!withinLimits(asked)) throw new TypeError("claims-selection: a selection past its bounds");
 	};
-	const pinned = async (redemption: string) => {
-		const kept = await records.read(nameOf.pin(redemption));
+	const pinOf = async (redemption: string) => {
+		const found = await records.read(nameOf.pin(redemption));
 		// A pin gone holds nothing back any more: the redemption fails rather than release unconstrained.
-		if (kept === undefined) throw new Unavailable("claims-selection");
-		return read.pin(kept);
+		if (found === undefined) throw new Unavailable("claims-selection");
+		return read.pin(found);
 	};
-	const keepForToken = async (access: Issued, target: Target) => {
-		if (!holds(target)) return;
-		await save(
-			nameOf.token(access.id),
-			stored.target(target),
-			access.expiresAt - now() + tokenAllowanceMs,
-		);
+	/** The pin a redemption writes from, which code-grant gave its subject: one without is a defect. */
+	const pinnedFor = async (redemption: string) => {
+		const pin = await pinOf(redemption);
+		if (pin.subject === undefined) {
+			throw new Unavailable("claims-selection: a pin without its subject");
+		}
+		return { selection: pin.selection, subject: pin.subject };
 	};
-	const forToken = async (tokenId: string) => {
-		const kept = await records.read(nameOf.token(tokenId));
-		return kept === undefined ? undefined : read.target(kept);
+	const tokenWrite = async (access: Issued, target: Target, subject: string | undefined) =>
+		holds(target)
+			? write(
+					nameOf.token(access.id),
+					stored.target(target, subject),
+					access.expiresAt - now() + tokenAllowanceMs,
+					subject,
+				)
+			: "created";
+	const keepForToken = async (access: Issued, target: Target, subject: string | undefined) =>
+		unlessErased(await tokenWrite(access, target, subject));
+	const tokenRecord = async (tokenId: string) => {
+		const found = await records.read(nameOf.token(tokenId));
+		return found === undefined ? undefined : read.target(found);
 	};
 	const selections: ClaimsSelections = {
 		scopeOf: (claim) => scopes?.scopeOf(claim),
@@ -82,57 +120,63 @@ export function selectionsWith(parts: {
 				userinfo: await cut(client, subject, asked.userinfo),
 			};
 		},
-		keepForCode: async (redemption, selection, lifetimeMs) => {
+		keepForCode: async (redemption, selection, lifetimeMs, subject) => {
 			bounded(selection);
 			if (!holds(selection.idToken) && !holds(selection.userinfo)) return;
-			const saved = await records.save(
+			const made = await write(
 				nameOf.code(redemption),
-				stored.code(selection),
+				stored.code(selection, subject),
 				lifetimeMs + codeMarginMs,
+				subject,
 			);
 			// A code's name is made fresh for it: one already kept is not this code's.
-			if (saved !== "created") throw new Unavailable("claims-selection");
+			if (made !== "created") throw new Unavailable("claims-selection");
 		},
-		forCode: pinned,
-		forToken,
+		forCode: async (redemption) => (await pinOf(redemption)).selection,
+		forToken: async (tokenId) => (await tokenRecord(tokenId))?.target,
 		follow: async (redemption, familyId, lifetimeMs) => {
-			const selection = await pinned(redemption);
+			const { selection, subject } = await pinnedFor(redemption);
 			if (!selection || !holds(selection.userinfo)) return;
-			await save(nameOf.family(familyId), stored.target(selection.userinfo), lifetimeMs);
+			const target = stored.target(selection.userinfo, subject);
+			unlessErased(await write(nameOf.family(familyId), target, lifetimeMs, subject));
 		},
 		forRefreshed: async (familyId, client, subject, access) => {
-			const kept = await records.read(nameOf.family(familyId));
-			if (kept === undefined) return;
-			await keepForToken(access, await cut(client, subject, read.target(kept)));
+			const found = await records.read(nameOf.family(familyId));
+			if (found === undefined) return;
+			const family = read.target(found);
+			const owner = ownerOf(family.subject, subject);
+			await keepForToken(access, await cut(client, subject, family.target), owner);
 		},
 	};
 	const hook: RedemptionHook = {
 		name: "claims-selection",
-		pin: async (redemption) => {
-			const kept = await records.read(nameOf.code(redemption));
-			await save(
-				nameOf.pin(redemption),
-				stored.pin(kept === undefined ? undefined : read.code(kept)),
-				pinHoldMs,
-			);
+		pin: async (redemption, given) => {
+			const found = await records.read(nameOf.code(redemption));
+			const code = found === undefined ? undefined : read.code(found);
+			const subject = ownerOf(code?.subject, given);
+			const pin = stored.pin(code?.selection, subject);
+			unlessErased(await write(nameOf.pin(redemption), pin, pinHoldMs, subject));
 		},
 		redeemed: async (redeemed) => {
-			const selection = await pinned(redeemed.redemption);
-			if (selection) await keepForToken(redeemed.access, selection.userinfo);
+			const { selection, subject } = await pinnedFor(redeemed.redemption);
+			// The pin's subject is the code's: a redemption told of another is not this one's.
+			ownerOf(subject, redeemed.subject);
+			if (selection) await keepForToken(redeemed.access, selection.userinfo, subject);
 		},
 	};
 	const tie: TokenTie = {
 		name: "claims-selection",
 		tieOf: async (tokenId) => {
-			const target = await forToken(tokenId);
-			if (!target || target.constraints.length === 0) return { kind: "none" };
+			const found = await tokenRecord(tokenId);
+			if (!found || found.target.constraints.length === 0) return { kind: "none" };
 			// An exchanged token keeps the constraints only: its names were never asked of its client.
-			const constraints = target.constraints;
+			const constraints = found.target.constraints;
 			return {
 				kind: "held",
-				join: async (issued) => {
-					await keepForToken(issued, { names: [], constraints });
-					return true;
+				join: async (issued, subject) => {
+					const owner = ownerOf(found.subject, subject);
+					// Erased meanwhile: the tie ended, and the exchange takes back what it issued.
+					return (await tokenWrite(issued, { names: [], constraints }, owner)) !== "erased";
 				},
 			};
 		},

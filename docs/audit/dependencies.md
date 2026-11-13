@@ -169,7 +169,7 @@ flowchart LR
 |---|---|---|
 | `@mod/acr` | feature | `@mod/issuer`, `@mod/kernel`, `@mod/login-gates` |
 | `@mod/authorize` | feature | `@mod/acr`, `@mod/audit`, `@mod/claims-selection`, `@mod/client-allowance`, `@mod/client-documents`, `@mod/clients`, `@mod/code-grant`, `@mod/consent`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/login-gates`, `@mod/rate-limit`, `@mod/reauth`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/token-endpoint`, `@mod/tokens`, `@mod/url-setting` |
-| `@mod/claims-selection` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/kernel` |
+| `@mod/claims-selection` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/erasure-extensions`, `@mod/grants`, `@mod/kernel` |
 | `@mod/client-allowance` | feature | `@mod/clients`, `@mod/kernel` |
 | `@mod/client-assertion` | feature | `@mod/clients`, `@mod/external-jwt`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/token-endpoint`, `@mod/url-setting` |
 | `@mod/client-credentials` | feature | `@mod/client-allowance`, `@mod/grants`, `@mod/issuer`, `@mod/kernel` |
