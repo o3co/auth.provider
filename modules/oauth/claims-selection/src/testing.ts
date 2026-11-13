@@ -52,15 +52,19 @@ export function selectionRecordsContract(name: string, open: () => Promise<Recor
 			expect(await place.records.read(settled)).toEqual(value(2));
 		});
 
-		it("refuses, where the place erases, every record created for a subject it erased, and only for that subject", async (context) => {
+		it("erases, where the place erases, a subject's records and refuses any created for it after, and only for that subject", async (context) => {
 			const { records } = await open();
 			const { create, erase } = records;
 			if (!erase) return context.skip();
-			await create.call(records, fresh(), value(1), 60_000, "erin");
+			const [erins, finns] = [fresh(), fresh()];
+			await create.call(records, erins, value(1), 60_000, "erin");
+			await create.call(records, finns, value(4), 60_000, "finn");
 			const report = await erase.call(records, "erin", new AbortController().signal);
 			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
 			if (report.kind === "stopped") return context.skip();
 			expect(report.kind).toBe("erased");
+			expect(await records.read(erins)).toBeUndefined();
+			expect(await records.read(finns)).toEqual(value(4));
 			expect(await create.call(records, fresh(), value(2), 60_000, "erin")).toBe("erased");
 			expect(await create.call(records, fresh(), value(3), 60_000, "finn")).toBe("created");
 		});

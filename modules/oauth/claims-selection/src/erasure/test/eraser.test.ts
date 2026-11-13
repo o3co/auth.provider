@@ -114,7 +114,10 @@ describe("whose a selection's record is, as the migration reads it", () => {
 				throw new Error("a family record of another shape");
 			}),
 		);
-		expect((await failing("f.fam", value)).kind).toBe("unreadable");
+		expect(await failing("f.fam", value)).toMatchObject({
+			kind: "unreadable",
+			reason: expect.stringContaining("could not be read: Error"),
+		});
 		expect(asked).toHaveLength(2);
 	});
 

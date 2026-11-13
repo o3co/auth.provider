@@ -29,8 +29,10 @@ const familyOf = async (families: FamilySubjects, familyId: string): Promise<Sub
 	try {
 		const whose = await families.subjectOf(familyId);
 		return whose.kind === "subject" ? whose : { kind: "orphan" };
-	} catch {
-		return unreadable("a family's target whose family could not be read");
+	} catch (error) {
+		// Named by its type, as subject-records names a failure: an outage apart from a record of another shape.
+		const what = error instanceof Error ? error.name : typeof error;
+		return unreadable(`a family's target whose family could not be read: ${what}`);
 	}
 };
 
