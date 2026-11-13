@@ -352,34 +352,23 @@ function selectionStores() {
 		failTokens: false,
 		/** Runs before each read, with the name read. */
 		beforeRead: undefined as ((name: string) => void) | undefined,
-		/** Runs after each write, `save` or `create`, with the name written; the write answers once it has. */
+		/** Runs after each write, with the name written; the write answers once it has. */
 		afterSave: undefined as ((name: string) => void | Promise<void>) | undefined,
 	};
-	/** Fails or watches a write by its name, whichever of `save` and `create` the store offers. */
-	const writing = async <T>(name: string, write: () => Promise<T>) => {
-		if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
-		if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
-		const written = await write();
-		await state.afterSave?.(name);
-		return written;
-	};
 	const { module } = claimsSelectionInMemory({
-		around: (records) => {
-			const { save, create } = records;
-			return {
-				read: async (name) => {
-					state.beforeRead?.(name);
-					return records.read(name);
-				},
-				...(save && {
-					save: (name, value, ms) => writing(name, () => save.call(records, name, value, ms)),
-				}),
-				...(create && {
-					create: (name, value, ms, subject) =>
-						writing(name, () => create.call(records, name, value, ms, subject)),
-				}),
-			};
-		},
+		around: (records) => ({
+			read: async (name) => {
+				state.beforeRead?.(name);
+				return records.read(name);
+			},
+			create: async (name, value, ms, subject) => {
+				if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
+				if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
+				const made = await records.create(name, value, ms, subject);
+				await state.afterSave?.(name);
+				return made;
+			},
+		}),
 	});
 	return { module, state };
 }
