@@ -21,7 +21,9 @@ export interface DeviceStore {
 	 * Once, under the maintenance key: hands `visit` each device record a walk of the store meets,
 	 * until `visit` answers false; optional in 0.20, required in 0.22. `walked` when every record
 	 * was handed over; `stopped` where `visit` stopped it; `unfinished` with why where the walk could
-	 * not finish, which tells nothing of the records it did not reach.
+	 * not finish, which tells nothing of the records it did not reach. Its reads need no
+	 * confirmation: 0.20 never removes a 0.19 approval from a record, so a stale read errs toward a
+	 * stop.
 	 */
 	walk?(
 		walk: Walk,

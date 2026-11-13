@@ -12,6 +12,7 @@ import {
 } from "@mod/clients/testing";
 import cookiesModule from "@mod/cookies/module";
 import { csrfStandIn } from "@mod/csrf/testing";
+import { type Eraser, erasers } from "@mod/erasure-extensions";
 import { sessionIssuances, targetRules } from "@mod/grants";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
@@ -1330,6 +1331,17 @@ it("refuses to start where the stores offer part of erasure's ports: the devices
 		where: "device-grant",
 		reason: expect.stringMatching(/all three, or none/),
 	});
+});
+
+it("contributes its eraser, `device-grant`, not erasable over stores without erasure's ports", async () => {
+	const found = contract<readonly Eraser[]>("found-erasers");
+	const finder = defineModule({ name: "finder", replicaSafe: false, takes: [erasers] }, (m) => [
+		m.provide(found).by((c) => c.collect(erasers)),
+	]);
+	const { input } = assembly({}, [finder]);
+	const app = await assemble(input);
+	const eraser = app.get(found).find((e) => e.name === "device-grant");
+	expect([eraser?.erasable, eraser?.after]).toEqual([false, undefined]);
 });
 
 it("takes all its module names, with a public origin and without", async () => {
