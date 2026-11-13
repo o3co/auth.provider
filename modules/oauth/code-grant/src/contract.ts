@@ -108,7 +108,7 @@ export interface RedemptionHook {
 	 * Before the code's token is issued, with the code's subject; a failure voids the code, and
 	 * nothing is issued.
 	 */
-	pin(redemption: string, subject?: string): Promise<void>;
+	pin(redemption: string, subject: string): Promise<void>;
 	/** After the additions; a failure voids the code, revoking its token and what the additions gave. */
 	redeemed(redeemed: Redeemed): Promise<void>;
 }
