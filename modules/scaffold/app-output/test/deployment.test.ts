@@ -364,7 +364,7 @@ it("listens and exposes the port where http is composed, and checks liveness whe
 	expect(await read(live, "README.md")).toContain("Its health check asks `/_healthcheck`");
 });
 
-it("installs the dependencies in a stage of their own, with pnpm through a pinned corepack the image the app runs in leaves behind", async () => {
+it("installs the dependencies in a stage of their own, with pnpm through a pinned corepack, and runs the app in an image holding no package manager but apk", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	await writeDeployment(target, ["@mod/http"], fakePackages(), listedReadme("`@mod/http`"));
 	const docker = await read(target, "Dockerfile");
@@ -377,14 +377,26 @@ it("installs the dependencies in a stage of their own, with pnpm through a pinne
 	]);
 	expect(docker).toMatch(/^RUN npm install --global corepack@\d+\.\d+\.\d+ && corepack enable$/m);
 	const runtime = docker.slice(docker.indexOf(`FROM ${image} AS runtime`));
-	// An init as process 1 passes signals on and reaps what node leaves behind; the corepack and the
-	// yarn Node's image bundles are taken out, and none put in, nor pnpm.
-	expect(runtime).toMatch(
-		/^RUN apk add --no-cache tini && npm uninstall --global corepack && rm -rf \/opt\/yarn-v\* \/usr\/local\/bin\/yarn \/usr\/local\/bin\/yarnpkg$/m,
+	// An init as process 1 passes signals on and reaps what node leaves behind.
+	expect(runtime).toMatch(/^RUN apk add --no-cache tini$/m);
+	// No package manager but apk: the npm, npx, corepack and yarn Node's image bundles are taken out
+	// as root, none put in, nor pnpm, and none run.
+	expect(runtime).toContain(
+		"RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-v* \\\n" +
+			"      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg\n",
 	);
+	expect(runtime.indexOf("RUN rm -rf")).toBeLessThan(runtime.indexOf("USER node"));
 	expect(runtime).not.toMatch(/corepack@|corepack enable|pnpm/);
+	expect(runtime).not.toMatch(/(^RUN |&& |; )(npm|npx|corepack|yarn)\b/m);
 	expect(runtime).toMatch(/^COPY --from=deps \/app\/node_modules \.\/node_modules$/m);
 	expect(runtime).toMatch(/^ENTRYPOINT \["\/sbin\/tini", "--"\]$/m);
+	for (const template of ["pattern-readme.md", "full-readme.md", "listed-readme.md"]) {
+		const written = await mkdtemp(join(tmpdir(), "app-output-"));
+		await writeDeployment(written, ["@mod/http"], fakePackages(), { ...readme, template });
+		expect(await read(written, "README.md"), template).toContain(
+			"It holds no package manager but apk: npm, npx, corepack and yarn are taken out, so `docker exec` cannot run them.",
+		);
+	}
 });
 
 it("builds on one minor of Node 24, so a build takes its patches and never a new minor", async () => {
