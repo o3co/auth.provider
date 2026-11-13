@@ -96,8 +96,8 @@ async function boot() {
 		const { token: _, ...access } = issued.access;
 		const refresh = app.get(seen).find((a) => a.field === "refresh_token");
 		const redemption = `r-${Math.random()}`;
-		// Pinned first, as code-grant pins every redemption before the additions run.
-		for (const hook of app.get(pins)) await hook.pin(redemption);
+		// Pinned first, with the code's subject, as code-grant pins every redemption before the additions run.
+		for (const hook of app.get(pins)) await hook.pin(redemption, grant.subject);
 		return (await refresh?.issue({
 			redemption,
 			client: {
