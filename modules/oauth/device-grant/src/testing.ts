@@ -23,8 +23,8 @@ export function deviceGrantConfig(settings: Partial<DeviceGrantSettings> = {}) {
 export interface DevicePlace {
 	readonly devices: DeviceStore;
 	readonly userCodes: UserCodes;
-	/** The place's approvals, where it offers them: checked as devices are, on the same clock and faults. */
-	readonly approvals?: ApprovalRecords;
+	/** The place's approvals: checked as devices are, on the same clock and faults. */
+	readonly approvals: ApprovalRecords;
 	/** Where the devices can be walked: the walk a maintenance tool would hand in, over this store. */
 	readonly walkOf?: () => Walk;
 	/** Moves the store's clock on, so lifetimes run out. */
@@ -125,10 +125,9 @@ export function deviceStoreContract(name: string, open: () => Promise<DevicePlac
 			expect(await store.userCodes.read(code)).toBe(name);
 		});
 
-		it("keeps an approval whole and once per name, read as kept, for its lifetime exactly", async (context) => {
+		it("keeps an approval whole and once per name, read as kept, for its lifetime exactly", async () => {
 			const place = await open();
 			const { approvals } = place;
-			if (!approvals) return context.skip();
 			const [name, other] = [fresh(), fresh()];
 			const odd = approved({ state: "unheard-of", nested: { list: [1, "two"] } });
 			expect(await approvals.create(name, odd, 1000, "alice")).toBe("created");
@@ -144,7 +143,7 @@ export function deviceStoreContract(name: string, open: () => Promise<DevicePlac
 		it("keeps approvals through a restart, memory pressure, lost answers and a failover", async (context) => {
 			const place = await open();
 			const { approvals, restart, pressMemory, loseNextAnswer: lose, failover } = place;
-			if (!approvals || !restart || !pressMemory || !lose || !failover) return context.skip();
+			if (!restart || !pressMemory || !lose || !failover) return context.skip();
 			const [kept, settled] = [fresh(), fresh()];
 			await approvals.create(kept, approved({ n: 1 }), 60_000, "alice");
 			await restart();

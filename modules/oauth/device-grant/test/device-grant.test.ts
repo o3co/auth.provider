@@ -43,6 +43,7 @@ import { issuancePolicies, subjectChecks, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	approvalRecords,
 	type DeviceStore,
 	deviceGrantType,
 	deviceStore,
@@ -140,6 +141,7 @@ function assembly(
 			}),
 		),
 		m.provide(userCodes).by(() => down.codes.wrap(kept.userCodes)),
+		m.provide(approvalRecords).by(() => kept.approvals),
 	]);
 	const audit = auditStandIn();
 	const input = {
@@ -1142,6 +1144,17 @@ it("refuses to start where nothing records a token to its session, so a logout c
 	expect((refused as BootRefused).refusals).toContainEqual({
 		where: "device-grant",
 		reason: expect.stringMatching(/recorded to the session/),
+	});
+});
+
+it("refuses to start where the stores offer part of erasure's ports: the devices' walk without the approvals' erase and migrate", async () => {
+	const { input, kept } = assembly();
+	Object.assign(kept.devices, { walk: kept.kept.records.walk });
+	const refused = await assemble(input).catch((e: unknown) => e);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals).toContainEqual({
+		where: "device-grant",
+		reason: expect.stringMatching(/all three, or none/),
 	});
 });
 

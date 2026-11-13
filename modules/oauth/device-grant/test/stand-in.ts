@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { memoryRecords } from "@mod/records/testing";
-import type { DeviceStore, StoredDevice, UserCodes } from "../src/store.ts";
+import type {
+	ApprovalRecords,
+	DeviceStore,
+	StoredApproval,
+	StoredDevice,
+	UserCodes,
+} from "../src/store.ts";
 
 /** A device's name as a store might make it: not the device code. */
 const nameOf = (code: string) => `n.${createHash("sha256").update(code).digest("base64url")}`;
@@ -17,5 +23,13 @@ export function recordsStandIn(clock: () => number) {
 		update: kept.records.change,
 	};
 	const userCodes: UserCodes = { save: codes.records.create, read: codes.records.read };
-	return { devices, userCodes, kept };
+	const approved = memoryRecords<StoredApproval>(clock, size);
+	/** Subjects erased: no approval is created for them, as a Store fencing creation answers. */
+	const erased = new Set<string>();
+	const approvals: ApprovalRecords = {
+		create: async (name, record, lifetimeMs, subject) =>
+			erased.has(subject) ? "erased" : approved.records.create(name, record, lifetimeMs),
+		read: approved.records.read,
+	};
+	return { devices, userCodes, approvals, erased, kept, approved };
 }

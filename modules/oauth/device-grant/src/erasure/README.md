@@ -9,7 +9,7 @@ Internal module of `device-grant`: erasing a subject's approvals, and checking t
 - What the stores keep and how they fence (the Store). When erasure runs (`account-erasure`).
 
 ## Offers
-- `portsRefused` (the device store, the approvals) → why their ports cannot be used, or none: the approvals' `erase` and `migrate` and the devices' `walk` come all three or none, a part to be refused at build; `portsOf` → the set, whole, or none. Nothing takes them yet.
+- `portsRefused` (the device store, the approvals) → why their ports cannot be used, or none: the approvals' `erase` and `migrate` and the devices' `walk` come all three or none, a part refused at build by the package's module, which requires the approvals; `portsOf` → the set, whole, or none.
 
 ## Invariants
 - Each port is called on its place, so an implementation keeps its own `this`.
