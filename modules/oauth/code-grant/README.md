@@ -14,7 +14,7 @@
 - The `authorization_code` grant (`codeGrantType`, taking its audience from the request) to `grants`' grant extension point, and the scope that asks for an ID token (the maker's, or none).
 - Extension point: the ID token maker, declaring its scope (two or more refuse boot). It is told the subject, client, nonce, authentication time (and whether the session knew it), amr, the code's acr if any, its scope, the session's handle and the redemption's name.
 - Extension point: session redemptions, told the session's handle and the client of each code redeemed in a session.
-- Extension point: redemption hooks, one per name: pinned with the redemption's name once the code is used up, then told the redemption facts after the additions.
+- Extension point: redemption hooks, one per name: pinned with the redemption's name and subject once the code is used up, then told the redemption facts after the additions.
 - Extension point: additions, one per answer field (one on the answer's own fields refuses boot): redemption facts → value or none, and optionally a revocation by redemption name.
 - Store interfaces, wired by the assembly, never shown what a record holds: codes by a name made from the code, created by the code for its subject (rewrite from the current contents, answering before and after); each redemption record by that name, for its subject (create, read, rewrite; `redemption-record`); the void list (add, done, go through in order). Their `erase` and `migrate` back the eraser `code-grant` (`erasure`).
 - Operator section: `code-lifetime` (10s–10m, default `10m`), `sweep-interval` (retry of failed revocations, 1s–1h, default `30s`). Times are written with their unit; a bare number is refused.

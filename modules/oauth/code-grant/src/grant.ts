@@ -156,7 +156,7 @@ export function codeGrant(parts: {
 			// Pinned once used up and before issuing, so a hook holds what it needs through the redemption.
 			for (const hook of hooks) {
 				try {
-					await hook.pin(name);
+					await hook.pin(name, record.subject);
 				} catch (error) {
 					await settle(name);
 					throw error;

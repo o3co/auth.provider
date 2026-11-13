@@ -104,8 +104,11 @@ export interface Addition {
 /** Told of each redemption: pinned once the code is used up, then told what it gave. */
 export interface RedemptionHook {
 	readonly name: string;
-	/** Before the code's token is issued; a failure voids the code, and nothing is issued. */
-	pin(redemption: string): Promise<void>;
+	/**
+	 * Before the code's token is issued, with the code's subject; a failure voids the code, and
+	 * nothing is issued.
+	 */
+	pin(redemption: string, subject?: string): Promise<void>;
 	/** After the additions; a failure voids the code, revoking its token and what the additions gave. */
 	redeemed(redeemed: Redeemed): Promise<void>;
 }
