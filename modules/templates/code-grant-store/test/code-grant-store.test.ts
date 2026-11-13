@@ -40,6 +40,7 @@ for (const phase of ["reader", "indexed"] as const) {
 			return {
 				codes,
 				voids: app.get(voidList),
+				redemptionRecords: app.get(redemptionRecords),
 				advance: (ms) => simulated.shiftClock(ms),
 				raceNextUpdate: (hash, change) =>
 					simulated.beforeNext("batch", "code-grant-store.codes", async () => {
