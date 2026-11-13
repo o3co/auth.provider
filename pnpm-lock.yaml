@@ -4296,6 +4296,9 @@ importers:
       '@mod/claims-selection':
         specifier: workspace:*
         version: link:../../oauth/claims-selection
+      '@mod/claims-selection-store':
+        specifier: workspace:*
+        version: link:../claims-selection-store
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../../oauth/client-allowance
@@ -4305,6 +4308,9 @@ importers:
       '@mod/code-grant':
         specifier: workspace:*
         version: link:../../oauth/code-grant
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http

@@ -19,9 +19,11 @@
 	"devDependencies": {
 		"@mod/audit": "workspace:*",
 		"@mod/claims-selection": "workspace:*",
+		"@mod/claims-selection-store": "workspace:*",
 		"@mod/client-allowance": "workspace:*",
 		"@mod/clients": "workspace:*",
 		"@mod/code-grant": "workspace:*",
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/http-server": "workspace:*",
 		"@mod/issuer": "workspace:*",
