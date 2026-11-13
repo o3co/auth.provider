@@ -1,13 +1,13 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import { isUnavailable, type Log, Unavailable } from "@mod/kernel";
-import type { PasskeyHolders } from "@mod/passkeys";
+import type { PasskeyClearing } from "@mod/passkeys";
 import type { Revocations } from "@mod/subject-revocation";
 import events from "./audit-events.ts";
 import type { PasskeyReset, PasskeyResetOutcome, PasskeyResetPart } from "./contract.ts";
 
 export interface ResetParts {
 	readonly revocations: Pick<Revocations, "record">;
-	readonly holders: Pick<PasskeyHolders, "cleared">;
+	readonly holders: Pick<PasskeyClearing, "cleared">;
 	readonly audit: Pick<Audit, "record">;
 	readonly log: Log;
 }
@@ -42,11 +42,20 @@ export function resetOver(p: ResetParts): { reset: PasskeyReset; part: PasskeyRe
 					return undefined;
 				}
 			};
+			/** The first boundary step that read the subject erased; whether one read it not erased. */
+			let erased: { readonly complete: boolean } | undefined;
+			let answeredNotErased = false;
 			const endSessions = async () =>
 				(await step("sessions", async () => {
-					const { complete } = await p.revocations.record(subject, { keepDelegations: true });
+					const done = await p.revocations.record(subject, { keepDelegations: true });
+					// Erased is read before complete: such a run is refused, never stopped at this step.
+					if (done.erased) {
+						erased ??= { complete: done.complete };
+						return false;
+					}
+					answeredNotErased = true;
 					// The boundary moved, but a session still open would outlive the reset.
-					if (!complete) throw new Unavailable("subject-revocation");
+					if (!done.complete) throw new Unavailable("subject-revocation");
 					return true;
 				})) === true;
 			const sessions = await endSessions();
@@ -55,10 +64,25 @@ export function resetOver(p: ResetParts): { reset: PasskeyReset; part: PasskeyRe
 				: undefined;
 			// Runs whatever the removal did: a login with a passkey between the first boundary and the removal ends here.
 			const sessionsAgain = sessions ? await endSessions() : undefined;
+			if (erased !== undefined) {
+				// No record of a run that read the subject erased names it; the passkeys may be gone already.
+				declaredAudit(p.audit, events).record("passkey.reset.refused", {
+					attributes: {
+						by: "operator",
+						complete: String(erased.complete),
+						...(requestedBy === undefined ? {} : { requestedBy }),
+					},
+				});
+				p.log.warn("passkey-reset.reset_refused", {});
+				if (fault !== undefined) throw fault.error;
+				return { kind: "erased" };
+			}
+			// The subject is named only where a boundary step read it, as not erased.
 			declaredAudit(p.audit, events).record("passkey.reset", {
-				subject,
+				...(answeredNotErased ? { subject } : {}),
 				attributes: {
 					by: "operator",
+					...(answeredNotErased ? {} : { withheld: "unread" }),
 					...(cleared ? { count: String(cleared.removed) } : {}),
 					sessions: String(sessions),
 					...(sessionsAgain === undefined ? {} : { sessionsAgain: String(sessionsAgain) }),

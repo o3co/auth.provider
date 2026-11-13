@@ -26,6 +26,7 @@
 	},
 	"devDependencies": {
 		"@mod/client-credentials": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/keys": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/store": "workspace:*"

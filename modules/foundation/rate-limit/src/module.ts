@@ -1,11 +1,20 @@
 import { audit } from "@mod/audit";
-import { marks, policies } from "@mod/http";
+import { erasers } from "@mod/erasure-extensions";
+import { marks, policies } from "@mod/http-server";
 import { contract, defineModule, isUnavailable, Unavailable } from "@mod/kernel";
 import { type Counter, instruments, counter as metricCounter } from "@mod/metrics";
 import { type Space, type Store, spaces, store } from "@mod/store";
 import { z } from "zod";
-import { attemptLimit, lockouts, type RateLimit, rateLimit, type Window } from "./contract.ts";
-import { lockoutCounter, lockoutSpace, storedStates } from "./lockout.ts";
+import {
+	attemptLimit,
+	lockouts,
+	type RateLimit,
+	rateLimit,
+	subjectLockouts,
+	type Window,
+} from "./contract.ts";
+import { lockoutEraser } from "./drop/drop.ts";
+import { lockoutCounter, lockoutSpace, storedStates } from "./lockout/lockout.ts";
 import { partitionOf, retryAfterMs } from "./partition.ts";
 import { limitingAttempts, limitingRequests, perSourceMark } from "./per-source.ts";
 
@@ -58,7 +67,7 @@ const section = z.strictObject({
 });
 
 export default defineModule(
-	{ name: "rate-limit", replicaSafe: true, section, takes: [audit, store] },
+	{ name: "rate-limit", replicaSafe: true, section, takes: [audit, store, subjectLockouts] },
 	(m) => [
 		m.provide(uncounted).by(() =>
 			metricCounter({
@@ -84,6 +93,12 @@ export default defineModule(
 			}),
 		),
 		m.provide(lockouts).by(async (c) => lockoutCounter(storedStates(await c.get(store)))),
+		// Its build takes only the store and the names, and collects no `probes`, as an eraser's must.
+		m
+			.contribute(erasers)
+			.by(async (c) =>
+				lockoutEraser(storedStates(await c.get(store)), await c.collect(subjectLockouts)),
+			),
 		m
 			.contribute(policies)
 			.by(async (c) =>

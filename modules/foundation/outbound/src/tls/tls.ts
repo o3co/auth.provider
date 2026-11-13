@@ -1,3 +1,4 @@
+import type { TLSSocket } from "node:tls";
 import { heldToFloor, type TlsOptions } from "@mod/tls-options";
 
 /**
@@ -36,3 +37,19 @@ export function noteHandshake<T extends object>(failure: T, error: unknown): T {
 /** What refused the handshake behind a failure, if one was refused. */
 export const handshakeCodeOf = (failure: unknown): string | undefined =>
 	typeof failure === "object" && failure !== null ? handshakes.get(failure) : undefined;
+
+/** The peer's certificate and the rest of the chain TLS has for it, by DER; none where it sent none. */
+export function peerChainOf(socket: TLSSocket) {
+	const raws: Uint8Array[] = [];
+	const seen = new Set<string>();
+	for (
+		let cert = socket.getPeerCertificate(true);
+		cert?.raw && !seen.has(cert.fingerprint256);
+		cert = cert.issuerCertificate
+	) {
+		seen.add(cert.fingerprint256);
+		raws.push(new Uint8Array(cert.raw));
+	}
+	const [leaf, ...sent] = raws;
+	return leaf ? { leaf, sent } : undefined;
+}

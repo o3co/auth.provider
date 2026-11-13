@@ -9,7 +9,7 @@ import { generateFull } from "../src/full.ts";
 import { generateListed } from "../src/listed.ts";
 import { generatePattern } from "../src/pattern.ts";
 import { patternNamed } from "../src/patterns/patterns.ts";
-import { workspacePackages } from "../src/project.ts";
+import { packageDirsIn } from "../src/project.ts";
 import { root } from "./full-app.ts";
 
 // Composing reads the whole workspace, and reading a package asks pnpm, slow on a loaded machine.
@@ -24,7 +24,7 @@ const sealed = {
 /** An index as distribution writes it, every module of the workspace in one bundle at 0.19.0, sealed as given. */
 function indexOfWorkspace(seal: Record<string, unknown> = sealed): string {
 	const file = join(mkdtempSync(join(tmpdir(), "index-")), "index.json");
-	const packages = [...workspacePackages(root).keys()]
+	const packages = [...packageDirsIn(root).keys()]
 		.filter((name) => name.startsWith("@mod/"))
 		.map((name) => ({
 			name,
@@ -107,16 +107,19 @@ describe("an app listing a package outside the release", () => {
 		expect(guide).toContain("| `@x/grant` | `1.2.0` |");
 	});
 
-	it("lets a version published within the last day be installed where named, at its recorded version alone", async () => {
+	it("lets a version published within the last day be installed where named, or a dependency it declares, at its version alone", async () => {
 		const target = join(mkdtempSync(join(tmpdir(), "outside-app-")), "app");
-		const plan = { target, outside: { from: project(), names: ["@x/grant"], fresh: ["@x/grant"] } };
+		const fresh = ["@x/grant", "jose-lite"];
+		const plan = { target, outside: { from: project(), names: ["@x/grant"], fresh } };
 		await generateListed(plan, ["@x/grant"], "@mod/log-stdout", indexOfWorkspace());
 		const settings = parse(await read(target, "pnpm-workspace.yaml"));
 		expect(settings.minimumReleaseAge).toBe(1440);
 		expect(settings.minimumReleaseAgeExclude).toEqual([
 			"@o3co/auth-provider-oauth",
 			"@x/grant@1.2.0",
+			"jose-lite@1.4.0",
 		]);
+		expect(await read(target, "README.md")).toContain("| `jose-lite` | `1.4.0` |");
 	});
 
 	it("refuses through generation a package that breaks a rule, writing nothing", async () => {
@@ -213,7 +216,7 @@ describe("naming a package outside the release on the command line", () => {
 		expect(unused.said.err).toContain("--outside-from names no package: none is named npm:<name>");
 	});
 
-	it("refuses npm:<name> beside a linked workspace, and a fresh name not named npm:", async () => {
+	it("refuses npm:<name> beside a linked workspace, and a fresh name where no package is named npm:", async () => {
 		const linked = io();
 		expect(
 			await run(
@@ -223,13 +226,8 @@ describe("naming a package outside the release on the command line", () => {
 		).toBe(64);
 		expect(linked.said.err).toContain("a linked workspace composes no package outside the release");
 		const fresh = io();
-		expect(
-			await run(
-				[target(), "npm:@x/grant", "--outside-from", "/somewhere", "--allow-fresh", "@x/other"],
-				fresh.io,
-			),
-		).toBe(64);
-		expect(fresh.said.err).toContain("--allow-fresh @x/other: not named npm:@x/other");
+		expect(await run([target(), "@mod/tokens", "--allow-fresh", "jose-lite"], fresh.io)).toBe(64);
+		expect(fresh.said.err).toContain("--allow-fresh jose-lite: no package is named npm:<name>");
 	});
 
 	it("refuses npm: naming no package, in a list or in --add", async () => {

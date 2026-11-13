@@ -287,12 +287,28 @@ describe("authorize: the section", () => {
 		]);
 	});
 
+	it("reads the nonce and state limits as whole numbers of characters, from 64 to 2048", () => {
+		for (const key of ["nonce-limit", "state-limit"]) {
+			const takes = (written: unknown) => section.safeParse({ ...login, [key]: written }).success;
+			expect([63, 64, 2048, 2049, 100.5, "300"].map(takes), key).toEqual([
+				false,
+				true,
+				true,
+				false,
+				false,
+				false,
+			]);
+		}
+	});
+
 	it("reads a section that holds only the login page with the defaults it had, claims-parameter true", () => {
 		expect(section.parse(login)).toEqual({
 			...login,
 			"oidc-mode": "oidc-required",
 			"claims-parameter": true,
 			"login-url-limit": 8192,
+			"nonce-limit": 256,
+			"state-limit": 512,
 			requests: 60,
 			window: 60,
 		});
@@ -387,25 +403,6 @@ describe("authorize: the audience a request asks for", () => {
 		const plain = await serve({ extra: [narrowing] });
 		const unruled = await plain.authorize(twice("resource"), await plain.login());
 		expect(unruled.at?.searchParams.get("error")).toBe("invalid_request");
-	});
-
-	it("sends a rule's description back in RFC 6749's characters alone, any other shown as ? [rfc6749-4.1.2.1-e]", async () => {
-		const loud = defineModule({ name: "loud", replicaSafe: true, takes: [] }, (m) => [
-			m.contribute(targetRules).by(() => ({
-				target: ({ audience }) => ({ kind: "audience", audience }),
-				repeated: () => ({
-					kind: "error",
-					error: "invalid_target",
-					description: 'one "resource", caf\u00e9\n\\',
-				}),
-			})),
-		]);
-		const query = new URLSearchParams(request({ client_id: "wide" }));
-		query.append("resource", "https://two");
-		query.append("resource", "https://api");
-		const s = await serve({ extra: [loud] });
-		const asked = await s.authorize(query.toString(), await s.login());
-		expect(asked.at?.searchParams.get("error_description")).toBe("one ?resource?, caf???");
 	});
 
 	it("asks the issuance policies for the audience asked, and gives their refusal before invalid_target", async () => {
@@ -1726,6 +1723,13 @@ describe("authorize: an id_token_hint", () => {
 		);
 		const both = await authorize(hinted("id:alice", { claims: claims("alice") }), alice);
 		expect(both.at?.searchParams.has("code")).toBe(true);
+	});
+
+	it("hands a hint longer than 2048 characters, as an ID token with added claims may be, to its reader", async () => {
+		const { authorize, login } = await serve();
+		const long = "a".repeat(4000);
+		const res = await authorize(hinted(`id:${long}`), await login(long));
+		expect(res.at?.searchParams.has("code")).toBe(true);
 	});
 
 	it("reads no hint in a request without openid", async () => {

@@ -1,8 +1,19 @@
+import type {
+	Elsewhere,
+	MigrationReport,
+	SpaceReport,
+	SubjectReading,
+	Walk,
+} from "@mod/erasure-extensions";
 import { contract, Unavailable } from "@mod/kernel";
 
 declare const storedLink: unique symbol;
 /** Who an upstream identity is linked to, as the store keeps it: only users opens it. */
 export type StoredLink = { readonly [storedLink]: true };
+
+declare const storedName: unique symbol;
+/** The issuer an IdP name stands for, as the store keeps it: only users opens it. */
+export type StoredName = { readonly [storedName]: true };
 
 declare const storedContacts: unique symbol;
 /** A subject's verified contacts, as the store keeps them: only users opens them. */
@@ -25,7 +36,45 @@ export interface RecordStore<T> {
 	): Promise<{ readonly before: T; readonly after: T } | undefined>;
 }
 
-/** Changes the record, or saves `first` where there is none; one saved meanwhile is changed from what it holds. */
+/**
+ * Records of subjects by key, as `RecordStore`, each saved with the subject it is kept for, last: a
+ * store that keeps the subject apart (to find and erase a subject's records) takes it; one that does
+ * not may ignore it.
+ */
+export interface SubjectRecordStore<T> extends Omit<RecordStore<T>, "save"> {
+	/**
+	 * Keeps a new record for its subject, unless the key holds one (`exists`) or, where the store
+	 * fences saves past a subject's erasure, the subject is erased there (`erased`), which users
+	 * takes as unavailable.
+	 */
+	save(
+		key: string,
+		record: T,
+		lifetimeMs: "endless",
+		subject: string,
+	): Promise<"created" | "exists" | "erased">;
+	/**
+	 * Erases a subject's records here, where the store can: optional in 0.20, required in 0.22; a
+	 * store without it holds records users' eraser cannot erase. Offered with `migrate`, or neither.
+	 */
+	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
+	/**
+	 * Once, under the maintenance key: puts the records written before indexing into the index, each
+	 * read by `subjectOf`, users', with `elsewhere` keeping what an orphan holds that users still
+	 * needs, so the store never opens a record.
+	 */
+	migrate?(
+		walk: Walk,
+		subjectOf: SubjectReading,
+		signal: AbortSignal,
+		elsewhere?: Elsewhere,
+	): Promise<MigrationReport>;
+}
+
+/**
+ * Changes the record, or saves `first` where there is none; one saved meanwhile is changed from what it holds.
+ * @deprecated A helper the package writes its own stores with, exported by mistake; nothing replaces it, copy it. A later release removes it.
+ */
 export async function written<T>(
 	store: RecordStore<T>,
 	key: string,
@@ -42,8 +91,42 @@ export async function written<T>(
 	return again;
 }
 
-export type LinkStore = RecordStore<StoredLink>;
-export type ContactStore = RecordStore<StoredContacts>;
+/**
+ * Links by upstream identity. Its `issuers` and `unowned` come together or neither; its `remove`,
+ * `erase` and `migrate` together or none, and only with `issuers`: a part of a set refuses the boot.
+ * Each is optional in 0.20 and required in 0.22, but `unowned`, which goes then.
+ */
+export type LinkStore = SubjectRecordStore<StoredLink> & {
+	/**
+	 * Removes the record where `when`, given the record held, answers true, in the write that removes
+	 * it: `removed`, `left` (it answered false) or `missing`. Offered with `erase` and `migrate`, or
+	 * none of them; required in 0.22. A store without it has unlink release a link to no subject.
+	 */
+	readonly remove?: (
+		key: string,
+		when: (record: StoredLink) => boolean,
+	) => Promise<"removed" | "left" | "missing">;
+	/**
+	 * The IdP names' own records, apart from the links: offered with `unowned`, or neither. Optional
+	 * in 0.20, without it names keeping their records in the link space alone; required in 0.22.
+	 */
+	readonly issuers?: NameStore;
+	/**
+	 * Saves an IdP name's record in the link space, which holds no subject, unless the key holds one;
+	 * `closed` where the link space keeps no such record any more, `issuers` then keeping it. Offered
+	 * with `issuers`, or neither.
+	 * @deprecated Names' records from before they moved out of the link space; removed in 0.22, when
+	 * `issuers` is required.
+	 */
+	readonly unowned?: (
+		key: string,
+		record: StoredName,
+		lifetimeMs: "endless",
+	) => Promise<"created" | "exists" | "closed">;
+};
+export type ContactStore = SubjectRecordStore<StoredContacts>;
+/** IdP names' records, apart from the links. */
+export type NameStore = RecordStore<StoredName>;
 
 export const linkStore = contract<LinkStore>("users.link-store");
 export const contactStore = contract<ContactStore>("users.contact-store");
@@ -55,6 +138,17 @@ export const linkStoreNeeds = {
 	survivesFailover: true,
 	confirmedReads: true,
 } as const;
+
+/**
+ * A name's record holds the issuer a boot judges the name by: lost or come back, a name could stand
+ * for another issuer unnoticed; a move another instance wrote must be read.
+ */
+export interface NameStoreNeeds {
+	readonly neverEvicted: true;
+	readonly survivesCrash: true;
+	readonly survivesFailover: true;
+	readonly confirmedReads: true;
+}
 
 /** Losing a verified contact would make its owner verify it again. */
 export const contactStoreNeeds = {

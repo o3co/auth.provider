@@ -11,8 +11,16 @@ const setUp = (part: SecondFactorPart): NewPart => ({
 		"@mod/mfa-management",
 		"@mod/mfa-totp",
 		"@mod/mfa-recovery",
-		// The wording is mfa-email's default adapter, which the scene names as it names the rest.
-		...(part.mail ? ["@mod/mail-smtp", "@mod/mfa-email", "@mod/mfa-email-wording"] : []),
+		// The wordings are mfa-email's and mfa-email-proof's default adapters, which the scene names as it names the rest.
+		...(part.mail
+			? [
+					"@mod/mail-smtp",
+					"@mod/mfa-email",
+					"@mod/mfa-email-proof",
+					"@mod/mfa-email-wording",
+					"@mod/mfa-email-proof-wording",
+				]
+			: []),
 	],
 	store: "volatile",
 	config: {
@@ -47,7 +55,9 @@ const setUp = (part: SecondFactorPart): NewPart => ({
 					},
 				}
 			: {}),
-		seal: { current: { id: "conformance", key: randomBytes(32).toString("base64") } },
+		seal: {
+			current: { id: "conformance", key: part.sealKey ?? randomBytes(32).toString("base64") },
+		},
 	},
 });
 

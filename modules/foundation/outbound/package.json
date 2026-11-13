@@ -19,9 +19,12 @@
 		"@mod/outbound-policy": "workspace:*",
 		"@mod/tls-options": "workspace:*",
 		"@mod/url-setting": "workspace:*",
+		"@mod/x509-path": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
+		"asn1js": "4.0.0",
+		"pkijs": "4.0.1",
 		"vitest": "5.0.5"
 	}
 }

@@ -68,8 +68,11 @@ function isPrivate(pem: string): boolean {
 	}
 }
 
+/** The form a public key PEM was written in: a public key, or a certificate the key is taken out of. */
+export type PemForm = "public-key" | "certificate";
+
 /** A public key written as PEM; none for anything else, a private key above all. */
-export function publicPem(pem: string): KeyObject | undefined {
+function keyOfPem(pem: string): KeyObject | undefined {
 	// The platform reads a public key out of a private one, so a private key is refused first.
 	if (isPrivate(pem)) return undefined;
 	try {
@@ -77,6 +80,27 @@ export function publicPem(pem: string): KeyObject | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * A public key written as PEM; none for anything else, a private key above all. Asked `withForm`, it
+ * answers too the form it was written in, a certificate's validity, issuer and chain unread.
+ */
+export function publicPem(pem: string): KeyObject | undefined;
+export function publicPem(
+	pem: string,
+	asked: { readonly withForm: true },
+): { readonly key: KeyObject; readonly form: PemForm } | undefined;
+export function publicPem(pem: string, asked?: { readonly withForm: true }) {
+	const key = keyOfPem(pem);
+	if (key === undefined || !asked?.withForm) return key;
+	// A public key only where the platform still reads one from its public key blocks alone; a key it
+	// read from any other block (a certificate, under any header it takes) came from a certificate.
+	const keyBlocks = pem.match(
+		/-----BEGIN (RSA )?PUBLIC KEY-----[\s\S]*?-----END \1PUBLIC KEY-----/g,
+	);
+	const form: PemForm = keyOfPem((keyBlocks ?? []).join("\n")) ? "public-key" : "certificate";
+	return { key, form };
 }
 
 /**

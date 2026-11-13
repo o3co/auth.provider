@@ -10,10 +10,6 @@ export const wordings = {
 		subject: "Your sign-in code",
 		text: `Your sign-in code is {code}.\nIt expires in {minutes} minute(s).\n\n${warning}\n`,
 	},
-	[purposes.proof]: {
-		subject: "Confirm your email address",
-		text: `Your code to confirm this email address is {code}.\nIt expires in {minutes} minute(s).\n\n${unasked}\n`,
-	},
 	[purposes.enrollment]: {
 		subject: "Confirm sign-in codes by email",
 		text: `Your code to receive sign-in codes at this address is {code}.\nIt expires in {minutes} minute(s).\n\n${unasked}\n`,

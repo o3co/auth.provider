@@ -53,17 +53,19 @@ export function grantStoreContract(name: string, open: () => Promise<GrantPlace>
 	const step = (value: object) => value as unknown as StoredStep;
 	const counted = (record: StoredGrant) => (record as unknown as { n: number }).n;
 
+	/** The subject every write here is for, where none other is asked. */
+	const who = "alice";
 	describe(`federation-grants' store interfaces: ${name}`, () => {
 		it("keeps a grant whole and once, and changes it only from what it holds", async () => {
 			const place = await open();
 			const id = fresh();
 			const odd = grant({ status: "active", nested: { list: [1, "two"] } });
-			expect(await place.grants.create(id, odd, 60_000)).toBe("created");
-			expect(await place.grants.create(id, grant({ n: 1 }), 60_000)).toBe("exists");
+			expect(await place.grants.create(id, odd, 60_000, who)).toBe("created");
+			expect(await place.grants.create(id, grant({ n: 1 }), 60_000, who)).toBe("exists");
 			expect(await place.grants.read(id)).toEqual(odd);
 			expect(await place.grants.change(fresh(), (r) => ({ value: r }))).toBeUndefined();
 			const other = fresh();
-			await place.grants.create(other, grant({ n: 1 }), 60_000);
+			await place.grants.create(other, grant({ n: 1 }), 60_000, who);
 			place.raceNextChange(other, (r) => grant({ n: counted(r) * 10 }));
 			const changed = await place.grants.change(other, (r) => ({
 				value: grant({ n: counted(r) + 1 }),
@@ -74,7 +76,7 @@ export function grantStoreContract(name: string, open: () => Promise<GrantPlace>
 		it("walks the ids of the grants that live, over pages", async () => {
 			const place = await open();
 			const ids = Array.from({ length: 120 }, fresh);
-			for (const id of ids) await place.grants.create(id, grant({ n: 1 }), 60_000);
+			for (const id of ids) await place.grants.create(id, grant({ n: 1 }), 60_000, who);
 			const seen = new Set<string>();
 			let cursor: string | undefined;
 			do {
@@ -88,8 +90,19 @@ export function grantStoreContract(name: string, open: () => Promise<GrantPlace>
 		it("ends a grant at its lifetime, which a change with a lifetime renews", async () => {
 			const place = await open();
 			const id = fresh();
-			await place.grants.create(id, grant({ n: 1 }), 1000);
+			await place.grants.create(id, grant({ n: 1 }), 1000, who);
 			place.advance(999);
+			await place.grants.change(id, () => ({ value: grant({ n: 2 }), lifetimeMs: 1000 }));
+			place.advance(999);
+			expect(await place.grants.read(id)).toBeDefined();
+			place.advance(1);
+			expect(await place.grants.read(id)).toBeUndefined();
+		});
+
+		it("ends a grant sooner where a change gives a lifetime shorter than what was left", async () => {
+			const place = await open();
+			const id = fresh();
+			await place.grants.create(id, grant({ n: 1 }), 60_000, who);
 			await place.grants.change(id, () => ({ value: grant({ n: 2 }), lifetimeMs: 1000 }));
 			place.advance(999);
 			expect(await place.grants.read(id)).toBeDefined();
@@ -108,15 +121,31 @@ export function grantStoreContract(name: string, open: () => Promise<GrantPlace>
 			if (place.holds) expect(place.holds(secret)).toBe(false);
 		});
 
+		it("refuses, where the Store erases, every grant and listing for a subject it erased, and only for that subject", async (context) => {
+			const place = await open();
+			const { erase } = place.grants;
+			if (!erase) return context.skip();
+			await place.grants.create(fresh(), grant({ n: 1 }), 60_000, "erin");
+			const report = await erase.call(place.grants, "erin", new AbortController().signal);
+			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+			if (report.kind === "stopped") return context.skip();
+			expect(report.kind).toBe("erased");
+			expect(await place.grants.create(fresh(), grant({ n: 2 }), 60_000, "erin")).toBe("erased");
+			expect(await place.grants.create(fresh(), grant({ n: 3 }), 60_000, "finn")).toBe("created");
+			// Each space keeps its own tombstone: the pending pairs are fenced once erased there too.
+			await place.pending.erase?.call(place.pending, "erin", new AbortController().signal);
+			expect(await place.pending.add(`c\nerin`, "g", 60_000, "erin")).toBe("erased");
+		});
+
 		it("pushes out the grant that ends first once a pair holds more than the cap", async () => {
 			const place = await open();
 			const pair = fresh();
 			for (let i = 0; i < place.cap; i++) {
-				expect((await place.pending.add(pair, `m-${i}`, 60_000 + i)).pushedOut).toEqual([]);
+				expect(await place.pending.add(pair, `m-${i}`, 60_000 + i, who)).toEqual({ pushedOut: [] });
 			}
-			expect((await place.pending.add(pair, "late", 120_000)).pushedOut).toEqual(["m-0"]);
+			expect(await place.pending.add(pair, "late", 120_000, who)).toEqual({ pushedOut: ["m-0"] });
 			await place.pending.remove(pair, "late");
-			expect((await place.pending.add(pair, "again", 120_000)).pushedOut).toEqual([]);
+			expect(await place.pending.add(pair, "again", 120_000, who)).toEqual({ pushedOut: [] });
 		});
 
 		it("lists a subject's grants each for its lifetime, until one is removed", async () => {
@@ -124,7 +153,7 @@ export function grantStoreContract(name: string, open: () => Promise<GrantPlace>
 			const [subject, other, ending, lasting] = [fresh(), fresh(), fresh(), fresh()];
 			const members = async (of: string) =>
 				(await subjects.members(of)).map(({ member }) => member).sort();
-			expect((await subjects.add(subject, ending, 1000)).pushedOut).toEqual([]);
+			expect(await subjects.add(subject, ending, 1000)).toEqual({ pushedOut: [] });
 			await subjects.add(subject, lasting, 60_000);
 			await subjects.add(other, ending, 60_000);
 			expect(await members(subject)).toEqual([ending, lasting].sort());
@@ -141,14 +170,14 @@ export function grantStoreContract(name: string, open: () => Promise<GrantPlace>
 			const { restart, pressMemory } = place;
 			if (!restart || !pressMemory) return context.skip();
 			const [id, secret, pair, subject] = [fresh(), fresh(), fresh(), fresh()];
-			await place.grants.create(id, grant({ n: 1 }), 60_000);
+			await place.grants.create(id, grant({ n: 1 }), 60_000, who);
 			await place.steps.create(secret, step({ n: 1 }), 60_000);
-			for (let i = 0; i < place.cap; i++) await place.pending.add(pair, `m-${i}`, 60_000 + i);
+			for (let i = 0; i < place.cap; i++) await place.pending.add(pair, `m-${i}`, 60_000 + i, who);
 			await place.subjects.add(subject, id, 60_000);
 			await pressMemory();
 			expect(await place.grants.read(id)).toEqual(grant({ n: 1 }));
 			expect(await place.steps.read(secret)).toEqual(step({ n: 1 }));
-			expect((await place.pending.add(pair, "late", 120_000)).pushedOut).toEqual(["m-0"]);
+			expect(await place.pending.add(pair, "late", 120_000, who)).toEqual({ pushedOut: ["m-0"] });
 			expect(await place.subjects.members(subject)).toMatchObject([{ member: id }]);
 			await restart();
 			expect(await place.grants.read(id)).toEqual(grant({ n: 1 }));
@@ -162,7 +191,7 @@ export function grantStoreContract(name: string, open: () => Promise<GrantPlace>
 			const { failover } = place;
 			if (!failover) return context.skip();
 			const [id, secret, subject] = [fresh(), fresh(), fresh()];
-			await place.grants.create(id, grant({ n: 1 }), 60_000);
+			await place.grants.create(id, grant({ n: 1 }), 60_000, who);
 			await place.grants.change(id, () => ({ value: grant({ n: 2 }) }));
 			await failover();
 			expect(await place.grants.read(id)).toEqual(grant({ n: 2 }));
@@ -187,7 +216,7 @@ export function grantStoreContract(name: string, open: () => Promise<GrantPlace>
 				// Past any resend of the create, so only what the read confirmed is left.
 				place.advance(60_000);
 			});
-			await place.grants.create(id, grant({ n: 1 }), 600_000).catch(() => undefined);
+			await place.grants.create(id, grant({ n: 1 }), 600_000, who).catch(() => undefined);
 			expect(seen).toEqual(grant({ n: 1 }));
 			expect(await place.grants.read(id)).toEqual(seen);
 		});

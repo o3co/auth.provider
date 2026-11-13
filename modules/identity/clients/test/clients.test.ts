@@ -817,6 +817,15 @@ describe("clients", () => {
 	});
 });
 
+it("hands every taker one frozen object, whose members none may reassign for the others", async () => {
+	const c = await boot();
+	expect(Object.isFrozen(c)).toBe(true);
+	expect(() => {
+		(c as { find: Clients["find"] }).find = async () => undefined;
+	}).toThrow(TypeError);
+	expect((await c.find("pub"))?.id).toBe("pub");
+});
+
 it("registers no clients, and a client no sections, that the operator leaves out", () => {
 	expect(clientsModule.section?.parse({})).toEqual({ registered: [] });
 	const written = { id: "c", kind: "public", method: "none" };

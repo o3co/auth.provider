@@ -3,12 +3,17 @@ import { defineModule, isUnavailable } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import type { Contact, Ledger, Users } from "./contract.ts";
 import {
+	type ContactStore,
 	contactStore,
+	type LinkStore,
 	linkStore,
 	type RecordStore,
 	type StoredContacts,
 	type StoredLink,
+	type StoredName,
+	type SubjectRecordStore,
 } from "./store.ts";
+import { portsRefused } from "./stores/ports.ts";
 
 const toUnpaddedBase64 = (bytes: Buffer) => bytes.toString("base64").replace(/=+$/, "");
 
@@ -382,19 +387,32 @@ function memoryStore<T>() {
 }
 
 /** users' store interfaces kept in memory, for tests that assemble users. */
-export function memoryUsersStores() {
+export function memoryUsersStores(options: { readonly issuers?: true } = {}) {
 	const links = memoryStore<StoredLink>();
 	const contacts = memoryStore<StoredContacts>();
+	const issuers = memoryStore<StoredName>();
+	/** While on, the link space keeps no names' record: `unowned` answers `closed`, as once indexed. */
+	const linksClosed = { on: false };
+	const linkPorts: LinkStore = options.issuers
+		? {
+				...links.store,
+				issuers: issuers.store,
+				unowned: async (key, record) =>
+					linksClosed.on
+						? "closed"
+						: links.store.save(key, record as unknown as StoredLink, "endless"),
+			}
+		: links.store;
 	const module = defineModule({ name: "users-stores", replicaSafe: false, takes: [] }, (m) => [
-		m.provide(linkStore).by(() => links.store),
+		m.provide(linkStore).by(() => linkPorts),
 		m.provide(contactStore).by(() => contacts.store),
 	]);
-	return { module, links, contacts };
+	return { module, links, contacts, issuers, linksClosed };
 }
 
 /** A place that keeps one of users' kinds of record, as one implementation of its store interfaces offers it. */
 export interface UsersStorePlace<T> {
-	readonly records: RecordStore<T>;
+	readonly records: SubjectRecordStore<T>;
 	/** Moves the place's clock on. */
 	advance(ms: number): void;
 	/** Before the next update of `key` writes, another writer changes its record as given. */
@@ -413,7 +431,8 @@ export interface UsersStorePlace<T> {
 
 /**
  * What users needs from any implementation of one of its store interfaces: records kept whole and
- * once, changed only from what they hold, never ended, through faults.
+ * once, changed only from what they hold, never ended, through faults. Each record is saved for a
+ * subject named as its key: a store keyed by its subject takes that, as one that is not does.
  */
 function recordTests<T>(open: () => Promise<UsersStorePlace<T>>): void {
 	let n = 0;
@@ -426,8 +445,8 @@ function recordTests<T>(open: () => Promise<UsersStorePlace<T>>): void {
 		const { records } = await open();
 		const key = fresh();
 		const odd = held({ state: "unheard-of", nested: { list: [1, "two"] } });
-		expect(await records.save(key, odd, "endless")).toBe("created");
-		expect(await records.save(key, held({ n: 1 }), "endless")).toBe("exists");
+		expect(await records.save(key, odd, "endless", key)).toBe("created");
+		expect(await records.save(key, held({ n: 1 }), "endless", key)).toBe("exists");
 		expect(await records.read(key)).toEqual(odd);
 		expect(await records.update(key, () => undefined)).toEqual({ before: odd, after: odd });
 		expect(await records.read(fresh())).toBeUndefined();
@@ -437,7 +456,7 @@ function recordTests<T>(open: () => Promise<UsersStorePlace<T>>): void {
 	it("changes a record only from what it holds, again after a racing writer", async () => {
 		const place = await open();
 		const key = fresh();
-		await place.records.save(key, held({ n: 1 }), "endless");
+		await place.records.save(key, held({ n: 1 }), "endless", key);
 		expect(await place.records.update(key, plus)).toEqual({
 			before: held({ n: 1 }),
 			after: held({ n: 2 }),
@@ -452,8 +471,8 @@ function recordTests<T>(open: () => Promise<UsersStorePlace<T>>): void {
 	it("never ends a record, saved or changed", async () => {
 		const place = await open();
 		const [saved, changed] = [fresh(), fresh()];
-		await place.records.save(saved, held({ n: 1 }), "endless");
-		await place.records.save(changed, held({ n: 1 }), "endless");
+		await place.records.save(saved, held({ n: 1 }), "endless", saved);
+		await place.records.save(changed, held({ n: 1 }), "endless", changed);
 		await place.records.update(changed, plus);
 		place.advance(10 * 365 * 86_400_000);
 		expect(await place.records.read(saved)).toEqual(held({ n: 1 }));
@@ -466,8 +485,8 @@ function recordTests<T>(open: () => Promise<UsersStorePlace<T>>): void {
 		if (!lose || !failover || !restart || !pressMemory) return context.skip();
 		const [saved, changed] = [fresh(), fresh()];
 		lose();
-		expect(await place.records.save(saved, held({ n: 1 }), "endless")).toBe("created");
-		await place.records.save(changed, held({ n: 1 }), "endless");
+		expect(await place.records.save(saved, held({ n: 1 }), "endless", saved)).toBe("created");
+		await place.records.save(changed, held({ n: 1 }), "endless", changed);
 		lose();
 		expect((await place.records.update(changed, plus))?.after).toEqual(held({ n: 2 }));
 		await failover();
@@ -486,12 +505,86 @@ export function linkStoreContract(
 	describe(`users' link store: ${name}`, () => {
 		recordTests(open);
 
+		it("offers its ports as whole sets: issuers and unowned together or neither; remove, erase and migrate together or none, and only with issuers", async () => {
+			const links = (await open()).records as LinkStore;
+			expect(portsRefused(links, {} as ContactStore)).toBeUndefined();
+		});
+
+		it("removes a record only where the check holds, in the write that removes it", async (context) => {
+			const links = (await open()).records as LinkStore;
+			if (!links.remove) return context.skip();
+			const key = `removed-${Math.random().toString(36).slice(2)}`;
+			await links.save(key, { subject: key } as unknown as StoredLink, "endless", key);
+			expect(await links.remove(key, () => false)).toBe("left");
+			expect(await links.read(key)).toEqual({ subject: key });
+			expect(await links.remove(key, () => true)).toBe("removed");
+			expect(await links.read(key)).toBeUndefined();
+			expect(await links.remove(key, () => true)).toBe("missing");
+		});
+
+		it("removes nothing a racing writer replaced between the check and the removal", async (context) => {
+			const place = await open();
+			const links = place.records as LinkStore;
+			if (!links.remove) return context.skip();
+			const key = `raced-${Math.random().toString(36).slice(2)}`;
+			const holds = (who: string) => (record: StoredLink) =>
+				(record as unknown as { subject?: string }).subject === who;
+			await links.save(key, { subject: "s-a" } as unknown as StoredLink, "endless", key);
+			// Another writer gives the record to another subject before the removal's write lands.
+			place.raceNextUpdate(key, () => ({ subject: "s-b" }) as unknown as StoredLink);
+			expect(await links.remove(key, holds("s-a"))).toBe("left");
+			expect(await links.read(key)).toEqual({ subject: "s-b" });
+		});
+
+		it("keeps a name's record raw once through unowned, or answers closed and writes nothing, never throwing", async (context) => {
+			const links = (await open()).records as LinkStore;
+			if (!links.unowned) return context.skip();
+			const key = JSON.stringify({ idp: `n-${Math.random().toString(36).slice(2)}` });
+			const record = { issuer: "https://a.example" } as unknown as StoredName;
+			const first = await links.unowned(key, record, "endless");
+			if (first === "closed") {
+				expect(await links.read(key)).toBeUndefined();
+				return;
+			}
+			expect(first).toBe("created");
+			const other = { issuer: "https://b.example" } as unknown as StoredName;
+			expect(await links.unowned(key, other, "endless")).toBe("exists");
+			expect(await links.read(key)).toEqual({ issuer: "https://a.example" });
+		});
+
+		it("answers erased to a save for a subject its erase fenced, where it erases", async (context) => {
+			const links = (await open()).records as LinkStore;
+			if (!links.erase) return context.skip();
+			const subject = `s-${Math.random().toString(36).slice(2)}`;
+			const report = await links.erase(subject, new AbortController().signal);
+			// A store not yet indexed erases nothing, so fences nothing: no case there.
+			if (report.kind !== "erased") return context.skip();
+			const key = `after-${subject}`;
+			expect(await links.save(key, { subject } as unknown as StoredLink, "endless", subject)).toBe(
+				"erased",
+			);
+			expect(await links.read(key)).toBeUndefined();
+		});
+
+		it("reads the names' records only as confirmed, as names relies on before a migration lets one go", async (context) => {
+			const place = await open();
+			const { issuers: names } = place.records as LinkStore;
+			const { stallReplicas: stall } = place;
+			if (!names || !stall) return context.skip();
+			const key = JSON.stringify({ idp: `c-${Math.random().toString(36).slice(2)}` });
+			await names.save(key, { issuer: "https://a.example" } as unknown as StoredName, "endless");
+			stall(true);
+			await expect(names.read(key)).rejects.toSatisfy(isUnavailable);
+			stall(false);
+			expect(await names.read(key)).toEqual({ issuer: "https://a.example" });
+		});
+
 		it("reads only what is confirmed", async (context) => {
 			const place = await open();
 			const { stallReplicas: stall } = place;
 			if (!stall) return context.skip();
 			const key = `confirmed-${Math.random().toString(36).slice(2)}`;
-			await place.records.save(key, {} as StoredLink, "endless");
+			await place.records.save(key, {} as StoredLink, "endless", key);
 			stall(true);
 			await expect(place.records.read(key)).rejects.toSatisfy(isUnavailable);
 			stall(false);

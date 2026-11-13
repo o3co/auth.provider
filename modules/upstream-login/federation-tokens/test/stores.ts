@@ -21,9 +21,15 @@ export function memoryStores(now: () => number = () => 0) {
 	const down = unavailableSwitch<UpstreamTokenStore>("records");
 	/** What runs as a save begins, before it lands. */
 	const during = { save: async () => {} };
+	/** Subjects erased: a save for one is answered `erased`, as a Store that erases does. */
+	const erased = new Set<string>();
+	/** The subject each save was given, in order. */
+	const savedFor: string[] = [];
 	const records: UpstreamTokenStore = down.wrap({
-		save: async (session, record, lifetimeMs) => {
+		save: async (session, record, lifetimeMs, subject) => {
 			await during.save();
+			savedFor.push(subject);
+			if (erased.has(subject)) return "erased";
 			given.push(record);
 			return stand.records.create(session, record, lifetimeMs);
 		},
@@ -57,5 +63,15 @@ export function memoryStores(now: () => number = () => 0) {
 			m.provide(refreshLocks).by(() => locks),
 		],
 	);
-	return { module, records, locks, down, given, during, raceNext: stand.raceNextChange };
+	return {
+		module,
+		records,
+		locks,
+		down,
+		given,
+		during,
+		erased,
+		savedFor,
+		raceNext: stand.raceNextChange,
+	};
 }

@@ -4,9 +4,11 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	BootRefused,
+	contract,
 	defineModule,
 	kernelConfig,
 	type Module,
@@ -21,6 +23,7 @@ import {
 } from "@mod/kernel/testing";
 import { loginGates, logins, returnPaths } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
+import { type LockoutPolicy, type Lockouts, lockouts, subjectLockouts } from "@mod/rate-limit";
 import rateLimitModule from "@mod/rate-limit/module";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Sessions, sessions } from "@mod/session";
@@ -50,6 +53,8 @@ interface Setup {
 	readonly origin?: string;
 	readonly sessions?: Module;
 	readonly users?: Module;
+	/** In place of rate-limit, one whose lockouts a test watches. */
+	readonly rateLimit?: Module;
 	readonly extra?: Module[];
 	/** A log in place of the quiet one. */
 	readonly log?: ReturnType<typeof recordingLog>;
@@ -64,6 +69,7 @@ async function serve(setup: Setup = {}) {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			setup.logins ?? gatesModule,
 			csrfStandIn,
 			cookiesModule,
@@ -72,7 +78,7 @@ async function serve(setup: Setup = {}) {
 			memoryUsersStores().module,
 			setup.sessions ?? sessionStandIn,
 			subjectRevocationStandIn,
-			rateLimitModule,
+			setup.rateLimit ?? rateLimitModule,
 			simulated.module,
 			loginModule,
 			audit.module,
@@ -632,6 +638,16 @@ describe("login-password attempts per account", () => {
 		expect((await login(right, elsewhere())).status).toBe(200);
 	});
 
+	it("makes an identifier's first wait as long as account-first-wait, doubling it after", async () => {
+		const { login, simulated } = await serve({ login: { ...budget, "account-first-wait": "10s" } });
+		await login(wrong("alice"), elsewhere());
+		await login(wrong("alice"), elsewhere());
+		expect((await login(wrong("alice"), elsewhere())).headers.get("retry-after")).toBe("10");
+		simulated.shiftClock(10_000);
+		expect((await login(wrong("alice"), elsewhere())).status).toBe(401);
+		expect((await login(wrong("alice"), elsewhere())).headers.get("retry-after")).toBe("20");
+	});
+
 	it("hands back the attempt of a guess users could not judge", async () => {
 		const down = unavailableSwitch<Users>("users");
 		const { login } = await serve({
@@ -654,6 +670,26 @@ describe("login-password attempts per account", () => {
 		expect((await login(wrong("alice"), elsewhere())).status).toBe(429);
 	});
 
+	it("refuses to boot on a wait longer than the one after it, naming both keys", async () => {
+		for (const [login, where, reason] of [
+			[
+				{ "account-first-wait": "2m", "account-max-wait": "1m" },
+				"account-first-wait",
+				"account-max-wait",
+			],
+			[
+				{ "account-window": "10m", "account-max-wait": "15m" },
+				"account-max-wait",
+				"account-window",
+			],
+		] as const) {
+			const refused = await serve({ login }).catch((error) => error);
+			expect(refused.refusals, JSON.stringify(login)).toMatchObject([
+				{ where: `login-password.${where}`, reason: `longer than login-password.${reason}` },
+			]);
+		}
+	});
+
 	it("refuses to boot on attempts, a window or a longest wait out of bounds, or a wait that names no unit", async () => {
 		for (const login of [
 			{ "account-attempts": 0 },
@@ -663,6 +699,9 @@ describe("login-password attempts per account", () => {
 			{ "account-max-wait": "1.5s" },
 			{ "account-max-wait": 60 },
 			{ "account-window": "10m", "account-max-wait": "15m" },
+			{ "account-first-wait": "0s" },
+			{ "account-first-wait": 1 },
+			{ "account-first-wait": "2m", "account-max-wait": "1m" },
 		]) {
 			await expect(serve({ login }), JSON.stringify(login)).rejects.toBeInstanceOf(BootRefused);
 		}
@@ -771,6 +810,7 @@ describe("login-password under a gate that refuses", () => {
 it("takes every handle its takes name, every module beside it as it boots", async () => {
 	const modules = [
 		http,
+		httpServer,
 		gatesModule,
 		csrfStandIn,
 		cookiesModule,
@@ -792,4 +832,55 @@ it("takes every handle its takes name, every module beside it as it boots", asyn
 		"login-gates": {},
 	};
 	expect((await takesUnused({ modules, config }))["login-password"]).toBeUndefined();
+});
+
+it("keeps an identifier's lockout out of erasure: no subject's name, no hold for good, no release, so it expires", async () => {
+	const seen: { readonly call: string; readonly policy: LockoutPolicy }[] = [];
+	const watched = switchedModule(rateLimitModule, lockouts, {
+		...unavailableSwitch<Lockouts>("rate-limit"),
+		wrap: (inner: Lockouts): Lockouts => {
+			const watch =
+				<K extends keyof Lockouts>(call: K) =>
+				(...args: Parameters<Lockouts[K]>) => {
+					seen.push({ call, policy: args[2] });
+					return (inner[call] as (...given: Parameters<Lockouts[K]>) => ReturnType<Lockouts[K]>)(
+						...args,
+					);
+				};
+			return {
+				check: watch("check"),
+				failed: watch("failed"),
+				reserve: watch("reserve"),
+				succeeded: watch("succeeded"),
+				abandoned: watch("abandoned"),
+				standing: watch("standing"),
+				releaseUnder: watch("releaseUnder"),
+			};
+		},
+	});
+	const names = contract<readonly unknown[]>("login-password-test.subject-lockouts");
+	const naming = defineModule(
+		{ name: "naming", replicaSafe: true, takes: [subjectLockouts] },
+		(m) => [m.provide(names).by((c) => c.collect(subjectLockouts))],
+	);
+	const { app, login } = await serve({
+		login: { "account-attempts": 1, "account-window": "1h", "account-max-wait": "1m" },
+		rateLimit: watched,
+		extra: [naming],
+	});
+	for (const attempt of [{ username: "alice", password: "wrong" }, right, right]) {
+		await login(attempt, from(`198.51.100.${seen.length + 40}`));
+	}
+	await login({ username: "bob", password: "battery staple" });
+	// Keyed by the identifier, never a subject: no name is given for erasure to drop.
+	expect(app.get(names)).toEqual([]);
+	expect(seen.map((s) => s.call)).not.toContain("releaseUnder");
+	expect(seen.length).toBeGreaterThan(0);
+	for (const { policy } of seen) {
+		// No run reaches the hard limit or spends the budget, so no hold is fixed and a state expires.
+		expect([policy.hardLimit, policy.budget]).toEqual([
+			Number.MAX_SAFE_INTEGER,
+			Number.MAX_SAFE_INTEGER,
+		]);
+	}
 });

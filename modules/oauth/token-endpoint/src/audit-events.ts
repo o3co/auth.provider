@@ -16,7 +16,8 @@ export default auditEvents({
 			"error",
 			"policy",
 			"refusal",
+			"fence",
 		],
-		when: "a request is refused, with `reason` (`client_not_identified`, `repeated_parameter`, `mistyped_parameter`, `missing_grant_type`, `unsupported_grant_type`, `grant_type_not_allowed`, `unsupported_body`, `multiple_bindings`, `binding_refused`, `binding_required`, `binding_kind_not_named`, `untargeted`, `grant_refused`, or `issuance_refused` with the refusing `policy` and its `refusal`) and the answer's `error`; `grant_type` once it is known; `client` once it is known, which for a request naming none is once the grant identifies it, `identified` then being `grant`",
+		when: "a request is refused, with `reason` (`client_not_identified`, `repeated_parameter`, `mistyped_parameter`, `missing_grant_type`, `unsupported_grant_type`, `grant_type_not_allowed`, `unsupported_body`, `multiple_bindings`, `binding_refused`, `binding_required`, `binding_kind_not_named`, `untargeted`, `grant_refused`, `issuance_refused` with the refusing `policy` and its `refusal`, or `issuance_fenced` with the refusing `fence`) and the answer's `error`; `grant_type` once it is known; `client` once it is known, which for a request naming none is once the grant identifies it, `identified` then being `grant`",
 	},
 });

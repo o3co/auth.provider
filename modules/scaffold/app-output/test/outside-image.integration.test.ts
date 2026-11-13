@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { DockerFailed, docker, dockerSync, dockerWithin } from "@mod/docker-client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { parse, stringify } from "yaml";
+import { parse, parseAllDocuments, stringify } from "yaml";
 import {
 	appZod,
 	fragmentsOf,
@@ -212,16 +212,15 @@ describe("the image's build", () => {
 		"stops at the check, before the install, for a package with a command and a wrong record",
 		async () => {
 			served = packed({ bin: { node: "./run.js" } }, { "run.js": "process.exit(0);\n" });
-			const app = await appOf("sha512-AAAA");
+			const wrong = `sha512-${"A".repeat(86)}==`;
+			const app = await appOf(wrong);
 			const failed = await built(app).then(
 				(wrote) => new Error(`the build passed:\n${wrote}`),
 				(error: unknown) => error,
 			);
 			expect(failed).toBeInstanceOf(DockerFailed);
 			const said = (failed as DockerFailed).wrote;
-			expect(said).toContain(
-				`${scoped}: integrity ${served.integrity}, not sha512-AAAA as recorded`,
-			);
+			expect(said).toContain(`${scoped}: integrity ${served.integrity}, not ${wrong} as recorded`);
 			expect(said).toMatch(/\[deps \d+\/\d+\] RUN node scripts\/check-outside\.mjs/);
 			// A step started is told by its header; the Dockerfile's excerpt beside the failure is no step.
 			expect(said).not.toMatch(/\[deps \d+\/\d+\] RUN .*pnpm install/);
@@ -236,6 +235,9 @@ describe("the image's build", () => {
 			const reads = 'require("node:fs").copyFileSync("/root/.npmrc", "read");\n';
 			served = packed({ scripts: { postinstall: "node read.cjs" } }, { "read.cjs": reads });
 			const app = await appOf(served.integrity, { allowBuilds: { [scoped]: true } });
+			// The pinned pnpm writes it one document, as the app's workspace asks: the check reads no other.
+			const lock = readFileSync(join(app, "pnpm-lock.yaml"), "utf8");
+			expect(parseAllDocuments(lock)).toHaveLength(1);
 			const wrote = await built(app);
 			// The registry refuses a request without it: the install read the secret.
 			expect(asked, wrote).toEqual([true]);

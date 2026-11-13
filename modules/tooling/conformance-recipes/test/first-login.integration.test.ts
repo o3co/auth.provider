@@ -4,10 +4,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { areaTarget, type Started, sceneOf } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { recipesArea } from "../src/area.ts";
 import {
 	commands,
 	composedBy,
-	recipesArea,
 	scripts,
 	shownCommand,
 	shownScript,

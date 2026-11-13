@@ -1,44 +1,49 @@
 # refresh
 
 ## Responsibilities
-- Owns refresh tokens and their families: rotation on every use, reuse detection, family revocation, revoking each access token a family issued.
-- Links families to sessions, and revokes a session's families when it closes.
+- Owns refresh tokens and their families: rotation on every use, reuse detection, family revocation.
 - Ties an access token to its family, adopting a token issued from it, and starts families bound to no session.
 
 ## Not here
 - The access token format and its revocation (`tokens`). Whether a client is allowed a grant (`client-allowance`). The session lifecycle (`session`).
 
 ## Offers
-- Grant `refresh_token` for `grants`, taking its audience from the request; a `code-grant` addition `refresh_token`, for a client allowed the grant; taking it back revokes the family its redemption started, or marks that none may start.
-- A `tokens` access condition: a token whose family has ended is revoked, before the sweep revokes it.
-- A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family, answered as written so it is audited; another client is answered the same, and a family already marked revoked is finished before it is answered.
-- A participant for closing a session.
-- `grants`' token tie `family`: a token's family, `ended` (`family has ended`) or held to its end; a token issued from it is adopted.
+- Grant `refresh_token` for `grants`, taking its audience from the request; a `code-grant` addition `refresh_token`, for a client allowed the grant; taking it back revokes the family its redemption started, or writes `taken` (none may start).
+- A `tokens` access condition: a token whose family has ended is revoked.
+- A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family; `settle` says how each is answered.
+- `grants`' token tie `family`: a token's family, `ended` (`family has ended`) or held to its end, naming the family's session, if any, to issue from; a token issued from it is adopted.
+- The eraser `refresh` (internal module `settle`).
 - Contract `lineage`: `start(...)` → a family's first refresh token, or nothing for a client not allowed to refresh.
-- Operator section `refresh`, with `lifetime` and `sweep-interval` (each written with its unit, in whole seconds) and `bind-confidential-clients` (false, as 0.17); its keys are in the configuration reference.
-- Audit event `refresh.family_revoked`, with the subject and the client, when a reuse revokes a family; never a token, its secret or the family's name: declared in `./audit-events`, listed in the audit event reference.
-- Store interfaces: families, redemptions, token links, each session's families, each family's access tokens (with those a cap pushed out awaiting until settled), the families to revoke; their needs (never evicted, survives a crash, never rolled back by failover), contract test and configuration builders (`./testing`).
+- Operator section `refresh`, with `lifetime` (written with its unit, in whole seconds) and `bind-confidential-clients` (false, as 0.17); its keys are in the configuration reference.
+- Audit event `refresh.family_revoked`, with the client, and the subject unless `withheld`, when a reuse revokes a family; never a token, its secret or the family's name: declared in `./audit-events`, listed in the audit event reference.
+- Store interfaces: families (each for its subject, erasable: `settle`), redemptions, token links; their needs (never evicted, survives a crash, never rolled back by failover), contract test and configuration builders (`./testing`).
 
 ## Invariants
-- A family's revocation is its confirmed mark: an operation that read or wrote the family before it may finish; from then the access condition and the grant refuse every token of it at each verification and use, a token handed back meanwhile at its next. Revoking its access tokens by id (the denylist) and the sweep are cleanup after it, finished when the store answers; not a guarantee of their own.
+- A family's revocation is its confirmed mark: an operation that read or wrote the family before it may finish; from then the access condition and the grant refuse every token of it at each verification and use, a token handed back meanwhile at its next.
 - A refresh token is `<family>.<secret>`: the family's name, 16 random bytes, and the secret, 32 random bytes, each in base64url, 66 characters in all (RFC 6749 §5.1 asks its size be documented).
 - Only a family's current token is usable, and each use swaps it for a new one. Any other token of the family is reuse and revokes the family; so is the loser of two concurrent uses.
 - A token with anything after it, another client's token, and one without the family's binding are refused without spending it.
-- A family's end is fixed when it starts; no access token from it outlives it, nor the family's session, where it has one. Each one carries the amr, authentication time and acr the family started with, and one from a family bound to no session stands from that time; a time not known when it started is stated by none. None carries claims a grant added to the access token its family began with: a family keeps none.
+- A family's end is fixed when it starts; no access token from it outlives it. One from a family bound to a session is issued from that session, its rounds' and a tie's joiner's alike, and so recorded there (`session-tokens`), which ends it when the session closes, and the family's next round is refused then.
+- Each access token from a family carries the amr, authentication time and acr the family started with, and one from a family bound to no session stands from that time; a time not known when it started is stated by none. None carries claims a grant added to the access token its family began with: a family keeps none.
 - A family started from a code keeps, through `claims-selection`, what the code's request asked beyond its scope, before its record is written and from the same end, read once before it, so the selection outlives the family; failing, the code is voided. Each round keeps for its access token that selection, its names cut to what is allowed and agreed to now, before the rotation; failing, that access token is revoked, the round fails and the refresh token stays usable.
 - Scope narrows only within the original grant, for that round's access token, each value once; omitted or empty is all of it. The audience asked narrows that round alone, within the family's and the client's.
 - Offline access is not offered, so `offline_access` is no part of a grant: a family's record holding it is read without it, and a request naming it goes on without it, as `authorize` drops it. One naming it alone is `invalid_scope`, never given the whole family.
 - Before rotating: the family's session, if any, enters at use (not closed, ended, or short of a requirement); the subject's authentication is past the revocation boundary; the client's allowance covers this round; `tokens`' issuance policies allow it, told the issuance continues a grant (`continuing`); once the access token is issued, the session enters again, else that token is revoked and the round refused. A refusal leaves the token usable.
 - A binding is attached to a public client's family, and to a confidential one's where set, only when it starts. Every refusal is the same `invalid_grant`; a store failure is unavailable, never a negative verdict.
 - The `family` tie's join takes a token only into a live family and only if it ends by the family's end; any other is revoked. Boot is refused where access tokens cannot be revoked.
-- Internal modules `grant` (the grant), `founding` (a family's beginning, the code addition among them), `lineage` (the contract and the access condition) and `settle` (the stores, revocation, the revocable kind and the participant) each take their contracts from the build context; the package's module only declares.
+- Internal modules `grant` (the grant), `founding` (a family's beginning, the code addition among them), `lineage` (the contract and the access condition) and `settle` (the stores, revocation and the revocable kind) each take their contracts from the build context; the package's module only declares.
+
+## Deprecated
+- The store interfaces, and the family store's `unowned` with the mark saved where no record is, that `settle`'s card names there.
+- `refresh.sweep-interval`: taken, not read. A later release refuses it.
+- The log events `refresh.access_pushed_out`, `refresh.session_list_pushed_out` and `refresh.settle_retry_failed`: no longer written. A later release drops their names.
 
 ## Data
 - Family records (the current secret's hash, client, subject, scope, audience, session, authentication context, binding, end; or a revoked mark), what each redemption left, and each access token's family. Every record outlives what it covers by one allowance, for hosts whose clocks lag.
 
 ## Depends on
-- `kernel`, `tokens`, `grants`, `client-allowance`, `claims-selection`, `code-grant`, `token-control`, `session`, `session-participants`, `subject-revocation`, `clients`, `issuer`, `sender-binding`, `audit`
+- `kernel`, `tokens`, `grants`, `client-allowance`, `claims-selection`, `code-grant`, `token-control`, `session`, `subject-revocation`, `clients`, `issuer`, `sender-binding`, `audit`, `erasure-extensions`
 
 ## Vocabulary
 - family: the series of refresh tokens that starts from one code redemption or one `start`. reuse: a token arriving that is not the family's current token.
-- revoker: what revokes a family and the access tokens it issued, and finishes a revocation left halfway.
+- revoker: what revokes a family.

@@ -15,6 +15,7 @@ import codeGrantStore from "@mod/code-grant-store/module";
 import type { GrantOutcome } from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, defineModule, kernelConfig, type Module, Unavailable } from "@mod/kernel";
@@ -107,6 +108,7 @@ async function serve(
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			switchedModule(tokensStandIn({ revocable: true }), tokens, capturing as never),
 			issuerModule,
 			clientsModule,

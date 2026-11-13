@@ -70,6 +70,7 @@ function noticesFor(answers: (() => Promise<number>)[] = []) {
 		random: { bytes: (length) => new Uint8Array(length) },
 		log: recordingLog().log,
 		notifyMs,
+		tokenSeconds: 300,
 		retryMs,
 	});
 	return {

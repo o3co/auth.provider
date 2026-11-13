@@ -25,14 +25,20 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 	const bySession = memoryRecords<never>(now, size).keyedSets(caps.sessionFamilies);
 	const byFamily = memoryRecords<never>(now, size).keyedSets(caps.issuedAccess);
 	const down = { families: unavailableSwitch<FamilyStore>("family store") };
+	/** Subjects erased: a family saved for one is answered `erased`. */
+	const erased = new Set<string>();
 	let meanwhile: ((id: string) => Promise<void>) | undefined;
 	let beforeAccess: ((id: string) => Promise<void>) | undefined;
+	let beforeLink: (() => Promise<void>) | undefined;
 	/** What redemptions and the settle list were given, as written. */
 	const given: unknown[] = [];
 	const module = defineModule({ name: "refresh-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(familyStore).by((c) => {
 			clock = c.clock.now;
-			const { create: save, read, change } = kept.records;
+			const { create, read, change } = kept.records;
+			// A subject marked erased fences its families' saves, as a Store that erases does.
+			const save: FamilyStore["save"] = async (id, record, lifetimeMs, subject) =>
+				erased.has(subject) ? "erased" : create(id, record, lifetimeMs);
 			// An update that finds no record runs `meanwhile` once, as a write landing just after it.
 			const update: FamilyStore["update"] = async (id, how) => {
 				const changed = await change(id, how);
@@ -60,7 +66,15 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 				return byFamily.add(key, member, lifetimeMs);
 			},
 		})),
-		m.provide(tokenFamilies).by(() => ({ save: links.records.create, read: links.records.read })),
+		m.provide(tokenFamilies).by(() => ({
+			save: async (tokenId: string, record: StoredLink, lifetimeMs: number) => {
+				const first = beforeLink;
+				beforeLink = undefined;
+				if (first) await first();
+				return links.records.create(tokenId, record, lifetimeMs);
+			},
+			read: links.records.read,
+		})),
 		m.provide(settleList).by(() => ({
 			...kept.deferred,
 			add: (id: string) => {
@@ -77,6 +91,10 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 	const landingBeforeAccess = (write: (id: string) => Promise<void>) => {
 		beforeAccess = write;
 	};
+	/** The next link of an access token to its family is preceded by this write. */
+	const landingBeforeLink = (write: () => Promise<void>) => {
+		beforeLink = write;
+	};
 	return {
 		module,
 		kept,
@@ -85,8 +103,10 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 		bySession,
 		byFamily,
 		down,
+		erased,
 		landing,
 		landingBeforeAccess,
+		landingBeforeLink,
 		given,
 	};
 }

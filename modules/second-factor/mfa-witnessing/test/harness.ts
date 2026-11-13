@@ -4,7 +4,7 @@ import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import { enforcers, type FactorStore, factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
-import { type MfaSettings, mfaConfig, updatingTogether } from "@mod/mfa/testing";
+import { type MfaSettings, mfaConfig, updatingAsOne } from "@mod/mfa/testing";
 import { type FactorBinding, factorBinding } from "@mod/mfa-binding";
 import { factorKinds } from "@mod/mfa-extensions";
 import { type FactorManaging, factorManaging } from "@mod/mfa-managing";
@@ -69,8 +69,8 @@ function memoryFactors() {
 		read: (key) => stand.records.read(key),
 		update: (key, change) => stand.records.change(key, change),
 		scan: (...given: Parameters<typeof stand.records.scan>) => stand.records.scan(...given),
-		updateTogether: (...given: Parameters<ReturnType<typeof updatingTogether>>) =>
-			updatingTogether(stand.records)(...given),
+		updateAsOne: (...given: Parameters<ReturnType<typeof updatingAsOne>>) =>
+			updatingAsOne(stand.records)(...given),
 	});
 	const module = defineModule({ name: "factor-store", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(factorStore).by(() => store),

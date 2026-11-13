@@ -1,7 +1,7 @@
 import { type ClaimsSelections, claimsSelections } from "@mod/claims-selection";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Redeemed } from "@mod/code-grant";
-import { type BuildContext, type Log, Unavailable } from "@mod/kernel";
+import { type BuildContext, Unavailable } from "@mod/kernel";
 import { type Sessions, sessions } from "@mod/session";
 import { refreshGrantType } from "../contract.ts";
 import { allowanceMs, fromStoredRedemption, toStoredRedemption } from "../record.ts";
@@ -14,7 +14,6 @@ export function starting(
 	revoker: Revoker,
 	found: ReturnType<typeof founding>,
 	lifetimeMs: number,
-	log: Log,
 	selections: Pick<ClaimsSelections, "follow">,
 	entered: Pick<Sessions, "entryOf">,
 ) {
@@ -22,44 +21,37 @@ export function starting(
 		if (!clientAllowance.allowsGrant(redeemed.client, refreshGrantType)) return undefined;
 		const id = found.name();
 		const binding = found.bindingFor(redeemed.client, redeemed.binding);
-		// The writes below come before the family's record. Named for its redemption: a code that comes
-		// again finds it, or has already marked that none may start.
+		// One end, read before the selection is kept: kept from then, it outlives the family by the allowance.
+		const expiresAt = found.endsAt();
+		// The family keeps what its code's request asked beyond its scope; failing, the code is voided.
+		await selections.follow(redeemed.redemption, id, lifetimeMs + allowanceMs);
+		// A session closed before the family starts issues nothing, and no record is written.
+		if ((await entered.entryOf(redeemed.session)).kind !== "entered") {
+			throw new Unavailable("refresh");
+		}
+		const token = await found.found(
+			id,
+			familyFieldsOf(redeemed, binding),
+			redeemed.access,
+			expiresAt,
+		);
+		// Named for its redemption after the record: the link's create decides every order with a take-back.
+		// One taken first answers `exists`, so the family is revoked here and hands out no token.
 		const named = toStoredRedemption({ format: 1, family: id });
 		const redemptionMs = lifetimeMs + allowanceMs;
 		if ((await stores.redemptions.save(redeemed.redemption, named, redemptionMs)) !== "created") {
-			throw new Unavailable("refresh");
-		}
-		// One end, read before the selection is kept: kept from then, it outlives the family by the allowance.
-		const expiresAt = found.endsAt();
-		// The family keeps what its code's request asked beyond its scope; failing, the code is voided
-		// before its session lists it, so a failure never pushes another family out of the list.
-		await selections.follow(redeemed.redemption, id, lifetimeMs + allowanceMs);
-		// Listed under its session: a close that comes meanwhile finds and revokes it.
-		const { pushedOut } = await stores.sessionFamilies.add(redeemed.session, id, lifetimeMs);
-		// A family dropped from its session's list would outlive the session: it ends instead.
-		if (pushedOut.length > 0) {
-			log.error("refresh.session_list_pushed_out", { count: pushedOut.length });
-			// One whose revocation fails stays on the settle list, which the sweep finishes.
-			for (const dropped of pushedOut) {
-				await revoker.revokeFamily(dropped);
-				await stores.sessionFamilies.settled(redeemed.session, dropped);
-			}
-			throw new Unavailable("refresh");
-		}
-		// A close that came before the list held it found nothing to revoke: the family ends here instead.
-		if ((await entered.entryOf(redeemed.session)).kind !== "entered") {
 			await revoker.revokeFamily(id);
 			throw new Unavailable("refresh");
 		}
-		return found.found(id, familyFieldsOf(redeemed, binding), redeemed.access, expiresAt);
+		return token;
 	};
 }
 
-/** Ends the family a redemption started; with none yet, marks that none may start. */
+/** Ends the family a redemption started; with none yet, writes `taken`, so none may start. */
 export function takingBack(stores: Stores, revoker: Revoker, lifetimeMs: number) {
 	return async (redemption: string) => {
-		const mark = toStoredRedemption({ format: 1, taken: true });
-		await stores.redemptions.save(redemption, mark, lifetimeMs + allowanceMs);
+		const taken = toStoredRedemption({ format: 1, taken: true });
+		await stores.redemptions.save(redemption, taken, lifetimeMs + allowanceMs);
 		// save keeps whichever came first; read back to see which.
 		const stored = await stores.redemptions.read(redemption);
 		if (stored === undefined) return;
@@ -95,7 +87,6 @@ export async function additionOver(c: BuildContext<Settings>) {
 			revoker,
 			found,
 			lifetimeMs,
-			c.log,
 			await c.get(claimsSelections),
 			await c.get(sessions),
 		),

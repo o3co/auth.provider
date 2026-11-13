@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
-import { clientAllowance } from "@mod/client-allowance";
 import type { Client } from "@mod/clients";
 import type { Grant, GrantInput, GrantOutcome, TokenTie } from "@mod/grants";
 import { Unavailable } from "@mod/kernel";
-import { resourceRefusal } from "@mod/resource-indicators";
 import { type Binding, carried } from "@mod/sender-binding";
 import type { Actor, IssuedAccess, Tokens } from "@mod/tokens";
 import { verified } from "./answer.ts";
@@ -13,6 +11,7 @@ import {
 	type ExchangeVerifier,
 	type OwnToken,
 } from "./contract.ts";
+import { targetWith } from "./target/target.ts";
 
 export const grantType = "urn:ietf:params:oauth:grant-type:token-exchange";
 
@@ -89,21 +88,10 @@ const mayActFor = (subject: Exchanged, party: { readonly sub: string; readonly i
 			(iss === undefined || iss === party.iss),
 	);
 
-/** The refusal of the `resource` asked, where one is and it is not the audience issued; none otherwise. */
-const resourceMismatch = (param: GrantInput["param"], audience: string): Refusal | undefined => {
-	const resource = param("resource");
-	// RFC 8693 §2.1: an absolute URI without a fragment, read as resource-indicators reads one.
-	const malformed = resource ? resourceRefusal(resource) : undefined;
-	if (malformed) return refused(malformed, "invalid_target");
-	if (resource && resource !== audience) {
-		return refused("resource is not the audience issued", "invalid_target");
-	}
-	return undefined;
-};
-
 export function exchangeGrant(parts: Parts): Grant {
 	// In their names' order, so a family is read and joined before a session, however composed.
 	const ties = parts.ties.toSorted((a, b) => (a.name < b.name ? -1 : 1));
+	const { targetOf } = targetWith(parts.issuer);
 	/** A token verified, unexpired, naming the client, or foreign and listing it; a once-only or foreign one never acts. */
 	const presented = async (
 		client: Client,
@@ -152,43 +140,6 @@ export function exchangeGrant(parts: Parts): Grant {
 			...(session === undefined ? {} : { session }),
 			joins,
 		};
-	};
-
-	/** The scope and the one audience asked for, within the client's allowance alone. */
-	const clientTargetOf = ({ client, param }: GrantInput) => {
-		const allowed = clientAllowance.allowedIssuance(client, param("scope"), parts.issuer);
-		if (allowed.kind === "error") {
-			return refused(allowed.description ?? "scope is not within the client's", allowed.error);
-		}
-		const audience = param("audience") || allowed.audience[0];
-		if (audience === undefined || !clientAllowance.allowsAudience(client, audience, parts.issuer)) {
-			return refused("audience is not one the client may be issued", "invalid_target");
-		}
-		const mismatch = resourceMismatch(param, audience);
-		if (mismatch) return mismatch;
-		return { scope: [...allowed.scope], audience: [audience] };
-	};
-
-	/** The scope and the one audience asked for, within the subject token's and the client's. */
-	const targetOf = (input: GrantInput, subject: Exchanged) => {
-		if (subject.kind === "foreign") return clientTargetOf(input);
-		const { client, param } = input;
-		const allows = (scope: string) => clientAllowance.allowsScope(client, scope);
-		const asked = clientAllowance.parseScope(param("scope"));
-		const ceiling = [...new Set(subject.scope.filter(allows))];
-		if (!asked || asked.some((s) => !ceiling.includes(s))) {
-			return refused("scope is not within the subject token's and the client's", "invalid_scope");
-		}
-		const held = subject.audience.filter((a) =>
-			clientAllowance.allowsAudience(client, a, parts.issuer),
-		);
-		const audience = param("audience") || (held.length === 1 ? held[0] : undefined);
-		if (audience === undefined || !held.includes(audience)) {
-			return refused("audience is not one the subject token and the client hold", "invalid_target");
-		}
-		const mismatch = resourceMismatch(param, audience);
-		if (mismatch) return mismatch;
-		return { scope: asked.length > 0 ? [...new Set(asked)] : ceiling, audience: [audience] };
 	};
 
 	/** Joins the issued token to each of the subject's ties in order; at the first that ended meanwhile, revokes it. */

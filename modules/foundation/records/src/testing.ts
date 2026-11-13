@@ -1,12 +1,12 @@
 import { Unavailable } from "@mod/kernel";
-import { codePointOrder, type Json } from "@mod/store";
+import type { Json } from "@mod/store";
 import {
 	type Attempt,
 	type Changed,
-	checkedCap,
 	type KeyedSets,
+	type KeyedSetWrite,
+	keyedSetsIn,
 	type Next,
-	overCap,
 	writeDeadline,
 } from "./records.ts";
 import { type DeferredSize, shardOf } from "./shards.ts";
@@ -41,39 +41,27 @@ export function memoryRecords<T extends Json>(now: () => number, size: DeferredS
 		kept.delete(key);
 		return undefined;
 	};
-	const sets = new Map<string, Map<string, number>>();
-	const awaiting = new Map<string, Map<string, number>>();
-	const liveIn = (key: string) =>
-		[...(sets.get(key) ?? new Map<string, number>())].filter(([, until]) => until > now());
+	// Keyed sets in memory, in the format at rest keyedSetsIn.codec defines, each kept its lifetime.
+	const sets = new Map<string, { readonly value: Json; readonly until: number }>();
 	const keyedSets = (asked: number): KeyedSets => {
-		const cap = checkedCap(asked);
+		const codec = keyedSetsIn.codec({ cap: asked, clock: { now } });
+		const setOf = (key: string) => {
+			const found = sets.get(key);
+			return found && found.until > now() ? found.value : undefined;
+		};
+		const put = (key: string, write: KeyedSetWrite | undefined) => {
+			if (write) sets.set(key, { value: write.value, until: now() + write.lifetimeMs });
+		};
 		return {
 			add: async (key, member, lifetimeMs) => {
-				const members = new Map(liveIn(key));
-				members.set(member, Math.max(members.get(member) ?? 0, now() + lifetimeMs));
-				const byEnd = [...members].sort((a, b) => a[1] - b[1] || codePointOrder(a[0], b[0]));
-				const { held, out: pushedOut } = overCap(byEnd, member, cap);
-				sets.set(key, new Map(held));
-				const waiting = awaiting.get(key) ?? new Map<string, number>();
-				for (const name of pushedOut) waiting.set(name, members.get(name) ?? now());
-				awaiting.set(key, waiting);
-				return { pushedOut };
+				const added = codec.add(setOf(key), member, now() + lifetimeMs);
+				put(key, added.next);
+				return { pushedOut: added.pushedOut };
 			},
-			members: async (key) =>
-				liveIn(key)
-					.map(([member, until]) => ({ member, remainingMs: until - now() }))
-					.sort((a, b) => codePointOrder(a.member, b.member)),
-			remove: async (key, member) => {
-				sets.get(key)?.delete(member);
-			},
-			awaiting: async (key) =>
-				[...(awaiting.get(key) ?? new Map<string, number>())]
-					.filter(([, until]) => until > now())
-					.map(([member]) => member)
-					.sort(codePointOrder),
-			settled: async (key, member) => {
-				awaiting.get(key)?.delete(member);
-			},
+			members: async (key) => codec.members(setOf(key)),
+			remove: async (key, member) => put(key, codec.remove(setOf(key), member)),
+			awaiting: async (key) => codec.awaiting(setOf(key)),
+			settled: async (key, member) => put(key, codec.settled(setOf(key), member)),
 		};
 	};
 	/** Writes the next of a record of the stand-in over the one read (`held`), answering what it holds after. */

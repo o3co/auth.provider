@@ -1,13 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
 import { outsideLock } from "../../lockfile/contract.ts";
 import { besideRelease, type OutsideModules } from "../contract.ts";
 
 const grant = {
 	name: "@x/grant",
 	version: "1.2.0",
-	integrity: "sha512-AAAA",
+	integrity: `sha512-${"A".repeat(86)}==`,
 	dependencies: { "jose-lite": "^1.0.0" },
 	optionalDependencies: {},
 	peerDependencies: {
@@ -43,6 +42,7 @@ describe("what an app beside packages outside the release is given", () => {
 		]) {
 			expect(besideRelease(none, app)).toEqual({
 				files: {},
+				settings: {},
 				image: undefined,
 				guide: "",
 				index: "",
@@ -74,6 +74,9 @@ describe("what an app beside packages outside the release is given", () => {
 		for (const field of [
 			{ name: "@x/gr`ant" },
 			{ version: "1.2.0|x" },
+			// A version spelled otherwise than semver spells it, and an integrity cut short.
+			{ version: "v1.2.0" },
+			{ integrity: "sha512-AAAA" },
 			{ integrity: "sha512-AA\n| injected |" },
 		]) {
 			expect(() => besideRelease({ ...outside, modules: [{ ...grant, ...field }] }, app)).toThrow(
@@ -83,7 +86,7 @@ describe("what an app beside packages outside the release is given", () => {
 	});
 
 	it("holds every bundle of the release it depends on, or a package outside names as a peer, and zod to one version", () => {
-		const settings = parse(besideRelease(outside, app).files["pnpm-workspace.yaml"] as string);
+		const { settings } = besideRelease(outside, app);
 		expect(settings.overrides).toEqual({
 			"@o3co/auth-provider-identity": "0.19.0",
 			"@o3co/auth-provider-oauth": "0.19.0",
@@ -104,19 +107,16 @@ describe("what an app beside packages outside the release is given", () => {
 	});
 
 	it("installs no version published within the last day, but the release's and those let through by name and version", () => {
-		const fresh = besideRelease({ ...outside, fresh: ["@x/grant"] }, app).files[
-			"pnpm-workspace.yaml"
-		] as string;
-		expect(parse(fresh).minimumReleaseAge).toBe(1440);
-		expect(parse(fresh).minimumReleaseAgeExclude).toEqual([
+		const fresh = besideRelease({ ...outside, fresh: ["@x/grant"] }, app).settings;
+		expect(fresh.minimumReleaseAge).toBe(1440);
+		expect(fresh.minimumReleaseAgeExclude).toEqual([
 			"@o3co/auth-provider-identity",
 			"@o3co/auth-provider-oauth",
 			"@x/grant@1.2.0",
 		]);
-		expect(
-			parse(besideRelease(outside, app).files["pnpm-workspace.yaml"] as string)
-				.minimumReleaseAgeExclude,
-		).not.toContain("@x/grant@1.2.0");
+		expect(besideRelease(outside, app).settings.minimumReleaseAgeExclude).not.toContain(
+			"@x/grant@1.2.0",
+		);
 	});
 
 	it("checks the lockfile in the image's install stage, with what it checks against", () => {
@@ -130,7 +130,7 @@ describe("what an app beside packages outside the release is given", () => {
 	it("tells the guide and the agents' index which packages lie outside the release, and what to run", () => {
 		const { guide, index } = besideRelease(outside, app);
 		expect(guide).toContain("## Packages outside this release");
-		expect(guide).toContain("| `@x/grant` | `1.2.0` | `sha512-AAAA` |");
+		expect(guide).toContain(`| \`@x/grant\` | \`1.2.0\` | \`sha512-${"A".repeat(86)}==\` |`);
 		const said = [
 			"pnpm install --lockfile-only",
 			"node scripts/check-outside.mjs",
@@ -225,6 +225,14 @@ describe("what an app beside packages outside the release is given", () => {
 				);
 			}
 		});
+
+		it("refuses a registry for pnpm's own scope, which the image's build fetches pnpm's binary under", () => {
+			const scopes = { "@pnpm": "https://registry.x.example" };
+			const given = { ...outside, registries: { default: "https://r.example", scopes } };
+			expect(() => besideRelease(given, app)).toThrow(
+				"@pnpm: pnpm's own scope, which no record routes",
+			);
+		});
 	});
 
 	it("says of the app's guide that only a package named comes, and says it for no other app", () => {
@@ -270,10 +278,9 @@ describe("what an app beside packages outside the release is given", () => {
 			"@o3co/auth-provider-oauth",
 			"@o3co/auth-provider-second-factor",
 		];
-		const { files } = besideRelease(outside, closing);
-		const settings = parse(files["pnpm-workspace.yaml"] as string);
-		expect(Object.keys(settings.overrides).sort()).toEqual([...closed, "zod"]);
-		expect(settings.overrides["@o3co/auth-provider-second-factor"]).toBe("0.19.0");
+		const { files, settings } = besideRelease(outside, closing);
+		expect(Object.keys(settings.overrides ?? {}).sort()).toEqual([...closed, "zod"]);
+		expect(settings.overrides?.["@o3co/auth-provider-second-factor"]).toBe("0.19.0");
 		expect(settings.minimumReleaseAgeExclude).toEqual(closed);
 		const { held } = JSON.parse(files["outside-modules.json"] as string);
 		expect(Object.keys(held)).toEqual([...closed, "zod"]);
@@ -305,9 +312,55 @@ describe("what an app beside packages outside the release is given", () => {
 		);
 	});
 
+	it("records each dependency let through though published within the last day, lets that version alone through, and names it in the guide and the index", () => {
+		const jose = { name: "jose-lite", version: "1.4.0", integrity: `sha512-${"J".repeat(86)}==` };
+		const beside = besideRelease({ ...outside, freshDependencies: [jose] }, app);
+		expect(JSON.parse(beside.files["outside-modules.json"] as string).freshDependencies).toEqual([
+			jose,
+		]);
+		expect(beside.settings.minimumReleaseAgeExclude).toEqual([
+			"@o3co/auth-provider-identity",
+			"@o3co/auth-provider-oauth",
+			"jose-lite@1.4.0",
+		]);
+		expect(beside.guide).toContain(
+			`| \`jose-lite\` | \`1.4.0\` | \`sha512-${"J".repeat(86)}==\` |`,
+		);
+		expect(beside.index).toContain("`jose-lite@1.4.0`");
+		const none = besideRelease(outside, app);
+		expect(JSON.parse(none.files["outside-modules.json"] as string)).not.toHaveProperty(
+			"freshDependencies",
+		);
+		expect(none.guide).not.toContain("within the last day, as a dependency");
+	});
+
+	it("refuses a dependency let through whose record is not a package name, version and integrity", () => {
+		for (const jose of [
+			{ name: "jose lite", version: "1.4.0", integrity: `sha512-${"J".repeat(86)}==` },
+			{ name: "jose-lite", version: "1.4.0|x", integrity: `sha512-${"J".repeat(86)}==` },
+			{ name: "jose-lite", version: "1.4.0", integrity: "md5-JOSE" },
+		]) {
+			expect(() => besideRelease({ ...outside, freshDependencies: [jose] }, app)).toThrow(
+				`${jose.name}: its record is not a package name, version and integrity`,
+			);
+		}
+	});
+
 	it("refuses a package let through as fresh that it does not record", () => {
 		expect(() => besideRelease({ ...outside, fresh: ["@x/other"] }, app)).toThrow(
 			"@x/other: let through as fresh, but not recorded",
+		);
+	});
+
+	it("writes a record at a version with build metadata, but lets none through as fresh", () => {
+		const built = { ...grant, version: "1.2.0+build.1" };
+		expect(() => besideRelease({ ...outside, modules: [built] }, app)).not.toThrow();
+		expect(() => besideRelease({ ...outside, modules: [built], fresh: [grant.name] }, app)).toThrow(
+			`${grant.name}: let through as fresh at 1.2.0+build.1, which no exemption names`,
+		);
+		const jose = { name: "jose-lite", version: "1.4.0+build.1", integrity: grant.integrity };
+		expect(() => besideRelease({ ...outside, freshDependencies: [jose] }, app)).toThrow(
+			"jose-lite: let through as fresh at 1.4.0+build.1, which no exemption names",
 		);
 	});
 });

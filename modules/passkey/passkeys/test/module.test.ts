@@ -22,7 +22,9 @@ import { expect, it } from "vitest";
 import {
 	challengeStore,
 	type PasskeyWitnessing,
+	passkeyClearing,
 	passkeyHolders,
+	passkeyHolding,
 	passkeyReading,
 	passkeyStore,
 	passkeys,
@@ -139,7 +141,7 @@ it("refuses to boot a passkey witness composed without a witnessing to ask it", 
 it("marks a subject with the witness composed once a registration is written, and clears it with the last removal", async () => {
 	const stand = scriptedWitnessing();
 	const app = await boot([stand]);
-	const holders = app.get(passkeyHolders);
+	const holders = app.get(passkeyHolding);
 	expect(holders.witnessed).toBe(true);
 	const kept = app.get(registrations);
 	const options = (await kept.creation("sam")).options as CreationOptions;
@@ -150,6 +152,42 @@ it("marks a subject with the witness composed once a registration is written, an
 	expect(await kept.removed("sam", response.id)).toEqual({ removed: true, empty: true });
 	expect(stand.marks.has("sam")).toBe(false);
 	await app.stop(1000);
+});
+
+it("reads holding and clears it through two contracts over the same holders, as the deprecated one still does", async () => {
+	const stand = scriptedWitnessing();
+	const app = await boot([stand]);
+	const { response } = await answered(app, "sam");
+	expect(await app.get(registrations).register("sam", response)).toMatchObject({
+		kind: "registered",
+	});
+	const holding = app.get(passkeyHolding);
+	expect([holding.witnessed, await holding.held("sam")]).toEqual([true, true]);
+	expect(await app.get(passkeyClearing).cleared("sam")).toEqual({ removed: 1 });
+	expect([await holding.held("sam"), stand.marks.has("sam")]).toEqual([false, false]);
+	// The deprecated contract answers as both, until it is removed.
+	const holders = app.get(passkeyHolders);
+	expect([holders.witnessed, await holders.held("sam")]).toEqual([true, false]);
+	await app.stop(1000);
+});
+
+it("lets any module read holding, and only passkey-reset clear it", async () => {
+	const reader = defineModule(
+		{ name: "reader", replicaSafe: true, takes: [passkeyHolding] },
+		(m) => [m.provide(contract<unknown>("reader.seen")).by((c) => c.get(passkeyHolding))],
+	);
+	const clearer = defineModule(
+		{ name: "clearer", replicaSafe: true, takes: [passkeyClearing] },
+		(m) => [m.provide(contract<unknown>("clearer.seen")).by((c) => c.get(passkeyClearing))],
+	);
+	const app = await assemble({ ...composition([]), modules: [...composition([]).modules, reader] });
+	await app.stop(1000);
+	const refused = await assemble({
+		...composition([]),
+		modules: [...composition([]).modules, clearer],
+	}).catch((error: unknown) => error);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals.map((r) => r.where)).toContain("clearer");
 });
 
 /** A registration's response from `subject`'s fresh options, against `app`'s registrations. */
@@ -376,7 +414,7 @@ it("answers conflict where another subject takes the record over before the list
 		reason: "conflict",
 	});
 	expect(await kept.listed?.("sam")).toEqual([]);
-	expect(await app.get(passkeyHolders).held("sam")).toBe(false);
+	expect(await app.get(passkeyHolding).held("sam")).toBe(false);
 	expect((await kept.listed?.("kim"))?.map((p) => p.id)).toEqual([response.id]);
 	await app.stop(1000);
 });

@@ -31,7 +31,7 @@ describe("a session's sealed tokens", () => {
 		const h = await linked();
 		const other = await h.login("bob");
 		const { token } = await h.issue(other);
-		await h.stores.records.save(other.id, stored(h.record), 60_000);
+		await h.stores.records.save(other.id, stored(h.record), 60_000, "bob");
 		expect((await h.ask(token)).status).toBe(404);
 		expect(await h.stores.records.read(other.id)).toEqual({ format: 1, idps: {} });
 		expect((await h.ask(h.token)).status).toBe(200);
@@ -244,7 +244,7 @@ describe("opening an entry", () => {
 			{ accessToken: "a", tokenType: "Bearer", granted: [], scope: [] },
 			"v",
 		);
-		await stores.records.save("s", vault.recordOf({ corp: entry }), 60_000);
+		await stores.records.save("s", vault.recordOf({ corp: entry }), 60_000, "alice");
 		expect(await resealerOver(stores.records, vault).reseal()).toEqual({ resealed: 1, left: 0 });
 		expect(opened.count).toBe(1);
 	});

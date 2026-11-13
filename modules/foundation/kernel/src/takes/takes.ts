@@ -11,15 +11,17 @@ export function takenByRefusal(contract: Contract<unknown>, module: Module): str
 		: `${contract.label} is taken by ${takenBy.join(", ")} alone`;
 }
 
-/** Why a point's rule refuses this many contributions; none where it holds. */
+/** Why a point's rule refuses this many contributions, with what to compose where none is; none where it holds. */
 export function countRefusal(
-	rule: { readonly multiplicity: string },
+	rule: { readonly multiplicity: string; readonly missing?: string },
 	count: number,
 ): string | undefined {
+	const missing = count === 0 && rule.missing ? `: ${rule.missing}` : "";
 	if (rule.multiplicity === "one" && count !== 1) {
-		return `needs exactly one contribution (${count})`;
+		return `needs exactly one contribution (${count})${missing}`;
 	}
-	if (rule.multiplicity === "some" && count === 0) return "needs at least one contribution";
+	if (rule.multiplicity === "some" && count === 0)
+		return `needs at least one contribution${missing}`;
 	return undefined;
 }
 
@@ -76,7 +78,14 @@ function checkHandle(
 	pointsChecked: Set<Handle>,
 	refusals: Refusal[],
 ): void {
-	if (handle.kind === "contract") {
+	if (handle.kind === "optional") {
+		// Its contract's owner lets it go unprovided, or none may take it so; its takenBy holds as for any take.
+		if (handle.contract.optional !== true) {
+			refusals.push({ where: module.name, reason: `${handle.label} may not be taken optionally` });
+		}
+		const taken = takenByRefusal(handle.contract, module);
+		if (taken) refusals.push({ where: module.name, reason: taken });
+	} else if (handle.kind === "contract") {
 		const taken = takenByRefusal(handle, module);
 		if (taken) refusals.push({ where: module.name, reason: taken });
 		if (!own.has(handle) && !parts.providers.has(handle)) {

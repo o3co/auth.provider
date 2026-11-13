@@ -1,0 +1,22 @@
+{
+	"name": "@mod/erasure-journal-file",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "adapter",
+	"adapts": "@mod/erasure-journal",
+	"asks": [
+		"Erasure journal in a file on the one node that runs erasure (`erasure-journal-file.path`)."
+	],
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/erasure-journal": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5"
+	}
+}

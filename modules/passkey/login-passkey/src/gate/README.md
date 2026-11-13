@@ -13,9 +13,9 @@ Internal module of `login-passkey`: the gate `credential-policy`.
 
 ## Invariants
 - It passes every login unless `password = refused-when-held`, and every login whose amr has no `pwd`, or whose groups include `password-exempt-group`, which every start under `refused-when-held` warns of (`login-passkey.password_exempt_group`).
-- Whether the subject holds a passkey is settled with the witness (`passkeyHolders.held`): a store that lost them is unavailable, never a pass.
+- Whether the subject holds a passkey is settled with the witness (`passkeyHolding.held`): a store that lost them is unavailable, never a pass.
 - A refusal records `passkey.password_refused` with the subject and source.
-- With `password = refused-when-held` and no passkey witness composed (`passkeyHolders.witnessed`), boot is refused: a lost store would read as holding none and let a former holder's password in.
+- With `password = refused-when-held` and no passkey witness composed (`passkeyHolding.witnessed`), boot is refused: a lost store would read as holding none and let a former holder's password in.
 
 ## Depends on
-- `login-gates`, `passkeys` (`passkeyHolders`); the internal module `audited`
+- `login-gates`, `passkeys` (`passkeyHolding`); the internal module `audited`

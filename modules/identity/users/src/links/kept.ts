@@ -1,7 +1,8 @@
 import { Unavailable } from "@mod/kernel";
 import type { Linking } from "../ledger.ts";
 import { keyOf, none, type UserSource } from "../registered.ts";
-import { type LinkStore, type StoredLink, written } from "../store.ts";
+import type { LinkStore, StoredLink } from "../store.ts";
+import { keptFor } from "../stores/kept-for.ts";
 
 /** A link holds its subject; one removed holds none, and is taken again from what it holds. */
 const linkRecord = (subject: string | null) => ({ subject }) as unknown as StoredLink;
@@ -28,15 +29,27 @@ export function keptLinks(source: UserSource, links: LinkStore): Linking {
 			if (fixed.kind === "user") return fixed.user.subject === subject ? "already" : "conflict";
 			const take = (record: StoredLink) =>
 				holderOf(record) === undefined ? { value: linkRecord(subject) } : undefined;
-			const { before, after } = await written(links, keyOf(upstream), linkRecord(subject), take);
+			const { before, after } = await keptFor(
+				links,
+				keyOf(upstream),
+				linkRecord(subject),
+				take,
+				subject,
+			);
 			if (holderOf(after) !== subject) return "conflict";
 			return holderOf(before) === subject ? "already" : "linked";
 		},
 		unlink: async (subject, upstream) => {
 			const fixed = await source.byUpstream(upstream.idp, upstream.subject);
 			if (fixed.kind === "user") return fixed.user.subject === subject ? "fixed" : "none";
+			const ours = (record: StoredLink) => holderOf(record) === subject;
+			// Removed only while it is still the subject's, in the write that removes it: no trace left.
+			if (links.remove) {
+				return (await links.remove(keyOf(upstream), ours)) === "removed" ? "unlinked" : "none";
+			}
+			// A store without removal keeps the link released, holding no subject, as before.
 			const release = (record: StoredLink) =>
-				holderOf(record) === subject ? { value: linkRecord(null) } : undefined;
+				ours(record) ? { value: linkRecord(null) } : undefined;
 			const changed = await links.update(keyOf(upstream), release);
 			return changed && holderOf(changed.before) === subject ? "unlinked" : "none";
 		},

@@ -12,14 +12,14 @@
 - `accessTokenSigning`: sign claims as an access token (`at+jwt`, adding the `kid`) and verify one, under the ring and answers of `keys`: the one way to either, taken by the module `tokens` alone (any other taking it refuses boot; it binds the modules of a trusted composition, not code that imports `keys` itself), and imported by `tokens` alone, as the manifest's `takenBy` declares.
 - Whether signing is asymmetric, the `alg` it signs with, and the path of the public key set, a route contributed to `http` that answers its listed origins.
 - `publicJwk`: a JWK the platform reads as a public key, kept as given.
-- `publicPem`: a public key written as PEM.
+- `publicPem`: a public key written as PEM; asked `withForm`, also whether it was written as a public key or as a certificate its key is taken out of, for a caller to tell the operator.
 - `thumbprint`: a key's JWK thumbprint (RFC 7638, SHA-256): of a key read, the same whatever form it was written in; of a JWK given, from its required members as written.
 - `verifiesUnder`: whether a JWK may verify, under an algorithm or any of `verifyAlgorithms`, typed as `VerifyAlgorithm`; `isVerifyAlgorithm` tells one from any other name.
 - `publicMembers`: a JWK rebuilt from its type's public members alone, without reading it.
 - `isCanonicalJws`: whether a compact JWS is written in its one form; `verify` answers any other as `malformed`. `secretBytes` (exactly or at least n): the setting of a secret's bytes every module takes, strict base64 of at least 8 byte values, never a `REPLACE-` sample; a refusal never names the value.
 - `bearerToken` (at least n): the setting of a bearer token sent to an outside party, an RFC 6750 b64token of at least n bytes and 8 byte values of key material however read (as written, hex or base64), never a `REPLACE-` sample; a refusal never names the value.
-- Operator section: `signing` (`kid`, `alg`, and a PKCS8 PEM `private-key`, or for HS256 a `secret`, its bytes the HMAC key as `secret-encoding` reads them: `hex`, `base64` or `utf8`, the text's own; unset, hex where the value is whole bytes of hex, else base64), `next` (`kid`, `alg`, `public-key`), `previous` (`kid`, `alg`, `public-key`, `expires-at`).
-- Test configuration builders (`./testing`), with an RS256 signing key, one RSA key a process makes once, unless a test sets one.
+- Operator section: `signing` (`kid`, `alg`, and a PKCS8 PEM `private-key`, or for HS256 a `secret`, its bytes the HMAC key as `secret-encoding` reads them: `hex`, `base64` or `utf8`, the text's own; unset, hex where the value is whole bytes of hex, else base64), `next` (`kid`, `alg`, `public-key`), `previous` (`kid`, `alg`, `public-key`, `expires-at`), `jwks-cache` (1m–1d, default `5m`: how long verifiers may cache the set).
+- `./testing`: `keysConfig`, a test configuration builder, with an RS256 signing key, one RSA key a process makes once, unless a test sets one.
 
 ## Invariants
 - Key material has no default; a missing or unreadable key, or one not of its `alg`'s kind, refuses boot.
@@ -30,10 +30,11 @@
 - A token is verified by the key its `kid` names, after its `typ`, and refused once that key's `expires-at` is reached.
 - A payload the key signed that is no JSON is answered as a bad signature.
 - The published set holds public members alone, of unexpired keys; with nothing to publish, it answers 404 `no-store`.
-- The set carries a strong ETag, answers 304 to it, and is cached five minutes.
+- The set carries a strong ETag, answers 304 to it, and is cached `jwks-cache`; the operator publishes `next` at least that long before it signs.
 - An outside JWK with a private member, a `kid` that is no string, or a key member not in its one form, is refused; so is a private PEM.
 - An outside key may verify only for signatures (`use`, `key_ops`) and only under an algorithm its kind and curve fit.
 - Internal modules `material` (outside key material), `secret` (secret settings), `signing` (the provider's key ring) and `jwks` (the public key set).
+- `accessTokenSigning`'s `takenBy` is a composition rule, held by the kernel at assembly and by the guard on shipped imports (imported only by the packages named), not a runtime defence: an access token is made only through `tokens`, so none skips its issuance policies, revocation and subject check.
 
 ## Depends on
 - `kernel`, `http`

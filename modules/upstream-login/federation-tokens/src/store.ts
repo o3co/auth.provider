@@ -1,3 +1,4 @@
+import type { MigrationReport, SpaceReport, SubjectReading, Walk } from "@mod/erasure-extensions";
 import { contract } from "@mod/kernel";
 
 declare const stored: unique symbol;
@@ -6,14 +7,23 @@ export type StoredUpstreamTokens = { readonly [stored]: true };
 
 /** One record per session, by its handle. Every call throws Unavailable when the place cannot tell. */
 export interface UpstreamTokenStore {
-	/** Keeps a session's first record for its lifetime, unless the session holds one. */
+	/**
+	 * Keeps a session's first record for its lifetime and the session's subject, unless the session
+	 * holds one (`exists`) or, where the Store fences saves past a subject's erasure, the subject is
+	 * erased there (`erased`). The subject comes last: keep this value, this long, for this subject.
+	 */
 	save(
 		session: string,
 		record: StoredUpstreamTokens,
 		lifetimeMs: number,
-	): Promise<"created" | "exists">;
+		subject: string,
+	): Promise<"created" | "exists" | "erased">;
 	read(session: string): Promise<StoredUpstreamTokens | undefined>;
-	/** Changes the record from what it holds, with a new lifetime or, naming none, its own; `change` reruns on a race, so it is pure. Nothing when gone. */
+	/**
+	 * Changes the record from what it holds, with a new lifetime or, naming none, its own; `change`
+	 * reruns on a race, so it is pure. Nothing when gone, or, where the Store fences a subject's
+	 * erasure, when its subject is erased.
+	 */
 	update(
 		session: string,
 		change: (
@@ -22,9 +32,18 @@ export interface UpstreamTokenStore {
 	): Promise<
 		{ readonly before: StoredUpstreamTokens; readonly after: StoredUpstreamTokens } | undefined
 	>;
-	remove(session: string): Promise<void>;
+	/** Removes the session's record; what it answers is not read. */
+	remove(session: string): Promise<unknown>;
 	/** A page of the session handles whose records live, and the cursor on; none when done. A walk is no one instant. */
 	scan(cursor?: string): Promise<{ readonly keys: readonly string[]; readonly cursor?: string }>;
+	/**
+	 * Erases a subject's records here, where the Store can: optional in 0.20, required in 0.22, as a
+	 * Store not built through `subject-records` cannot be erased. Offered with `migrate`, or neither;
+	 * one alone refuses the boot.
+	 */
+	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
+	/** Once, under the maintenance key, each record read by federation-tokens' reading; optional as `erase` is. */
+	migrate?(walk: Walk, reading: SubjectReading, signal: AbortSignal): Promise<MigrationReport>;
 }
 
 export const upstreamTokenStore = contract<UpstreamTokenStore>(

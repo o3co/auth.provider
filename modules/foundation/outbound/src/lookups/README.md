@@ -24,6 +24,7 @@ Internal module of `outbound`: name lookups shared among those asking a name at 
 - A lookup is taken off the map only where the map still holds it: one ending late never takes off the key's later lookup.
 - With no place free, a new lookup is `unavailable` at once; a deadline already past is `timeout` at once; a lookup's own failure is `unreachable`.
 - In this process, a lookup holds its place until the system answers, whoever waits; left by all, it is still joined until it ends.
+- Within the outside party's share there is no limit per destination: a caller that lets outside parties choose the hosts it reaches (`clients-cimd`'s `allow`) is what keeps one of them from filling it.
 - The outside party's share is half the total, rounded down, the deployment's own the rest. In this process, the total is first held to half the threadpool (`UV_THREADPOOL_SIZE`, four unless set), rounded up and at least one, so both pools full never take more of it.
 
 ## Depends on

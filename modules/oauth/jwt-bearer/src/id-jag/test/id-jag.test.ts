@@ -62,12 +62,12 @@ describe("id-jag: reading a verified ID-JAG", () => {
 		});
 	});
 
-	it("needs iat and a client_id of 1 to 255 characters", () => {
+	it("needs iat and a client_id not empty, whose length is clients' to bound", () => {
 		expect(without("iat")).toEqual(malformed);
 		expect(without("client_id")).toEqual(malformed);
-		for (const client_id of [7, "", "c".repeat(256)])
+		for (const client_id of [7, ""])
 			expect(readOf({ client_id }), String(client_id)).toEqual(malformed);
-		expect(readOf({ client_id: "c".repeat(255) }).kind).toBe("id-jag");
+		expect(readOf({ client_id: "c".repeat(256) }).kind).toBe("id-jag");
 		expect(readOf({ iat: "1800000000" })).toEqual(malformed);
 	});
 

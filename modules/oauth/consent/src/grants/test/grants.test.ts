@@ -147,3 +147,18 @@ describe("grants: a record of a format this module does not read", () => {
 		expect(await store.read(key)).toEqual({ format: 2, range: ["write"] });
 	});
 });
+
+describe("grants: a subject the store refuses", () => {
+	it("keeps nothing and answers refused where the save answers erased, never taking it as held", async () => {
+		const { stand, grants } = over();
+		const store = {
+			save: async () => "erased" as const,
+			read: stand.records.read,
+			update: stand.records.change,
+		};
+		const refusing = grantsWith({ store });
+		expect(await refusing.keep("c", "alice", ["read"], undefined)).toBe("refused");
+		await expect(refusing.grant(registered, "alice", ["read"])).rejects.toThrow("consent");
+		expect(await grants.keep("c", "alice", ["read"], undefined)).toBe("kept");
+	});
+});

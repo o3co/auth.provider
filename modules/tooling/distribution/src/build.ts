@@ -10,7 +10,6 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import ts from "typescript";
-import type { Bundle } from "./contract.ts";
 import {
 	aboutFields,
 	aboutOf,
@@ -21,6 +20,7 @@ import {
 	type Release,
 	readmeOf,
 } from "./publish.ts";
+import type { Bundle } from "./workspace.ts";
 
 /** A file the build leaves out: tests, test tools (a trial file among them), and the TypeScript it compiles instead. */
 const leftOut = (path: string) =>

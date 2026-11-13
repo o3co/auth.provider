@@ -7,13 +7,13 @@
 - Which peers are trusted proxies (`request-source`); what a certificate holds (its reader).
 
 ## Offers
-- The forwarded certificate: its leaf and chain, or `malformed`, as `request-source`'s source carries it.
+- The forwarded certificate (`certificateOf`, from a trusted proxy's headers): its leaf and chain, `malformed`, or none where the header is absent, as `request-source`'s source carries it. `ignoredCertificates`: whether to warn now of certificate headers sent but not taken, at most once a minute.
 - `certificateForwarding`: whether the operator named where certificates are forwarded.
 - `certificateSettings`, the schema part `http`'s section takes as `client-certificate` (its keys in the settings list).
 
 ## Invariants
 - No client's certificate is read unless `client-certificate` is set.
-- The client's certificate is read only from a direct peer that is a trusted proxy, each header at most 16 KiB.
+- The client's certificate is read only from a direct peer that is a trusted proxy, each header at most 16 KiB, a fixed bound guarding the server alone: the proxy's own header limit binds before it.
 - A certificate sent by another peer is ignored, and logged at most once a minute.
 - Whether the proxy removes the header a client sends is the proxy's to ensure.
 - A certificate read is handed on as copies of its bytes, frozen.

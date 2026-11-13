@@ -17,6 +17,7 @@
 		"@mod/tokens": "workspace:*"
 	},
 	"devDependencies": {
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation-store": "workspace:*"
 	}

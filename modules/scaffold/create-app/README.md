@@ -17,7 +17,7 @@
 
 ## Offers
 - `generate`, and the `create-app` command around it (also `run`, the command on given arguments, answering its exit status, for a package that runs it): packages listed make their app, `--sink <package>` naming its log sink; none makes a pattern's, `--pattern` naming it (default `full`), `--add` naming features to add, `--axis <owner>=<module>` an axis's choice and `--<group>` a group's features, comma-separated (not for full). `--workspace <root>` names a workspace whose packages it links.
-- A package outside the release is named `npm:<name>` (a package listed, `--add`, an axis's module) and read from `--outside-from <project>`, where the operator had pnpm install it; `--allow-fresh <name>` lets one published within the last day be installed.
+- A package outside the release is named `npm:<name>` (a package listed, `--add`, an axis's module) and read from `--outside-from <project>`, where the operator had pnpm install it; `--allow-fresh <name>` lets one published within the last day be installed, or a package one declares itself, at the version the project resolved.
 - `--list` names, one a line, what `--add` takes: `combinations`' `addable`. `--help` (`-h`) writes the usage.
 - `patterns()`: each pattern's name, use, conformance areas and what conformance adds for its run.
 - A pattern's README opens with its use and carries its card; the full template's names the opt-in features not added; a listed app's names the modules listed.
@@ -29,7 +29,7 @@
 - With a workspace, each dependency links to the workspace's package; a module the workspace does not hold is refused. Built into a bundle and given none, it reads the bundle's index: the app depends on each public bundle at the index's version, imports public entries, and takes the fragments the index holds; a module it does not hold is refused, but a package outside the release named `npm:`.
 - A package outside the release is composed beside the published release alone, through `combinations`' `combinationsWith`: never with a linked workspace, nor from the workspace. The app depends on it at its recorded version, imports it by its name, and its fragment is read with the release's in one reading.
 - It is composed beside a release whose index records the integrity of its bundles and of zod, and passes them, with each bundle's dependencies on other bundles as its members' manifests in the index tell them, to `app-output` for the app to be held to. An index that records none, a zod other than the app's, and a package outside the release taking as a peer a bundle the index records no integrity of are refused.
-- `npm:` without `--outside-from`, `--outside-from` with no `npm:` name, `npm:` with a linked workspace, and `--allow-fresh` of a name not named `npm:` are usage errors.
+- `npm:` without `--outside-from`, `--outside-from` with no `npm:` name, `npm:` with a linked workspace, and `--allow-fresh` where no package is named `npm:` are usage errors.
 - A pattern or a listed app whose store is kept in memory says in its README that the deployment runs as one instance, by `store`'s own declaration.
 - A listed app takes no axis default but one declared to replace its owner: its store is kept in memory unless a store adapter is listed.
 
@@ -37,7 +37,7 @@
 - Writes the target only, through `app-output`; reads the workspace's package list or the bundle's index, and the cards and fragments of the modules it composes.
 
 ## Depends on
-- `app-output` (it writes the project, from the packages create-app gives it), `combinations` (the modules it assembles become dependencies of the project); `semver`, through `outside`.
+- `app-output` (it writes the project, from the packages create-app gives it), `combinations` (the modules it assembles become dependencies of the project), `workspace-packages` (a workspace's packages, for `--workspace`); `semver`, through `outside`.
 
 ## Vocabulary
 - fragment: a module's example of its section, placeholders only; a secret's is `REPLACE-…` text its section refuses.

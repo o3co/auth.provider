@@ -1,7 +1,7 @@
 # references
 
 ## Responsibilities
-- Generates the workspace's references from what each module declares: the configuration reference, each package's `reference.conf`, the audit event reference, the route reference, the attack surface reference (internal module `attack-surface`), and the audit index's generated parts, the cards and the dependencies (internal module `audit-index`).
+- Generates the workspace's references from what each module declares: the configuration reference, each package's `reference.conf`, the audit event reference, the route reference, the attack surface reference (internal module `attack-surface`), the audit index's generated parts, the cards and the dependencies (internal module `audit-index`), and the wiring reference, the wiring to compose for the module a boot refusal names (internal module `wirings`).
 - Holds each section's schema to the rules its defaults, time and size keys follow.
 
 ## Not here
@@ -10,8 +10,8 @@
 - Generating the app the references compose: `create-app`'s.
 
 ## Offers
-- `pnpm --filter @mod/references run configuration`: writes the configuration reference, the audit event reference, the route reference, the attack surface reference, the audit index's cards and dependencies, and a `reference.conf` beside each package's manifest whose module has a section.
-- The configuration reference: each section's keys from its schema (type, bounds, default, whether required, description) and its fragment (example, variable); a key inside an optional object has its default and requiredness marked as holding only once that object is set.
+- `pnpm --filter @mod/references run configuration`: writes the configuration reference, the audit event reference, the route reference, the attack surface reference, the audit index's cards and dependencies, the wiring reference (internal module `wirings`), and a `reference.conf` beside each package's manifest whose module has a section.
+- The configuration reference: each section's keys from its schema (type, bounds, default, whether required, description) and its fragment (example, variable); a key inside an optional object has its default and requiredness marked as holding only once that object is set. A nested object with a description of its own is a row of its own, before its first key, and a comment in `reference.conf` likewise.
 - The configuration reference's client metadata sections: each section modules add to client records, by the package that adds it, as the full template with every opt-in composes it on the trial's settings.
 - The configuration reference's IdP type settings: what one IdP under `federation`'s `idps` holds for each type, by the package that adds the type, composed alike.
 - `reference.conf`: the section's keys as HOCON, each with its description as a comment; a key with a default as `key = value` (a time or size bare, `5m`), one without as a comment saying whether it is required; a key inside an optional object only as a comment, its default or requiredness said to hold once that object is set. The module applies its defaults itself; no app loads the file.

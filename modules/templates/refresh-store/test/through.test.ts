@@ -8,6 +8,7 @@ import { clientsConfig, confidentialClient } from "@mod/clients/testing";
 import { type Addition, additions, type RedemptionHook, redemptionHooks } from "@mod/code-grant";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
@@ -50,6 +51,7 @@ async function boot() {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			tokensStandIn(),
 			issuerModule,
 			clientsModule,
@@ -127,9 +129,8 @@ async function boot() {
 it("rotates once through a lost answer to the rotation, and keeps the rotation through a failover", async () => {
 	const { simulated, start, refresh } = await boot();
 	const first = await start();
-	simulated.beforeNext("replaceIf", "refresh-store.families", async () =>
-		simulated.loseNextReply(),
-	);
+	// Records written raw, before indexing: one partition, a batch.
+	simulated.beforeNext("batch", "refresh-store.families", async () => simulated.loseNextReply());
 	const next = await refresh(first);
 	await simulated.failover();
 	expect(await refresh(first)).toBe("invalid_grant");
@@ -154,13 +155,13 @@ it("keeps a family a reuse revoked revoked through a failover", async () => {
 	expect(await refresh(next)).toBe("invalid_grant");
 });
 
-it("revokes a session's family and its access tokens when the session closes, through refresh's participant", async () => {
+it("refuses a session's family at its next round once the session closes, through the stores it wires", async () => {
 	const { app, start, close } = await boot();
 	const params = { grant_type: "refresh_token", refresh_token: await start() };
 	const outcome = await app.get(grantCalls).call("refresh_token", "app", params);
 	if (outcome.kind !== "issued") throw new Error(outcome.error);
-	const access = String(outcome.body.access_token);
-	expect((await app.get(tokens).verifyAccess(access)).kind).toBe("valid");
 	expect((await close()).kind).toBe("closed");
-	expect((await app.get(tokens).verifyAccess(access)).kind).toBe("invalid");
+	const next = { grant_type: "refresh_token", refresh_token: String(outcome.body.refresh_token) };
+	const after = await app.get(grantCalls).call("refresh_token", "app", next);
+	expect(after).toMatchObject({ kind: "error", error: "invalid_grant" });
 });

@@ -11,6 +11,7 @@
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/kernel": "workspace:*"
 	},
 	"peerDependencies": {
@@ -24,5 +25,8 @@
 	"devDependencies": {
 		"@mod/records": "workspace:*",
 		"vitest": "5.0.5"
+	},
+	"takenBy": {
+		"subjectErasure": []
 	}
 }

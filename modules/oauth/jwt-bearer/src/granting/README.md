@@ -14,6 +14,8 @@ Internal module of `jwt-bearer`: the grant itself, once boot has checked what it
 
 ## Invariants
 - What an assertion becomes, and each refusal on the way: the package's card.
+- An assertion's `jti` is once only: spent in its issuer's ledger where one is contributed, else through the store interface, by a hash of the `iss` as sent and the `jti`, unless spent already. In the store, a self-issued signer's assertions are spent apart from its issuer's own; a ledger keeps them apart only where it is told the `iss`, and one that is not counts both as one, which refuses more and never lets a reuse through.
+- A ledger is asked with the `iss` and `jti` as sent, the `exp`, and the time it must stay used until (`policy`'s, set by no setting). A throw, or an answer neither `first` nor `replayed`, is unavailable, issuing nothing; the store is never written or read for that issuer, so a ledger out never falls back to it. One whose answer is lost may stay used: the client signs another.
 - A spend is read at its boundary by the package's `spentAt`: any throw but Unavailable, and any answer the ledger or the delegate does not give, is Unavailable.
 
 ## Depends on

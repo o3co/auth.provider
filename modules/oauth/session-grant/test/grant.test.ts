@@ -6,6 +6,7 @@ import { originEvidence } from "@mod/csrf";
 import { type GrantOutcome, sessionIssuances } from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import {
@@ -125,6 +126,7 @@ async function serve(options: Options = {}) {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			watched,
 			issuerModule,
 			clientsModule,

@@ -21,6 +21,7 @@ import { testSigner } from "@mod/external-jwt/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import jwtBearer from "@mod/jwt-bearer/module";
@@ -201,18 +202,19 @@ async function serve(
 ): Promise<Served> {
 	const store = settings.on?.store ?? simulatedStore();
 	const shared = settings.on;
-	// The store the simulated one provides, by its own handle: a feature names no capability.
-	const provided = store.module.provides?.[0]?.contract as Contract<object>;
+	// What the simulated store provides, by their own handles: a feature names no capability.
+	const provided = (store.module.provides ?? []).map((p) => p.contract as Contract<object>);
 	const storeModule = shared
-		? defineModule({ name: "store", replicaSafe: false, takes: [] }, (m) => [
-				m.provide(provided).by(() => shared.app.get(provided)),
-			])
+		? defineModule({ name: "store", replicaSafe: false, takes: [] }, (m) =>
+				provided.map((handle) => m.provide(handle).by(() => shared.app.get(handle))),
+			)
 		: store.module;
 	const watched = watchedTokens();
 	const checks = watchedChecks();
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			keysModule,
 			watched.module,
 			tokensStore,

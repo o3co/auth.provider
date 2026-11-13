@@ -26,6 +26,21 @@ async function linked(
 	return { ...h, session, token, receipt, get: () => h.ask(token) };
 }
 
+describe("a login's tokens and its subject", () => {
+	it("are kept for the session's subject, and not at all for a subject whose erasure fences the save", async () => {
+		const h = await harness({});
+		const alice = await h.login("alice");
+		expect(await h.receive(alice)).toBeDefined();
+		expect(h.stores.savedFor).toEqual(["alice"]);
+		h.stores.erased.add("bob");
+		const bob = await h.login("bob");
+		expect(await h.receive(bob)).toBeUndefined();
+		expect(h.stores.savedFor).toEqual(["alice", "bob"]);
+		expect(await h.stores.records.read(bob.id)).toBeUndefined();
+		expect(warned(h, "login_tokens_not_kept")).toEqual([{ idp: "corp" }]);
+	});
+});
+
 describe("when a token ends", () => {
 	it("keeps the earlier end when a refresh answers the same token, timing the next refresh from then", async () => {
 		for (const [said, left] of [

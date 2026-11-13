@@ -1,3 +1,5 @@
+import { idempotencyWindows } from "@mod/store";
+
 /**
  * Shared prelude: store time, versions, expiry and idempotency. Every input has been checked at
  * the store contract boundary, so nothing below fails after the first write.
@@ -8,7 +10,7 @@
  * was created, so a counter that expired and came back starts afresh too. The counter lives a
  * day past its last use. Numbers go out as strings, since cjson keeps only 14 digits.
  */
-const prelude = `
+export const prelude = `
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local function num(x) return string.format('%.0f', x) end
@@ -63,9 +65,9 @@ local function guard(ikey, digest, deadline)
   if deadline ~= '' and now > tonumber(deadline) then return cjson.encode({kind = 'late'}) end
   return nil
 end
--- A mark is kept a second past its deadline, or five minutes and a second without one, as store says.
-local mark_without_deadline_ms = 300000
-local mark_past_deadline_ms = 1000
+-- A mark is kept as store's idempotencyWindows say: past its deadline, or from now without one.
+local mark_without_deadline_ms = ${idempotencyWindows.withoutDeadlineMs}
+local mark_past_deadline_ms = ${idempotencyWindows.pastDeadlineMs}
 local function remember(ikey, digest, answer, deadline)
   if ikey ~= '' then
     local base = deadline ~= '' and tonumber(deadline) or now + mark_without_deadline_ms
@@ -80,6 +82,20 @@ local function entry(key)
   return {value = held[1], version = held[2], expiresAt = expires >= 0 and num(expires) or cjson.null}
 end
 `;
+
+/**
+ * First in each script that changes data: under another epoch than the control record's it changes
+ * nothing, neither removing what expired nor replaying an answer. ARGV's last two: the record's key
+ * (not in KEYS: one server, as boot refuses a cluster) and the epoch taken ('' for none).
+ */
+const epochCheck = `
+local held_epoch = redis.call('HGET', ARGV[#ARGV - 1], 'epoch') or ''
+if held_epoch ~= ARGV[#ARGV] then
+  return string.match(redis.call('INFO', 'server'), 'run_id:(%w+)') .. '\\n' .. cjson.encode({kind = 'stale'})
+end
+`;
+
+export const changing = `${epochCheck}${prelude}`;
 
 /** KEYS: key, version key, mark key. ARGV: mode, value, expected, kind, arg, deadline, digest, has mark. */
 /**
@@ -114,7 +130,7 @@ try('DEL', KEYS[1], KEYS[2])
 return failed
 `;
 
-export const write = `${prelude}
+export const write = `${changing}
 local key, vkey, ikey = KEYS[1], KEYS[2], ARGV[8] == '1' and KEYS[3] or ''
 local seen = guard(ikey, ARGV[7], ARGV[6])
 if seen then return out(seen) end
@@ -136,7 +152,7 @@ return out(remember(ikey, ARGV[7], answer, ARGV[6]))
 `;
 
 /** KEYS: key, mark key. ARGV: by ('version'|'value'), expected, deadline, digest, has mark. */
-export const removeIf = `${prelude}
+export const removeIf = `${changing}
 local key, ikey = KEYS[1], ARGV[5] == '1' and KEYS[2] or ''
 local seen = guard(ikey, ARGV[4], ARGV[3])
 if seen then return out(seen) end
@@ -161,7 +177,7 @@ return out(cjson.encode({now = num(now), entries = entries, n = #KEYS}))
 `;
 
 /** KEYS: key, mark key. ARGV: deadline, digest, has mark. */
-export const take = `${prelude}
+export const take = `${changing}
 local ikey = ARGV[3] == '1' and KEYS[2] or ''
 local seen = guard(ikey, ARGV[2], ARGV[1])
 if seen then return out(seen) end
@@ -181,7 +197,7 @@ return out(remember(ikey, ARGV[2], answer, ARGV[1]))
  * ARGV: spec JSON {conditions = [{i, version|absent}], writes = [{i, put, kind, arg}|{i, remove}]},
  * deadline, digest, has mark.
  */
-export const batch = `${prelude}
+export const batch = `${changing}
 local spec = cjson.decode(ARGV[1])
 local n = #KEYS
 local vkey = KEYS[n - 1]
@@ -207,7 +223,7 @@ for index, w in ipairs(spec.writes) do
     versions[index] = store_value(KEYS[w.i], vkey, w.put, expiries[index])
   end
 end
-return out(remember(ikey, ARGV[3], cjson.encode({kind = 'committed', versions = versions, n = #spec.writes}), ARGV[2]))
+return out(remember(ikey, ARGV[3], cjson.encode({kind = 'committed', versions = versions, n = #spec.writes, at = num(now)}), ARGV[2]))
 `;
 
 /**
@@ -217,7 +233,7 @@ return out(remember(ikey, ARGV[3], cjson.encode({kind = 'committed', versions = 
  * digest, has mark. The mark is looked for in every partition before the deadline is judged, kept in
  * each with one answer and one end, never rewritten when reused; a late answer is not kept.
  */
-export const batchAcross = `${prelude}
+export const batchAcross = `${changing}
 local spec = cjson.decode(ARGV[1])
 local marks = {}
 if ARGV[4] == '1' then
@@ -258,17 +274,17 @@ for index, w in ipairs(spec.writes) do
     versions[index] = store_value(KEYS[w.i], KEYS[w.v], w.put, expiries[index])
   end
 end
-return out(remember_all(cjson.encode({kind = 'committed', versions = versions, n = #spec.writes})))
+return out(remember_all(cjson.encode({kind = 'committed', versions = versions, n = #spec.writes, at = num(now)})))
 `;
 
 /** No keys. ARGV: deadline. An empty batch still honours its deadline. */
-export const deadlineOnly = `${prelude}
+export const deadlineOnly = `${changing}
 if ARGV[1] ~= '' and now > tonumber(ARGV[1]) then return out(cjson.encode({kind = 'late'})) end
-return out(cjson.encode({kind = 'committed', versions = {}, n = 0}))
+return out(cjson.encode({kind = 'committed', versions = {}, n = 0, at = num(now)}))
 `;
 
 /** KEYS: counter key, mark key. ARGV: window ms, limit, deadline, digest, has mark. Not versioned: it is hit hard. */
-export const count = `${prelude}
+export const count = `${changing}
 local ikey = ARGV[5] == '1' and KEYS[2] or ''
 local seen = guard(ikey, ARGV[4], ARGV[3])
 if seen then return out(seen) end

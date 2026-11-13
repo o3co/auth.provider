@@ -83,7 +83,7 @@ describe("the flow: logging in before a refusal", () => {
 		expect([res.status, res.location, JSON.parse(res.text)]).toEqual([
 			400,
 			"",
-			{ error: "invalid_request", error_description: "parameter too long" },
+			{ error: "invalid_request", error_description: "nonce too long" },
 		]);
 	});
 });

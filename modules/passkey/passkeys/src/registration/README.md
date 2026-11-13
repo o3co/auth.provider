@@ -10,6 +10,8 @@ Internal module of `passkeys`: registering passkeys.
 
 ## Offers
 - `registrationsOver` (ceremonies, records, challenges, user verification, the limit, a fresh handle) → the package's `Registrations`.
+- A caller's check (`admitted`) is asked before the record is written and once after; its write's record (by token) becomes a passkey only as the last write, both asks admitting. A `false` (`revoked`), a throw or a failed write ends it, best effort; what that leaves open, the invariants below say.
+- A registration answers when its challenge was made (`challengedAt`). `listed` (id, nickname, transports, backup state, and when registered where kept), `renamed` (`renamed` / `unknown`) and `removed` (`removed`: this call ended it; `empty`: none left) take only the subject's own.
 
 ## Invariants
 - A challenge counts only for the subject it was made for, once. Client data that does not read takes no challenge.

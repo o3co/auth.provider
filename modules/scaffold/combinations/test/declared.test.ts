@@ -1,14 +1,11 @@
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it, vi } from "vitest";
+import { workspacePackages } from "@mod/workspace-packages";
+import { expect, it } from "vitest";
 import { completedWith, declaredIn, declaredInIndex } from "../src/declared.ts";
 
-// Generating and reading a workspace spawn pnpm, slow on a loaded machine.
-vi.setConfig({ testTimeout: 30_000 });
-
-/** The fixture workspace, read once: reading a workspace takes a while. */
+/** The fixture workspace, read once. */
 const declared = declaredIn(join(import.meta.dirname, "fixture"));
 
 it("finds the wirings and bridges the modules declare, in code point order of name", () => {
@@ -53,14 +50,8 @@ it("completes what completing brought in: a bridge's wiring, and a bridge that j
 
 it("reads the same declarations from a bundle's index as from the workspace it was written from", () => {
 	const workspace = join(import.meta.dirname, "composition");
-	const listed = JSON.parse(
-		execFileSync("pnpm", ["ls", "-r", "--json", "--depth", "-1"], {
-			cwd: workspace,
-			encoding: "utf8",
-		}),
-	) as { path: string }[];
-	const packages = listed.map(({ path }) => ({
-		manifest: JSON.parse(readFileSync(join(path, "package.json"), "utf8")),
+	const packages = workspacePackages(workspace).map(({ dir }) => ({
+		manifest: JSON.parse(readFileSync(join(dir, "package.json"), "utf8")),
 	}));
 	const index = join(mkdtempSync(join(tmpdir(), "combinations-")), "index.json");
 	writeFileSync(index, JSON.stringify({ version: "0.18.0", packages }));

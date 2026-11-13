@@ -50,7 +50,11 @@ function harness(
 	const requests = windowCounter();
 	const recorded: AuditRecord[] = [];
 	const revoked: { subject: string; keepDelegations: boolean | undefined }[] = [];
-	const recording = { answer: "complete" as "complete" | "incomplete" | "unknown" | "broken" };
+	const recording = {
+		answer: "complete" as "complete" | "incomplete" | "unknown" | "broken",
+		/** Whether the revocation answers that the subject is erased. */
+		erased: false,
+	};
 	const logged = recordingLog();
 	// Notes each credential the endpoint reads, so a comparison that stops early shows.
 	const compared: number[] = [];
@@ -70,7 +74,10 @@ function harness(
 				revoked.push({ subject, keepDelegations: given?.keepDelegations });
 				if (recording.answer === "unknown") throw new Unavailable("subject-revocation");
 				if (recording.answer === "broken") throw new Error("broken");
-				return { complete: recording.answer === "complete" };
+				return {
+					complete: recording.answer === "complete",
+					...(recording.erased ? { erased: true as const } : {}),
+				};
 			},
 		},
 		recorded: { record: (event) => recorded.push(event) },
@@ -372,6 +379,44 @@ describe("recording", () => {
 		]);
 	});
 
+	it("records a revocation it is told is erased without the subject, answering as for any subject", async () => {
+		const { send, recording, recorded } = harness();
+		recording.erased = true;
+		const complete = await send();
+		recording.answer = "incomplete";
+		const incomplete = await send();
+		expect([complete.status, incomplete.status]).toEqual([200, 503]);
+		expect(recorded).toEqual([
+			{
+				kind: "subject.revocation.requested",
+				attributes: { delegations: "end", outcome: "complete", source: inside, withheld: "erased" },
+			},
+			{
+				kind: "subject.revocation.requested",
+				attributes: {
+					delegations: "end",
+					outcome: "incomplete",
+					source: inside,
+					withheld: "erased",
+				},
+			},
+		]);
+	});
+
+	it("records an unknown or failed revocation without the subject, unread, keeping what the ledger matches it by", async () => {
+		const { send, recording, recorded } = harness();
+		recording.answer = "unknown";
+		await send();
+		recording.answer = "broken";
+		await expect(send()).rejects.toThrow("broken");
+		expect(recorded).toEqual(
+			["unknown", "failed"].map((outcome) => ({
+				kind: "subject.revocation.requested",
+				attributes: { delegations: "end", outcome, source: inside, withheld: "unread" },
+			})),
+		);
+	});
+
 	it("answers a resend as the first, recording it again", async () => {
 		const { send, revoked } = harness();
 		const first = await send();
@@ -392,8 +437,7 @@ describe("recording", () => {
 		expect(recorded).toEqual([
 			{
 				kind: "subject.revocation.requested",
-				subject: "alice",
-				attributes: { delegations: "end", outcome: "failed", source: inside },
+				attributes: { delegations: "end", outcome: "failed", source: inside, withheld: "unread" },
 			},
 		]);
 	});

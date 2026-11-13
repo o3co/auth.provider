@@ -10,6 +10,7 @@ import {
 import externalJwtModule from "@mod/external-jwt/module";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
@@ -104,6 +105,7 @@ async function boot({
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			outboundModule,
 			tlsOptionsForTests,
 			externalJwtModule,
@@ -202,7 +204,10 @@ describe("private_key_jwt", () => {
 	it("names the asymmetric algorithms an assertion may be signed with: by default one for each kind of key [oidc-discovery-3-ad]", async () => {
 		const { c } = await boot();
 		expect(c.signingAlgorithms()).toEqual(["RS256", "ES256", "ES384", "ES512", "EdDSA"]);
-		const named = await boot({ settings: { algorithms: ["RS256", "PS256", "RS256"] } });
+		const named = await boot({
+			keys: [jwk(rsa.publicKey, { kid: "r", alg: "PS256" })],
+			settings: { algorithms: ["RS256", "PS256", "RS256"] },
+		});
 		expect(named.c.signingAlgorithms()).toEqual(["RS256", "PS256"]);
 		for (const algorithms of [[], ["HS256"], ["none"]]) {
 			expect(section.safeParse({ algorithms }).success, String(algorithms)).toBe(false);
@@ -426,29 +431,54 @@ describe("private_key_jwt", () => {
 		expect(await tried(curves.c, {}, {}, p521.privateKey, { alg: "ES512" })).toBe("app");
 	});
 
-	it("reads each client key under one algorithm, its own alg or the one the operator takes for its kind", async () => {
+	it("reads each client key under one algorithm, its own alg or the one the operator takes for its kind, and warns at each start of one read under none, by its place", async () => {
 		const both = { algorithms: ["RS256" as const, "PS256" as const] };
-		// RS256 and PS256 both taken: a key naming no alg is unused, for an RS256 assertion too.
-		const bare = await boot({ keys: [jwk(rsa.publicKey, { kid: "r" })], settings: both });
-		const bareBy = (alg: string) => tried(bare.c, {}, {}, rsa.privateKey, { alg, kid: "r" });
-		expect(await bareBy("RS256")).toBe("bad_credentials");
-		expect(await bareBy("PS256")).toBe("bad_credentials");
+		const unread = () =>
+			recorded
+				.lines()
+				.filter((line) => line.event === "client-assertion.key_unread")
+				.map(({ level, fields }) => ({ level, fields }));
+		/** What one start of the composition booted so warns of, with its clients. */
+		const started = async (options: Parameters<typeof boot>[0]) => {
+			const before = unread().length;
+			const { app, c } = await boot(options);
+			expect(unread()).toHaveLength(before);
+			await app.start();
+			await app.stop();
+			return { c, warned: unread().slice(before) };
+		};
+		// Each of the two clients registered with the keys, by each one's place.
+		const byClient = (keys: string[]) =>
+			["app", "app:twin"].flatMap((client) =>
+				keys.map((key) => ({ level: "warn", fields: { client, key } })),
+			);
+		// RS256 and PS256 both taken: a key naming no alg is read under neither.
+		const unnamed = await started({ keys: [jwk(rsa.publicKey, { kid: "r" })], settings: both });
+		expect(unnamed.warned).toEqual(byClient(["keys.0"]));
+		expect(await tried(unnamed.c, {}, {}, rsa.privateKey, { alg: "RS256", kid: "r" })).toBe(
+			"bad_credentials",
+		);
 		// A key naming its alg is read under that one alone.
-		const named = await boot({
+		const named = await started({
 			keys: [jwk(rsa.publicKey, { kid: "r", alg: "RS256" })],
 			settings: both,
 		});
+		expect(named.warned).toEqual([]);
 		const namedBy = (alg: string) => tried(named.c, {}, {}, rsa.privateKey, { alg, kid: "r" });
 		expect(await namedBy("RS256")).toBe("app");
 		expect(await namedBy("PS256")).toBe("bad_credentials");
-		// A key whose alg the operator does not take is used under none.
-		const untaken = await boot({
-			keys: [jwk(rsa.publicKey, { kid: "r", alg: "PS256" })],
-			settings: { algorithms: ["RS256", "ES256"] },
+		// A key whose alg the operator does not take is read under none; every such key is named.
+		const several = await started({
+			keys: [
+				jwk(rsa.publicKey, { kid: "r", alg: "RS512" }),
+				jwk(ec.publicKey, { kid: "ec" }),
+				jwk(rsa.publicKey, { kid: "r2" }),
+			],
+			settings: { algorithms: ["RS256", "PS256", "ES256"] },
 		});
-		expect(await tried(untaken.c, {}, {}, rsa.privateKey, { alg: "RS256", kid: "r" })).toBe(
-			"bad_credentials",
-		);
+		expect(several.warned).toEqual(byClient(["keys.0", "keys.2"]));
+		// One taken for its kind, a key naming no alg is read under it.
+		expect((await started({ keys: [jwk(rsa.publicKey, { kid: "r" })] })).warned).toEqual([]);
 	});
 
 	it("logs why it refused an assertion [rfc7523-3-u] [rfc7521-5.2-n] [rfc7523-3-y]", async () => {

@@ -12,6 +12,7 @@
 - `Begun`, `PendingProved`, `Bound`.
 
 ## Invariants
+- `unknown kind` is a kind this deployment lets no binding begin for: one it does not take (`mfa-reading`), or the way back `mfa` gives itself (recovery codes).
 - A binding whose unique value another factor holds, of any subject, is refused as duplicate and leaves nothing, even when two bind at once; `begin` refuses it already when the secret alone tells the value. A binding begun before a reset or a `fence` of the subject writes nothing (`fenced`), checked in the write itself.
 - A binding begun while the subject held no counting factor binds only if none counts when it is written; else it writes nothing, answers `first-binding-closed`, and records `mfa.first_binding_conflict` (`kind`, `reason`). Of two first bindings at once, one binds.
 - A binding asked from a login holds the password alone: it begins and binds only as the subject's first counting factor, whenever it began; once one counts, `begin` and `bind` answer `first-binding-closed` and record the conflict.

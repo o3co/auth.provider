@@ -4,7 +4,10 @@ import { contract } from "@mod/kernel";
 /** The policy a route uses to refuse cross-site requests: a GET passes; any other method needs the evidence. */
 export const csrfChecked = policy("csrf");
 
-/** The answer to a request the policy refuses. */
+/**
+ * The answer to a request the policy refuses.
+ * @deprecated The answer is the route's contract, not a value to import: match a 403 `{ "error": "csrf" }`. A later release removes it.
+ */
 export const csrfRefused: HttpResponse = Object.freeze(jsonAnswer(403, { error: "csrf" }));
 
 /** Whether a request shows positive evidence that it came from this deployment's origin. */

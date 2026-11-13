@@ -2,7 +2,6 @@
 
 export { hostLibfaketime } from "./clock/clock.ts";
 export {
-	type Deployment,
 	type DeploymentRecord,
 	type DeploymentSpec,
 	type Instance,
@@ -13,7 +12,6 @@ export { faultRun, faultRunReporter } from "./fault-run.ts";
 export {
 	type Deployed,
 	type Deploying,
-	deployed,
 	failover,
 	instanceOf,
 	on,
@@ -26,18 +24,14 @@ export {
 } from "./fault-scene/fault-scene.ts";
 export {
 	type Node,
-	redisImage,
 	startTopology,
 	type Topology,
 	type TopologySpec,
 } from "./faults/topology.ts";
 export type {
 	Command,
-	Connection,
-	Drop,
 	Dropped,
 	Execution,
-	Held,
 	Match,
 	Relay,
 	Reply,
@@ -50,7 +44,6 @@ export {
 	isOutOfMemory,
 	keysOf,
 	type Operation,
-	roleOf,
 	runIdOf,
 	type StoreKey,
 	type StoreWrite,

@@ -1,7 +1,9 @@
 import cookiesModule from "@mod/cookies/module";
+import { type Eraser, erasers } from "@mod/erasure-extensions";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
+import httpServer from "@mod/http-server/module";
+import { assemble, contract, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { type Session, sessions } from "@mod/session";
 import { openedOf } from "@mod/session/testing";
@@ -20,8 +22,11 @@ const pair = (setCookie: string | undefined) => setCookie?.split(";")[0] ?? "";
 const withCookie = (cookie: string) =>
 	testRequest({ headers: new Map([["cookie", cookie]]), source: { scheme: "https" } });
 
-async function boot() {
+const collected = contract<readonly Eraser[]>("test.erasers");
+
+async function boot(phase: "reader" | "indexed" = "reader") {
 	const simulated = simulatedStore();
+	if (phase === "indexed") simulated.mark("subject-records.phase", "indexed");
 	const closer = { failing: false, calls: 0 };
 	const participant = defineModule({ name: "closer", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(participants).by(() => ({
@@ -35,6 +40,7 @@ async function boot() {
 	const app = await assemble({
 		modules: [
 			http,
+			httpServer,
 			sessionLifecycle,
 			sessionRequirements,
 			sessionParticipants,
@@ -43,6 +49,9 @@ async function boot() {
 			subjectRevocationStandIn,
 			simulated.module,
 			participant,
+			defineModule({ name: "eraser-reader", replicaSafe: false, takes: [erasers] }, (m) => [
+				m.provide(collected).by(async (c) => c.collect(erasers)),
+			]),
 		],
 		config: {
 			...kernelConfig(),
@@ -62,17 +71,22 @@ async function boot() {
 		return pair(openedOf(await s.open(testRequest(), facts)).cookies[0]);
 	};
 	const handleOf = async (cookie: string) => ((await s.enter(withCookie(cookie))) as Session).id;
-	return { s, simulated, closer, login, handleOf };
+	const eraser = () => app.get(collected).find((e) => e.name === "session-lifecycle") as Eraser;
+	return { s, simulated, closer, login, handleOf, eraser };
 }
 
 it("keeps a closed session closed through a lost answer and a failover, and fails closed when the store cannot tell", async () => {
 	const { s, simulated, login, handleOf } = await boot();
 	const cookie = await login();
 	const handle = await handleOf(cookie);
-	simulated.beforeNext("replaceIf", "session-store.sessions", async () =>
-		simulated.loseNextReply(),
-	);
+	// A raw record's change is a batch on its own partition.
+	let lost = false;
+	simulated.beforeNext("batch", "session-store.sessions", async () => {
+		lost = true;
+		simulated.loseNextReply();
+	});
 	expect((await s.close(handle)).kind).toBe("closed");
+	expect(lost).toBe(true);
 	await simulated.failover();
 	expect(await s.enter(withCookie(cookie))).toBeUndefined();
 	expect((await s.entryOf(handle)).kind).toBe("absent");
@@ -112,10 +126,13 @@ it("never lets a raise it could not confirm be seen: what an entry reads is what
 	const { s, simulated, login } = await boot();
 	const cookie = await login();
 	// The raise's record write applies on the primary, but its confirmation never comes.
-	simulated.beforeNext("replaceIf", "session-store.sessions", async () =>
-		simulated.stallReplicas(true),
-	);
+	let stalled = false;
+	simulated.beforeNext("batch", "session-store.sessions", async () => {
+		stalled = true;
+		simulated.stallReplicas(true);
+	});
 	const raised = await s.raise(withCookie(cookie), ["otp"]);
+	expect(stalled).toBe(true);
 	expect(raised?.raised).toBe(false);
 	const fresh = withCookie(pair(raised?.cookies[0]));
 	const seen = await s.enter(fresh).catch((error) => error);
@@ -127,3 +144,22 @@ it("never lets a raise it could not confirm be seen: what an entry reads is what
 	await simulated.failover();
 	expect((await s.enter(fresh))?.context.amr ?? []).toEqual(settled);
 }, 30_000);
+
+it("erases an indexed subject's sessions and listing end to end, counting the open session removed as a logout gap", async () => {
+	const { s, closer, login, handleOf, eraser } = await boot("indexed");
+	const [open, closed] = [await handleOf(await login()), await handleOf(await login())];
+	expect((await s.close(closed)).kind).toBe("closed");
+	expect(eraser().erasable).toBe(true);
+	const { reports, logoutGaps } = await eraser().online("alice", new AbortController().signal);
+	expect(reports).toMatchObject([
+		{ kind: "erased", space: "session-store.sessions", removed: 2 },
+		{ kind: "erased", space: "session-store.subjects" },
+	]);
+	expect(logoutGaps).toBe(1);
+	expect(await s.subjectOf?.(open)).toBeUndefined();
+	// Its subject erased, a close finds no record, writes nothing and calls no participant.
+	const calls = closer.calls;
+	expect((await s.close(open)).kind).toBe("closed");
+	expect(closer.calls).toBe(calls);
+	await expect(login()).rejects.toSatisfy(isUnavailable);
+});

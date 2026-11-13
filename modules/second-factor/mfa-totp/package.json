@@ -11,6 +11,10 @@
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/mfa": "workspace:*",
-		"@mod/mfa-extensions": "workspace:*"
+		"@mod/mfa-extensions": "workspace:*",
+		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"@mod/http-server": "workspace:*"
 	}
 }

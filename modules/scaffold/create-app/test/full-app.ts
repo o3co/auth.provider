@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { trialLayer } from "@mod/trial";
 import { generate, type PatternPlan } from "../src/contract.ts";
-import { workspacePackages } from "../src/project.ts";
+import { packageDirsIn } from "../src/project.ts";
 
 /** The workspace these tests generate from, and its package directories by name. */
 export const root = join(import.meta.dirname, "..", "..", "..", "..");
-export const packageDirs = workspacePackages(root);
+export const packageDirs = packageDirsIn(root);
 
 export type Tree = { [key: string]: unknown };
 export const isTree = (value: unknown): value is Tree =>

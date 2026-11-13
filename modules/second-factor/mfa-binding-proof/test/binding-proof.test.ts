@@ -2,12 +2,13 @@ import { randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
 import { factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
-import { mfaConfig, updatingTogether } from "@mod/mfa/testing";
+import { mfaConfig, updatingAsOne } from "@mod/mfa/testing";
 import { factorBinding } from "@mod/mfa-binding";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
@@ -80,12 +81,13 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 			read: stand.records.read,
 			update: stand.records.change,
 			scan: stand.records.scan,
-			updateTogether: updatingTogether(stand.records),
+			updateAsOne: updatingAsOne(stand.records),
 		})),
 	]);
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			auditStandIn().module,
 			sessionStandIn,
 			sessionRequirements,

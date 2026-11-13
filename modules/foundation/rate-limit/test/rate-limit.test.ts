@@ -2,6 +2,7 @@ import { auditStandIn } from "@mod/audit/testing";
 import { listening, routes, use } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { metrics } from "@mod/metrics";
@@ -20,7 +21,7 @@ import {
 	rateLimit,
 	requestsPerSource,
 } from "../src/contract.ts";
-import { lockoutSpace } from "../src/lockout.ts";
+import { lockoutSpace } from "../src/lockout/lockout.ts";
 import rateLimitModule from "../src/module.ts";
 import { partitionOf } from "../src/partition.ts";
 
@@ -203,6 +204,35 @@ it("is unavailable when other writers keep changing a key's lockout before each 
 	};
 	contend(8);
 	await expect(l.failed("l1", "busy", policy)).rejects.toSatisfy(isUnavailable);
+});
+
+it("reads a lockout state of another shape as unavailable, never as no hold", async () => {
+	const { lockouts: l, store } = await boot();
+	const held = { space: lockoutSpace, partition: partitionOf("l1", "odd"), name: "lockout" };
+	const whole = { run: 3, lastAt: start, spent: [start], holdUntil: start + 60_000, fixed: false };
+	const expiry = { expiry: { kind: "after", ms: 60_000 } } as const;
+	for (const odd of [
+		{},
+		7,
+		[whole],
+		{ ...whole, holdUntil: String(start + 60_000) },
+		{ ...whole, holdUntil: null },
+		{ ...whole, spent: [String(start)] },
+		{ ...whole, fixed: "no" },
+		{ ...whole, named: 1.5 },
+		{ ...whole, used: [{ id: 1, until: start }] },
+	]) {
+		const { entry } = await store.get(held);
+		await (entry
+			? store.replaceIf(held, entry.version, odd, expiry)
+			: store.putIfAbsent(held, odd, expiry));
+		const said = JSON.stringify(odd);
+		await expect(l.check("l1", "odd", policy), said).rejects.toSatisfy(isUnavailable);
+		await expect(l.failed("l1", "odd", policy), said).rejects.toSatisfy(isUnavailable);
+	}
+	const { entry } = await store.get(held);
+	await store.replaceIf(held, entry?.version ?? "", whole, expiry);
+	expect((await l.check("l1", "odd", policy)).kind).toBe("held");
 });
 
 it("judges a lockout policy's shape", () => {
@@ -467,6 +497,19 @@ describe("releasing a lockout under terms", () => {
 		});
 	});
 
+	it("refuses terms keeping their id for no positive whole number of ms, writing nothing", async () => {
+		const { lockouts: l } = await boot();
+		await fail(l, "k1", policy, 2);
+		const standing = await l.standing("l1", "k1", policy);
+		for (const keepMs of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53, 2 ** 53 - 1]) {
+			const terms = { kind: "checked", once: { id: "z", keepMs }, forgive: standing } as const;
+			await expect(l.releaseUnder("l1", "k1", policy, terms), String(keepMs)).rejects.toThrow(
+				"keepMs",
+			);
+		}
+		expect(await l.standing("l1", "k1", policy)).toEqual(standing);
+	});
+
 	it("answers what it judged on the state it wrote, when a failure lands between its read and its write", async () => {
 		const { simulated, lockouts: l } = await boot();
 		await fail(l, "w1", fixing, 10);
@@ -537,7 +580,15 @@ async function serving(section?: Record<string, unknown>) {
 	const simulated = simulatedStore();
 	const audit = auditStandIn();
 	const app = await assemble({
-		modules: [http, audit.module, metricsModule, rateLimitModule, simulated.module, routed],
+		modules: [
+			http,
+			httpServer,
+			audit.module,
+			metricsModule,
+			rateLimitModule,
+			simulated.module,
+			routed,
+		],
 		config: {
 			...kernelConfig(),
 			...httpConfig({ "trusted-proxies": ["127.0.0.1"] }),

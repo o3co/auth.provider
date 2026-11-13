@@ -8,6 +8,7 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	contract,
@@ -71,6 +72,8 @@ function faulty<T extends StoredGrant | StoredAsk>() {
 	let lose: Operation | undefined;
 	let before: { operation: Operation; run: (key: string) => Promise<unknown> } | undefined;
 	const keys: string[] = [];
+	/** Subjects erased in this place: a save for one answers `erased`, as subject-records does. */
+	const erased = new Set<string>();
 	const down = unavailableSwitch<RecordsStandIn<T>["records"]>("consent records");
 	const around =
 		<A extends [string, ...unknown[]], R>(operation: Operation, call: (...args: A) => Promise<R>) =>
@@ -89,8 +92,12 @@ function faulty<T extends StoredGrant | StoredAsk>() {
 		/** The keys saved, in order. */
 		keys,
 		down,
+		erased,
 		records: down.wrap({
-			create: around("create", stand.records.create),
+			create: async (key: string, value: T, lifetimeMs: number | "endless", subject: string) =>
+				erased.has(subject)
+					? ("erased" as const)
+					: around("create", stand.records.create)(key, value, lifetimeMs),
 			read: stand.records.read,
 			change: around("change", stand.records.change),
 		}),
@@ -163,6 +170,7 @@ async function serve(
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			...sections,
@@ -570,6 +578,33 @@ describe("consent: the answer", () => {
 		const next = await pendingFor("alice");
 		now += 60_000;
 		expect((await next.answer("accept")).status).toBe(400);
+	});
+});
+
+describe("consent: an erased subject", () => {
+	it("completes no acceptance whose grant the store refuses: 401 no_session, no audit, no redirect", async () => {
+		const { pendingFor, given, grants, events } = await serve();
+		// Asked before the erasure; the ask outlives it, the grant's save is refused.
+		const alice = await pendingFor("alice");
+		grants.erased.add("alice");
+		const refused = await alice.answer("accept");
+		expect([refused.status, refused.location, refused.body]).toEqual([
+			401,
+			null,
+			{ error: "no_session" },
+		]);
+		expect(refused.cacheControl).toBe("no-store");
+		expect(events).toEqual([]);
+		expect(await given.grantedFor(registeredAs("app"), "alice")).toEqual([]);
+	});
+
+	it("asks and grants nothing for a subject the store refuses: unavailable, only in a race with its erasure", async () => {
+		const { pendingFor, given, grants, asks } = await serve();
+		asks.erased.add("alice");
+		await expect(pendingFor("alice")).rejects.toThrow(Unavailable);
+		grants.erased.add("bob");
+		await expect(given.grantFor(registeredAs("app"), "bob", ["read"])).rejects.toThrow(Unavailable);
+		expect(await given.grantedFor(registeredAs("app"), "bob")).toEqual([]);
 	});
 });
 

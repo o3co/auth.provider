@@ -1,12 +1,13 @@
 import { createHmac, randomBytes } from "node:crypto";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { describe, expect, it } from "vitest";
 import { keys } from "../src/contract.ts";
 import keysModule from "../src/module.ts";
-import { section } from "../src/signing/section.ts";
+import { section } from "../src/section.ts";
 
 const runtime = quietRuntime();
 const signing = (secret: string, encoding?: string) => ({
@@ -21,7 +22,7 @@ const signing = (secret: string, encoding?: string) => ({
 /** The key the provider signs with, as the bytes whose HMAC its signature is. */
 async function signsWith(secret: string, encoding?: string): Promise<(key: Buffer) => boolean> {
 	const app = await assemble({
-		modules: [http, keysModule],
+		modules: [http, httpServer, keysModule],
 		config: { ...kernelConfig(), ...httpConfig(), keys: signing(secret, encoding) },
 		runtime,
 	});
@@ -82,7 +83,7 @@ describe("keys.signing.secret-encoding", () => {
 	it("refuses a reading it does not know, at its key", async () => {
 		expect(refusal(secret, "latin1")).toBeDefined();
 		const refused = await assemble({
-			modules: [http, keysModule],
+			modules: [http, httpServer, keysModule],
 			config: { ...kernelConfig(), ...httpConfig(), keys: signing(secret, "utf16") },
 			runtime,
 		}).catch((error: unknown) => error);

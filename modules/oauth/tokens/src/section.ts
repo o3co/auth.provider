@@ -1,3 +1,4 @@
+import { addedClaimsLimits } from "@mod/added-claims";
 import { setting } from "@mod/kernel";
 import { z } from "zod";
 import { lifetimeSecondsRange } from "./contract.ts";
@@ -9,7 +10,7 @@ export const section = z.strictObject({
 		.pipe(z.number().int().min(lifetimeSecondsRange.min).max(lifetimeSecondsRange.max))
 		.prefault("1h")
 		.describe(
-			"How long an access token lives, from when it is asked for (the issuance policies' wait included), from `2s` to `1d` in whole seconds.",
+			"How long an access token lives, from when it is asked for (the issuance policies' wait included), from `2s` to `1d` in whole seconds; the range is fixed: under two seconds a token signed in whole seconds keeps under one, and a day is the ceiling every lifetime is held to.",
 		),
 	revocation: z
 		.enum(["denylist", "unsupported"])
@@ -27,4 +28,7 @@ export const section = z.strictObject({
 		.literal("none")
 		.optional()
 		.describe("Stated where no module checks subject revocation on access tokens."),
+	"added-claims": addedClaimsLimits.describe(
+		"The limits of the claims a grant adds to an access token, as added-claims reads them, each raised only: one value holds both issuing and reading back, so lowering a raised one leaves the tokens issued while it was raised unreadable until they expire. Raise a value on every instance before any issues under it: an instance on a lower one, 0.19 included, refuses those tokens until they expire.",
+	),
 });

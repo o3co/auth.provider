@@ -88,10 +88,21 @@ describe("cacheProblems", () => {
 			expect(step(uses)).toEqual([expect.stringContaining("an action this check does not know")]);
 		}
 		expect(step("actions/checkout@v3")).toEqual([expect.stringContaining("a ref not taken")]);
+		// A tag, which can move, is not taken, even the one the pinned commit carries.
+		expect(step("actions/checkout@v4")).toEqual([expect.stringContaining("a ref not taken")]);
+	});
+
+	it("takes an action at the commit it is pinned to, and refuses another commit", () => {
+		expect(step("actions/checkout@11d5960a326750d5838078e36cf38b85af677262")).toEqual([]);
+		expect(step("actions/checkout@0000000000000000000000000000000000000000")).toEqual([
+			expect.stringContaining("a ref not taken"),
+		]);
 	});
 
 	it("passes a cache step only with the condition set out, written exactly, nothing evaluated", () => {
-		expect(step("actions/cache@v4", "", offInEvidence)).toEqual([]);
+		expect(
+			step("actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830", "", offInEvidence),
+		).toEqual([]);
 		for (const condition of [
 			"",
 			"github.event_name == 'schedule'",
@@ -100,60 +111,115 @@ describe("cacheProblems", () => {
 			"${{ null }}",
 			offInEvidence.replace("!(", "! ("),
 		]) {
-			expect(step("actions/cache@v4", "", condition)).toEqual([
-				expect.stringContaining("it restores a cache"),
-			]);
-			expect(step("actions/cache/restore@v4", "", condition)).toHaveLength(1);
+			expect(step("actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830", "", condition)).toEqual(
+				[expect.stringContaining("it restores a cache")],
+			);
+			expect(
+				step("actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830", "", condition),
+			).toHaveLength(1);
 		}
 	});
 
 	it("passes setup-go only with its cache written off, as it caches unless told not to", () => {
-		expect(step("actions/setup-go@v5")).toEqual([expect.stringContaining("its cache is on")]);
+		expect(step("actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff")).toEqual([
+			expect.stringContaining("its cache is on"),
+		]);
 		for (const ok of ["false", "'false'", offInEvidence]) {
-			expect(step("actions/setup-go@v5", `          cache: ${ok}\n`)).toEqual([]);
+			expect(
+				step(
+					"actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff",
+					`          cache: ${ok}\n`,
+				),
+			).toEqual([]);
 		}
 		for (const bad of ["true", "${{ false }}", "${{ github.event_name == 'schedule' }}"]) {
-			expect(step("actions/setup-go@v5", `          cache: ${bad}\n`)).toEqual([
-				expect.stringContaining("its cache is on"),
-			]);
+			expect(
+				step(
+					"actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff",
+					`          cache: ${bad}\n`,
+				),
+			).toEqual([expect.stringContaining("its cache is on")]);
 		}
 	});
 
 	it("passes setup-java's maven cache only as set out, and other setups' only left empty", () => {
-		expect(step("actions/setup-java@v4")).toEqual([]);
-		expect(step("actions/setup-java@v4", `          cache: ${mavenOffInEvidence}\n`)).toEqual([]);
+		expect(step("actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3")).toEqual([]);
+		expect(
+			step(
+				"actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3",
+				`          cache: ${mavenOffInEvidence}\n`,
+			),
+		).toEqual([]);
 		for (const bad of ["maven", `\${{ (${evidenceRun}) && '' || 'maven' }}`]) {
-			expect(step("actions/setup-java@v4", `          cache: ${bad}\n`)).toEqual([
-				expect.stringContaining("its cache must be"),
-			]);
+			expect(
+				step(
+					"actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3",
+					`          cache: ${bad}\n`,
+				),
+			).toEqual([expect.stringContaining("its cache must be")]);
 		}
-		expect(step("actions/setup-node@v4", "          cache: pnpm\n")).toHaveLength(1);
-		expect(step("actions/setup-python@v5", "          cache: pip\n")).toHaveLength(1);
-		expect(step("actions/setup-python@v5", "          cache: ''\n")).toEqual([]);
+		expect(
+			step(
+				"actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+				"          cache: pnpm\n",
+			),
+		).toHaveLength(1);
+		expect(
+			step(
+				"actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+				"          cache: pip\n",
+			),
+		).toHaveLength(1);
+		expect(
+			step(
+				"actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+				"          cache: ''\n",
+			),
+		).toEqual([]);
 	});
 
 	it("passes pnpm's cache and install only left out or written false", () => {
-		expect(step("pnpm/action-setup@v4")).toEqual([]);
-		expect(step("pnpm/action-setup@v4", "          cache: false\n")).toEqual([]);
+		expect(step("pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115")).toEqual([]);
+		expect(
+			step(
+				"pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115",
+				"          cache: false\n",
+			),
+		).toEqual([]);
 		for (const inputs of [
 			"          cache: true\n",
 			"          cache: ${{ false }}\n",
 			"          run_install: true\n",
 		]) {
-			expect(step("pnpm/action-setup@v4", inputs)).toHaveLength(1);
+			expect(
+				step("pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115", inputs),
+			).toHaveLength(1);
 		}
 	});
 
 	it("reads an input's name without regard to case, as GitHub does, and refuses one written twice", () => {
-		expect(step("actions/setup-java@v4", "          CACHE: maven\n")).toHaveLength(1);
-		expect(step("actions/setup-go@v5", "          Cache: true\n")).toHaveLength(1);
+		expect(
+			step(
+				"actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3",
+				"          CACHE: maven\n",
+			),
+		).toHaveLength(1);
+		expect(
+			step("actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff", "          Cache: true\n"),
+		).toHaveLength(1);
 		for (const name of ["run-id", "Run-Id", "GitHub-Token"]) {
-			expect(step("actions/download-artifact@v4", `          ${name}: x\n`)).toEqual([
-				expect.stringContaining("reaches past this run"),
-			]);
+			expect(
+				step(
+					"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+					`          ${name}: x\n`,
+				),
+			).toEqual([expect.stringContaining("reaches past this run")]);
 		}
 		expect(
-			step("actions/setup-go@v5", "          cache: false\n          CACHE: true\n"),
+			step(
+				"actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff",
+				"          cache: false\n          CACHE: true\n",
+			),
 		).toContainEqual(expect.stringContaining("names CACHE twice"));
 	});
 
@@ -161,25 +227,29 @@ describe("cacheProblems", () => {
 		const tag: RunContext = { event_name: "push", ref: `refs/tags/v${version}`, base_ref: "" };
 		expect(inputOf(offInEvidence, tag)).toBe(true);
 		const inRelease = (steps: string) => ofSteps(steps, {}, "release");
-		expect(inRelease(`      - uses: actions/cache@v4\n        if: ${offInEvidence}\n`)).toEqual([
-			expect.stringContaining("which the release never does"),
-		]);
 		expect(
 			inRelease(
-				`      - uses: actions/setup-go@v5\n        with:\n          cache: ${offInEvidence}\n`,
+				`      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830\n        if: ${offInEvidence}\n`,
+			),
+		).toEqual([expect.stringContaining("which the release never does")]);
+		expect(
+			inRelease(
+				`      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff\n        with:\n          cache: ${offInEvidence}\n`,
 			),
 		).toEqual([expect.stringContaining("as the release restores none")]);
 		expect(
-			inRelease("      - uses: actions/setup-go@v5\n        with:\n          cache: false\n"),
+			inRelease(
+				"      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff\n        with:\n          cache: false\n",
+			),
 		).toEqual([]);
 		expect(
 			inRelease(
-				`      - uses: actions/setup-java@v4\n        with:\n          cache: ${mavenOffInEvidence}\n`,
+				`      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3\n        with:\n          cache: ${mavenOffInEvidence}\n`,
 			),
 		).toHaveLength(1);
 		const files: Record<string, string> = {
 			"r.yml": "jobs:\n  c:\n    uses: ./.github/workflows/s.yml\n",
-			".github/workflows/s.yml": `jobs:\n  k:\n    runs-on: x\n    steps:\n      - uses: actions/cache@v4\n        if: ${offInEvidence}\n`,
+			".github/workflows/s.yml": `jobs:\n  k:\n    runs-on: x\n    steps:\n      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830\n        if: ${offInEvidence}\n`,
 		};
 		expect(cacheProblems("r.yml", (p) => files[p] as string, "release")).toEqual([
 			expect.stringMatching(/^\.github\/workflows\/s\.yml: job k.*which the release never does/),
@@ -189,7 +259,8 @@ describe("cacheProblems", () => {
 
 	it("follows a workflow of this tree a job calls, refuses one outside it and a loop", () => {
 		const calls = (target: string) => `jobs:\n  c:\n    uses: ${target}\n`;
-		const cached = "jobs:\n  k:\n    runs-on: x\n    steps:\n      - uses: actions/cache@v4\n";
+		const cached =
+			"jobs:\n  k:\n    runs-on: x\n    steps:\n      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830\n";
 		const files: Record<string, string> = {
 			"a.yml": calls("./.github/workflows/b.yml"),
 			".github/workflows/b.yml": cached,

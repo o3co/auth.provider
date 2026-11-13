@@ -1,17 +1,22 @@
 import { csrfChecked } from "@mod/csrf";
+import { erasers } from "@mod/erasure-extensions";
 import { type Route, routes, use } from "@mod/http";
 import { defineModule, isUnavailable } from "@mod/kernel";
 import { fenceFollower, proofSteps } from "@mod/mfa";
 import { lockoutProblem, requestsPerSource } from "@mod/rate-limit";
+import { sessions } from "@mod/session";
 import { revocationFollowers } from "@mod/subject-revocation";
 import { flowParts } from "./contract.ts";
+import { flowsEraser } from "./erasure/eraser.ts";
 import { type Handler, unavailable } from "./requests/requests.ts";
 import { section } from "./section.ts";
+import { transactionListings, transactionStore } from "./store.ts";
 import {
 	gating,
 	gatingTakes,
 	handlersOver,
 	handlersTakes,
+	naming,
 	partsIn,
 	partsTakes,
 	policyOf,
@@ -57,6 +62,17 @@ export default defineModule({ name: "mfa-flows", section, replicaSafe: true, tak
 		return partsIn(c);
 	}),
 	gating(m),
+	naming(m),
+	// Its build takes only its two stores and `session` late, collecting no probes: the erasure gate collects erasers.
+	m
+		.contribute(erasers)
+		.by(async (c) =>
+			flowsEraser(
+				await c.get(transactionStore),
+				await c.get(transactionListings),
+				c.late(sessions),
+			),
+		),
 	...table.map(([method, path, name]) =>
 		m.contribute(routes).by(async (c): Promise<Route> => {
 			const policy = policyOf(c.section);

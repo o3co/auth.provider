@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { parseItems } from "../../checklist.ts";
 import { expectedOf } from "../../repo.ts";
+import { attemptsOf, legOf, selectReports } from "../legs/legs.ts";
 import { type EvidenceReport, entryOf } from "../reporter.ts";
 import {
-	attemptsOf,
 	checkpoint,
 	complianceTable,
 	type Expected,
@@ -12,7 +12,6 @@ import {
 	itemStatuses,
 	planOf,
 	runsPrinted,
-	selectReports,
 } from "../runs.ts";
 
 const identity = (entry: string, extra: Partial<EvidenceReport["identity"]> = {}) => ({
@@ -75,7 +74,11 @@ describe("a job's marks that it was attempted", () => {
 			runs,
 			"r1",
 		);
-		expect(Object.fromEntries(attempts)).toEqual({ "@mod/a@p": 2, "@mod/b@p": 2, unit: 1 });
+		expect(Object.fromEntries(attempts)).toEqual({
+			[legOf("@mod/a@p", undefined)]: 2,
+			[legOf("@mod/b@p", undefined)]: 2,
+			[legOf("unit", undefined)]: 1,
+		});
 	});
 
 	it("leave out an entry's reports older than its job's last attempt, and keep a job's not attempted again", () => {
@@ -84,7 +87,7 @@ describe("a job's marks that it was attempted", () => {
 		const kept = selectReports(
 			[earlier, other],
 			{ commit: "c1", run: "r1" },
-			new Map([["@mod/a@p", 2]]),
+			new Map([[legOf("@mod/a@p", undefined), 2]]),
 		);
 		expect(kept.map((r) => r.identity.entry)).toEqual(["@mod/a@q"]);
 	});
@@ -162,6 +165,7 @@ describe("itemStatuses", () => {
 		suffixed: [],
 		noSkip: new Set(),
 		gate: new Set(),
+		shards: new Map(),
 	};
 	const pkgDirs = new Map([
 		["@mod/x", "modules/x/x"],
@@ -481,6 +485,7 @@ describe("each test of an item, in each run of its file", () => {
 					suffixed: [],
 					noSkip: new Set(),
 					gate: new Set(),
+					shards: new Map(),
 				},
 				new Map([["@mod/x", "modules/x/x"]]),
 			)[0];
@@ -545,6 +550,7 @@ describe("a test's results, matched to its title in the source", () => {
 		suffixed: [],
 		noSkip: new Set(),
 		gate: new Set(),
+		shards: new Map(),
 	};
 	const report = (names: string[][]): EvidenceReport => ({
 		identity: identity("unit"),
@@ -603,6 +609,7 @@ describe("a test's results, matched to where it is written", () => {
 		suffixed: [],
 		noSkip: new Set(),
 		gate: new Set(),
+		shards: new Map(),
 	};
 	const ref = (path: (string | null)[], suite = false) => ({
 		pkg: "@mod/x",

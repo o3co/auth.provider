@@ -18,6 +18,9 @@ importers:
       '@types/node':
         specifier: 26.6.5
         version: 26.6.5
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -83,6 +86,9 @@ importers:
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../../oauth/sender-binding
+      '@mod/x509-path':
+        specifier: workspace:*
+        version: link:../../foundation/x509-path
       asn1js:
         specifier: 4.0.0
         version: 4.0.0
@@ -96,6 +102,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -111,6 +120,9 @@ importers:
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
@@ -145,6 +157,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -206,6 +221,9 @@ importers:
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -228,7 +246,30 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/erasure/erasure-journal-file:
+    dependencies:
+      '@mod/erasure-journal':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-journal
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/foundation/added-claims:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       vitest:
         specifier: 5.0.5
@@ -288,6 +329,30 @@ importers:
       '@mod/request-source':
         specifier: workspace:*
         version: link:../request-source
+    devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../http-server
+
+  modules/foundation/erasure-extensions:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/foundation/erasure-journal:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/foundation/external-jwt:
     dependencies:
@@ -301,8 +366,8 @@ importers:
         specifier: workspace:*
         version: link:../outbound
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -355,6 +420,25 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../http-server
+
+  modules/foundation/http-server:
+    dependencies:
+      '@mod/client-certificate':
+        specifier: workspace:*
+        version: link:../client-certificate
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../http
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@mod/request-source':
+        specifier: workspace:*
+        version: link:../request-source
 
   modules/foundation/kernel:
     dependencies:
@@ -375,11 +459,15 @@ importers:
         specifier: workspace:*
         version: link:../kernel
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../http-server
 
   modules/foundation/labels:
     devDependencies:
@@ -392,9 +480,18 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@mod/mail-address':
+        specifier: workspace:*
+        version: link:../mail-address
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/foundation/mail-address:
     devDependencies:
       vitest:
         specifier: 5.0.5
@@ -430,10 +527,19 @@ importers:
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../url-setting
+      '@mod/x509-path':
+        specifier: workspace:*
+        version: link:../x509-path
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      asn1js:
+        specifier: 4.0.0
+        version: 4.0.0
+      pkijs:
+        specifier: 4.0.1
+        version: 4.0.1(asn1js@4.0.0)
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -465,9 +571,15 @@ importers:
       '@mod/audit':
         specifier: workspace:*
         version: link:../audit
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../erasure-extensions
       '@mod/http':
         specifier: workspace:*
         version: link:../http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../http-server
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -545,6 +657,25 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/foundation/subject-records:
+    dependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../erasure-extensions
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../records
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../store
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/foundation/tls-options:
     dependencies:
       '@mod/kernel':
@@ -563,6 +694,19 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
+
+  modules/foundation/x509-path:
+    dependencies:
+      asn1js:
+        specifier: 4.0.0
+        version: 4.0.0
+      pkijs:
+        specifier: 4.0.1
+        version: 4.0.1(asn1js@4.0.0)
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/identity/client-documents:
     dependencies:
@@ -609,12 +753,18 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
 
   modules/identity/login-attributes:
     dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
       '@mod/users':
         specifier: workspace:*
         version: link:../users
@@ -644,6 +794,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../subject-revocation
@@ -684,6 +837,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -715,6 +871,9 @@ importers:
         specifier: workspace:*
         version: link:../subject-revocation
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -724,6 +883,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
@@ -743,6 +905,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -812,6 +977,9 @@ importers:
 
   modules/identity/subject-revocation:
     dependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -825,12 +993,15 @@ importers:
 
   modules/identity/users:
     dependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/mail':
+      '@mod/mail-address':
         specifier: workspace:*
-        version: link:../../foundation/mail
+        version: link:../../foundation/mail-address
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -870,6 +1041,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -892,6 +1066,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
@@ -977,6 +1154,9 @@ importers:
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -1079,12 +1259,15 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/url-setting
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -1183,6 +1366,9 @@ importers:
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/grants':
         specifier: workspace:*
         version: link:../grants
@@ -1208,6 +1394,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -1250,6 +1439,9 @@ importers:
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
@@ -1275,6 +1467,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -1342,6 +1537,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -1370,6 +1568,9 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/kernel
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
@@ -1395,12 +1596,15 @@ importers:
         specifier: workspace:*
         version: link:../sender-binding
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -1429,8 +1633,8 @@ importers:
         specifier: workspace:*
         version: link:../../identity/users
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1444,6 +1648,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/issuer':
         specifier: workspace:*
         version: link:../issuer
@@ -1508,6 +1715,10 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
 
   modules/oauth/jwt-bearer:
     dependencies:
@@ -1557,12 +1768,15 @@ importers:
         specifier: workspace:*
         version: link:../../identity/users
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -1627,6 +1841,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/issuer':
         specifier: workspace:*
         version: link:../issuer
@@ -1679,8 +1896,8 @@ importers:
         specifier: workspace:*
         version: link:../../identity/users
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -1728,6 +1945,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/session-participants':
         specifier: workspace:*
         version: link:../../identity/session-participants
@@ -1792,6 +2012,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -1854,6 +2077,9 @@ importers:
       '@mod/code-grant':
         specifier: workspace:*
         version: link:../code-grant
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/grants':
         specifier: workspace:*
         version: link:../grants
@@ -1869,9 +2095,6 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
-      '@mod/session-participants':
-        specifier: workspace:*
-        version: link:../../identity/session-participants
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1891,6 +2114,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -1900,6 +2126,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/session-requirements':
         specifier: workspace:*
         version: link:../../identity/session-requirements
@@ -1995,6 +2224,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2035,6 +2267,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -2069,6 +2304,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -2106,6 +2344,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2128,6 +2369,9 @@ importers:
         specifier: workspace:*
         version: link:../tokens
     devDependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
@@ -2171,6 +2415,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -2236,6 +2483,9 @@ importers:
       '@mod/client-credentials':
         specifier: workspace:*
         version: link:../client-credentials
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
@@ -2279,6 +2529,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
@@ -2325,6 +2578,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2362,6 +2618,9 @@ importers:
         specifier: workspace:*
         version: link:../tokens
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -2442,6 +2701,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/passkey-witness':
         specifier: workspace:*
         version: link:../passkey-witness
@@ -2574,6 +2836,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
@@ -2692,6 +2957,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2757,6 +3025,9 @@ importers:
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -2809,6 +3080,9 @@ importers:
       '@mod/kinds':
         specifier: workspace:*
         version: link:../kinds
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../workspace-packages
     devDependencies:
       vitest:
         specifier: 5.0.5
@@ -2822,6 +3096,9 @@ importers:
       '@mod/combinations':
         specifier: workspace:*
         version: link:../combinations
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../workspace-packages
       semver:
         specifier: 7.8.5
         version: 7.8.5
@@ -2859,9 +3136,47 @@ importers:
 
   modules/scaffold/trial:
     dependencies:
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../workspace-packages
       '@o3co/ts.hocon':
         specifier: 1.14.3
         version: 1.14.3(yaml@2.9.1)(zod@4.6.7)
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/scaffold/workspace-packages:
+    dependencies:
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/second-factor/account-mail-code:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mail':
+        specifier: workspace:*
+        version: link:../../foundation/mail
+      '@mod/mail-address':
+        specifier: workspace:*
+        version: link:../../foundation/mail-address
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+      '@mod/subject-attributes':
+        specifier: workspace:*
+        version: link:../../identity/subject-attributes
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
     devDependencies:
       vitest:
         specifier: 5.0.5
@@ -2872,6 +3187,9 @@ importers:
       '@mod/audit':
         specifier: workspace:*
         version: link:../../foundation/audit
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -2906,6 +3224,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2962,6 +3283,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
@@ -2989,6 +3313,9 @@ importers:
 
   modules/second-factor/mfa-email:
     dependencies:
+      '@mod/account-mail-code':
+        specifier: workspace:*
+        version: link:../account-mail-code
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -3001,6 +3328,9 @@ importers:
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
+      '@mod/mfa-email-proof':
+        specifier: workspace:*
+        version: link:../mfa-email-proof
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
@@ -3020,15 +3350,18 @@ importers:
 
   modules/second-factor/mfa-email-proof:
     dependencies:
+      '@mod/account-mail-code':
+        specifier: workspace:*
+        version: link:../account-mail-code
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/mail':
+        specifier: workspace:*
+        version: link:../../foundation/mail
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
-      '@mod/mfa-email':
-        specifier: workspace:*
-        version: link:../mfa-email
       '@mod/users':
         specifier: workspace:*
         version: link:../../identity/users
@@ -3036,12 +3369,25 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@mod/mail':
-        specifier: workspace:*
-        version: link:../../foundation/mail
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/second-factor/mfa-email-proof-wording:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mail':
+        specifier: workspace:*
+        version: link:../../foundation/mail
+      '@mod/mfa-email-proof':
+        specifier: workspace:*
+        version: link:../mfa-email-proof
+    devDependencies:
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -3107,6 +3453,9 @@ importers:
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/login-attributes':
         specifier: workspace:*
         version: link:../../identity/login-attributes
@@ -3174,6 +3523,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -3202,6 +3554,9 @@ importers:
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
@@ -3239,6 +3594,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/login-attributes':
         specifier: workspace:*
         version: link:../../identity/login-attributes
@@ -3312,6 +3670,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
@@ -3414,6 +3775,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/login-attributes':
         specifier: workspace:*
         version: link:../../identity/login-attributes
@@ -3496,6 +3860,13 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
 
   modules/second-factor/mfa-witness:
     dependencies:
@@ -3555,6 +3926,9 @@ importers:
       '@mod/mail':
         specifier: workspace:*
         version: link:../../foundation/mail
+      '@mod/mail-address':
+        specifier: workspace:*
+        version: link:../../foundation/mail-address
       '@mod/tls-options':
         specifier: workspace:*
         version: link:../../foundation/tls-options
@@ -3562,8 +3936,8 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/url-setting
       nodemailer:
-        specifier: 10.2.1
-        version: 10.2.1
+        specifier: 10.3.1
+        version: 10.3.1
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -3656,6 +4030,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -3675,6 +4052,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/issuer':
         specifier: workspace:*
         version: link:../../oauth/issuer
@@ -3735,12 +4115,12 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/records':
-        specifier: workspace:*
-        version: link:../../foundation/records
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
 
   modules/templates/device-grant-store:
     dependencies:
@@ -3801,6 +4181,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -3823,6 +4206,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
     devDependencies:
       vitest:
         specifier: 5.0.5
@@ -3851,12 +4237,19 @@ importers:
       '@mod/mfa-flows':
         specifier: workspace:*
         version: link:../../second-factor/mfa-flows
-      '@mod/records':
-        specifier: workspace:*
-        version: link:../../foundation/records
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
 
   modules/templates/mfa-store:
     dependencies:
@@ -3866,12 +4259,12 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../../second-factor/mfa
-      '@mod/records':
-        specifier: workspace:*
-        version: link:../../foundation/records
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
 
   modules/templates/refresh-store:
     dependencies:
@@ -3887,6 +4280,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -3909,6 +4305,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/issuer':
         specifier: workspace:*
         version: link:../../oauth/issuer
@@ -3973,6 +4372,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -3980,9 +4382,15 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
@@ -4016,6 +4424,9 @@ importers:
 
   modules/templates/subject-revocation-store:
     dependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -4047,6 +4458,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/issuer':
         specifier: workspace:*
         version: link:../../oauth/issuer
@@ -4065,12 +4479,12 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/records':
-        specifier: workspace:*
-        version: link:../../foundation/records
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
       '@mod/upstream-handoff':
         specifier: workspace:*
         version: link:../../upstream-login/upstream-handoff
@@ -4109,9 +4523,19 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
       '@mod/users':
         specifier: workspace:*
         version: link:../../identity/users
+    devDependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
 
   modules/templates/webauthn-store:
     dependencies:
@@ -4193,8 +4617,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-checklist
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4258,8 +4682,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-checklist
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4298,8 +4722,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-checklist
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4382,8 +4806,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-checklist
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4407,8 +4831,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-checklist
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4472,8 +4896,8 @@ importers:
         specifier: workspace:*
         version: link:../../passkey/webauthn
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
 
   modules/tooling/conformance-recipes:
     dependencies:
@@ -4505,6 +4929,9 @@ importers:
       '@mod/ledger-fakes':
         specifier: workspace:*
         version: link:../ledger-fakes
+      '@mod/local-registry':
+        specifier: workspace:*
+        version: link:../local-registry
       '@mod/spec-checklist':
         specifier: workspace:*
         version: link:../spec-checklist
@@ -4554,9 +4981,15 @@ importers:
       '@mod/docker-client':
         specifier: workspace:*
         version: link:../docker-client
+      '@mod/local-registry':
+        specifier: workspace:*
+        version: link:../local-registry
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../../scaffold/workspace-packages
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -4594,6 +5027,9 @@ importers:
 
   modules/tooling/guard-imports:
     dependencies:
+      '@mod/workspace-packages':
+        specifier: workspace:*
+        version: link:../../scaffold/workspace-packages
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -4674,6 +5110,12 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/tooling/local-registry:
     devDependencies:
       vitest:
         specifier: 5.0.5
@@ -4780,6 +5222,9 @@ importers:
       '@mod/federation-link':
         specifier: workspace:*
         version: link:../federation-link
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -4849,6 +5294,9 @@ importers:
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
@@ -4879,6 +5327,9 @@ importers:
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../../oauth/session-tokens
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
       '@mod/tokens':
         specifier: workspace:*
         version: link:../../oauth/tokens
@@ -4889,6 +5340,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/issuer':
         specifier: workspace:*
         version: link:../../oauth/issuer
@@ -4904,9 +5358,6 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
-      '@mod/subject-revocation':
-        specifier: workspace:*
-        version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4935,8 +5386,8 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/url-setting
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -5047,8 +5498,8 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/tls-options
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -5096,6 +5547,9 @@ importers:
 
   modules/upstream-login/upstream-handoff:
     dependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -5150,6 +5604,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -5317,6 +5774,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       '@mod/issuer':
         specifier: workspace:*
         version: link:../../oauth/issuer
@@ -5342,8 +5802,8 @@ importers:
         specifier: workspace:*
         version: link:../../oauth/tokens
       jose:
-        specifier: 6.2.13
-        version: 6.2.13
+        specifier: 6.2.15
+        version: 6.2.15
 
   modules/user-ledger-http/subject-revocation-http:
     dependencies:
@@ -5375,6 +5835,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -5832,6 +6295,10 @@ packages:
     resolution: {integrity: sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==}
     engines: {node: '>=12.0.0'}
 
+  fast-check@4.10.2:
+    resolution: {integrity: sha512-iK2f+YrcmoeGqk6fA0ea2bptcu/itMIm4NfEozq6N25+aG6h7s5HZbB/k1aV7b5w5sFLMCbbtRUsTVR+BgC3xw==}
+    engines: {node: '>=12.17.0'}
+
   fdir@6.5.0:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
     engines: {node: '>=12.0.0'}
@@ -5850,8 +6317,8 @@ packages:
     resolution: {integrity: sha512-ehuGcf94bQXhfagULNXrJdfnWO38v070jxSx/qE87Kjzmu2fU7ro5EFAb+OPituLqgfyuQaym5DlrNydW2sJ9A==}
     engines: {node: '>=12.22.0'}
 
-  jose@6.2.13:
-    resolution: {integrity: sha512-7TIg10ZE1x82YediN+lcrPNvGMKge9yFHQD+Qho/b8y2adfugU3AsvvHfxV0fzyFllT6l9xCjf4RWY9g/Z9PJQ==}
+  jose@6.2.15:
+    resolution: {integrity: sha512-qdF6ewcZARtef63fJ9AKKZPgxw+t7USH6HLXYcD4CrdmSvDp79rpJSPFEKc90QBeGS63u1KQtN2MZQHC0yDIzA==}
 
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
@@ -5955,8 +6422,8 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  nodemailer@10.2.1:
-    resolution: {integrity: sha512-ZrDNsPFoDMwefNs7sJwrYiEJ/CG4ClJWDZv05iNJsEBWa8GRDry1QJHTJxsuTAY9eDDKjX4k+q3SxslXJOao7w==}
+  nodemailer@10.3.1:
+    resolution: {integrity: sha512-uF0AFsJC07Y1vdW7p580DKAnh7rAO+4UPSSB3mDCPNDufoiaOebV6JmrzpxB14OjEEEiBsNdYoM2Y+fN8M7BBA==}
     engines: {node: '>=20.0.0'}
 
   oauth4webapi@3.8.8:
@@ -5994,6 +6461,9 @@ packages:
   punycode.js@2.3.1:
     resolution: {integrity: sha512-uxFIHU0YlHYhDQtV4R9J6a52SLx28BCjT+4ieh7IGbgwVJWO+km431c4yRlREUAsAmt/uMjQUyQHNEPf0M39CA==}
     engines: {node: '>=6'}
+
+  pure-rand@8.4.2:
+    resolution: {integrity: sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng==}
 
   pvtsutils@1.3.6:
     resolution: {integrity: sha512-PLgQXQ6H2FWCaeRak8vvk1GW462lMxB5s3Jm673N82zI4vqtVUPuZdffdZbPDFRoU8kAhItWFtPCWiPpp4/EDg==}
@@ -6582,6 +7052,10 @@ snapshots:
 
   expect-type@1.4.0: {}
 
+  fast-check@4.10.2:
+    dependencies:
+      pure-rand: 8.4.2
+
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
@@ -6601,7 +7075,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  jose@6.2.13: {}
+  jose@6.2.15: {}
 
   lightningcss-android-arm64@1.33.0:
     optional: true
@@ -6682,7 +7156,7 @@ snapshots:
 
   nanoid@3.3.20: {}
 
-  nodemailer@10.2.1: {}
+  nodemailer@10.3.1: {}
 
   oauth4webapi@3.8.8: {}
 
@@ -6690,7 +7164,7 @@ snapshots:
 
   openid-client@6.8.8:
     dependencies:
-      jose: 6.2.13
+      jose: 6.2.15
       oauth4webapi: 3.8.8
 
   picocolors@1.1.1: {}
@@ -6716,6 +7190,8 @@ snapshots:
       tdigest: 0.1.3
 
   punycode.js@2.3.1: {}
+
+  pure-rand@8.4.2: {}
 
   pvtsutils@1.3.6:
     dependencies:

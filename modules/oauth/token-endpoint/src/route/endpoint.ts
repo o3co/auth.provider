@@ -6,12 +6,12 @@ import { type HttpRequest, type HttpResponse, jsonAnswer, type Route } from "@mo
 import { Unavailable } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import type { Binding, ClientBindings, SenderBindings } from "@mod/sender-binding";
-import type { Tokens } from "@mod/tokens";
+import type { IssuanceFencing, Tokens } from "@mod/tokens";
 import { challenged, oauthError, refusedAuthenticationAnswer } from "../answers/answers.ts";
 import events from "../audit-events.ts";
 import { identifiedClient, identifierOf } from "../identified/identified.ts";
 import { answeredBody } from "./answer.ts";
-import { issuanceFor, refusedAnswer } from "./issuance.ts";
+import { bundleOf, type IssuedBundle, issuanceFor, refusedAnswer } from "./issuance.ts";
 
 export const tokenPath = "/oauth/token";
 
@@ -52,12 +52,12 @@ export function grantInputOf(parts: {
 	readonly targets: TargetRule;
 	readonly tokens: Tokens;
 	readonly told: readonly SessionIssuance[];
-	/** Told the names of the claims the grant added to each token issued. */
-	readonly added?: (names: readonly string[]) => void;
+	/** Where each token issued notes its subject and the names of the claims the grant added. */
+	readonly bundle?: IssuedBundle;
 	/** What the grant's own `identify` answered with the client; none for a client that authenticated. */
 	readonly identified?: unknown;
 }): GrantInput {
-	const { request, client, grantType, binding, targets, tokens, told, added, identified } = parts;
+	const { request, client, grantType, binding, targets, tokens, told, bundle, identified } = parts;
 	const { param, value } = readerOf(request);
 	return {
 		request,
@@ -67,7 +67,7 @@ export function grantInputOf(parts: {
 		target: (audience, within) => targets.target({ param, audience, within }),
 		...(binding ? { binding } : {}),
 		...(identified === undefined ? {} : { identified }),
-		...issuanceFor(tokens, grantType, binding, told, added),
+		...issuanceFor(tokens, grantType, binding, told, bundle),
 	};
 }
 
@@ -95,6 +95,7 @@ const namesOf = (names: ReadonlySet<string>) => {
 export interface EndpointParts {
 	readonly clients: Clients;
 	readonly tokens: Tokens;
+	readonly fencing: IssuanceFencing;
 	readonly told: readonly SessionIssuance[];
 	readonly bindings: SenderBindings;
 	readonly required: ClientBindings;
@@ -105,7 +106,7 @@ export interface EndpointParts {
 
 /** The endpoint's handler and its answer to Unavailable. */
 export function tokenEndpoint(parts: EndpointParts): Pick<Route, "handle" | "unavailable"> {
-	const { clients, tokens, told, bindings, required, grants, targets, audit } = parts;
+	const { clients, tokens, fencing, told, bindings, required, grants, targets, audit } = parts;
 	const recorded = declaredAudit(audit, events);
 	/** A grant's error as answered; a `401` carries the challenges given. */
 	const grantError = (
@@ -134,11 +135,17 @@ export function tokenEndpoint(parts: EndpointParts): Pick<Route, "handle" | "una
 		const identified = identifier ? { identified: "grant" } : {};
 		const source = determinedSource(request);
 		// Once the client is known, each answer but an unavailable one is recorded; a known grant type is named.
-		// The claims grants added to the tokens issued for this request, by name; never their values.
-		const addedNames = new Set<string>();
+		// What the grant issued for this request: its subjects, and the claims it added by name, never their values.
+		const bundle = bundleOf();
 		const record = (
 			grantType: string | undefined,
-			failure?: { reason: string; error: string; policy?: string; refusal?: string },
+			failure?: {
+				reason: string;
+				error: string;
+				policy?: string;
+				refusal?: string;
+				fence?: string;
+			},
 		) => {
 			const attributes = {
 				...(client === undefined ? {} : { client: client.id }),
@@ -149,7 +156,9 @@ export function tokenEndpoint(parts: EndpointParts): Pick<Route, "handle" | "una
 			if (failure)
 				recorded.record("token.issued.failure", { attributes: { ...attributes, ...failure } });
 			else {
-				recorded.record("token.issued", { attributes: { ...attributes, ...namesOf(addedNames) } });
+				recorded.record("token.issued", {
+					attributes: { ...attributes, ...namesOf(bundle.added) },
+				});
 			}
 		};
 		const refuse = (failure: {
@@ -267,10 +276,8 @@ export function tokenEndpoint(parts: EndpointParts): Pick<Route, "handle" | "una
 		const { grant, grantType, binding, identifiedBy } = admission;
 		client = admission.client;
 		const input = grantInputOf({
-			...{ request, client, grantType, binding, targets, tokens, told, identified: identifiedBy },
-			added: (names) => {
-				for (const name of names) addedNames.add(name);
-			},
+			...{ request, client, grantType, binding, targets, tokens, told, bundle },
+			identified: identifiedBy,
 		});
 		const outcome = await grant.handle(input);
 		// One answer for every grant; the audit names the policy and its reason, never a value.
@@ -283,6 +290,18 @@ export function tokenEndpoint(parts: EndpointParts): Pick<Route, "handle" | "una
 		if (outcome.kind === "error") {
 			record(grantType, { reason: "grant_refused", error: outcome.error });
 			return grantError(outcome, challenges);
+		}
+		const [subject, ...more] = bundle.subjects;
+		if (subject === undefined || more.length > 0) {
+			throw new Error(
+				`token-endpoint: ${grantType} answered credentials not issued under one subject`,
+			);
+		}
+		const fenced = await fencing.pass({ subject });
+		if (fenced.kind === "refused") {
+			const { fence, description } = fenced;
+			record(grantType, { reason: "issuance_fenced", error: "invalid_grant", fence });
+			return oauthError(400, "invalid_grant", description);
 		}
 		record(grantType);
 		return jsonAnswer(200, answeredBody(outcome.body));

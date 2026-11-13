@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Writes the generated references, configuration (with each package's defaults), audit events, routes, the attack surface and the audit index's cards and dependencies, into the workspace this package lies in. */
+/** Writes the generated references, configuration (with each package's defaults), audit events, routes, the attack surface, the audit index's cards and dependencies, and the wiring reference, into the workspace this package lies in. */
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { readWorkspace } from "@mod/guard-imports";
@@ -22,6 +22,7 @@ import {
 	sectionsIn,
 } from "./configuration.ts";
 import { routesFile, routesIn, routesOf } from "./routes.ts";
+import { wiringsFile, wiringsIn, wiringsOf } from "./wirings/wirings.ts";
 
 const root = join(import.meta.dirname, "..", "..", "..", "..");
 // Read once, for every reference below.
@@ -40,3 +41,4 @@ const entries = auditIndexIn(root, packages);
 await mkdir(dirname(cardsFile(root)), { recursive: true });
 await writeFile(cardsFile(root), cardsOf(entries));
 await writeFile(dependenciesFile(root), dependenciesOf(entries));
+await writeFile(wiringsFile(root), wiringsOf(wiringsIn(packages)));

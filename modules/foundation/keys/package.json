@@ -12,8 +12,11 @@
 	"dependencies": {
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
-		"jose": "6.2.13",
+		"jose": "6.2.15",
 		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"@mod/http-server": "workspace:*"
 	},
 	"takenBy": {
 		"accessTokenSigning": [

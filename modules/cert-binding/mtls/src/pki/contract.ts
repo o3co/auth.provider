@@ -1,3 +1,5 @@
+import type { SignatureAlgorithm } from "@mod/x509-path";
+
 /** What a client certificate is held to. */
 export interface PathPolicy {
 	/** Trust anchors (DER); a peer never sends one that counts. */
@@ -5,6 +7,8 @@ export interface PathPolicy {
 	/** At most this many certificates between the leaf and an anchor. */
 	readonly maxIntermediates: number;
 	readonly minRsaBits: number;
+	/** The signature algorithms taken on the path, its CRLs and OCSP answers, anchors aside. */
+	readonly signatureAlgorithms: readonly SignatureAlgorithm[];
 }
 
 export interface RevocationPolicy {
@@ -17,6 +21,8 @@ export interface RevocationPolicy {
 	readonly crlTtlMs: number;
 	/** How long a source that failed is not asked again. */
 	readonly failureMs: number;
+	/** How long one fetch may take; a fetched CRL waits no longer for its turn to be read. */
+	readonly timeoutMs: number;
 	readonly crlEntries: number;
 	readonly ocspEntries: number;
 	/** How many sources one check may fetch from; past them, what is left is unconfirmed. */

@@ -24,6 +24,7 @@ import {
 	signedOutbound,
 } from "./contract.ts";
 import { sentRequest } from "./credential/credential.ts";
+import { crlFetchOf } from "./crl-fetch/crl-fetch.ts";
 import {
 	inProcessPool,
 	LookupRefused,
@@ -34,8 +35,18 @@ import {
 } from "./lookups/contract.ts";
 import { plainIpv4Rules, plainIpv4Setting, takesIpv4 } from "./plain-ipv4.ts";
 import { type ResolverPool, resolverPool } from "./resolver-process/contract.ts";
-import type { Tls } from "./tls/tls.ts";
-import { type Lookup, type Resolver, type Route, send, systemLookup } from "./transport.ts";
+import { noticesOver } from "./revocation/notices.ts";
+import { type Fetched, revocationOver, storeTrust, type Verdict } from "./revocation/revocation.ts";
+import { revocationSection, startWarnings } from "./revocation/settings.ts";
+import { peerChainOf, type Tls } from "./tls/tls.ts";
+import {
+	type Lookup,
+	type PeerCheck,
+	type Resolver,
+	type Route,
+	send,
+	systemLookup,
+} from "./transport/transport.ts";
 
 export const section = policySettings
 	.safeExtend({
@@ -87,6 +98,7 @@ export const section = policySettings
 			.describe(
 				"Names resolving at once, the outside party's half among them; one more is unavailable at once. Four by default, never more than max-concurrent.",
 			),
+		revocation: revocationSection,
 	})
 	.refine((s) => s["max-lookups"] === undefined || s["max-lookups"] <= s["max-concurrent"], {
 		message: "max-lookups is never more than max-concurrent",
@@ -162,6 +174,18 @@ export class NotTheFloor extends TypeError {
 	}
 }
 
+/** What the paths log by, their clock, and the signal that ends what runs in the background. */
+export interface Runtime {
+	readonly log?: {
+		warn(event: string, fields: Readonly<Record<string, string | number>>): void;
+		debug(event: string, fields: Readonly<Record<string, string | number>>): void;
+	};
+	readonly now?: () => number;
+	/** The kernel's monotonic time, which holds a checked TLS connection to its deadline. */
+	readonly monotonic?: () => number;
+	readonly stopping?: AbortSignal;
+}
+
 /** The outbound paths over a resolver; the module passes the system's, a test its own. */
 /** `deadlineOf` makes a request's one deadline; a test gives one it fires itself. */
 export function outboundOver(
@@ -173,6 +197,7 @@ export function outboundOver(
 	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
 	/** In this process, the lookups at once; else as the settings and the threadpool give. */
 	lookupsAtOnce?: number,
+	runtime: Runtime = {},
 ): Paths {
 	// A copy of the floor, or another's value, may carry a weaker one: tls-options' own alone is taken.
 	// Each read once, so what was checked is what is sent: the caller's object is never read again.
@@ -200,6 +225,22 @@ export function outboundOver(
 					direct: (host) => policy.listed(host, direct),
 				};
 	const requestPlace = places(settings["max-concurrent"]);
+	const check = peerCheckOf(settings, checked, {
+		...runtime,
+		fetch: crlFetchOf(
+			settings.revocation.hosts,
+			policy,
+			route,
+			resolverOf(outside),
+			checked,
+			deadlineOf,
+		),
+		// A refresh takes a place of its own where one is free, else waits for the next check.
+		inBackground: (refresh) => {
+			const stopping = runtime.stopping ?? new AbortController().signal;
+			requestPlace(() => refresh(stopping)).catch(() => {});
+		},
+	});
 	const go = async (url: string, request: OutboundRequest, narrower: Narrower, signed: boolean) => {
 		const limits = policy.limitsOf(narrower, signed);
 		const sent = sentRequest(request, signed);
@@ -211,7 +252,18 @@ export function outboundOver(
 			takesIpv4(settings["plain-ipv4"], admitted) ? 4 : undefined,
 		);
 		return requestPlace(() =>
-			send(admitted, sent, limits, resolving, policy, route, checked, deadlineOf),
+			send(
+				admitted,
+				sent,
+				limits,
+				resolving,
+				policy,
+				route,
+				checked,
+				deadlineOf,
+				check,
+				runtime.monotonic,
+			),
 		);
 	};
 	return {
@@ -224,6 +276,50 @@ export function outboundOver(
 		// The call `go` cuts a request by, for a plain request.
 		limitsOf: (narrower) => policy.limitsOf(narrower, false),
 		lookupsOf: (narrower) => (narrower?.outsideChosen ? pools.shares.outside : pools.shares.own),
+	};
+}
+
+/**
+ * The check of a peer's revocation each TLS request waits on, none where no CRL host is listed. It
+ * warns of what is not good and lets the request go, whatever it finds (0.20).
+ */
+function peerCheckOf(
+	settings: z.output<typeof section>,
+	tls: Tls,
+	runtime: Runtime & {
+		fetch(url: string, signal: AbortSignal): Promise<Fetched>;
+		inBackground(refresh: (signal: AbortSignal) => Promise<unknown>): void;
+	},
+): PeerCheck | undefined {
+	const r = settings.revocation;
+	if (r.hosts.length === 0) return undefined;
+	const now = runtime.now ?? Date.now;
+	const revocation = revocationOver({
+		trust: storeTrust(tls.ca),
+		hosts: r.hosts,
+		crlEntries: r["crl-entries"],
+		fetching: {
+			fetch: runtime.fetch,
+			inBackground: runtime.inBackground,
+			now,
+			failureMs: r["failure-lifetime"],
+			crlTtlMs: r["crl-ttl"],
+		},
+	});
+	const quiet = { warn: () => {}, debug: () => {} };
+	const notice = noticesOver(runtime.log ?? quiet, now, r["accept-unconfirmed"]);
+	return async (socket, signal) => {
+		let verdict: Verdict;
+		try {
+			const chain = peerChainOf(socket);
+			verdict = chain
+				? await revocation.check(chain.leaf, chain.sent, signal)
+				: { kind: "unconfirmed", reason: "path" };
+		} catch {
+			// Material that cannot be read is unconfirmed, never the request's failure.
+			verdict = { kind: "unconfirmed", reason: "malformed" };
+		}
+		notice(verdict);
 	};
 }
 
@@ -281,10 +377,23 @@ export default defineModule(
 	(m) => [
 		m.provide(paths).by(async (c) => {
 			const tls = { floor: await c.get(tlsOptions) };
+			// What runs in the background, a CRL's refresh, ends as the app stops.
+			const stopping = new AbortController();
+			c.onStop(async () => stopping.abort());
+			const monotonic = c.clock.monotonic;
+			const runtime: Runtime = {
+				log: {
+					warn: (event, fields) => c.log.warn(event, fields),
+					debug: (event, fields) => c.log.debug(event, fields),
+				},
+				now: () => c.clock.now(),
+				...(monotonic ? { monotonic: () => monotonic.call(c.clock) } : {}),
+				stopping: stopping.signal,
+			};
 			/** The paths over these lookups, a floor not tls-options' own refusing boot as composed wrong. */
 			const over = (lookups: LookupPools | Lookup) => {
 				try {
-					return outboundOver(c.section, lookups, tls);
+					return outboundOver(c.section, lookups, tls, undefined, undefined, runtime);
 				} catch (error) {
 					if (error instanceof NotTheFloor) return c.refuse("outbound", error.message);
 					throw error;
@@ -322,6 +431,7 @@ export default defineModule(
 					});
 				}
 			}
+			for (const [event, fields] of startWarnings(c.section.revocation)) c.log.warn(event, fields);
 			const present = proxyVariables.filter((name) => (process.env[name] ?? "") !== "");
 			if (proxy === undefined && present.length > 0 && !c.section["direct-despite-proxy"]) {
 				c.refuse(

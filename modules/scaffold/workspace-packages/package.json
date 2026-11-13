@@ -1,0 +1,16 @@
+{
+	"name": "@mod/workspace-packages",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "assembly",
+	"exports": {
+		".": "./src/contract.ts"
+	},
+	"dependencies": {
+		"yaml": "2.9.1"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5"
+	}
+}

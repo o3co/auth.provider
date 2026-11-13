@@ -26,7 +26,7 @@ Internal module of `consent`: the two routes the deployment's consent page calls
 - After a `503`, resending the same POST is the only way to recover, as the page may no longer show the challenge.
 - The page shows a pending consent only while its client exists and, for a client from another source, only while its section says the `under` the pending consent holds.
 - An answer is taken on the same terms, so a stale page replaces no newer grant, and leaves the challenge unanswered: `unknown_challenge`, a resend's too. An acceptance writes under the `under` the pending consent holds.
-- An event is recorded for every completed answer, resends included.
+- An event is recorded for every completed answer, resends included. A refused acceptance, its grant refused as its subject was erased meanwhile, is no completed answer: it is answered `401 no_session`, as the erasure ended the sessions, records nothing and sends on nothing; the pending consent stays marked `accept`, with no grant.
 - An acceptance is recorded only after its grant is written.
 
 ## Depends on

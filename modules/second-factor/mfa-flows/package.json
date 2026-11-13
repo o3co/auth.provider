@@ -15,6 +15,7 @@
 		"@mod/audit": "workspace:*",
 		"@mod/cookies": "workspace:*",
 		"@mod/csrf": "workspace:*",
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/login-gates": "workspace:*",
@@ -29,6 +30,8 @@
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
+		"@mod/erasure-extensions": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/login-attributes": "workspace:*",
 		"@mod/mfa-binding": "workspace:*",
 		"@mod/mfa-binding-proof": "workspace:*",

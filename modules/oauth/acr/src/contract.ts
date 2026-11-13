@@ -4,7 +4,10 @@ import { z } from "zod";
 /** The amr sets that meet an acr: a session holding all of any one set meets it. */
 export type AmrSets = readonly (readonly string[])[];
 
-/** The one rule for amr sets, the operator's and the offered alike: non-empty sets in a non-empty list. */
+/**
+ * The one rule for amr sets, the operator's and the offered alike: non-empty sets in a non-empty list.
+ * @deprecated The schema behind `isAmrSets`; use `isAmrSets`. A later release removes it.
+ */
 export const amrSetsShape = z.array(z.array(z.string()).min(1)).min(1);
 
 export const isAmrSets = (sets: unknown): sets is AmrSets => amrSetsShape.safeParse(sets).success;

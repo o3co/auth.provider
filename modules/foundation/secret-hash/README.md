@@ -11,13 +11,13 @@
 - `readSecretHash` (text → hash or none), the only maker of a hash; a hash names its `work`, alike for hashes that take equal work.
 - `secretCheckers`: `checkerOf` (the hashes in use) → a checker, `check` (hash or none, secret → matched or not), its decoys from the kernel's random; every checker one assembly makes shares that assembly's `max-concurrent`, apart from any other assembly's.
 - Operator section `max-concurrent`: how many checks run at once in the assembly, every checker it makes together (1–1024, default 8).
-- `./testing`: bcrypt and scrypt hashes at the cheapest work, a 72-byte secret, and a checker recording the work of each computation.
+- `./testing`: bcrypt and scrypt hashes at the cheapest work (`testBcryptHash`, `testScryptHash`), a 72-byte secret (`seventyTwoBytes`), and `recordingChecker`, a checker recording the work of each computation.
 
 ## Invariants
-- A hash is bcrypt (`$2a$`, `$2b$`, `$2y$`; cost 4–14; its unused final bits zero) or scrypt (`$scrypt$ln=,r=,p=$salt$key`, in strict base64 without padding); anything else, plain text included, is none.
+- A hash is bcrypt (`$2a$`, `$2b$`, `$2y$`; cost 4–14, fixed with scrypt's 128 MiB below to bound the work one check may demand, so a hash brought from elsewhere past them does not match; its unused final bits zero) or scrypt (`$scrypt$ln=,r=,p=$salt$key`, in strict base64 without padding); anything else, plain text included, is none.
 - scrypt's parameters come from the hash: ln 10 or more and below 16·r (Node's limit), at most 128 MiB per run, p at most 2, salt 16 to 64 bytes and key 32 to 64.
 - The minimum is legacy's for bcrypt (scrypt, which legacy did not read, starts at ln 10); the strength is the operator's choice.
-- A secret is compared as its UTF-8 bytes, with no Unicode normalization. One over 1024 bytes never matches, before any computation; past 72 bytes it never matches a bcrypt hash.
+- A secret is compared as its UTF-8 bytes, with no Unicode normalization. One over 1024 bytes never matches, before any computation, a fixed bound far past a generated secret's length; past 72 bytes it never matches a bcrypt hash.
 - Each check computes once per kind of work in use: the hash for its own kind, a decoy of that work (its answer dropped) for every other, so a check without a hash takes the same work as one with it.
 - A hash whose work is not in use is computed besides the decoys; with no hash in use, a check without one computes nothing.
 - A check past `max-concurrent` is unavailable before any computation; a secret over 1024 bytes takes no place, and a check keeps its place until each of its computations ends.

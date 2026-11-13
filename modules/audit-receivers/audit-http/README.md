@@ -12,7 +12,7 @@
 - Composition definition: the receiver `http`.
 - Operator section: `url` (required), an http or https URL as `url-setting` takes it.
 - Operator section: `authorization` (optional), the whole value of the Authorization header the collector asks for, a secret.
-- Test configuration builders (`./testing`): an https URL and a new Authorization value, unless a test sets them.
+- `./testing`: `auditHttpConfig`, a test configuration builder: an https URL and a new Authorization value, unless a test sets them.
 
 ## Invariants
 - One request per event: `POST`, `content-type: application/json`, and the event as one JSON object, values included.

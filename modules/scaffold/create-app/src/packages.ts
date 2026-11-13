@@ -10,8 +10,8 @@ import {
 	type Sampled,
 	sampleFile,
 } from "@mod/app-output";
-import { bundlesIn, type Outside, type Read } from "./outside/contract.ts";
-import { dependenciesOf, workspacePackages } from "./project.ts";
+import { bundlesIn, declaredRanges, type Outside, type Read } from "./outside/contract.ts";
+import { dependenciesOf, packageDirsIn } from "./project.ts";
 
 /** Where an entry's files lie in the app: under `node_modules`, the entry's own path. */
 const installed = (
@@ -98,7 +98,7 @@ export function packagesFor(plan: { readonly workspace?: string }, index = bundl
 	let listed: Map<string, string> | undefined;
 	// Listed on first use: a target refused as it is written reads no workspace.
 	const dirs = () => {
-		listed ??= workspacePackages(root);
+		listed ??= packageDirsIn(root);
 		return listed;
 	};
 	return {
@@ -219,10 +219,15 @@ export function publishedIn(index: Indexed, beside?: Beside): Packages {
 			const modules = names.flatMap((name) => outside.get(name)?.record ?? []);
 			if (modules.length === 0 || beside === undefined) return undefined;
 			const fresh = (beside.fresh ?? []).filter((name) => names.includes(name));
+			// A dependency let through goes with the packages of this plan that declare it.
+			const freshDependencies = (beside.read.freshDependencies ?? []).filter((dependency) =>
+				modules.some((record) => declaredRanges(record, dependency.name).length > 0),
+			);
 			return {
 				modules,
 				registries: beside.read.registries,
 				...(fresh.length > 0 ? { fresh } : {}),
+				...(freshDependencies.length > 0 ? { freshDependencies } : {}),
 			};
 		},
 	};

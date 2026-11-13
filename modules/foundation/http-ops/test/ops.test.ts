@@ -1,6 +1,6 @@
 import { routes } from "@mod/http";
 import { BootRefused, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { metrics } from "@mod/metrics";
 import metricsModule from "@mod/metrics/module";
 import { describe, expect, it } from "vitest";
@@ -105,6 +105,31 @@ describe("request duration", () => {
 		const { app, end } = await assembled([metricsModule, handlers], runtime);
 		end({ method: "GET", route: "/slow", status: "closed", ms: 0 });
 		expect(seriesOf(app)["GET /slow 499"]?.count).toBe(1);
+	});
+
+	it("writes each end at debug as http.request, with the method and route labelled and no value the request brought", async () => {
+		const recorded = recordingLog();
+		const { end } = await assembled(
+			[metricsModule, handlers],
+			quietRuntime({ clock: { now: () => 0 }, log: recorded.log }),
+		);
+		end({ method: "GET", route: "/slow", status: 204, ms: 30 });
+		end({ method: "PROPFIND", status: 405, ms: 1 });
+		end({ method: "POST", route: "/items/*", status: "closed", ms: 2 });
+		expect(recorded.lines().filter((line) => line.event === "http.request")).toEqual([
+			expect.objectContaining({
+				level: "debug",
+				fields: { method: "GET", route: "/slow", status: 204, ms: 30 },
+			}),
+			expect.objectContaining({
+				level: "debug",
+				fields: { method: "other", route: "unmatched", status: 405, ms: 1 },
+			}),
+			expect.objectContaining({
+				level: "debug",
+				fields: { method: "POST", route: "/items/*", status: "closed", ms: 2 },
+			}),
+		]);
 	});
 
 	it("drops a status outside its labels without throwing", async () => {

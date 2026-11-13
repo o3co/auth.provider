@@ -11,6 +11,7 @@ Internal module of `client-assertion`: the client metadata section that holds a 
 
 ## Offers
 - `clientKeys`, the section; `keysOf` (the section) → where the keys come from; `clientKeysIn` (the build context) → the section with its boot check, `outbound`'s refusals taken from the composition.
+- `unreadKeys` (the section, the algorithms taken) → the places (`keys.<n>`) of the written keys none of them reads.
 
 ## Invariants
 - A written key is a public RSA, EC or OKP key for verifying signatures, read by `keys`' rules; written keys and a key set's URL are never both given.

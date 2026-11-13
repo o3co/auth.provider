@@ -1,5 +1,6 @@
 import { contract } from "@mod/kernel";
 
+export { longestUsedMs } from "./section.ts";
 export { type UsedIdTokens, usedIdTokens, usedIdTokensNeeds } from "./store.ts";
 
 /** An id_token taken: the account users links its upstream subject to, and the one client of this provider it is for. */

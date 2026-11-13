@@ -44,7 +44,7 @@ The browser sends the session's cookie with it. `200`, never cached:
 | Answer | What the page does |
 |---|---|
 | `200` | Show the client and the scopes, and ask the user. |
-| `401 {"error": "no_session"}` | The browser holds no session: the user signed out or it expired. Say so; the client can start again. |
+| `401 {"error": "no_session"}` | The browser holds no session: the user signed out, it expired, or its account was erased. Say so; the client can start again. |
 | `400 {"error": "unknown_challenge"}` | The challenge is unknown, expired, already answered, or another session's, or the client's document changed since it was asked. Say so; the client can start again. |
 | `503 {"error": "temporarily_unavailable"}` | Try again later. |
 
@@ -63,7 +63,7 @@ challenge=<the challenge>&decision=accept&csrf_token=<csrf_token>
 | Answer | What the page does |
 |---|---|
 | `303` | Nothing: the browser follows it back to the authorization endpoint, which goes on to the client with a code, or with `access_denied` after a denial. Post as a form navigation, so the browser follows it. |
-| `401 {"error": "no_session"}` | As above: the browser holds no session. |
+| `401 {"error": "no_session"}` | As above: the browser holds no session, or its account was erased. |
 | `400 {"error": "unknown_challenge"}` | As above, a document changed since the challenge was made among them, and nothing is written. Sending the other decision for an answered challenge gets this too. |
 | `400` `invalid_decision` or `repeated_parameter` | The request is malformed: fix the page. The challenge stays usable. |
 | `403 {"error": "csrf"}` | Get a new token, then post again. The challenge stays usable. |

@@ -25,6 +25,8 @@ export interface FactorParts {
 
 export const byKind = (kinds: readonly FactorKind[]) => new Map(kinds.map((k) => [k.kind, k]));
 export const addsMfa = (kind: FactorKind) => kind.addsSecondFactor;
+/** A composed kind this deployment does not take: under required, one whose proof adds no `mfa`. */
+export const leftOut = (kind: FactorKind, required: boolean) => required && !addsMfa(kind);
 /** Whether guessing can beat the kind: unless it says no, as 0.17 took it, so a kind that says nothing is held to the stricter side. */
 export const guessing = (kind: FactorKind) => kind.guessable !== false;
 /** A proof's own amr kept to its kind's, else its kind's, and `mfa` when the kind adds it. */

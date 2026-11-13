@@ -21,7 +21,7 @@ function permits() {
 it("grants a session a release that one proof can use, keeping what it answered", async () => {
 	const { permits: p } = permits();
 	expect(await p.of("h1")).toEqual({ kind: "none" });
-	await p.grant("h1");
+	await p.grant("h1", "alice");
 	const ready = await p.of("h1");
 	if (ready.kind !== "ready") throw new Error(ready.kind);
 	expect(await p.of("h2")).toEqual({ kind: "none" });
@@ -33,12 +33,12 @@ it("grants a session a release that one proof can use, keeping what it answered"
 
 it("replaces a session's permit with a later proof's, used or not, under a new id", async () => {
 	const { permits: p } = permits();
-	await p.grant("h1");
+	await p.grant("h1", "alice");
 	const first = await p.of("h1");
 	if (first.kind !== "ready") throw new Error(first.kind);
 	await p.use("h1", first, { lock: "released" });
 	now += 1000;
-	await p.grant("h1");
+	await p.grant("h1", "alice");
 	const second = await p.of("h1");
 	if (second.kind !== "ready") throw new Error(second.kind);
 	expect(second.id).not.toBe(first.id);
@@ -49,19 +49,29 @@ it("replaces a session's permit with a later proof's, used or not, under a new i
 
 it("lets a permit lapse once its proof is no longer recent, and drops it an hour after the first", async () => {
 	const { permits: p } = permits();
-	await p.grant("h1");
+	await p.grant("h1", "alice");
 	now += 60_001;
 	expect(await p.of("h1")).toEqual({ kind: "none" });
-	await p.grant("h1");
+	await p.grant("h1", "alice");
 	expect((await p.of("h1")).kind).toBe("ready");
 	now += 3_600_000 - 60_001;
 	expect(await p.of("h1")).toEqual({ kind: "none" });
-	await p.grant("h1");
+	await p.grant("h1", "alice");
 	expect((await p.of("h1")).kind).toBe("ready");
 });
 
 it("keeps the session's handle out of the store's names", async () => {
 	const { store, permits: p } = permits();
-	await p.grant("handle-in-clear");
+	await p.grant("handle-in-clear", "alice");
 	expect(store.peek("handle-in-clear")).toBeUndefined();
+});
+
+it("keeps no permit granted after the subject's erasure, and refuses one kept past the store's bound", async () => {
+	const { store, permits: p } = permits();
+	store.erased.transactions.add("erin");
+	await p.grant("h9", "erin");
+	expect(await p.of("h9")).toEqual({ kind: "none" });
+	expect(store.saves.count).toBe(0);
+	const over = { store: store.transactions, clock, recent: () => true, keepMs: 3_600_001 };
+	expect(() => permitsOver(over)).toThrow(TypeError);
 });

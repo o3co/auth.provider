@@ -6,6 +6,7 @@ import linkModule from "@mod/federation-link/module";
 import { listening, type Route, requestEnds, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	BootRefused,
@@ -157,6 +158,7 @@ async function serve(setup: Setup = {}) {
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			...(setup.withoutCsrf ? [] : [csrfStandIn]),
 			cookiesModule,
 			gatesModule,
@@ -286,6 +288,7 @@ async function serve(setup: Setup = {}) {
 		contextOf,
 		achievable,
 		asked: idp.asked,
+		down: idp.down,
 		events: audit.events,
 	};
 }
@@ -363,6 +366,43 @@ describe("federation", () => {
 		const before = s.events.length;
 		await s.callback(`code=good&state=${state}&iss=https://idp.example`, `${session}; ${cookie}`);
 		expect(s.events.slice(before).map((e) => e.kind)).not.toContain("federation.login.succeeded");
+	});
+
+	it("is unavailable while its upstream cannot build a start, setting no cookie, and starts once it can", async () => {
+		const s = await serve();
+		s.down.starts = true;
+		const res = await s.begin();
+		expect([res.status, res.body, res.cookies]).toEqual([
+			503,
+			{ error: "temporarily_unavailable" },
+			[],
+		]);
+		s.down.starts = false;
+		const started = await s.begin();
+		expect([started.status, started.cookie !== ""]).toEqual([302, true]);
+	});
+
+	it("is unavailable, setting no cookie, where it goes on with a live round trip its upstream cannot build a start for", async () => {
+		const s = await serve();
+		const first = await s.begin();
+		const loggedIn = await s.callback(
+			`code=good&state=${first.state}&iss=https://idp.example`,
+			first.cookie,
+		);
+		const session = loggedIn.cookies.filter((c) => !c.includes("federation.corp=")).join("; ");
+		const linking = await s.get(`${base}/corp?link=1`, session, {
+			"sec-fetch-site": "same-origin",
+		});
+		const cookie = linking.cookies.find((c) => c.includes("federation.corp")) ?? "";
+		s.down.starts = true;
+		const again = await s.get(`${base}/corp`, `${session}; ${cookie}`, {
+			"sec-fetch-site": "cross-site",
+		});
+		expect([again.status, again.body, again.cookies]).toEqual([
+			503,
+			{ error: "temporarily_unavailable" },
+			[],
+		]);
 	});
 
 	it("begins anew where the browser's live round trip carries what federation does not read", async () => {

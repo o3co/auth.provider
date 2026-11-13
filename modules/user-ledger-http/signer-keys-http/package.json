@@ -23,6 +23,7 @@
 		"@mod/clients": "workspace:*",
 		"@mod/external-jwt": "workspace:*",
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
@@ -31,6 +32,6 @@
 		"@mod/tls-options": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/tokens": "workspace:*",
-		"jose": "6.2.13"
+		"jose": "6.2.15"
 	}
 }

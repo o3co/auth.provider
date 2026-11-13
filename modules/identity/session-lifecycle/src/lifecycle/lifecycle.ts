@@ -14,7 +14,7 @@ import {
 	sessionRules,
 } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
-import { keptAtLogin, keptAttributes } from "../attributes.ts";
+import type { AttributesKeeping } from "../attributes.ts";
 import type {
 	ChangedSession,
 	ClosingList,
@@ -24,7 +24,7 @@ import type {
 	SubjectSessions,
 } from "../store.ts";
 import { listingOver } from "./listing/listing.ts";
-import { fromStored, type SessionRecord, toStored } from "./record.ts";
+import { closedFrom, fromStored, type SessionRecord, toStored } from "./record.ts";
 import { retryingWith } from "./retrying.ts";
 import { freshToken, secretsWith } from "./secrets.ts";
 
@@ -46,6 +46,7 @@ export interface LifecycleParts {
 	readonly log: Log;
 	readonly lifetimeMs: number;
 	readonly sweepMs: number;
+	readonly attributes: AttributesKeeping;
 	/** Whether a time is within the recent-authentication window, the floor's for changing credentials. */
 	readonly recent: (at: number) => boolean;
 }
@@ -56,6 +57,7 @@ export interface Lifecycle {
 	secretIn(request: HttpRequest): string | undefined;
 	/** The record, while it is open and after the subject's revocation boundary. */
 	liveAt(handle: string): Promise<OpenRecord | undefined>;
+	subjectOf(handle: string): Promise<string | undefined>;
 	entryAt(handle: string, level: EntryLevel): Promise<Entry>;
 	entryIn(request: HttpRequest, level: EntryLevel): Promise<Entry>;
 	/** As `open` over the request's earlier session, the proof's start compared once saved. */
@@ -90,7 +92,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		close: (handle) => close(handle),
 	});
 	const contextOf = (record: AuthContext): AuthContext => {
-		const attributes = keptAttributes(record.attributes);
+		const attributes = parts.attributes.read(record.attributes);
 		return Object.freeze({
 			subject: record.subject,
 			amr: Object.freeze([...record.amr]),
@@ -106,18 +108,18 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 	const sessionOf = (handle: string, record: AuthContext): Session =>
 		Object.freeze({ id: handle, context: contextOf(record) });
 	const endedAt = (record: OpenRecord, at: number) => record.openedAt + lifetimeMs <= at;
-	/** Closed, and kept for the lifetime from now. */
+	/** Closed, keeping only its subject and what 0.19 reads, for the lifetime from now. */
 	const closedOf = (was: SessionRecord): ChangedSession => ({
-		value: toStored({ ...was, state: "closed" }),
+		value: toStored(closedFrom(was)),
 		lifetimeMs,
 	});
-	/** Goes on only when the place answered created; anything else is unavailable. */
-	const created = async (saving: Promise<"created" | "exists">) => {
+	/** Goes on only when the place answered created; anything else, `erased` included, is unavailable, never tried again. */
+	const created = async (saving: Promise<"created" | "exists" | "erased">) => {
 		if ((await saving) !== "created") throw new Unavailable("session");
 	};
 	/**
-	 * Moves forward to `target`, never back, always writing to confirm it; a missing record is marked
-	 * closed. Answers the record after, and the state it was found in (none when there was no record).
+	 * Moves forward to `target`, never back, always writing to confirm it; closed, writing nothing, where
+	 * the update answers nothing. Answers the record after, and the state it was found in (none if none).
 	 */
 	const advance = async (
 		handle: string,
@@ -144,10 +146,8 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 			}
 			return { record: after, from: before.state };
 		}
-		const mark: SessionRecord = { format: 2, state: "closed" };
-		// A record placed meanwhile is moved on when the close is asked again.
-		await created(kept.save(handle, toStored(mark), lifetimeMs));
-		return { record: mark };
+		// Ended, never opened, or its subject erased: a handle is never reissued, so nothing to guard.
+		return { record: { format: 2, state: "closed" } };
 	};
 	const close: Sessions["close"] = async (handle, request) => {
 		const cookies =
@@ -215,6 +215,14 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		const revoked = (await revocation.check(found.subject, found.openedAt)) === "revoked";
 		return revoked ? undefined : found;
 	};
+	/** None where no record is, or it names no subject (a closed mark); a record it cannot read is Unavailable. */
+	const subjectOf = async (handle: string) => {
+		const stored = await kept.read(handle);
+		if (stored === undefined) return undefined;
+		const record = fromStored(stored);
+		if (!record) throw new Unavailable("session");
+		return "subject" in record ? record.subject : undefined;
+	};
 	const entryAt = async (handle: string, level: EntryLevel): Promise<Entry> => {
 		const found = await liveAt(handle);
 		if (!found) return { kind: "absent" };
@@ -241,7 +249,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		// A new session every time, under a new handle: a login never carries on an earlier one.
 		const handle = freshToken(parts.random);
 		const openedAt = clock.now();
-		const attributes = keptAtLogin(facts.attributes, log);
+		const attributes = parts.attributes.atLogin(facts.attributes, log);
 		const context = {
 			subject: facts.subject,
 			amr: [...facts.amr],
@@ -251,14 +259,16 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 			...(attributes === undefined ? {} : { attributes }),
 		};
 		const record: SessionRecord = { format: 2, state: "open", ...context, openedAt };
-		await created(kept.save(handle, toStored(record), lifetimeMs));
+		await created(kept.save(handle, toStored(record), lifetimeMs, facts.subject));
 		// Once saved: a boundary landing after this read is later than the opening, which entry compares.
 		if ((await revocation.check(facts.subject, facts.provenSince)) === "revoked") {
 			await close(handle);
 			return { kind: "revoked" };
 		}
 		// Listed before its cookie is made, so a revocation finds every session anyone can enter.
-		const { pushedOut } = await listed.add(facts.subject, handle, lifetimeMs);
+		const listedAs = await listed.add(facts.subject, handle, lifetimeMs);
+		if (typeof listedAs === "string") throw new Unavailable("session");
+		const { pushedOut } = listedAs;
 		if (pushedOut.length > 0) await listing.closePushedOut(facts.subject, handle, pushedOut);
 		const { cookie } = await issueSecret(handle, lifetimeMs);
 		return { kind: "opened", session: sessionOf(handle, context), cookies: [cookie] };
@@ -267,6 +277,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		handleIn,
 		secretIn,
 		liveAt,
+		subjectOf,
 		entryAt,
 		entryIn,
 		open,

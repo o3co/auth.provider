@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { workspacePackages } from "@mod/workspace-packages";
 import type { Release } from "./publish.ts";
 
 /** The repository URL the workspace's package.json states, as a string or as `{ url }`. */
@@ -33,4 +34,43 @@ export function releaseOf(root: string): Release | undefined {
 		...(notice ? { notice } : {}),
 		...(Array.isArray(workspace.keywords) ? { keywords: workspace.keywords } : {}),
 	};
+}
+
+export interface Member {
+	readonly name: string;
+	readonly dir: string;
+	readonly dependencies: readonly string[];
+}
+
+export interface Bundle {
+	readonly dir: string;
+	readonly shipped: boolean | undefined;
+	readonly members: readonly Member[];
+}
+
+/** Whether the bundle manifest in `dir` ships the bundle; undefined when it is missing or unreadable. */
+function shippedOf(dir: string): boolean | undefined {
+	try {
+		return JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).private === false;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Bundles are the parent directories of the packages the workspace definition places. */
+export function readBundles(root: string): Bundle[] {
+	const groups = Map.groupBy(workspacePackages(root), (entry) => dirname(entry.dir));
+	return [...groups].map(([dir, entries]) => {
+		return {
+			dir,
+			shipped: shippedOf(dir),
+			members: entries.map((entry) => ({
+				name: entry.name,
+				dir: entry.dir,
+				dependencies: Object.keys(
+					JSON.parse(readFileSync(join(entry.dir, "package.json"), "utf8")).dependencies ?? {},
+				),
+			})),
+		};
+	});
 }

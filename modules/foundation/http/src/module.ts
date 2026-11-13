@@ -1,12 +1,16 @@
-import { once } from "node:events";
-import type { AddressInfo } from "node:net";
 import { certificateForwarding } from "@mod/client-certificate";
 import { defineModule } from "@mod/kernel";
 import { proxiesOf } from "@mod/request-source";
-import { listening, marks, policies, requestEnds, routes, site } from "./contract.ts";
-import { brokenGuarantees } from "./guarantees/guarantees.ts";
-import { withPolicies } from "./guards/guards.ts";
-import { drain, serve } from "./serving/server.ts";
+import {
+	type HttpServer,
+	httpServers,
+	listening,
+	type RunningServer,
+	requestEnds,
+	routes,
+	type ServerInput,
+	site,
+} from "./contract.ts";
 import { section } from "./settings/section.ts";
 
 export default defineModule(
@@ -27,7 +31,7 @@ export default defineModule(
 						},
 					]
 				: [],
-		takes: [marks, policies, requestEnds, routes],
+		takes: [httpServers, requestEnds, routes],
 	},
 	(m) => [
 		m.provide(site).by((c) => {
@@ -42,50 +46,38 @@ export default defineModule(
 			.provide(certificateForwarding)
 			.by((c) => Object.freeze({ configured: c.section["client-certificate"] !== undefined })),
 		m.provide(listening).by(async (c) => {
-			const declared = await c.collect(routes);
-			const applied = withPolicies(declared, await c.collect(policies));
-			if (applied.kind === "twice") {
-				return c.refuse("http.policies", `more than one rule for a policy: ${applied.label}`);
-			}
-			if (applied.kind === "missing") {
-				return c.refuseAll(
-					applied.missing.map(({ route, label }) => ({
-						where: `http.routes:${route.method} ${route.path}`,
-						reason: `uses a policy no module applies: ${label}`,
-					})),
-				);
-			}
-			const broken = brokenGuarantees(declared, await c.collect(marks));
-			if (broken.length > 0) {
-				return c.refuseAll(
-					broken.map(({ route, reason }) => ({
-						where: `http.routes:${route.method} ${route.path}`,
-						reason,
-					})),
-				);
-			}
+			// The kernel holds the point to exactly one server.
+			const [server] = (await c.collect(httpServers)) as [HttpServer];
 			const certificate = c.section["client-certificate"];
-			const server = serve({
-				routes: applied.routes,
-				proxies: proxiesOf(c.section, certificate),
-				origins: new Set(c.section["cors-origins"]),
+			const input: ServerInput = {
+				routes: await c.collect(routes),
+				settings: {
+					host: c.section.host,
+					port: c.section.port,
+					proxies: proxiesOf(c.section, certificate),
+					origins: new Set(c.section["cors-origins"]),
+					limits: {
+						headersMs: c.section["headers-timeout"] * 1000,
+						requestMs: c.section["request-timeout"] * 1000,
+						connections: c.section["max-connections"],
+					},
+				},
 				ends: await c.collect(requestEnds),
 				log: c.log,
 				clock: c.clock,
-				limits: {
-					headersMs: c.section["headers-timeout"] * 1000,
-					requestMs: c.section["request-timeout"] * 1000,
-					connections: c.section["max-connections"],
-				},
-			});
-			const port = () => (server.address() as AddressInfo).port;
+			};
+			let running: RunningServer | undefined;
 			c.onStart(async () => {
-				server.listen(c.section.port, c.section.host);
-				await once(server, "listening");
-				c.log.info("http.listening", { port: port() });
+				running = await server.serve(input);
+				c.log.info("http.listening", { port: running.port });
 			});
-			c.onStop((signal) => drain(server, signal));
-			return { port };
+			c.onStop(async (signal) => running?.drain(signal));
+			return {
+				port: () => {
+					if (!running) throw new Error("http is not listening yet");
+					return running.port;
+				},
+			};
 		}),
 	],
 );

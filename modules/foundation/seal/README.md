@@ -12,7 +12,7 @@
 - Operator section: `current` (an id, an `algorithm`, `aes-256-gcm` unless set, and a base64 key of its size, 32 bytes) seals; `next` opens but never seals, so every host opens with it before it seals; `previous` keys open only.
 - Extension point `resealers`: a holder of long-lived sealed values, which walks its own and seals again what is stale, answering how many it sealed again and how many it could not open.
 - `resealing`: runs each resealer in name order and answers its counts, or that it failed (logged by name and kind); the rest still run. Counts alone, never an id or a value.
-- Test configuration builders (`./testing`), with one key per test file.
+- `./testing`: `sealConfig`, a test configuration builder, with one key per test file.
 
 ## Invariants
 - A sealed value is the key's id, a random IV, the body and a tag, sized by the key's algorithm: 12 and 16 bytes for `aes-256-gcm`. Each algorithm is one row of the table its sizes come from, the key's among them.

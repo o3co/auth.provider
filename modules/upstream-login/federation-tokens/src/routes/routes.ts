@@ -13,6 +13,7 @@ import { requestsPerSource } from "@mod/rate-limit";
 import { registrable } from "@mod/redirect-uris";
 import { determinedSource } from "@mod/request-source";
 import { challengeOf } from "@mod/sender-binding";
+import { erasureFence } from "@mod/subject-revocation";
 import { type Upstreams, upstreams } from "@mod/upstreams";
 import { z } from "zod";
 import events from "../audit-events.ts";
@@ -57,6 +58,8 @@ export interface Flow {
 	readonly upstreams: Upstreams;
 	readonly audit: Audit;
 	readonly log: Pick<Log, "warn">;
+	/** The erasure fence for a token answered, one fenced write where erasure is enabled: `erased` where the subject is. */
+	readonly fence: (subject: string) => Promise<"passed" | "erased">;
 }
 
 /** Each outcome short of a token, as the status and error word clients of this route know. */
@@ -135,8 +138,12 @@ export async function federationTokens(flow: Flow, request: HttpRequest): Promis
 				status === 502 ? { headers: { "retry-after": "300" } } : {},
 			);
 		}
-		// The session may have closed, or fallen short of a requirement, while the upstream answered.
-		if (!(await flow.caller.stillEnters(caller))) {
+		// The session may have closed, or fallen short of a requirement, while the upstream answered; a
+		// subject erased by then is answered alike: the answer passes only where its subject is not erased.
+		if (
+			!(await flow.caller.stillEnters(caller)) ||
+			(await flow.fence(caller.subject)) === "erased"
+		) {
 			return jsonAnswer(
 				401,
 				{ error: "invalid_token" },
@@ -189,10 +196,11 @@ async function logout(
 }
 
 /** What `routesIn` takes from the build context, and its caller check's. */
-export const routesTakes = [clients, upstreams, audit, ...callerTakes] as const;
+export const routesTakes = [clients, upstreams, audit, erasureFence, ...callerTakes] as const;
 
 /** The route over the build context, its caller check and its contracts taken here, answering with `renewal`. */
 export async function routesIn(c: BuildContext<Settings>, renewal: Renewal): Promise<Route> {
+	const fenced = await c.get(erasureFence);
 	const flow: Flow = {
 		caller: await callerFrom(c),
 		renewal,
@@ -200,6 +208,9 @@ export async function routesIn(c: BuildContext<Settings>, renewal: Renewal): Pro
 		upstreams: await c.get(upstreams),
 		audit: await c.get(audit),
 		log: c.log,
+		// Each answer's own receipt, written where erasure is enabled: 128 fresh random bits.
+		fence: (subject) =>
+			fenced.fence(subject, Buffer.from(c.random.bytes(16)).toString("base64url")),
 	};
 	// Told at every start by client: each is handed its sessions' upstream tokens.
 	for (const client of flow.clients.registered()) {

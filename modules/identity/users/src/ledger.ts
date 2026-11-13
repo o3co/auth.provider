@@ -1,8 +1,10 @@
+import type { SubjectOf } from "@mod/erasure-extensions";
 import { deepFreeze } from "@mod/kernel";
-import { canonicalAddress } from "@mod/mail";
+import { canonicalAddress } from "@mod/mail-address";
 import { type Contact, isWellFormedSubject, type Users, userAttribute } from "./contract.ts";
 import { none, type UserSource, unanswerable } from "./registered.ts";
-import { type ContactStore, type StoredContacts, written } from "./store.ts";
+import type { ContactStore, StoredContacts } from "./store.ts";
+import { keptFor } from "./stores/kept-for.ts";
 
 const maxPasswordBytes = 1024;
 const maxContacts = 20;
@@ -14,6 +16,12 @@ const contactsIn = (record: StoredContacts | undefined): Contact[] =>
 		.filter(isContact)
 		.map(({ kind, value }) => ({ kind, value }));
 const contactsRecord = (contacts: readonly Contact[]) => contacts as unknown as StoredContacts;
+
+/** Whose a contacts record written before indexing is: the subject it is keyed by, where it holds a list. */
+export const contactSubjectOf = (key: string, value: unknown): SubjectOf =>
+	Array.isArray(value)
+		? { kind: "subject", subject: key }
+		: { kind: "unreadable", reason: "a contacts record of another shape" };
 
 function required(...parts: string[]) {
 	if (parts.some((part) => part === "")) throw new TypeError("users: an empty part names no one");
@@ -50,7 +58,7 @@ export function ledgerUsers(source: UserSource, linking: Linking, contacts: Cont
 				if (holds(held) || held.length >= maxContacts) return undefined;
 				return { value: contactsRecord([...held, kept]) };
 			};
-			const { after } = await written(contacts, subject, contactsRecord([kept]), add);
+			const { after } = await keptFor(contacts, subject, contactsRecord([kept]), add, subject);
 			if (!holds(contactsIn(after))) {
 				throw new RangeError(`users: a subject keeps at most ${maxContacts} contacts`);
 			}

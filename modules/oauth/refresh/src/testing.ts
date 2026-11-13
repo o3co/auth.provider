@@ -23,11 +23,14 @@ export function refreshConfig(settings: Partial<RefreshSettings> = {}) {
 export interface RefreshStorePlace {
 	readonly families: FamilyStore;
 	readonly redemptions: RedemptionStore;
+	/** @deprecated Neither read nor written by refresh; a later release removes it. */
 	readonly sessionFamilies: MemberLists;
+	/** @deprecated Neither read nor written by refresh; a later release removes it. */
 	readonly issuedAccess: MemberLists;
 	readonly tokenFamilies: TokenFamilies;
+	/** @deprecated Neither read nor written by refresh; a later release removes it. */
 	readonly settles: SettleList;
-	/** How many members each list keeps to a key. */
+	/** How many members each list keeps to a key. @deprecated Neither read nor written by refresh; a later release removes it. */
 	readonly caps: { readonly sessionFamilies: number; readonly issuedAccess: number };
 	/** Moves the place's clock on, so lifetimes run out. */
 	advance(ms: number): void;
@@ -98,8 +101,8 @@ export function refreshStoreContract(name: string, open: () => Promise<RefreshSt
 			const { families } = await open();
 			const id = fresh();
 			const odd = held({ state: "unheard-of", nested: { list: [1, "two"] } });
-			expect(await families.save(id, odd, 60_000)).toBe("created");
-			expect(await families.save(id, held({ n: 1 }), 60_000)).toBe("exists");
+			expect(await families.save(id, odd, 60_000, "alice")).toBe("created");
+			expect(await families.save(id, held({ n: 1 }), 60_000, "alice")).toBe("exists");
 			expect(await families.read(id)).toEqual(odd);
 			expect(await families.update(id, () => undefined)).toEqual({ before: odd, after: odd });
 			expect(await families.update(fresh(), plus(1))).toBeUndefined();
@@ -109,7 +112,7 @@ export function refreshStoreContract(name: string, open: () => Promise<RefreshSt
 		it("changes a family only from what it holds, again after a racing writer", async () => {
 			const place = await open();
 			const id = fresh();
-			await place.families.save(id, held({ n: 1 }), 60_000);
+			await place.families.save(id, held({ n: 1 }), 60_000, "alice");
 			expect(await place.families.update(id, plus(1))).toEqual({
 				before: held({ n: 1 }),
 				after: held({ n: 2 }),
@@ -121,14 +124,14 @@ export function refreshStoreContract(name: string, open: () => Promise<RefreshSt
 		it("ends a family at exactly its lifetime, counted from the write that last set one", async () => {
 			const place = await open();
 			const id = fresh();
-			await place.families.save(id, held({ n: 1 }), 1000);
+			await place.families.save(id, held({ n: 1 }), 1000, "alice");
 			place.advance(999);
 			await place.families.update(id, (record) => ({ value: record, lifetimeMs: 1000 }));
 			place.advance(999);
 			expect(await place.families.read(id)).toBeDefined();
 			place.advance(1);
 			expect(await place.families.read(id)).toBeUndefined();
-			expect(await place.families.save(id, held({ n: 2 }), 1000)).toBe("created");
+			expect(await place.families.save(id, held({ n: 2 }), 1000, "alice")).toBe("created");
 		});
 
 		it("keeps what a redemption left once, for its lifetime", async () => {
@@ -179,12 +182,25 @@ export function refreshStoreContract(name: string, open: () => Promise<RefreshSt
 			expect(await listed(settles)).toEqual([...kept].sort());
 		}, 60_000);
 
+		it("refuses, where the family store erases, every family saved for a subject it erased, and only for that subject", async (context) => {
+			const { families } = await open();
+			const { erase } = families;
+			if (!erase) return context.skip();
+			await families.save(fresh(), held({ n: 1 }), 60_000, "erin");
+			const report = await erase.call(families, "erin", new AbortController().signal);
+			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+			if (report.kind === "stopped") return context.skip();
+			expect(report.kind).toBe("erased");
+			expect(await families.save(fresh(), held({ n: 2 }), 60_000, "erin")).toBe("erased");
+			expect(await families.save(fresh(), held({ n: 3 }), 60_000, "finn")).toBe("created");
+		});
+
 		it("keeps records, lists and settles through a restart and through memory pressure", async (context) => {
 			const place = await open();
 			const { restart, pressMemory } = place;
 			if (!restart || !pressMemory) return context.skip();
 			const [id, key, kept] = [fresh(), fresh(), fresh()];
-			await place.families.save(id, held({ n: 1 }), 60_000);
+			await place.families.save(id, held({ n: 1 }), 60_000, "alice");
 			await place.redemptions.save(key, marked({ family: id }), 60_000);
 			await place.sessionFamilies.add(key, id, 60_000);
 			await place.issuedAccess.add(id, key, 60_000);
@@ -208,7 +224,7 @@ export function refreshStoreContract(name: string, open: () => Promise<RefreshSt
 			if (!lose || !failover) return context.skip();
 			const [id, key, kept, settled] = [fresh(), fresh(), fresh(), fresh()];
 			lose();
-			expect(await place.families.save(id, held({ n: 1 }), 60_000)).toBe("created");
+			expect(await place.families.save(id, held({ n: 1 }), 60_000, "alice")).toBe("created");
 			lose();
 			expect((await place.families.update(id, plus(1)))?.after).toEqual(held({ n: 2 }));
 			await failover();

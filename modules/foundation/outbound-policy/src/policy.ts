@@ -65,11 +65,14 @@ export function admitUrl(
 	}
 	const plain = url.protocol === "http:";
 	const pair = `${host}:${port}`;
-	const loopback = plain && policy.plainLoopback.some((listed) => pairOf(listed) === pair);
+	// An outside party's choice never takes the operator's plain reach, whatever else the caller names.
+	const loopback =
+		plain &&
+		narrower.outsideChosen !== true &&
+		policy.plainLoopback.some((listed) => pairOf(listed) === pair);
 	// Named by its configured URL, the operator's own reach ends at that URL's origin.
 	const own =
 		narrower.internal !== undefined && URL.parse(narrower.internal)?.origin === url.origin;
-	// An outside party's choice never takes the operator's plain reach, whatever else the caller names.
 	const plainInternal =
 		plain &&
 		!loopback &&

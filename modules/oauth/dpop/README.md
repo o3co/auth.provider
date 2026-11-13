@@ -10,9 +10,9 @@
 ## Offers
 - Composition definition only. The binding kind: `cnf` member `jkt`, named `dpop` for operators, token type `DPoP`, explicit (it wins over an ambient binding, such as a certificate, a request also proves).
 - Contribution to `issuer`'s metadata: `dpop_signing_alg_values_supported`, the allowed algorithms.
-- Store interface for spent proofs: save a name for a lifetime, answering `created` or `exists`.
-  - Requirements: no eviction, survives a crash, never rolled back by failover.
-  - Its contract test, and the section for tests, `dpopConfig` (`./testing`).
+- Store interface for spent proofs, `spentProofs`: save a name for a lifetime, answering `created` or `exists`.
+  - Requirements (`spentProofsNeeds`): no eviction, survives a crash, never rolled back by failover.
+  - Its contract test `spentProofsContract`, and the section for tests, `dpopConfig` (`./testing`).
 - Operator section `dpop`: `algorithms`, `proof-window`, and `nonce` (`required`: `as` by default, asked at the token endpoint, where a token is bound; `as+rs`, at resources too, is no default, as a resource server outside this provider would have to ask it as well; `never` is warned of at every start, `dpop.nonce_not_asked`; `ttl`; `secret`, then required), `proofs` in `proofs-window` (default 60 in `1m`), times written with their unit; its keys are in the configuration reference.
 
 ## Invariants
@@ -23,7 +23,7 @@
 - A proof not written in its one form (`keys`' rule for a JWS) is no JWT.
 - The header needs `typ` `dpop+jwt` and an allowed algorithm. None and shared secrets are never allowed.
 - The key is rebuilt from its public members alone, by `keys`. A key of an unknown type, with any other member than `kid`, `alg`, `use` and `key_ops`, or with a member that is no string is refused.
-- The payload is one JSON object with `htm`, `htu`, a numeric `iat`, and a `jti` of 1–256 characters that is well formed.
+- The payload is one JSON object with `htm`, `htu`, a numeric `iat`, and a `jti` of 1–256 characters that is well formed, a fixed bound RFC 9449 leaves open, as it names a spent proof's record.
 - `htm` is the request's method.
 - `htu` is compared by scheme, host, port and path, ignoring query and fragment. A `htu` with user information is refused.
 - The expected `htu` is the origin of the issuer `sender-binding` passes, with the request's path, never from Host or forwarding headers.

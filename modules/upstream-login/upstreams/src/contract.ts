@@ -82,17 +82,24 @@ export interface Upstream {
 	readonly responseMode?: "query" | "form_post";
 	/** How far this upstream's clock may be from ours; none when not given. */
 	readonly clockSkewMs?: number;
+	/** Throws Unavailable while the type cannot build it yet. */
 	authorizationUrl(start: AuthorizationStart): string;
-	/** Exchanges the code; throws UpstreamRefused for an answer that does not hold, Unavailable when unreachable. */
+	/**
+	 * Exchanges the code; throws UpstreamRefused for an answer that does not hold, Unavailable when
+	 * the upstream cannot be asked now: unreachable, or not yet reached by its type.
+	 */
 	exchange(code: CodeExchange): Promise<UpstreamLogin>;
 	/** Throws as `exchange` does; an upstream that fails (5xx) is unavailable. */
 	refresh?(refreshToken: string, scopes: readonly string[]): Promise<UpstreamRefresh>;
-	/** The upstream's end-session URL. */
+	/**
+	 * The upstream's end-session URL, or none once the type has found the upstream has none; throws
+	 * Unavailable while it cannot tell yet. Without this member, the upstream has no end of session.
+	 */
 	endSession?(at: {
 		readonly idTokenHint?: string;
 		readonly postLogoutRedirectUri?: string;
 		readonly state?: string;
-	}): string;
+	}): string | undefined;
 	readonly delegation?: Delegation;
 }
 
@@ -110,7 +117,7 @@ export interface DelegationRefused {
 
 /** Offline access an upstream grants, to be delegated; `exchange` and `refresh` throw as the upstream's own. */
 export interface Delegation {
-	/** Never throws: a start the upstream does not take is refused as a value. */
+	/** A start the upstream does not take is refused as a value; throws Unavailable while the type cannot build it yet. */
 	authorizationUrl(start: DelegationStart): string | DelegationRefused;
 	/** Names the upstream's own issuer: what is held from it is refreshed where the upstream says that issuer alone. */
 	exchange(
@@ -178,7 +185,11 @@ export interface IdpType<S extends z.ZodType = z.ZodType> {
 	readonly type: string;
 	/** The settings of one IdP of this type, beside `type` and the settings the implementation reads. */
 	readonly settings: S;
-	/** Refuses boot (throws) when the upstream's own description does not match its settings; `UpstreamMismatch` says why. */
+	/**
+	 * Refuses boot (throws) when the upstream's own description does not match its settings;
+	 * `UpstreamMismatch` says why. An upstream it cannot reach yet it may open instead: each operation
+	 * that needs the upstream then throws Unavailable until it can be asked.
+	 */
 	open(
 		settings: z.output<S>,
 		at: {

@@ -1,4 +1,8 @@
+import { issue } from "@mod/x509-path/testing";
+import * as asn1js from "asn1js";
+import * as pkijs from "pkijs";
 import { expect, it } from "vitest";
+import { isCertificate, signatureAlgorithms } from "../src/pki/pki.ts";
 import { anchorOf, revocationPolicyOf, section } from "../src/section.ts";
 
 const revocationOf = (stated: Record<string, unknown>) => {
@@ -22,6 +26,7 @@ it("states the revocation policy in milliseconds, with the defaults the legacy s
 		ocspFreshMs: 600_000,
 		crlTtlMs: 3_600_000,
 		failureMs: 30_000,
+		timeoutMs: 3000,
 		crlEntries: 256,
 		ocspEntries: 1024,
 		maxFetches: 4,
@@ -35,6 +40,7 @@ it("states the revocation policy in milliseconds, with the defaults the legacy s
 			"ocsp-fresh": "2s",
 			"crl-ttl": "3s",
 			"failure-lifetime": "4s",
+			timeout: "8s",
 			"crl-entries": 5,
 			"ocsp-entries": 6,
 			"max-fetches": 7,
@@ -46,6 +52,7 @@ it("states the revocation policy in milliseconds, with the defaults the legacy s
 		ocspFreshMs: 2000,
 		crlTtlMs: 3000,
 		failureMs: 4000,
+		timeoutMs: 8000,
 		crlEntries: 5,
 		ocspEntries: 6,
 		maxFetches: 7,
@@ -60,8 +67,30 @@ it("holds a path to four intermediates and 2048-bit RSA keys unless stated, and 
 	expect(stated({ "max-intermediates": 15 }).success).toBe(false);
 });
 
+it("takes all nine signature algorithms unless stated, and only those it names", () => {
+	const stated = (more: Record<string, unknown>) =>
+		section.safeParse({ mode: "pki", anchors: ["x"], revocation: { mode: "disabled" }, ...more });
+	expect(stated({}).data).toMatchObject({ "signature-algorithms": signatureAlgorithms });
+	expect(stated({ "signature-algorithms": ["ecdsa-sha384"] }).success).toBe(true);
+	expect(stated({ "signature-algorithms": [] }).success).toBe(false);
+	expect(stated({ "signature-algorithms": ["rsa-pkcs1-sha1"] }).success).toBe(false);
+});
+
 it("reads no anchor from text without a certificate block", () => {
 	expect(anchorOf("   ")).toBeUndefined();
+});
+
+it("reads an anchor x509-path takes, and none from a certificate it would not, though pkijs reads it", async () => {
+	const pem = (der: Uint8Array) =>
+		`-----BEGIN CERTIFICATE-----\n${Buffer.from(der).toString("base64")}\n-----END CERTIFICATE-----`;
+	const root = await issue({ cn: "root", ca: true });
+	expect(anchorOf(pem(root.der))).toEqual(root.der);
+	// An empty serial number: pkijs reads it, node does not, so it could make no trust.
+	const bare = new pkijs.Certificate({ schema: asn1js.fromBER(root.der.slice().buffer).result });
+	bare.serialNumber = new asn1js.Integer({ valueHex: new ArrayBuffer(0) });
+	const unread = new Uint8Array(bare.toSchema(true).toBER(false));
+	expect(isCertificate(unread)).toBe(true);
+	expect(anchorOf(pem(unread))).toBeUndefined();
 });
 
 it("takes revocation hosts as host-entries reads a host list, and refuses anything else", () => {

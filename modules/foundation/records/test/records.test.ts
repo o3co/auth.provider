@@ -16,6 +16,8 @@ import {
 	deferredIn,
 	type KeyedSets,
 	keyedSetsIn,
+	pairedRecordsAcross,
+	pairedRecordsIn,
 	type Records,
 	recordsIn,
 	secretRecordsIn,
@@ -943,4 +945,98 @@ it("refuses a space opened for records and for secret records on one store, in e
 	// Another store, or another space, holds its own kind.
 	secretRecordsIn<Counted>((await open()).place);
 	recordsIn<Counted>({ ...second.place, space: { ...space, name: "records-test.other" } });
+});
+
+it("holds the keyed set's format in its codec: the cap, those pushed out awaiting, and ten minutes past the last end", () => {
+	let now = 1_000;
+	const codec = keyedSetsIn.codec({ cap: 2, clock: { now: () => now } });
+	const first = codec.add(undefined, "a", 5_000);
+	const second = codec.add(first.next.value, "b", 6_000);
+	const third = codec.add(second.next.value, "c", 7_000);
+	expect(third.pushedOut).toEqual(["a"]);
+	expect(codec.members(third.next.value).map((m) => m.member)).toEqual(["b", "c"]);
+	expect(codec.awaiting(third.next.value)).toEqual(["a"]);
+	expect(third.next.lifetimeMs).toBe(7_000 - now + 600_000);
+	const settled = codec.settled(third.next.value, "a");
+	expect(settled && codec.awaiting(settled.value)).toEqual([]);
+	expect(codec.remove(undefined, "a")).toBeUndefined();
+	now = 6_500;
+	expect(codec.members(third.next.value)).toEqual([{ member: "c", remainingMs: 500 }]);
+});
+
+it("refuses to open a space holding a subject's data through any plain door, and opens one that holds none", () => {
+	const fake = {
+		batchAcross: async () => ({ kind: "committed", versions: [] }),
+	} as unknown as Store;
+	const random = { bytes: (n: number) => new Uint8Array(n) };
+	const at = (subjectData?: Space["subjectData"]) => ({
+		store: fake,
+		space: { name: `held-${subjectData ?? "none-declared"}`, guarantees: [], subjectData } as Space,
+		random,
+	});
+	const refuse = (where: string, reason: string): never => {
+		throw new Error(`${where}: ${reason}`);
+	};
+	const doors = [
+		(p: ReturnType<typeof at>) => recordsIn(p),
+		(p: ReturnType<typeof at>) => secretRecordsIn(p),
+		(p: ReturnType<typeof at>) => deferredIn({ ...p, shards: 1, perShard: 1 }),
+		(p: ReturnType<typeof at>) => keyedSetsIn({ ...p, cap: 1, clock: runtime.clock }),
+		(p: ReturnType<typeof at>) => pairedRecordsIn(p, "w", refuse),
+		(p: ReturnType<typeof at>) => pairedRecordsAcross(p, at("window"), "w", refuse),
+	];
+	for (const held of ["online-indexed", "online-keyed", "bounded"] as const) {
+		for (const door of doors) {
+			expect(() => door(at(held)), held).toThrow(/written through subject-records/);
+		}
+	}
+	expect(() => recordsIn(at("none"))).not.toThrow();
+	expect(() => keyedSetsIn({ ...at("window"), cap: 1, clock: runtime.clock })).not.toThrow();
+	expect(() => deferredIn({ ...at(), shards: 1, perShard: 1 })).not.toThrow();
+});
+
+it("reads a stored set strictly, with no cap or clock: whole where every part is well formed, unreadable where any is not", () => {
+	const codec = keyedSetsIn.codec({ cap: 2, clock: { now: () => 10_000 } });
+	// Ended members and those awaiting are well formed, as is the first format's bare list.
+	for (const value of [
+		{
+			held: [
+				["a", 5_000],
+				["b", 20_000],
+			],
+			awaiting: [["c", 1]],
+		},
+		[["a", 5_000]],
+		{ held: [] },
+	]) {
+		expect(keyedSetsIn.strict(value as never), JSON.stringify(value)).toEqual({ kind: "set" });
+	}
+	const malformed = [
+		undefined,
+		null,
+		"a",
+		7,
+		{ held: [["a", 1]], extra: [] },
+		{ held: "a" },
+		{ held: [["a"]] },
+		{ held: [["a", 1, 2]] },
+		{ held: [[1, 1]] },
+		{ held: [["a", "1"]] },
+		{ held: [["a", Number.POSITIVE_INFINITY]] },
+		{
+			held: [
+				["a", 1],
+				["a", 2],
+			],
+		},
+		{ awaiting: [["a", 1], "b"] },
+		[["a", 1], ["b"]],
+	];
+	for (const value of malformed) {
+		expect(keyedSetsIn.strict(value as never).kind, JSON.stringify(value)).toBe("unreadable");
+	}
+	// The lenient reads stay as they were: a malformed entry is left out, not refused.
+	expect(codec.members({ held: [["a", 20_000], ["b"]] } as never)).toEqual([
+		{ member: "a", remainingMs: 10_000 },
+	]);
 });

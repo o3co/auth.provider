@@ -1,9 +1,10 @@
 import { type Audit, audit, declaredAudit } from "@mod/audit";
-import { type BuildContext, Unavailable } from "@mod/kernel";
+import { type BuildContext, type Clock, Unavailable } from "@mod/kernel";
 import type { RevocationFollower } from "@mod/subject-revocation";
 import events from "../audit-events.ts";
-import { type Grant, type Judge, type Records, withoutCredentials } from "../grant/grant.ts";
+import type { Grant, Judge, Records } from "../grant/grant.ts";
 import { recordsOver, shared } from "../grant/shared.ts";
+import { type Revocation, retention } from "../retention/retention.ts";
 import type { Settings } from "../section.ts";
 import { type GrantStore, grantStore, type SubjectGrants, subjectGrants } from "../store.ts";
 
@@ -13,6 +14,9 @@ export interface FollowParts {
 	readonly records: Records;
 	/** The judge, once the composition is built: it reads the boundaries this follows. */
 	readonly judge: () => Judge;
+	/** The revocation's rewrite, once the composition is built, as the judge. */
+	readonly revocation: () => Revocation;
+	readonly clock: Clock;
 	readonly audit: Audit;
 }
 
@@ -33,7 +37,7 @@ export function followerWith(p: FollowParts): RevocationFollower {
 		if (!intent || !(await judge.intentRevoked(grant, intent))) return "left";
 		return grant.status === "pending" ? "ended" : "renewal";
 	};
-	const follow = async (subject: string, id: string) => {
+	const follow = async (subject: string, id: string, erased: boolean) => {
 		const read = records.grantOf(await p.grants.read(id));
 		const judged = read?.subject === subject ? await verdict(read) : "left";
 		if (!read || judged === "left") {
@@ -41,6 +45,7 @@ export function followerWith(p: FollowParts): RevocationFollower {
 				await p.subjects.remove(subject, id);
 			return;
 		}
+		const at = p.clock.now();
 		const changed = await p.grants.change(id, (stored) => {
 			const now = records.grantOf(stored);
 			// Written only over the state judged, so a renewal or revocation since is left alone.
@@ -51,25 +56,31 @@ export function followerWith(p: FollowParts): RevocationFollower {
 				};
 			}
 			if (judged !== "ended") return undefined;
-			const ended: Grant = { ...withoutCredentials(now), status: "revoked", reason: "backstop" };
-			return { value: records.stored(ended) };
+			const ended = p.revocation()(now, "backstop", at);
+			return { value: records.stored(ended.grant), lifetimeMs: ended.lifetimeMs };
 		});
 		const was = records.grantOf(changed?.before);
 		const now = records.grantOf(changed?.after);
 		if (now?.status !== "revoked") return;
 		await p.subjects.remove(subject, id);
 		if (was?.status === "revoked") return;
+		// Told the subject is erased, the record leaves it out and says why: the grant still ends.
 		declaredAudit(p.audit, events).record("federation.grant.revoked", {
-			subject,
-			attributes: { client: now.client, connection: now.connection, outcome: "backstop" },
+			...(erased ? {} : { subject }),
+			attributes: {
+				client: now.client,
+				connection: now.connection,
+				outcome: "backstop",
+				...(erased ? { withheld: "erased" } : {}),
+			},
 		});
 	};
 	return {
 		name: "federation-grants",
-		follow: async (subject) => {
+		follow: async (subject, { erased }) => {
 			let failed = 0;
 			for (const { member } of await p.subjects.members(subject)) {
-				await follow(subject, member).catch(() => {
+				await follow(subject, member, erased === true).catch(() => {
 					failed++;
 				});
 			}
@@ -84,11 +95,14 @@ export const followerTakes = [grantStore, subjectGrants, audit] as const;
 export async function followerOver(c: BuildContext<Settings>) {
 	// The shared parts read the revocations this follower is collected into: taken once built.
 	const parts = c.late(shared);
+	const kept = c.late(retention);
 	return followerWith({
 		grants: await c.get(grantStore),
 		subjects: await c.get(subjectGrants),
 		records: await recordsOver(c),
 		judge: () => parts().judge,
+		revocation: () => kept().revocation,
+		clock: c.clock,
 		audit: await c.get(audit),
 	});
 }

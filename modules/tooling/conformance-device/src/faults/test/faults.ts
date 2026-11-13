@@ -7,8 +7,7 @@ import {
 	on as onDeployment,
 } from "@mod/conformance/testing";
 import type { ClientScene } from "@mod/conformance-oauth";
-// The package's entry, which sets the area up on each target.
-import { type DeviceScene, deviceScene } from "../../main.ts";
+import { type DeviceScene, deviceScene } from "../../area.ts";
 
 export const issuer = "https://issuer.example";
 export const deviceGrant = "urn:ietf:params:oauth:grant-type:device_code";

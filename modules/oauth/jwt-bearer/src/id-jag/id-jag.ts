@@ -67,8 +67,8 @@ export function read(verified: {
 		return invalid("tenant not taken");
 	const clientId = own(claims, "client_id");
 	if (typeof own(claims, "iat") !== "number") return malformed;
-	if (typeof clientId !== "string" || clientId.length < 1 || clientId.length > 255)
-		return malformed;
+	// Its length is clients' to bound: it must equal the authenticated client's id (`admit`).
+	if (typeof clientId !== "string" || clientId.length < 1) return malformed;
 	// A scope signed empty would read as none, and the client's defaults would stand in.
 	const rawScope = own(claims, "scope");
 	const scope =

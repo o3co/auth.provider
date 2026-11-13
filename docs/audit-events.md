@@ -46,14 +46,14 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `federation.grant.authorization_failed` | `client`, `connection`, `outcome`, `source` | a connection fails, with why (`outcome`) |
+| `federation.grant.authorization_failed` | `client`, `connection`, `outcome`, `source`, `withheld` | a connection fails, with why (`outcome`); without the subject, `withheld` `erased` or `unread`, where it is erased or that cannot be read |
 | `federation.grant.authorized` | `client`, `connection`, `outcome`, `source` | the user connects a new grant, with the identity check that applied (`outcome`) |
 | `federation.grant.reauthorized` | `account_changed`, `client`, `connection`, `outcome`, `source` | the user connects a renewal, with the identity check that applied (`outcome`), and which of the grant's account differs from what it held (`account_changed`: `issuer` or `subject`), if any |
-| `federation.grant.request.denied` | `client`, `outcome`, `source` | a client's intent is refused, with why (`outcome`) |
-| `federation.grant.requested` | `client`, `connection`, `outcome`, `source` | a client lodges an intent, for a new grant (`initial`) or a renewal (`reauthorization`) |
+| `federation.grant.request.denied` | `client`, `outcome`, `source`, `withheld` | a client's intent is refused, with why (`outcome`); without the subject, `withheld` `erased` or `unread`, where the subject named is erased (`subject_unknown` among them) or that cannot be read |
+| `federation.grant.requested` | `client`, `connection`, `outcome`, `source`, `withheld` | a client lodges an intent, for a new grant (`initial`) or a renewal (`reauthorization`); without the subject, `withheld` `erased` or `unread`, where it is erased or that cannot be read |
 | `federation.grant.revoke.denied` | `client`, `reason`, `source` | a client's revoke is refused before the grant is found, with why (`reason`), by the client only |
-| `federation.grant.revoked` | `client`, `connection`, `outcome`, `source` | a grant ends, revoked by its client or by the subject's revocation (`outcome`) |
-| `federation.grant.token.denied` | `client`, `connection`, `reason`, `source` | a client is refused a grant's token or renewal, with why (`reason`); by the client only before the grant is found |
+| `federation.grant.revoked` | `client`, `connection`, `outcome`, `source`, `withheld` | a grant ends, revoked by its client or by the subject's revocation (`outcome`); without the subject, `withheld` `erased` or `unread`, where the revocation said it is erased, or a request or the sweep reads it erased or cannot read it |
+| `federation.grant.token.denied` | `client`, `connection`, `reason`, `source`, `withheld` | a client is refused a grant's token or renewal, with why (`reason`); by the client only before the grant is found; without the subject, `withheld` `erased` or `unread`, where it is erased (the erasure fence's `backstop` among them) or that cannot be read |
 | `federation.grant.token.success` | `client`, `connection`, `refreshed`, `source` | a client is handed a grant's upstream token, refreshed first or not (`refreshed`) |
 
 ## @mod/federation-link
@@ -121,7 +121,8 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `mfa.reset` | `by`, `kinds`, `count`, `parts`, `partsStopped`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's reset gets past its input, finished or not (`complete`) |
+| `mfa.reset` | `by`, `kinds`, `count`, `parts`, `partsStopped`, `sessions`, `sessionsAgain`, `complete`, `requestedBy`, `withheld` | an operator's reset gets past its input, finished or not (`complete`); without the subject, `withheld` `unread`, where no boundary step answered |
+| `mfa.reset.refused` | `by`, `complete`, `requestedBy` | an operator's reset of a subject a boundary step read as erased, naming no subject; `complete` as that step's `record` answered it, false meaning running it again finishes what this run left |
 
 ## @mod/mfa-witnessing
 
@@ -141,7 +142,8 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `passkey.reset` | `by`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's passkey reset gets past its input, finished or not (`complete`) |
+| `passkey.reset` | `by`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy`, `withheld` | an operator's passkey reset gets past its input, finished or not (`complete`); without the subject, `withheld` `unread`, where no boundary step answered |
+| `passkey.reset.refused` | `by`, `complete`, `requestedBy` | an operator's passkey reset of a subject a boundary step read as erased, naming no subject; `complete` as that step's `record` answered it, false meaning running it again finishes what this run left |
 
 ## @mod/passkey-witnessing
 
@@ -159,7 +161,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `refresh.family_revoked` | `client` | a refresh token is used again (one already rotated, or the same one twice at once) and its family is revoked, with the subject |
+| `refresh.family_revoked` | `client`, `withheld` | a refresh token is used again (one already rotated, or the same one twice at once) and its family is revoked, with the subject; without it, `withheld` `erased` where the subject is erased, or `unread` where that could not be read |
 
 ## @mod/rp-logout
 
@@ -174,7 +176,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | Kind | Attributes | Recorded when |
 |---|---|---|
 | `subject.revocation.denied` | `reason`, `source` | a request to revoke a subject was refused for its source, credential or body, or as a window could not count |
-| `subject.revocation.requested` | `delegations`, `outcome`, `source` | the ledger's revocation of a subject was recorded, or its recording failed or was not confirmed |
+| `subject.revocation.requested` | `delegations`, `outcome`, `source`, `withheld` | the ledger's revocation of a subject was recorded, or its recording failed or was not confirmed; without the subject, `withheld` `erased` where the revocation said it is erased, or `unread` where it did not answer (`unknown`, `failed`) |
 
 ## @mod/token-control
 
@@ -188,7 +190,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | Kind | Attributes | Recorded when |
 |---|---|---|
 | `token.issued` | `client`, `source`, `grant_type`, `identified`, `claims`, `claims_left` | a grant issues; `identified` is `grant` where the grant identified the client of a request naming none; `claims` names the claims the grant added to the tokens it issued, in their order, one space apart, never their values: all of them within 2048 characters, else as many as fit, with `claims_left` how many were left out |
-| `token.issued.failure` | `client`, `source`, `grant_type`, `identified`, `reason`, `error`, `policy`, `refusal` | a request is refused, with `reason` (`client_not_identified`, `repeated_parameter`, `mistyped_parameter`, `missing_grant_type`, `unsupported_grant_type`, `grant_type_not_allowed`, `unsupported_body`, `multiple_bindings`, `binding_refused`, `binding_required`, `binding_kind_not_named`, `untargeted`, `grant_refused`, or `issuance_refused` with the refusing `policy` and its `refusal`) and the answer's `error`; `grant_type` once it is known; `client` once it is known, which for a request naming none is once the grant identifies it, `identified` then being `grant` |
+| `token.issued.failure` | `client`, `source`, `grant_type`, `identified`, `reason`, `error`, `policy`, `refusal`, `fence` | a request is refused, with `reason` (`client_not_identified`, `repeated_parameter`, `mistyped_parameter`, `missing_grant_type`, `unsupported_grant_type`, `grant_type_not_allowed`, `unsupported_body`, `multiple_bindings`, `binding_refused`, `binding_required`, `binding_kind_not_named`, `untargeted`, `grant_refused`, `issuance_refused` with the refusing `policy` and its `refusal`, or `issuance_fenced` with the refusing `fence`) and the answer's `error`; `grant_type` once it is known; `client` once it is known, which for a request naming none is once the grant identifies it, `identified` then being `grant` |
 
 ## @mod/webauthn-login
 

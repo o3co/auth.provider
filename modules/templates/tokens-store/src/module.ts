@@ -9,7 +9,11 @@ const guaranteeFor: Record<keyof typeof revokedTokensNeeds, Guarantee> = {
 	survivesCrash: "durable",
 	survivesFailover: "replicated",
 };
-const revoked: Space = { name: "tokens-store.revoked", guarantees: Object.values(guaranteeFor) };
+const revoked: Space = {
+	name: "tokens-store.revoked",
+	guarantees: Object.values(guaranteeFor),
+	subjectData: "none",
+};
 
 export default defineModule({ name: "tokens-store", replicaSafe: true, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => revoked),

@@ -4,8 +4,7 @@ import { testRequest } from "@mod/http/testing";
 import { isUnavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { memoryTransactions } from "../../../test/stores.ts";
-import { transactionsPerHolder } from "../../store.ts";
+import { memoryTransactions, perHolder } from "../../../test/stores.ts";
 import type { Started } from "../records.ts";
 import { transactionsOver } from "../transactions.ts";
 
@@ -51,11 +50,11 @@ function opened() {
 
 const login = { subject: "sue", purpose: "enroll-login" } as const;
 
-it(`keeps ${transactionsPerHolder} live transactions a holder: one more ends the one ending first`, async () => {
+it(`keeps ${perHolder} live transactions a holder: one more ends the one ending first`, async () => {
 	const { start } = opened();
 	const first = await start(login);
 	const rest = [];
-	for (let n = 1; n < transactionsPerHolder; n++) rest.push(await start(login));
+	for (let n = 1; n < perHolder; n++) rest.push(await start(login));
 	expect(await first.found()).toBe(true);
 	const last = await start(login);
 	expect(await first.found()).toBe(false);
@@ -65,7 +64,7 @@ it(`keeps ${transactionsPerHolder} live transactions a holder: one more ends the
 it("counts a session's transactions apart from a held login's, and one subject's apart from another's", async () => {
 	const { start } = opened();
 	const held = await start(login);
-	for (let n = 0; n < transactionsPerHolder; n++) {
+	for (let n = 0; n < perHolder; n++) {
 		await start({ subject: "sue", purpose: "step-up", handle: "h1" });
 		await start({ subject: "tom", purpose: "enroll-login" });
 	}
@@ -80,7 +79,7 @@ it("counts no transaction once taken or out of attempts, so it pushes out none",
 	expect(await transactions.take(taken.id)).toBe(true);
 	await transactions.spend(spent.id);
 	await transactions.spend(spent.id);
-	for (let n = 3; n < transactionsPerHolder + 2; n++) await start(login);
+	for (let n = 3; n < perHolder + 2; n++) await start(login);
 	expect(await first.found()).toBe(true);
 });
 
@@ -94,4 +93,28 @@ it("starts and finds nothing while the listing cannot answer, and logs a removal
 	kept.listingsDown.failNext("remove");
 	expect(await transactions.take(listed.id)).toBe(true);
 	expect(logged.lines().map((line) => line.event)).toEqual(["mfa-flows.listing_failed"]);
+});
+
+it("fails a start its subject's erasure refused, at the save or at the listing, never trying it again", async () => {
+	const { kept, transactions } = opened();
+	kept.erased.transactions.add("erin");
+	await expect(transactions.start({ subject: "erin", purpose: "login" })).rejects.toSatisfy(
+		isUnavailable,
+	);
+	expect(kept.saves.count).toBe(0);
+	// Saved, then refused at the listing: never listed, so it never counts, and it ends by its lifetime.
+	kept.erased.listings.add("finn");
+	await expect(transactions.start({ subject: "finn", purpose: "login" })).rejects.toSatisfy(
+		isUnavailable,
+	);
+	expect(kept.saves.count).toBe(1);
+	expect(await kept.listings.members("login:finn")).toEqual([]);
+});
+
+it("refuses to keep a transaction past the store's ceiling for transactions", () => {
+	const kept = memoryTransactions(() => 0);
+	const over = { store: kept.transactions, listings: kept.listings, jar, log: recordingLog().log };
+	const parts = { ...over, random, clock: { now: () => 0 }, attempts: 2 };
+	expect(() => transactionsOver({ ...parts, ttlMs: 1_800_001 })).toThrow(TypeError);
+	expect(() => transactionsOver({ ...parts, ttlMs: 1_800_000 })).not.toThrow();
 });

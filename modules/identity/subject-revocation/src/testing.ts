@@ -1,26 +1,35 @@
 import { randomUUID } from "node:crypto";
-import { defineModule } from "@mod/kernel";
+import { contract, defineModule } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import {
 	type Boundaries,
-	compared,
+	comparedTo,
 	recorded,
 	subjectRevocationOf,
 } from "./boundaries/boundaries.ts";
 import {
+	type ErasedSubjects,
+	erasedSubjects,
+	erasureFence,
 	type Revocations,
 	revocationFollowers,
 	revocations,
+	type SubjectErasure,
 	type SubjectRevocation,
+	subjectErasure,
 	subjectRevocation,
 } from "./contract.ts";
 import { followedBy, type Write } from "./followers.ts";
-import type { BoundaryStore, BoundaryWrite, StoredBoundary } from "./store.ts";
+import type { BoundaryStore, BoundaryWrite, StoredBoundary, StoredReceipt } from "./store.ts";
 
 /** A composition that offers subject revocation, as one implementation of the contract does. */
 export interface RevocationComposition {
 	readonly revocation: SubjectRevocation;
 	readonly revocations: Revocations;
+	/** Marks a subject erased, as account erasure will. */
+	readonly erasure: SubjectErasure;
+	/** Whether a subject is marked erased. */
+	readonly erasedSubjects: ErasedSubjects;
 	/** The time a revocation now takes. */
 	now(): number;
 	/** Moves that time on. */
@@ -63,6 +72,39 @@ export function subjectRevocationContract(
 			composition.advance(composition.settlesAfterMs * 2);
 			await composition.revocation.revoke("alice");
 			expect(await composition.revocation.check("alice", between)).toBe("revoked");
+		});
+
+		it("answers erased where the record its write read carried the subject's mark, the key absent otherwise, and revokes all of a marked subject", async () => {
+			const composition = await open();
+			expect(await composition.revocations.record("alice")).toEqual({ complete: true });
+			await composition.erasure.markErased("alice");
+			await composition.erasure.markErased("carol");
+			expect(await composition.revocations.record("alice")).toEqual({
+				complete: true,
+				erased: true,
+			});
+			// A subject marked before any revocation is answered erased at its first one.
+			expect(await composition.revocations.record("carol")).toEqual({
+				complete: true,
+				erased: true,
+			});
+			expect(await composition.revocations.record("bob")).toEqual({ complete: true });
+			const later = composition.now() + 365 * 86_400_000;
+			expect(await composition.revocations.compare("alice", later, "delegations")).toBe("revoked");
+			expect(await composition.revocation.check("carol", later)).toBe("revoked");
+			expect(await composition.revocation.check("bob", later)).toBe("valid");
+		});
+
+		it("tells whether a subject is marked erased, read on every call", async () => {
+			const composition = await open();
+			expect(await composition.erasedSubjects.erased("alice")).toBe(false);
+			await composition.revocations.record("alice");
+			expect(await composition.erasedSubjects.erased("alice")).toBe(false);
+			await composition.erasure.markErased("alice");
+			await composition.erasure.markErased("carol");
+			expect(await composition.erasedSubjects.erased("alice")).toBe(true);
+			expect(await composition.erasedSubjects.erased("carol")).toBe(true);
+			expect(await composition.erasedSubjects.erased("bob")).toBe(false);
 		});
 
 		it("moves sessions every time, and delegations unless kept", async () => {
@@ -120,6 +162,50 @@ export function subjectRevocationContract(
 	});
 }
 
+/** `erased` from the stand-in's own marks, as the module answers it from the record its write read. */
+const erasedOf = (held: Boundaries | undefined): { readonly erased?: true } =>
+	held?.erasedAt === undefined ? {} : { erased: true };
+
+/** Writes a revocation into the stand-in's map, answering whether it found a mark. */
+const writtenInto =
+	(boundaries: Map<string, Boundaries>, now: () => number): Write =>
+	async (subject, keep) => {
+		const held = boundaries.get(subject);
+		boundaries.set(subject, recorded(held, now(), keep));
+		return erasedOf(held);
+	};
+
+/**
+ * Marks a subject erased in the stand-in's map by the module's rules: a first mark is kept and
+ * answered; a subject with no boundary gets a `sessions` one at the mark's time.
+ */
+const markedInto =
+	(boundaries: Map<string, Boundaries>, now: () => number): SubjectErasure["markErased"] =>
+	async (subject) => {
+		const held = boundaries.get(subject);
+		if (held?.erasedAt !== undefined) return { kind: "marked", erasedAt: held.erasedAt };
+		const erasedAt = now();
+		boundaries.set(subject, { ...(held ?? recorded(undefined, erasedAt, true)), erasedAt });
+		return { kind: "marked", erasedAt };
+	};
+
+/** Compares as the module does: an erased subject is revoked by every comparison. */
+const comparedIn =
+	(boundaries: () => Map<string, Boundaries>): Revocations["compare"] =>
+	async (subject, time, kind, allowanceMs) => {
+		const held = boundaries().get(subject);
+		return held === undefined ? "valid" : comparedTo(held, time, kind, allowanceMs);
+	};
+
+/** Whether a subject is marked erased in the stand-in's map, as the module reads its mark. */
+const erasedInto =
+	(boundaries: () => Map<string, Boundaries>): ErasedSubjects["erased"] =>
+	async (subject) =>
+		boundaries().get(subject)?.erasedAt !== undefined;
+
+/** One composition's boundaries, shared by its revocations and its marks. */
+const standInBoundaries = contract<Map<string, Boundaries>>("subject-revocation.stand-in");
+
 /**
  * A stand-in for tests of the modules that use subject revocation: boundaries kept in memory on
  * the composition's clock, recorded and compared by subject-revocation's own rules, and followed
@@ -128,18 +214,40 @@ export function subjectRevocationContract(
 export const subjectRevocationStandIn = defineModule(
 	{ name: "subject-revocation", replicaSafe: false, takes: [revocationFollowers] },
 	(m) => [
+		m.provide(standInBoundaries).by(() => new Map<string, Boundaries>()),
 		m.provide(revocations).by(async (c) => {
-			const boundaries = new Map<string, Boundaries>();
-			const write: Write = async (subject, keep) => {
-				boundaries.set(subject, recorded(boundaries.get(subject), c.clock.now(), keep));
-			};
+			const boundaries = await c.get(standInBoundaries);
 			return {
-				record: followedBy(write, await c.collect(revocationFollowers), c.log),
-				compare: async (subject, time, kind, allowanceMs) =>
-					compared(time, boundaries.get(subject)?.[kind], allowanceMs),
+				record: followedBy(
+					writtenInto(boundaries, c.clock.now),
+					await c.collect(revocationFollowers),
+					c.log,
+				),
+				compare: comparedIn(() => boundaries),
 			};
 		}),
 		m.provide(subjectRevocation).by(async (c) => subjectRevocationOf(await c.get(revocations))),
+		m
+			.provide(subjectErasure)
+			.by(async (c) => ({ markErased: markedInto(await c.get(standInBoundaries), c.clock.now) })),
+		m.provide(erasedSubjects).by(async (c) => {
+			const boundaries = await c.get(standInBoundaries);
+			return { erased: erasedInto(() => boundaries) };
+		}),
+		// The fence: passes unless the subject is marked; a receipt id is new to each fence, as there.
+		m.provide(erasureFence).by(async (c) => {
+			const boundaries = await c.get(standInBoundaries);
+			const erased = erasedInto(() => boundaries);
+			const receipts = new Set<string>();
+			return {
+				fence: async (subject, receiptId) => {
+					if (receipts.has(receiptId))
+						throw new Error("subject-revocation: a fence's receipt id is used");
+					receipts.add(receiptId);
+					return (await erased(subject)) ? "erased" : "passed";
+				},
+			};
+		}),
 	],
 );
 
@@ -154,17 +262,19 @@ export function laggingRevocation() {
 	const module = defineModule(
 		{ name: "subject-revocation", replicaSafe: false, takes: [revocationFollowers] },
 		(m) => [
-			m.provide(revocations).by(async (c) => {
-				const write: Write = async (subject, keep) => {
-					boundaries.set(subject, recorded(boundaries.get(subject), c.clock.now(), keep));
-				};
-				return {
-					record: followedBy(write, await c.collect(revocationFollowers), c.log),
-					compare: async (subject, time, kind, allowanceMs) =>
-						compared(time, (behind ?? boundaries).get(subject)?.[kind], allowanceMs),
-				};
-			}),
+			m.provide(revocations).by(async (c) => ({
+				record: followedBy(
+					writtenInto(boundaries, c.clock.now),
+					await c.collect(revocationFollowers),
+					c.log,
+				),
+				compare: comparedIn(() => behind ?? boundaries),
+			})),
 			m.provide(subjectRevocation).by(async (c) => subjectRevocationOf(await c.get(revocations))),
+			// A mark goes to the boundaries as they are; a lagging read sees it once caught up.
+			m.provide(subjectErasure).by((c) => ({ markErased: markedInto(boundaries, c.clock.now) })),
+			// Read as a compare is: by the boundaries as they stood at `lag()` until caught up.
+			m.provide(erasedSubjects).by(() => ({ erased: erasedInto(() => behind ?? boundaries) })),
 		],
 	);
 	return {
@@ -193,6 +303,13 @@ export interface BoundaryPlace {
 	readonly restart?: () => Promise<void>;
 	/** Where memory can run short: it does, keeping only what is kept from eviction. */
 	readonly pressMemory?: () => Promise<void>;
+	/** Where it fences: before the next fence of `subject` writes, another writer changes its boundary. */
+	readonly raceNextFence?: (
+		subject: string,
+		change: (record: StoredBoundary) => StoredBoundary,
+	) => void;
+	/** Where it tells whether erasure is enabled: enables it, as the erasure's tool does. */
+	readonly enableErasure?: () => Promise<void>;
 }
 
 /**
@@ -256,6 +373,51 @@ export function boundaryStoreContract(name: string, open: () => Promise<Boundary
 			place.advance(10 * 365 * 86_400_000);
 			expect(await place.boundaries.read(saved)).toEqual(stored({ n: 1 }));
 			expect(await place.boundaries.read(changed)).toEqual(stored({ n: 2 }));
+		});
+
+		// The fence and the mark are optional until 0.22: their cases run where the implementation has them.
+		it("fences: keeps the receipt allowed makes from the boundary as read, none where it makes none", async (context) => {
+			const place = await open();
+			const fence = place.boundaries.fence?.bind(place.boundaries);
+			if (!fence) return context.skip();
+			const made = (id: string) => ({ id }) as unknown as StoredReceipt;
+			const write = (id: string) => ({ value: made(id), lifetimeMs: 60_000 });
+			const subject = fresh();
+			const seen: unknown[] = [];
+			const allowing = (record: StoredBoundary | undefined) => {
+				seen.push(record);
+				return write("r1");
+			};
+			expect(await fence(subject, fresh(), allowing)).toEqual({
+				before: undefined,
+				after: made("r1"),
+			});
+			expect(seen).toEqual([undefined]);
+			await place.boundaries.save(subject, () => stored({ n: 1 }), "endless");
+			expect((await fence(subject, fresh(), () => undefined)).after).toBeUndefined();
+			// A receipt already under the id is answered as `before`, and kept where `allowed` makes none.
+			const taken = fresh();
+			await fence(fresh(), taken, () => write("r2"));
+			expect(await fence(subject, taken, () => undefined)).toEqual({
+				before: made("r2"),
+				after: made("r2"),
+			});
+			if (place.raceNextFence) {
+				seen.length = 0;
+				place.raceNextFence(subject, (record) => stored({ n: counted(record) + 1 }));
+				await fence(subject, fresh(), allowing);
+				expect(seen.at(-1)).toEqual(stored({ n: 2 }));
+			}
+		});
+
+		it("tells whether erasure is enabled, and enabled once it is", async (context) => {
+			const place = await open();
+			const enabled = place.boundaries.erasureEnabled?.bind(place.boundaries);
+			if (!enabled) return context.skip();
+			expect(typeof (await enabled())).toBe("boolean");
+			if (!place.enableErasure) return;
+			await place.enableErasure();
+			expect(await enabled()).toBe(true);
 		});
 
 		it("keeps boundaries through lost answers, a failover, a restart and memory pressure", async (context) => {

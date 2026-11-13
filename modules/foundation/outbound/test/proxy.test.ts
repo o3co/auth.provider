@@ -77,6 +77,8 @@ beforeAll(async () => {
 			client.pipe(upstream);
 		});
 		upstream.on("error", () => client.destroy());
+		// The client's end may close first, as when TLS inside the tunnel ended before a request went.
+		client.on("error", () => upstream.destroy());
 	});
 	await new Promise<void>((done) => proxy.listen(0, "127.0.0.1", done));
 	proxyPort = (proxy.address() as AddressInfo).port;

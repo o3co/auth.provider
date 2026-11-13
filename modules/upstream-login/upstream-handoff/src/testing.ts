@@ -36,25 +36,25 @@ export function heldLoginStoreContract(name: string, open: () => Promise<HeldLog
 		it("removes a record, so its name is free again", async () => {
 			const place = await open();
 			const [key, other] = [fresh(), fresh()];
-			await place.held.save(key, asStored({ n: 1 }), 60_000);
-			await place.held.save(other, asStored({ n: 2 }), 60_000);
+			await place.held.save(key, asStored({ n: 1 }), 60_000, "alice");
+			await place.held.save(other, asStored({ n: 2 }), 60_000, "alice");
 			await place.held.remove(key);
 			await place.held.remove(fresh());
 			expect(await read(place.held, key)).toBeUndefined();
 			expect(await read(place.held, other)).toEqual(asStored({ n: 2 }));
-			expect(await place.held.save(key, asStored({ n: 3 }), 60_000)).toBe("created");
+			expect(await place.held.save(key, asStored({ n: 3 }), 60_000, "alice")).toBe("created");
 		});
 
 		it("keeps a record whole and once per name, and changes it only from what it holds", async () => {
 			const place = await open();
 			const key = fresh();
 			const odd = asStored({ state: "unheard-of", nested: { list: [1, "two"] } });
-			expect(await place.held.save(key, odd, 60_000)).toBe("created");
-			expect(await place.held.save(key, asStored({ n: 1 }), 60_000)).toBe("exists");
+			expect(await place.held.save(key, odd, 60_000, "alice")).toBe("created");
+			expect(await place.held.save(key, asStored({ n: 1 }), 60_000, "alice")).toBe("exists");
 			expect(await read(place.held, key)).toEqual(odd);
 			expect(await place.held.update(fresh(), plus)).toBeUndefined();
 			const counting = fresh();
-			await place.held.save(counting, asStored({ n: 1 }), 60_000);
+			await place.held.save(counting, asStored({ n: 1 }), 60_000, "alice");
 			place.raceNextUpdate(counting, (record) => asStored({ n: counted(record) * 10 }));
 			expect(await place.held.update(counting, plus)).toEqual({
 				before: asStored({ n: 10 }),
@@ -65,7 +65,7 @@ export function heldLoginStoreContract(name: string, open: () => Promise<HeldLog
 		it("ends a record at exactly its lifetime", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.held.save(key, asStored({ n: 1 }), 1000);
+			await place.held.save(key, asStored({ n: 1 }), 1000, "alice");
 			place.advance(999);
 			expect(await read(place.held, key)).toBeDefined();
 			place.advance(1);
@@ -77,9 +77,22 @@ export function heldLoginStoreContract(name: string, open: () => Promise<HeldLog
 			const { holds } = place;
 			if (!holds) return context.skip();
 			const [carry, kept] = [fresh(), fresh()];
-			await place.held.save(carry, asStored({ kept }), 60_000);
+			await place.held.save(carry, asStored({ kept }), 60_000, "alice");
 			await place.held.update(carry, (record) => ({ value: record }));
 			expect([holds(kept), holds(carry)]).toEqual([true, false]);
+		});
+
+		it("refuses, where the Store erases, every save for a subject it erased, and only for that subject", async (context) => {
+			const place = await open();
+			const { erase } = place.held;
+			if (!erase) return context.skip();
+			await place.held.save(fresh(), asStored({ n: 1 }), 60_000, "erin");
+			const report = await erase.call(place.held, "erin", new AbortController().signal);
+			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+			if (report.kind === "stopped") return context.skip();
+			expect(["erased", "fenced"]).toContain(report.kind);
+			expect(await place.held.save(fresh(), asStored({ n: 2 }), 60_000, "erin")).toBe("erased");
+			expect(await place.held.save(fresh(), asStored({ n: 3 }), 60_000, "finn")).toBe("created");
 		});
 
 		it("keeps a change whose answer was lost, through a failover", async (context) => {
@@ -87,7 +100,7 @@ export function heldLoginStoreContract(name: string, open: () => Promise<HeldLog
 			const { loseNextAnswer: lose, failover } = place;
 			if (!lose || !failover) return context.skip();
 			const key = fresh();
-			await place.held.save(key, asStored({ n: 1 }), 60_000);
+			await place.held.save(key, asStored({ n: 1 }), 60_000, "alice");
 			lose();
 			expect((await place.held.update(key, plus))?.after).toEqual(asStored({ n: 2 }));
 			await failover();

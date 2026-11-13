@@ -1,6 +1,7 @@
 import { connect } from "node:net";
 import { listening, routes } from "@mod/http";
 import http from "@mod/http/module";
+import httpServer from "@mod/http-server/module";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { metrics } from "@mod/metrics";
@@ -32,7 +33,7 @@ const items = defineModule({ name: "items", replicaSafe: true, takes: [] }, (m) 
 /** http, metrics and http-ops served together, as a composition has them. */
 async function served() {
 	const app = await assemble({
-		modules: [http, metricsModule, httpOps, items],
+		modules: [http, httpServer, metricsModule, httpOps, items],
 		config: { ...kernelConfig(), http: { port: 0 } },
 		runtime,
 	});

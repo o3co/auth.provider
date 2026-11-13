@@ -9,7 +9,7 @@ Internal module of `keys`: reading public key material from outside, by one set 
 - The provider's own keys and signing (`signing`). Which outside keys a module trusts (the module's).
 
 ## Offers
-- `publicJwk`, `publicPem`, `publicMembers`, `verifiesUnder`, `verifyAlgorithms`, `isVerifyAlgorithm`, `thumbprint`, `isCanonicalJws` and `canonical` (whether a base64url text is its bytes' one form).
+- `publicJwk`, `publicPem` (asked `withForm`, with the form it was written in: a public key, or a certificate its key is taken out of, nothing of the certificate checked), `publicMembers`, `verifiesUnder`, `verifyAlgorithms`, `isVerifyAlgorithm`, `thumbprint`, `isCanonicalJws` and `canonical` (whether a base64url text is its bytes' one form).
 
 ## Invariants
 - A key member is taken only in the one base64url form its bytes encode, so one key has one JWK.

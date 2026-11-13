@@ -1,4 +1,5 @@
 import { cookies } from "@mod/cookies";
+import { erasers } from "@mod/erasure-extensions";
 import { defineModule } from "@mod/kernel";
 import {
 	closingParticipants,
@@ -8,6 +9,9 @@ import {
 	sessions,
 } from "@mod/session";
 import { revocationFollowers, subjectRevocation } from "@mod/subject-revocation";
+import { attributesUnder } from "./attributes.ts";
+import { sessionEraser } from "./erasure/eraser.ts";
+import { portsRefused } from "./erasure/ports.ts";
 import { lifecycleOver } from "./lifecycle/lifecycle.ts";
 import { raiseOver } from "./raise/raise.ts";
 import { section } from "./section.ts";
@@ -32,6 +36,9 @@ export default defineModule(
 	(m) => [
 		m.provide(sessions).by(async (c) => {
 			const kept = await c.get(sessionStore);
+			const listed = await c.get(subjectSessions);
+			const parted = portsRefused(kept, listed);
+			if (parted !== undefined) return c.refuse("session-lifecycle", parted);
 			// Kept elsewhere, as session's seams: none composed is refused, never taken as no rule.
 			const [judge] = await c.collect(entryJudge);
 			const [closing] = await c.collect(closingParticipants);
@@ -52,7 +59,7 @@ export default defineModule(
 				kept,
 				index: await c.get(cookieIndex),
 				closings: await c.get(closingList),
-				listed: await c.get(subjectSessions),
+				listed,
 				revocation: await c.get(subjectRevocation),
 				judge,
 				closing,
@@ -62,6 +69,7 @@ export default defineModule(
 				log: c.log,
 				lifetimeMs,
 				sweepMs,
+				attributes: attributesUnder(c.section.attributes),
 				recent,
 			});
 			c.every(sweepMs, lifecycle.sweep);
@@ -76,11 +84,19 @@ export default defineModule(
 				raise: raiseOver({ lifecycle, kept, clock: c.clock, lifetimeMs }),
 				// The cookie's index alone: no session record is read before a close.
 				handleOf: lifecycle.handleIn,
+				subjectOf: lifecycle.subjectOf,
 				closeRequest: lifecycle.closeIn,
 				close: lifecycle.close,
 				recent,
 			};
 		}),
+		// Its build takes only its two stores, collecting no probes: the erasure gate collects erasers.
+		m.contribute(erasers).by(async (c) =>
+			sessionEraser(await c.get(sessionStore), await c.get(subjectSessions), {
+				clock: c.clock,
+				lifetimeMs: c.section.lifetime * 1000,
+			}),
+		),
 		m.contribute(revocationFollowers).by(async (c) => {
 			const listed = await c.get(subjectSessions);
 			const lateSessions = c.late(sessions);

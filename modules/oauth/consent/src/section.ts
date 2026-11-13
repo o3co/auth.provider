@@ -1,6 +1,7 @@
 import { setting } from "@mod/kernel";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
+import { askLifetimeMaxMs } from "./store.ts";
 
 export const section = z.strictObject({
 	page: urlSetting({ schemes: ["https"], loopbackHttp: true })
@@ -10,7 +11,13 @@ export const section = z.strictObject({
 		),
 	"challenge-lifetime": setting
 		.duration("s")
-		.pipe(z.number().int().min(60).max(3600))
+		.pipe(
+			z
+				.number()
+				.int()
+				.min(60)
+				.max(askLifetimeMaxMs / 1000),
+		)
 		.prefault("10m")
 		.describe(
 			"How long a pending consent challenge stays answerable, from `1m` to `1h` in whole seconds.",

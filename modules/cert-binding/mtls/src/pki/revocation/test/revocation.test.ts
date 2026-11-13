@@ -1,7 +1,4 @@
-import * as asn1js from "asn1js";
-import * as pkijs from "pkijs";
-import { describe, expect, it } from "vitest";
-import type { Fetched, PathPolicy, RevocationPolicy } from "../../contract.ts";
+import { signatureAlgorithms } from "@mod/x509-path";
 import {
 	type Answering,
 	crlOf,
@@ -11,11 +8,15 @@ import {
 	ocspOf,
 	pointAt,
 	rsaKeys,
-} from "../../test/authority.ts";
+} from "@mod/x509-path/testing";
+import * as asn1js from "asn1js";
+import * as pkijs from "pkijs";
+import { describe, expect, it } from "vitest";
+import type { Fetched, PathPolicy, RevocationPolicy } from "../../contract.ts";
 import { revocationOver } from "../revocation.ts";
 
 const ocspSigning = "1.3.6.1.5.5.7.3.9";
-type Policy = RevocationPolicy & Pick<PathPolicy, "minRsaBits">;
+type Policy = RevocationPolicy & Pick<PathPolicy, "minRsaBits" | "signatureAlgorithms">;
 const policyOf = (more: Partial<Policy> = {}): Policy => ({
 	mode: "crl",
 	nonce: true,
@@ -23,10 +24,12 @@ const policyOf = (more: Partial<Policy> = {}): Policy => ({
 	ocspFreshMs: 600_000,
 	crlTtlMs: 3_600_000,
 	failureMs: 30_000,
+	timeoutMs: 3000,
 	crlEntries: 256,
 	ocspEntries: 1024,
 	maxFetches: 4,
 	minRsaBits: 2048,
+	signatureAlgorithms,
 	...more,
 });
 
@@ -100,6 +103,28 @@ const answering = (spec: Omit<Answering, "nonce">) => async (body: Uint8Array | 
 };
 
 describe("revocation by CRL", () => {
+	it("refuses a certificate whose only CRL location is past 2 KiB, or whose issuer's name is past 4 KiB, never taking it as having no CRL", async () => {
+		const root = await issue({ cn: "root", ca: true });
+		const long = `http://root.example/${"a".repeat(2100)}`;
+		const farOff = await issue({ cn: "client", by: root, crl: long });
+		const named = await issue({ cn: "n".repeat(5000), ca: true });
+		const under = await issue({ cn: "client", by: named, crl: "http://root.example/crl" });
+		const s = sources({
+			[long]: await crlOf({ by: root }),
+			"http://root.example/crl": await crlOf({ by: named }),
+		});
+		const revocation = revocationOver(policyOf(), s);
+		expect(await revocation.check([farOff.certificate, root.certificate])).toEqual({
+			kind: "refused",
+			reason: "no source",
+		});
+		expect(await revocation.check([under.certificate, named.certificate])).toEqual({
+			kind: "refused",
+			reason: "malformed",
+		});
+		expect(s.asked).toEqual([]);
+	});
+
 	it("judges a kept CRL again for each certificate, refusing it for one of another issuer", async () => {
 		const root = await issue({ cn: "root", ca: true });
 		const a = await issue({ cn: "a", by: root, ca: true, crl: "http://root.example/crl" });

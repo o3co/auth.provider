@@ -5,6 +5,14 @@ import { z } from "zod";
 /** The longest `max-age` and `clock-skew` any section may give, in seconds: records are kept by these, never by the section. */
 export const longestMaxAge = 3600;
 export const longestClockSkew = 300;
+/** Kept past the last moment a token is taken by this much, so clock differences never let one back. */
+export const usedAllowanceMs = 60_000;
+/**
+ * The longest a used id_token's record lives from its write, in ms: taken at most the longest max-age
+ * after its `iat` and the skew past that, an `iat` at most the skew ahead (external-jwt refuses one later),
+ * and the allowance.
+ */
+export const longestUsedMs = (longestMaxAge + 2 * longestClockSkew) * 1000 + usedAllowanceMs;
 
 /** The kinds of id_token taken, each with its issuer fixed. */
 export const kinds = ["apple", "google"] as const;

@@ -26,12 +26,15 @@ What each module contains is described by that module's contract card (each modu
 | Each module's settings | setting | that module |
 | Explicit acknowledgment of using something despite the risk | setting | the module that requires it |
 | HTTP routes | plug-in point | http |
+| The server serving the routes (`httpServers`): reading each request, applying its route's policies, and checking the rules and marks at boot | contract implementation | http-server |
 | The readiness route (`GET /readyz`) and how long it waits | contract / setting | http-ops |
 | The liveness route (`GET /_healthcheck`), and timing each request | contract | http-ops |
 | Each request's end (`requestEnds`) | extension point | http |
-| Route policies (making one, a route's use of one, applying them before the handler) | extension point kind | http |
+| Route policies (making one, a route's use of one) | extension point kind | http |
+| Applying a route's policies before its handler (`policies`), and the guarantees they are marked to keep (`marks`) | extension point | http-server |
 | A route taking cross-origin requests (its declaration), and the origins allowed | contract / setting | http |
-| The security headers on every answer, and what a page declares it loads (the frames and scripts its policy allows) | contract | http |
+| What a page declares it loads (the frames and scripts its policy allows) | contract | http |
+| The security headers on every answer, a page's policy among them | contract implementation | http-server |
 | Trusted proxies | setting | http |
 | Request source | vocabulary | request-source |
 | The client's certificate a trusted proxy forwards, the forms it is read in, and whether the operator named where it is forwarded | vocabulary / contract | client-certificate |
@@ -44,8 +47,9 @@ What each module contains is described by that module's contract card (each modu
 | Received values: a name's single value, and the names repeated | vocabulary | http |
 | Signing, verification, publishing public keys | contract | keys |
 | Sending outbound HTTP requests, and the operator's section `outbound` | contract / setting | outbound |
+| Checking the revocation of an outbound request's TLS peer certificate by CRL, the hosts its CRLs are fetched from, and how many are kept how long (`outbound.revocation`) | contract / setting | outbound |
 | Where outbound requests may go: the destination policy and its boot questions | contract / setting | outbound-policy |
-| The floor of the provider's own TLS connections as a client, the certificate checked among it: the section `tls-options`, its contract and `heldToFloor` | contract / setting | tls-options |
+| The floor of the provider's own TLS connections as a client, its chain and name checked among it: the section `tls-options`, its contract and `heldToFloor` | contract / setting | tls-options |
 | What an IP address reaches by its kind: special-purpose, private, loopback | contract | address-reach |
 | How an operator writes a host in configuration (a name, `.name`, an address, a `host:port` pair), and whether a host is among such entries | vocabulary / setting | host-entries |
 | Fetching signed material | contract | outbound |
@@ -58,6 +62,7 @@ What each module contains is described by that module's contract card (each modu
 | Sealing at rest (keyring) | contract / setting | seal |
 | Checking a secret against a stored hash (bcrypt, scrypt), with the same work when there is none to check | contract | secret-hash |
 | The rule for a name a user gives something that a page shows back as it is (a label) | contract | labels |
+| The rule for an address mail takes, and its one form to compare by | contract | mail-address |
 | Sending mail (one address per send), preparing a message for a sender | contract | mail |
 | Mail purposes and mail templates | extension point kind | mail |
 | The logging-only mail sender | contract implementation / setting | mail |
@@ -70,6 +75,7 @@ What each module contains is described by that module's contract card (each modu
 | Keyed records (also under a secret), deferred work and keyed sets | implementation | records |
 | Place (where records are kept: the store and space a wiring gives) | vocabulary | records |
 | Checking JWTs signed by outside keys (header, key choice, signature, times, expected issuer, audience and subject), and fetching key sets | contract | external-jwt |
+| Validating an X.509 certification path under the caller's rules, its signature rules, and reading CRLs and OCSP answers | contract | x509-path |
 | How large a feature's deferred work may grow | setting | the per-owner modules in templates |
 | Wiring a feature's store interface to a capability's implementation | wiring | the per-owner modules in templates |
 | Wiring code-grant's store interface to records | wiring | code-grant-store |
@@ -202,7 +208,7 @@ What each module contains is described by that module's contract card (each modu
 | The client credentials grant | grant contribution | client-credentials |
 | Sender binding (binding kinds, reading a request's binding, the shape of a binding), admitting a request presenting a token at a resource | extension point kind / contract | sender-binding |
 | DPoP proofs (RFC 9449) as a binding kind, each proof's `jti` spent once | contribution / setting | dpop |
-| Certificate-bound tokens: the `x5t#S256` binding kind, certificate path validation and revocation checking, trust anchors | contribution / setting | mtls |
+| Certificate-bound tokens: the `x5t#S256` binding kind, a client certificate's path (validated by `x509-path`) and revocation checking, trust anchors | contribution / setting | mtls |
 | Extra checks added to access token verification | extension point kind | tokens |
 | The check of subject revocation on access tokens, and stating there is none | extension point kind / setting | tokens |
 | Checking access tokens against the subject revocation boundary | contribution | subject-tokens |
@@ -273,9 +279,11 @@ What each module contains is described by that module's contract card (each modu
 | An operator's reset of a subject's passkeys, and the passkeys' step of mfa-reset's parts | contract | passkey-reset |
 | Having an operator's reset of second factors remove the subject's passkeys too | contribution | mfa-reset-passkeys |
 | WebAuthn as a second factor (the subject's user handle for it, its amr, the name an authenticator shows) | contribution / setting | mfa-webauthn |
-| A code by mail as a second factor, how a code is mailed to the account's address, and the mail purposes of both below | contribution / setting / contract | mfa-email |
-| The proof of the account's address before a first binding (`account-email`), by mfa-email's rules | contribution | mfa-email-proof |
+| A code by mail as a second factor, and the mail purposes it declares | contribution / setting / contract | mfa-email |
+| The proof of the account's address before a first binding (`account-email`), by account-mail-code's rules | contribution | mfa-email-proof |
 | The wording of mfa-email's mails, which a deployment replaces | contribution | mfa-email-wording |
+| Mailing a code to the account's address and checking it typed back, for the caller's purpose | contract | account-mail-code |
+| The wording of mfa-email-proof's mails, which a deployment replaces | contribution | mfa-email-proof-wording |
 | Budget numbers and invariant checks | setting | guard |
 | Kind names, their order, and which way a dependency between kinds may point | vocabulary / contract | kinds |
 | The checks each kind gets | setting | guard |
@@ -284,6 +292,7 @@ What each module contains is described by that module's contract card (each modu
 | Running each pattern's conformance areas on its app, and leaving out as `not-in-pattern` the scenes it cannot hold | contract | conformance |
 | The local layer that boots a generated app for a test or a conformance run, from each composed module's trial file | contract | trial |
 | Running the docker client within a time, and how each of its commands fails, for every package that drives Docker | contract | docker-client |
+| Serving packed tarballs as an npm registry, at the publish times its caller gives, for the checks that install them | contract | local-registry |
 | An https front before a running app, for a harness's outside party | contract | conformance-front |
 | A way out from a harness's app to a party on this machine by its name alone (an HTTP CONNECT proxy on loopback, as `outbound.proxy`) | contract | conformance-tunnel |
 | Starting the legacy build, and registering legacy set-ups | contract | conformance-legacy |
@@ -305,6 +314,7 @@ What each module contains is described by that module's contract card (each modu
 | Running the provider against independent client libraries, and the differences accepted with each | contract / data | interop-clients |
 | Running the OpenID Foundation's conformance suite against the provider, and the expected entries a test's result may take | contract / data | interop-oidf |
 | Repo layout (where packages go) | setting | the workspace definition |
+| Listing the packages a workspace's definition places, by name and directory | contract | workspace-packages |
 | Generating a project: the command, the plan, and where the packages come from (the workspace or a bundle's index) | contract | create-app |
 | A generated project's files (a listed app, or a deployment of full or a pattern: the module list, configuration gathered from the modules' fragments, env and local examples, Dockerfile, README) | template | app-output |
 | A generated app's entries (its start and the scripts its composed modules call for: how each boots, refuses, checks 0.17's variables, writes and stops) | template | app-entries |

@@ -2,11 +2,14 @@ import { defineModule, type Module, Unavailable } from "@mod/kernel";
 import {
 	checkedStore,
 	type Guarantee,
+	type Json,
 	type Key,
+	type Mark,
 	type Space,
 	type Store,
 	spaces,
 	store,
+	storeControl,
 } from "./contract.ts";
 import { memoryStore } from "./memory.ts";
 
@@ -58,6 +61,11 @@ export interface SimulatedStore {
 	stallReplicas(on: boolean): void;
 	/** Whether any write it ever took, kept now or lost, carried `text` in a key or a value. */
 	holds(text: string): boolean;
+	/**
+	 * Writes an owner's mark in the control record it offers (`storeControl`), as maintenance would:
+	 * a record of its own beside the data, no epoch and no maintenance key, unavailable while unreachable.
+	 */
+	mark(name: string, value: Json): void;
 }
 
 function spaceOf(name: string, args: readonly unknown[]): Space | undefined {
@@ -67,6 +75,11 @@ function spaceOf(name: string, args: readonly unknown[]): Space | undefined {
 		case "batchAcross": {
 			const [conditions, written] = args as [readonly { key: Key }[], readonly { key: Key }[]];
 			return (conditions[0] ?? written[0])?.key.space;
+		}
+		// Reads of several keys are confirmed where any of their spaces confirms reads.
+		case "getMany": {
+			const keys = args[0] as readonly Key[];
+			return (keys.find((k) => k.space.guarantees.includes("confirmed-reads")) ?? keys[0])?.space;
 		}
 		default:
 			return (args[0] as Key | undefined)?.space;
@@ -87,6 +100,7 @@ export function simulatedStore(): SimulatedStore {
 	let loseNext = false;
 	let writesFail = false;
 	let down = false;
+	const marks = new Map<string, Mark>();
 	let stalled = false;
 	const failing = new Set<keyof Store>();
 	type Hook = { operation: keyof Store; space: string; run: () => Promise<void> };
@@ -231,7 +245,21 @@ export function simulatedStore(): SimulatedStore {
 				// Inputs are read once into copies whose keys carry the declared space, for replays too.
 				return checkedStore(facade, declared);
 			}),
+			m.provide(storeControl).by(() => ({
+				control: async () => {
+					if (down) throw new Unavailable("store");
+					return {
+						epoch: null,
+						maintenance: false,
+						requires: [],
+						marks: Object.fromEntries(marks),
+					};
+				},
+			})),
 		]),
+		mark: (name, value) => {
+			marks.set(name, { value, epoch: null });
+		},
 		loseNextReply: () => {
 			loseNext = true;
 		},

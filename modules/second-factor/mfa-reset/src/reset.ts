@@ -32,6 +32,8 @@ const typeOf = (error: unknown) => (error instanceof Error ? error.name : typeof
  * first failure that is not unavailable, if any, whichever step it came at.
  */
 interface Ran {
+	/** Whether a boundary step read the subject as erased, and what that step's `record` answered as `complete`. */
+	readonly erased: { readonly complete: boolean } | undefined;
 	readonly cleared: Removed | undefined;
 	/** Each part done, by name, with how many went. */
 	readonly parts: Readonly<Record<string, number>>;
@@ -62,11 +64,20 @@ export function resetOver(p: ResetParts): MfaReset {
 				return undefined;
 			}
 		};
+		/** The first boundary step that read the subject erased; whether one read it not erased. */
+		let erased: { readonly complete: boolean } | undefined;
+		let answeredNotErased = false;
 		const endSessions = async () =>
 			(await step("sessions", async () => {
-				const { complete } = await p.revocations.record(subject, { keepDelegations: true });
+				const done = await p.revocations.record(subject, { keepDelegations: true });
+				// Erased is read before complete: such a run is refused, never stopped at this step.
+				if (done.erased) {
+					erased ??= { complete: done.complete };
+					return false;
+				}
+				answeredNotErased = true;
 				// The boundary moved, but a session still open would outlive the reset.
-				if (!complete) throw new Unavailable("subject-revocation");
+				if (!done.complete) throw new Unavailable("subject-revocation");
 				return true;
 			})) === true;
 		const sessions = await endSessions();
@@ -94,10 +105,24 @@ export function resetOver(p: ResetParts): MfaReset {
 		}
 		// Runs whatever happened above: a login proved with a factor between the first boundary and the removal ends here.
 		const sessionsAgain = sessions ? await endSessions() : undefined;
+		if (erased !== undefined) {
+			// No record of a run that read the subject erased names it; the factors may be gone already.
+			declaredAudit(p.audit, events).record("mfa.reset.refused", {
+				attributes: {
+					by: "operator",
+					complete: String(erased.complete),
+					...(requestedBy === undefined ? {} : { requestedBy }),
+				},
+			});
+			p.log.warn("mfa-flows.reset_refused", {});
+			return { erased, cleared, parts: {}, failure, fault };
+		}
+		// The subject is named only where a boundary step read it, as not erased.
 		declaredAudit(p.audit, events).record("mfa.reset", {
-			subject,
+			...(answeredNotErased ? { subject } : {}),
 			attributes: {
 				by: "operator",
+				...(answeredNotErased ? {} : { withheld: "unread" }),
 				...(cleared ? { kinds: cleared.kinds.join(" "), count: String(cleared.count) } : {}),
 				...(went.length > 0
 					? {
@@ -119,13 +144,14 @@ export function resetOver(p: ResetParts): MfaReset {
 		} else {
 			p.log.info("mfa-flows.reset", {});
 		}
-		return { cleared, parts, failure, fault };
+		return { erased: undefined, cleared, parts, failure, fault };
 	};
 	return {
 		run: async (subject, options = {}): Promise<ResetOutcome> => {
-			const { cleared, parts, failure, fault } = await attempt(subject, options);
+			const { erased, cleared, parts, failure, fault } = await attempt(subject, options);
 			// The one place a step's unavailability becomes a stopped run; any other failure, at any step, is thrown.
 			if (fault !== undefined) throw fault.error;
+			if (erased !== undefined) return { kind: "erased" };
 			if (failure !== undefined) {
 				// The lockout is released only once the factors went: before them a run stops at the
 				// first boundary or the removal, after them at the release or the second boundary.

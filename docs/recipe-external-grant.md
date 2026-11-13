@@ -1,21 +1,20 @@
 # Recipe: a grant of your own, in your own package
 
-The module cards are the source of truth. Where this page and a card disagree, the card wins. This page orders the steps and points to the cards; the package, the code and the exchange below are built and run against the published packages before each release, so they do not go stale.
+The module cards are the source of truth. Where this page and a card disagree, the card wins. This page orders the steps and points to the cards; the package, the code, the commands and the exchange below are built and run against the published packages before each release, so they do not go stale.
 
-It writes an OAuth grant as an npm package outside this repository, modelled on the client credentials grant (`client-credentials`), and adds it to an app the generator made.
+It writes an OAuth grant as an npm package outside this repository, modelled on the client credentials grant (`client-credentials`), and has the generator compose it into an app.
 
 ## The package
 
 Depend on the published packages your module imports, all at the one version of the release you run: every package of a release shares it. Keep them as peers, so the app installs one copy of each. The kernel finds contracts and extension points by the object itself, never by name, so a second copy of a package is a different contract, and your grant would reach no token endpoint (the `kernel` card).
 
-Export the module the app imports at `./module`, as every module of the provider does: the app's `src/main.ts` imports it from there, as does the generator when it composes your package ([packages outside the release](outside-modules.md#export-the-module)).
+Export the module the app imports at `./module`, as every module of the provider does: the generator composes your package by importing it from there ([packages outside the release](outside-modules.md#export-the-module)). Declare it in `authProvider`, as the generator reads it: this one is a feature, needing the modules its code takes and contributes to ([declare it](outside-modules.md#declare-it)).
 
 <!-- generated:package-json -->
 ```json
 {
-	"name": "example-grant",
+	"name": "@example/example-grant",
 	"version": "1.0.0",
-	"private": true,
 	"type": "module",
 	"exports": {
 		"./module": {
@@ -31,6 +30,16 @@ Export the module the app imports at `./module`, as every module of the provider
 		"@o3co/auth-provider-identity": "<version>",
 		"@o3co/auth-provider-oauth": "<version>",
 		"zod": "^4.6.0"
+	},
+	"authProvider": {
+		"format": 1,
+		"kind": "feature",
+		"needs": [
+			"@mod/client-allowance",
+			"@mod/grants",
+			"@mod/issuer",
+			"@mod/tokens"
+		]
 	}
 }
 ```
@@ -111,15 +120,23 @@ If your grant calls another server, take `outbound`'s contract and send the requ
 
 ## Add it to the app
 
-Generate the app as the README's quick start shows, add your package to its dependencies, and add your module to the list the generated `src/main.ts` passes to `assemble`. (To have the generator compose it instead, declare it and install it as [packages outside the release](outside-modules.md) shows.) A package added by hand has no record, and nothing there holds it: no check reads its lockfile entry, nothing refuses a command it declares, and the app keeps its scripts, which run with `node_modules/.bin` first on PATH.
+Publish your package to a registry, npm's or one of your own, under a name of your own: `@example/example-grant` here stands for it. Install the package with pnpm into a project of your own: the generator reads your package from that project, never from a registry. Generate the app from outside it, naming the package `npm:<name>` and the project `--outside-from`, then check the app's lockfile before installing it ([composing a package outside the release](outside-modules.md#composing-a-package-outside-the-release)):
 
-<!-- generated:main -->
-```ts
-import exampleGrant from "example-grant/module";
-// …
-		return assemble({ modules: [exampleGrant, m0, m1, …], config });
+<!-- generated:command -->
+```sh
+mkdir outside && cd outside
+echo '{ "private": true }' > package.json
+pnpm add @example/example-grant@1.0.0
+cd ..
+npx @o3co/create-auth-provider my-provider --pattern simple-web --add npm:@example/example-grant --outside-from outside
+cd my-provider
+pnpm install --lockfile-only
+node scripts/check-outside.mjs
+pnpm install --frozen-lockfile --ignore-scripts
 ```
 <!-- end generated -->
+
+The generator composes your module into the app's `src/main.ts` beside the release's, and records your package and its integrity in `outside-modules.json`; `scripts/check-outside.mjs` holds the lockfile to that record. Commit the lockfile once the check passes. Such an app runs its files with node, not through its scripts ([run the app by its files](outside-modules.md#run-the-app-by-its-files)).
 
 ## Allow it for a client
 

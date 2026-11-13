@@ -1,7 +1,7 @@
 import { audit } from "@mod/audit";
 import { assemble, type BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { takesUnused } from "@mod/kernel/testing";
-import { passkeyHolders } from "@mod/passkeys";
+import { passkeyClearing } from "@mod/passkeys";
 import { revocations } from "@mod/subject-revocation";
 import { expect, it } from "vitest";
 import { passkeyReset, passkeyResetPart } from "../src/contract.ts";
@@ -19,7 +19,7 @@ const parts = (calls: string[]) =>
 					},
 				}) as never,
 		),
-		m.provide(passkeyHolders).by(
+		m.provide(passkeyClearing).by(
 			() =>
 				({
 					cleared: async (subject: string) => {

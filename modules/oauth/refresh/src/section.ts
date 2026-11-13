@@ -1,10 +1,19 @@
 import { setting } from "@mod/kernel";
 import { z } from "zod";
 
+/** The longest a family may live: 365 days. */
+export const familyLifetimeMaxMs = 31_536_000_000;
+
 export const section = z.strictObject({
 	lifetime: setting
 		.duration("s")
-		.pipe(z.number().int().min(1).max(31_536_000))
+		.pipe(
+			z
+				.number()
+				.int()
+				.min(1)
+				.max(familyLifetimeMaxMs / 1000),
+		)
 		.prefault("1d")
 		.describe(
 			"How long a refresh token family lives, from `1s` to `365d` in whole seconds. Shorter is only safer, so the floor is a second, which lets tests watch a family run out.",
@@ -14,7 +23,7 @@ export const section = z.strictObject({
 		.pipe(z.number().int().min(1).max(3600))
 		.prefault("30s")
 		.describe(
-			"How often the sweep finishes revocations that stopped halfway, from `1s` to `1h` in whole seconds.",
+			"Deprecated: taken, not read, as no sweep runs; a later release refuses it. From `1s` to `1h` in whole seconds.",
 		),
 	"bind-confidential-clients": z
 		.boolean()

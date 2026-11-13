@@ -2,7 +2,7 @@ import { hostEntry } from "@mod/host-entries";
 import { setting } from "@mod/kernel";
 import { z } from "zod";
 import type { RevocationPolicy } from "./pki/contract.ts";
-import { isCertificate } from "./pki/pki.ts";
+import { isAnchor, signatureAlgorithms } from "./pki/pki.ts";
 
 const positive = (max: number, fallback: number) =>
 	z.number().int().min(1).max(max).prefault(fallback);
@@ -83,6 +83,13 @@ export const section = z.discriminatedUnion("mode", [
 			.max(16_384)
 			.prefault(2048)
 			.describe("The fewest bits an RSA key in the path may have; 2048 at least."),
+		"signature-algorithms": z
+			.array(z.enum(signatureAlgorithms))
+			.min(1)
+			.prefault([...signatureAlgorithms])
+			.describe(
+				"The signature algorithms taken on the path (anchors aside), on CRLs, on OCSP answers and on the responders they are delegated to; all nine by default, at least one. A CRL or OCSP answer signed with an algorithm left out is not used, and that is a refusal, not an outage: `on-unavailable` does not bind it, and under `both` the other source alone can confirm the certificate.",
+			),
 		revocation: revocation.describe("How a certificate's revocation is confirmed."),
 	}),
 ]);
@@ -93,7 +100,7 @@ export function anchorOf(pem: string): Uint8Array | undefined {
 	const [only, ...more] = [...pem.matchAll(pattern)];
 	if (!only || more.length > 0 || pem.replace(pattern, "").trim() !== "") return undefined;
 	const der = new Uint8Array(Buffer.from((only[1] ?? "").replace(/\s+/g, ""), "base64"));
-	return isCertificate(der) ? der : undefined;
+	return isAnchor(der) ? der : undefined;
 }
 
 type PkiSection = Extract<z.output<typeof section>, { mode: "pki" }>;
@@ -107,6 +114,7 @@ export const revocationPolicyOf = (r: RevocationSection): RevocationPolicy => ({
 	ocspFreshMs: r["ocsp-fresh"] * 1000,
 	crlTtlMs: r["crl-ttl"] * 1000,
 	failureMs: r["failure-lifetime"] * 1000,
+	timeoutMs: r.timeout,
 	crlEntries: r["crl-entries"],
 	ocspEntries: r["ocsp-entries"],
 	maxFetches: r["max-fetches"],

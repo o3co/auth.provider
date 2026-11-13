@@ -28,6 +28,7 @@
 		"@mod/clients": "workspace:*",
 		"@mod/cookies": "workspace:*",
 		"@mod/csrf": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",

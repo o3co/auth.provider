@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import type { Scene } from "@mod/sender-binding";
+import { issue } from "@mod/x509-path/testing";
 import { describe, expect, it } from "vitest";
 import { type Checking, readCertificate } from "../src/binding.ts";
 import type { Checked } from "../src/pki/contract.ts";
-import { issue } from "../src/pki/test/authority.ts";
 
 const thumbprint = (der: Uint8Array) => createHash("sha256").update(der).digest("base64url");
 const issuance: Scene = { kind: "issue" };

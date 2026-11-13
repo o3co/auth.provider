@@ -10,12 +10,13 @@
 - Owns the fault scenes of the federation area, on a Redis topology and a deployment of their own: a subject's revocation boundary refusing a grant established before it, and the grants kept where a revocation keeps delegations (internal module `revocation-boundary`), with what they share (`faults`).
 - Owns the fault scenes of an IdP name's issuer across starts (internal module `names`), each start a deployment of its own on one Redis.
 - Owns the fault scenes of a DPoP proof's count, on Redis (internal module `proof-writes`).
+- Owns the fault scenes of an OpenID Connect IdP whose description cannot be read at boot (internal module `descriptions`).
 - Sets up the federation area's part (the IdPs, the landing, the held page, the return targets, federation grants' page, connections, lodging limit and whether they keep on subject revocation, a link's step-up page, a name's stated move and a sealing key kept across starts) on each of the legacy and new targets; on the new, the grants' page goes to `federation-grants-connect`, composed with the grants, and the step-up page to `federation-link`.
 - The legacy build turns federation grants on only when enabled.
 - The legacy set-up enables federation grants.
 - The legacy set-up keeps federation grants in Redis.
 - The legacy set-up checks no upstream account's holder.
-- Scripts a fake upstream IdP on the test side, on the base's fake HTTP server: it publishes its description and keys (and its end of session, where the scene says), answers its token endpoint as a real one would, hands over the tokens a scene sets, and answers refreshes as the scene scripts them.
+- Scripts a fake upstream IdP on the test side, on the base's fake HTTP server: it publishes its description (answering as the scene switches it) and keys (and its end of session, where the scene says), answers its token endpoint as a real one would, hands over the tokens a scene sets, and answers refreshes as the scene scripts them.
 - The same fake upstream IdP stands for Google at Google's paths, naming Google's issuer and telling the user's subject.
 - Scripts a fake Apple that answers in a posted form, takes a fixed client secret or one the team's key signs, and can move its id_tokens to a new key.
 - Scripts a fake GitHub that answers a refused code with 200 and an error, refuses an API request without a User-Agent, and tells the user's numeric id.
@@ -25,7 +26,7 @@
 
 ## Offers
 - Area `federation` and the shape of its part
-- Scene builder (builds the key, identity, OAuth, code-flow and federation parts from the form written in a scene)
+- Scene builder `federationScene` (builds the key, identity, OAuth, code-flow and federation parts from the form written in a scene)
 - The needs `grantsLoginPage`, `linkStepUpPage` and `readsUserinfo`, which the legacy target cannot meet
 - `landedStatus`: the status a callback lands its browser with, 303 (RFC 9700 §4.12), or 302 where the target differs
 - The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run only with `CONFORMANCE_FAULTS=1`, as CI sets and the script does not; named to the evidence as `@mod/conformance-federation#faults` by the run itself; the area's own run and its pattern runs leave them out

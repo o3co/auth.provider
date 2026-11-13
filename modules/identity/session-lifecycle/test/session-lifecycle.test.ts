@@ -2,6 +2,7 @@ import { cookies } from "@mod/cookies";
 import cookiesModule from "@mod/cookies/module";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	BootRefused,
@@ -88,6 +89,7 @@ async function boot(
 		assemble({
 			modules: [
 				http,
+				httpServer,
 				cookiesModule,
 				sessionLifecycle,
 				sessionRequirements,
@@ -147,6 +149,7 @@ describe("session cookies", () => {
 		const refused = await assemble({
 			modules: [
 				http,
+				httpServer,
 				cookiesModule,
 				sessionLifecycle,
 				subjectRevocationStandIn,
@@ -208,6 +211,24 @@ describe("session attributes", () => {
 		await login({ source: "users", values: { email: "a@b.example", "secret-only": 1 } });
 		expect(dropped().at(-1)?.fields).toEqual({ dropped: "", others: 1 });
 		expect(JSON.stringify(recorded.lines())).not.toMatch(/secret|nnn/);
+	});
+
+	it("keeps a login's attributes under the section's caps, and a read under a cap lowered since drops a value past it", async () => {
+		const values = { name: "Al", groups: Array.from({ length: 80 }, (_, n) => `g${n}`) };
+		const wide = await boot({ attributes: { "groups-limit": 100 } });
+		const opened = openedOf(
+			await wide.s.open(testRequest(), { ...facts(), attributes: { source: "users", values } }),
+		);
+		expect(opened.session.context.attributes?.values).toEqual(values);
+		const { s, withCookie, stores, login, handleOf } = await boot();
+		const cookie = await login();
+		await stores.kept.records.change(await handleOf(cookie), (r) => ({
+			value: {
+				...(r as object),
+				attributes: { source: "users", values },
+			} as unknown as StoredSession,
+		}));
+		expect((await s.enter(withCookie(cookie)))?.context.attributes?.values).toEqual({ name: "Al" });
 	});
 
 	it("rechecks a record's attributes on every read", async () => {
@@ -434,6 +455,7 @@ describe("session entry", () => {
 		const app = await assemble({
 			modules: [
 				http,
+				httpServer,
 				cookiesModule,
 				sessionLifecycle,
 				sessionRequirements,
@@ -576,6 +598,7 @@ describe("session entry", () => {
 		const other = await assemble({
 			modules: [
 				http,
+				httpServer,
 				cookiesModule,
 				sessionLifecycle,
 				sessionRequirements,
@@ -780,13 +803,21 @@ describe("session closing", () => {
 		expect(stores.kept.pending()).toEqual([]);
 	});
 
-	it("marks a session closed with a write even when there is no record", async () => {
+	it("fails a login whose save or listing its subject's erasure refused, never trying it again", async () => {
+		const { s, stores } = await boot();
+		stores.erased.sessions.add("erin");
+		await expect(s.open(testRequest(), facts("erin"))).rejects.toSatisfy(isUnavailable);
+		// Saved, then refused at the listing: unlisted, and no cookie made to lead to it.
+		stores.erased.listed.add("finn");
+		await expect(s.open(testRequest(), facts("finn"))).rejects.toSatisfy(isUnavailable);
+		expect(await listed(stores, "finn")).toEqual([]);
+	});
+
+	it("answers closed where there is no record, writing nothing: ended, never opened, or erased", async () => {
 		const { s, stores } = await boot();
 		const handle = "x".repeat(43);
-		stores.down.sessions.failNext("save");
-		await expect(s.close(handle)).rejects.toSatisfy(isUnavailable);
-		expect((await s.close(handle)).kind).toBe("closed");
-		expect(stores.kept.peek(handle)).toEqual({ format: 2, state: "closed" });
+		expect(await s.close(handle)).toMatchObject({ kind: "closed" });
+		expect(stores.kept.peek(handle)).toBeUndefined();
 	});
 
 	it("keeps a closed record for the lifetime from its closing, then lets it go", async () => {
@@ -842,6 +873,33 @@ describe("session closing", () => {
 		const mark = { format: 1, state: "closed", extra: true } as unknown as StoredSession;
 		await stores.kept.records.create(handle, mark, 60_000);
 		await expect(s.close(handle)).rejects.toSatisfy(isUnavailable);
+	});
+
+	it("reads the subject of a record kept past the lifetime in force, ending nothing", async () => {
+		const { s, stores, login, handleOf } = await boot({ lifetime: "2m" });
+		const handle = await handleOf(await login());
+		// Kept longer than the lifetime in force, as a record written under a longer one is.
+		await stores.kept.records.change(handle, (r) => ({ value: r, lifetimeMs: 3_600_000 }));
+		now += 120_001;
+		expect(await s.subjectOf?.(handle)).toBe("alice");
+		// Nothing was written: the record is still open, and a close finds it so.
+		expect((await stores.kept.records.read(handle)) as unknown).toMatchObject({ state: "open" });
+		expect((await s.close(handle)).from).toBe("open");
+	});
+
+	it("reads a record's subject without entering it: none for a closed mark or no record, unavailable for one it cannot read", async () => {
+		const { s, stores, login, handleOf } = await boot();
+		const subjectOf = (handle: string) => s.subjectOf?.(handle);
+		const handle = await handleOf(await login());
+		expect(await subjectOf(handle)).toBe("alice");
+		const mark = { format: 1, state: "closed" } as unknown as StoredSession;
+		await stores.kept.records.create("marked", mark, 60_000);
+		expect(await subjectOf("marked")).toBeUndefined();
+		expect(await subjectOf("none")).toBeUndefined();
+		await stores.kept.records.change(handle, (r) => ({
+			value: { ...(r as object), format: 3 } as unknown as StoredSession,
+		}));
+		await expect(subjectOf(handle)).rejects.toSatisfy(isUnavailable);
 	});
 
 	it("puts off a closing whose record it cannot read, as one whose participants fail", async () => {
@@ -1123,6 +1181,7 @@ describe("session raise", () => {
 		const other = await assemble({
 			modules: [
 				http,
+				httpServer,
 				cookiesModule,
 				sessionLifecycle,
 				sessionRequirements,
@@ -1373,6 +1432,7 @@ describe("revoking a subject", () => {
 it("takes every handle its takes name", async () => {
 	const modules = [
 		http,
+		httpServer,
 		cookiesModule,
 		sessionLifecycle,
 		sessionRequirements,

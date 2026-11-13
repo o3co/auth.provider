@@ -1,5 +1,5 @@
 import { auditStandIn } from "@mod/audit/testing";
-import { clients } from "@mod/clients";
+import { type Clients, clients } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientSecret, clientsConfig, confidentialClient } from "@mod/clients/testing";
 import cookiesModule from "@mod/cookies/module";
@@ -15,7 +15,15 @@ import { federationGrantsConfig } from "@mod/federation-grants/testing";
 import { type HttpRequest, type HttpResponse, type Route, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
+import httpServer from "@mod/http-server/module";
+import {
+	assemble,
+	contract,
+	defineModule,
+	kernelConfig,
+	type Module,
+	Unavailable,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { memoryRecords } from "@mod/records/testing";
@@ -135,14 +143,15 @@ export async function connector(
 	const recorded = auditStandIn();
 	const script = {
 		exchange: async (_x: DelegatedExchange): Promise<unknown> => upstreamLogin(),
-		startThrows: false,
+		/** What the delegation's start throws, if anything. */
+		startThrows: undefined as Error | undefined,
 		startRefused: false,
 		withdrawn: false,
 	};
 	const asked = { starts: [] as DelegationStart[] };
 	const delegation = {
 		authorizationUrl: (start) => {
-			if (script.startThrows) throw new Error("cannot build");
+			if (script.startThrows) throw script.startThrows;
 			if (script.startRefused) return { kind: "refused" };
 			asked.starts.push(start);
 			return `https://up.example/authorize?state=${start.state}`;
@@ -186,10 +195,36 @@ export async function connector(
 			.provide(roundTripStore)
 			.by(() => ({ save: kept.records.create, update: kept.records.change })),
 	]);
+	/** What `relist` last set, which the clients then answer as every client's section found. */
+	let listed: { connections: string[]; "return-uris": string[] } | undefined;
+	/** The clients as built, finding a client with `listed` once set: a new object, as the one built is shared. */
+	const relisting: Module = {
+		...clientsModule,
+		provides: (clientsModule.provides ?? []).map((part) =>
+			part.contract !== clients
+				? part
+				: {
+						contract: part.contract,
+						create: async (context: Parameters<typeof part.create>[0]) => {
+							const real = (await part.create(context)) as Clients;
+							return {
+								...real,
+								find: async (id: string) => {
+									const found = await real.find(id);
+									return found && listed !== undefined
+										? { ...found, section: (() => listed) as never }
+										: found;
+								},
+							};
+						},
+					},
+		),
+	};
 	const app = await assemble({
 		modules: [
 			http,
-			clientsModule,
+			httpServer,
+			relisting,
 			secretHashModule,
 			cookiesModule,
 			tripStore,
@@ -250,13 +285,7 @@ export async function connector(
 	};
 	/** From now on the clients answer the worker with these connections and returns. */
 	const relist = (connections: string[], returns: string[]) => {
-		const found = app.get(clients);
-		const { find } = found;
-		const section = () => ({ connections, "return-uris": returns }) as never;
-		found.find = async (id) => {
-			const client = await find(id);
-			return client && { ...client, section };
-		};
+		listed = { connections, "return-uris": returns };
 	};
 
 	let n = 0;
@@ -287,7 +316,12 @@ export async function connector(
 			version: `v-${n}`,
 			rotations: { from: now, count: 0 },
 		};
-		await stores.grants.create(grant.id, grant as unknown as StoredGrant, connectMs + retentionMs);
+		await stores.grants.create(
+			grant.id,
+			grant as unknown as StoredGrant,
+			connectMs + retentionMs,
+			grant.subject,
+		);
 		const link = `link-${grant.id}`;
 		const step = { format: 1, kind: "link", grant: grant.id, intent: intent.id };
 		await stores.steps.create(link, step as unknown as StoredStep, connectMs);

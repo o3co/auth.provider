@@ -2,13 +2,14 @@ import { createPrivateKey, generateKeyPairSync, type KeyObject, randomBytes } fr
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { CompactSign } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
 import { keys } from "../src/contract.ts";
 import keysModule from "../src/module.ts";
-import { section as keysSection } from "../src/signing/section.ts";
+import { section as keysSection } from "../src/section.ts";
 import { keysConfig } from "../src/testing.ts";
 
 let now = Date.parse("2026-01-01T00:00:00Z");
@@ -30,7 +31,7 @@ afterEach(() => stop());
 
 async function boot(keysSection: unknown, http_: Record<string, unknown> = {}) {
 	const app = await assemble({
-		modules: [http, keysModule],
+		modules: [http, httpServer, keysModule],
 		config: { ...kernelConfig(), ...httpConfig(http_), keys: keysSection },
 		runtime,
 	});
@@ -144,7 +145,7 @@ describe("keys", () => {
 		expect(published.keys.map((key) => key.kid)).toEqual(["now", "old", "next"]);
 		expect(published.keys.every((key) => !("d" in key))).toBe(true);
 		// The tools of the coordination; the wait between publishing and signing is the operator's, as
-		// docs/runbook.md's "Rotating the signing key" sets it: 300 seconds after the last restart.
+		// docs/runbook.md's "Rotating the signing key" sets it: `jwks-cache` after the last restart.
 		expect((await fetch(`${base}/.well-known/jwks.json`)).headers.get("cache-control")).toBe(
 			"public, max-age=300",
 		);
@@ -201,6 +202,21 @@ describe("keys", () => {
 			);
 		expect(await read("https://app.example")).toBe("https://app.example");
 		expect(await read("https://evil.example")).toBeNull();
+	});
+
+	it("lets verifiers cache the set as long as jwks-cache says, from a minute to a day", async () => {
+		const { base } = await boot({ ...rotated(), "jwks-cache": "1h" });
+		const res = await fetch(`${base}/.well-known/jwks.json`);
+		expect(res.headers.get("cache-control")).toBe("public, max-age=3600");
+		const takes = (value: unknown) =>
+			keysSection.safeParse({ ...rotated(), "jwks-cache": value }).success;
+		expect(["59s", "1m", "1d", "86401s", 300].map(takes)).toEqual([
+			false,
+			true,
+			true,
+			false,
+			false,
+		]);
 	});
 
 	it("publishes only public members of unexpired keys, each for signatures, with a strong ETag [oidc-core-10.1.1-a] [oidc-core-10.2.1-a] [oidc-core-10.1-e]", async () => {
@@ -327,9 +343,9 @@ describe("keys", () => {
 		expect(keysSection.safeParse(keysConfig().keys).success).toBe(true);
 	});
 
-	it("holds no past keys and no next key when the operator writes only the signing key", () => {
+	it("holds no past keys and no next key, and lets the set be cached five minutes, when the operator writes only the signing key", () => {
 		const { signing } = keysConfig().keys;
-		expect(keysSection.parse({ signing })).toEqual({ signing, previous: [] });
+		expect(keysSection.parse({ signing })).toEqual({ signing, previous: [], "jwks-cache": 300 });
 	});
 
 	it("signs with Ed25519 as asymmetric, and publishes its key set", async () => {

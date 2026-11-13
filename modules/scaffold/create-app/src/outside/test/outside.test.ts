@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
-import { readOutside } from "../contract.ts";
+import { declaredRanges, readOutside } from "../contract.ts";
 
 // The lockfile is pnpm 11.3's own, for a project that ran `pnpm add @x/grant@1.2.0` (it is the
 // fixture app-output's lockfile module is tried on).
@@ -479,5 +479,93 @@ describe("asking pnpm for the project's registries", () => {
 		);
 		const read = readOutside(project(), ["@x/grant"], release, { pnpm: answering });
 		expect(read.registries).toEqual({ default: "http://127.0.0.1:4873" });
+	});
+});
+
+describe("a dependency let through though published within the last day", () => {
+	const fresh = (names: string[], root = project()) =>
+		readOutside(root, ["@x/grant"], release, {}, names);
+
+	it("records one a package named npm: declares, as a dependency, an optional one or a peer, at the one version the project resolved", () => {
+		const records = fresh(["jose-lite", "fast-path"]).freshDependencies;
+		expect(records).toEqual([
+			{
+				name: "jose-lite",
+				version: "1.4.0",
+				integrity: parse(lock).packages["jose-lite@1.4.0"].resolution.integrity,
+			},
+			{
+				name: "fast-path",
+				version: "2.1.0",
+				integrity: parse(lock).packages["fast-path@2.1.0"].resolution.integrity,
+			},
+		]);
+		expect(fresh(["@x/grant"]).freshDependencies).toBeUndefined();
+	});
+
+	it("refuses one no package named npm: declares, one the release holds, and one the project holds at two versions", () => {
+		const second = (text: string) => {
+			const l = parse(text);
+			l.packages["jose-lite@1.5.0"] = { resolution: { integrity: "sha512-SECOND==" } };
+			return stringify(l);
+		};
+		for (const [names, why] of [
+			[
+				["@x/other"],
+				"--allow-fresh @x/other: neither named npm:@x/other nor declared by a package named so",
+			],
+			[["zod"], "--allow-fresh zod: held to the release's version"],
+			[
+				["@o3co/auth-provider-oauth"],
+				"--allow-fresh @o3co/auth-provider-oauth: held to the release's version",
+			],
+		] as const) {
+			expect(() => fresh([...names])).toThrow(why);
+		}
+		// Declared under an alias, the name is another package's: none a package declares itself.
+		expect(() => fresh(["real-alias"])).toThrow(
+			"--allow-fresh real-alias: declared only as an alias of another package, so no package named so declares it itself",
+		);
+		// An optional dependency left unresolved, its name held at another version by another package.
+		const elsewhere = parse(lock);
+		for (const [key, snapshot] of Object.entries(elsewhere.snapshots)) {
+			if (key.startsWith("@x/grant@"))
+				delete (snapshot as { optionalDependencies?: unknown }).optionalDependencies;
+		}
+		elsewhere.packages["fast-path@3.0.0"] = elsewhere.packages["fast-path@2.1.0"];
+		delete elsewhere.packages["fast-path@2.1.0"];
+		expect(() => fresh(["fast-path"], project({ lock: stringify(elsewhere) }))).toThrow(
+			"--allow-fresh fast-path: the project resolves 3.0.0, outside the range a package declares it by",
+		);
+		expect(() => fresh(["jose-lite"], project({ lock: second(lock) }))).toThrow(
+			"--allow-fresh jose-lite: 1.4.0, 1.5.0 in the project's lockfile, where one is let through",
+		);
+	});
+
+	it("reads every range a package declares a name by, and none where any declaration of it is an alias", () => {
+		const record = (more: Record<string, Record<string, string>>) => ({
+			name: "@x/grant",
+			version: "1.2.0",
+			integrity,
+			dependencies: {},
+			optionalDependencies: {},
+			peerDependencies: {},
+			peerDependenciesMeta: {},
+			...more,
+		});
+		expect(declaredRanges(record({}), "jose-lite")).toEqual([]);
+		const both = { dependencies: { "jose-lite": "^1.0.0" } };
+		expect(
+			declaredRanges(
+				record({ ...both, optionalDependencies: { "jose-lite": "^1.4.0" } }),
+				"jose-lite",
+			),
+		).toEqual(["^1.0.0", "^1.4.0"]);
+		// The alias takes the declaration's place: the package of that name is not its own.
+		const aliased = record({
+			...both,
+			optionalDependencies: { "jose-lite": "npm:real-lib@^1.0.0" },
+		});
+		expect(declaredRanges(aliased, "jose-lite")).toEqual([]);
 	});
 });

@@ -84,10 +84,26 @@ export const installArguments = (p: {
 	"/cache/store",
 ];
 
+export const buildArguments = (p: {
+	readonly image: string;
+	readonly deps: string;
+	readonly app: string;
+	readonly fresh?: boolean;
+}) => [
+	"build",
+	"-q",
+	...(p.fresh ? ["--pull", "--no-cache-filter=runtime"] : []),
+	"-t",
+	p.image,
+	"--build-context",
+	`deps=${p.deps}`,
+	p.app,
+];
+
 /**
  * Builds and runs apps' images, tagged `run`. The registry has no tarball of an unreleased version,
- * so each Dockerfile's `deps` stage is replaced by the same install, `--prod` in the Dockerfile's
- * own `base` stage, from the tarballs in `dir`; every other stage is built as written.
+ * so each Dockerfile's `deps` stage is replaced by the same install, `--prod` in its `base` stage,
+ * from the tarballs in `dir`; every other stage is built as written, `fresh` as the app's guide says.
  */
 export function images(
 	run: string,
@@ -99,7 +115,7 @@ export function images(
 		Object.entries(tarballs.byName).map(([name, path]) => [name, `/tarballs/${basename(path)}`]),
 	);
 
-	async function build(app: string, name: string): Promise<string> {
+	async function build(app: string, name: string, fresh = false): Promise<string> {
 		const base = `${run}:base`;
 		if (!built.includes(base)) {
 			await docker(["build", "-q", "--target", "base", "-t", base, app], buildWithin);
@@ -118,10 +134,7 @@ export function images(
 			c.run(installArguments({ mounts, base, user })),
 		);
 		const image = `${run}:${name}`;
-		await docker(
-			["build", "-q", "-t", image, "--build-context", `deps=${join(deps, "..")}`, app],
-			buildWithin,
-		);
+		await docker(buildArguments({ image, deps: join(deps, ".."), app, fresh }), buildWithin);
 		built.push(image);
 		return image;
 	}

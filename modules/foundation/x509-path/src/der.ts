@@ -1,0 +1,74 @@
+import * as asn1js from "asn1js";
+import type * as pkijs from "pkijs";
+
+export const oid = {
+	subjectKeyIdentifier: "2.5.29.14",
+	keyUsage: "2.5.29.15",
+	authorityKeyIdentifier: "2.5.29.35",
+	reasonCode: "2.5.29.21",
+	subjectAltName: "2.5.29.17",
+	basicConstraints: "2.5.29.19",
+	deltaCrlIndicator: "2.5.29.27",
+	issuingDistributionPoint: "2.5.29.28",
+	certificateIssuer: "2.5.29.29",
+	crlNumber: "2.5.29.20",
+	nameConstraints: "2.5.29.30",
+	crlDistributionPoints: "2.5.29.31",
+	certificatePolicies: "2.5.29.32",
+	policyConstraints: "2.5.29.36",
+	extKeyUsage: "2.5.29.37",
+	inhibitAnyPolicy: "2.5.29.54",
+	authorityInfoAccess: "1.3.6.1.5.5.7.1.1",
+	ocspNonce: "1.3.6.1.5.5.7.48.1.2",
+	ocspNoCheck: "1.3.6.1.5.5.7.48.1.5",
+} as const;
+
+export const generalName = { dns: 2, uri: 6, ip: 7 } as const;
+
+/** Whether a CRLReason is certificateHold (RFC 5280 §5.3.1), the one revocation that can be lifted. */
+export const isHold = (reason: asn1js.BaseBlock | undefined) =>
+	reason instanceof asn1js.Enumerated && reason.valueBlock.valueDec === 6;
+
+/** Key usage bits in its first byte (RFC 5280 §4.2.1.3). */
+export const usage = { digitalSignature: 0x80, keyAgreement: 0x08, cRLSign: 0x02 } as const;
+
+export const parsedExtension = <T>(cert: pkijs.Certificate, id: string) =>
+	cert.extensions?.find((extension) => extension.extnID === id)?.parsedValue as T | undefined;
+
+/** Whether key usage, where present, allows any of `bits`. */
+export function keyUsageAllows(cert: pkijs.Certificate, bits: number): boolean {
+	const value = parsedExtension<asn1js.BitString>(cert, oid.keyUsage);
+	return !value || ((value.valueBlock.valueHexView[0] ?? 0) & bits) !== 0;
+}
+
+export const same = (a: Uint8Array, b: Uint8Array) =>
+	a.length === b.length && a.every((byte, at) => byte === b[at]);
+
+/**
+ * As many nodes as the bytes could hold (a node takes two at least): what a CRL is read with, as
+ * asn1js's own cap of 10,000 would refuse one of some 3,300 entries. It still bounds the work by the
+ * bytes, which the caller caps; anything else keeps asn1js's cap.
+ */
+export const nodesIn = (bytes: Uint8Array) => Math.ceil(bytes.byteLength / 2);
+
+/**
+ * `make` over DER holding exactly one value; undefined if it does not, or `make` refuses it. Read
+ * with asn1js's cap of nodes, or `maxNodes`.
+ */
+export function decoded<T>(
+	der: Uint8Array,
+	make: (schema: asn1js.AsnType) => T,
+	maxNodes?: number,
+): T | undefined {
+	try {
+		// Read in place, not copied whole: what a caller keeps of it, it copies out itself.
+		const parsed = asn1js.fromBER(der, {
+			copyInput: false,
+			...(maxNodes === undefined ? {} : { maxNodes }),
+		});
+		if (parsed.offset === -1 || parsed.offset !== der.byteLength) return undefined;
+		return make(parsed.result);
+	} catch {
+		return undefined;
+	}
+}

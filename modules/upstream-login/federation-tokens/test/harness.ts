@@ -5,6 +5,7 @@ import { clientsConfig, confidentialClient } from "@mod/clients/testing";
 import { type HttpResponse, listening, type Route, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { issuer } from "@mod/issuer";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
@@ -130,6 +131,7 @@ export async function harness(
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			senderBindingModule,

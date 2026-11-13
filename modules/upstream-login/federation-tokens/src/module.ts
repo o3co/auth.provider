@@ -1,11 +1,14 @@
 import { metadataSections } from "@mod/clients";
+import { erasers } from "@mod/erasure-extensions";
 import { routes } from "@mod/http";
 import { contract, defineModule } from "@mod/kernel";
 import { resealers } from "@mod/seal";
+import { sessions } from "@mod/session";
 import { participants } from "@mod/session-participants";
 import { upstreamLoginReceivers, upstreams } from "@mod/upstreams";
 import { upstreamEndSessions } from "./contract.ts";
 import { endSessionAt } from "./end-session.ts";
+import { tokensEraser } from "./renewal/eraser.ts";
 import { type Renewal, renewalIn, renewalTakes } from "./renewal/renewal.ts";
 import { clientSection, routesIn, routesTakes } from "./routes/routes.ts";
 import { section } from "./section.ts";
@@ -54,4 +57,9 @@ export default defineModule({ name, replicaSafe: true, section, takes }, (m) => 
 		return { name, closing: (session) => keeper.close(session.id) };
 	}),
 	m.contribute(routes).by(async (c) => routesIn(c, await c.get(kept))),
+	// Late: session collects this module's participant; the eraser reads sessions only when it migrates.
+	m.contribute(erasers).by(async (c) => {
+		const late = c.late(sessions);
+		return tokensEraser(await c.get(upstreamTokenStore), late);
+	}),
 ]);

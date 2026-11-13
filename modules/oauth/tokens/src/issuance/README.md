@@ -13,12 +13,15 @@ Internal module of `tokens`: the judgment `admits` and `issue` share, and the is
 - `judging` (the policies, the clock, the deadline) → the judgment `admits` and `issue` share.
 - `issuing` (the judgment, the issuing, the clock) → `admits` and `issue`, alike for tokens and its stand-in; `IssueAccess`, the issuing it takes.
 - `authenticatedAheadMs`, `issuanceTimeoutMs`: tokens' own rule's bound and the policies' default deadline.
+- `refusedDescription`: the description of an issuance refused for a reason the client is not to learn, a policy's unreadable answer or a fence's refusal.
 
 ## Invariants
-- The order policies are asked in: tokens' own rule first (an authentication time over 300 s ahead of the clock), then the issuance policies in name order, each asked the grant as its caller verified it; any answer but allowed refuses. All of them answer within `issuance-timeout` together: past it the issuance is unavailable, and the signal each policy is given aborts.
+- The order policies are asked in: tokens' own rule first (an authentication time over 300 s ahead of the clock, a fixed allowance for hosts' clocks, as 0.17 allowed), then the issuance policies in name order, each asked the grant as its caller verified it; any answer but allowed refuses. All of them answer within `issuance-timeout` together: past it the issuance is unavailable, and the signal each policy is given aborts.
+- A policy reads session-built state late (`c.late`), else boot cycles.
 - `admits` makes the same judgment without issuing, but for the lifetime, which only `issue`'s limits and signing fix; a policy that cannot tell is unavailable.
 - `issue` takes one frozen copy of the request and its limits, and the time, before anything waits: every policy reads it and the issuing signs it, so neither a policy nor a caller changing its own objects meanwhile changes what is signed; that time is handed to the issuing (`IssueAccess`' `askedAt`) as the token's `iat`, so the policies' wait moves it past no boundary.
 - A token with less than a second left once signed, its end come, its cap passed, its lifetime spent in the policies' wait or its signing slow, is refused as tokens' own rule: policy `tokens`, reason `no_lifetime_left`, the client's word `expired`, which `token-endpoint` answers `invalid_grant` whatever the grant. Any other answers its expires-in: what is left once signed, rounded up to whole seconds, at least 1.
+- A token over 16 KiB once signed, a fixed bound as Node's own 16 KiB header limit binds a bearer token sent to this provider, is refused alike, policy `tokens`, reason `token_too_large`, the client's word `too large`; the package warns of it.
 - What an issuing keeps of a token (`IssueAccess`' `keep`) is kept only once the token is handed out, so one refused leaves no trace. tokens keeps nothing: a token is signed and handed back, no store, ledger or record written. The stand-in keeps what it issued.
 
 ## Depends on

@@ -13,6 +13,15 @@ export const commands = {
 	],
 	/** The default web login: a password, users in the configuration, the store in memory. */
 	"first-login": ["--pattern", "simple-web"],
+	/** The default web login with a grant of the reader's own, installed in the project `outside`. */
+	"external-grant": [
+		"--pattern",
+		"simple-web",
+		"--add",
+		"npm:@example/example-grant",
+		"--outside-from",
+		"outside",
+	],
 } as const satisfies Record<string, readonly string[]>;
 
 /** Scripts a recipe's reader runs with `node -e`, each one constant shown and run. */

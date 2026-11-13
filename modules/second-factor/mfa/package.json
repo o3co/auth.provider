@@ -13,6 +13,7 @@
 	},
 	"dependencies": {
 		"@mod/audit": "workspace:*",
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/labels": "workspace:*",
 		"@mod/login-gates": "workspace:*",
@@ -26,6 +27,7 @@
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",

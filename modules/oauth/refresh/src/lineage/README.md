@@ -12,8 +12,8 @@ Internal module of `refresh`: the families (`of`, `adopt`, `start`) behind the `
 - `lineageIn` (the build context) → the families, provided inside the package as `families`, from which `lineage` and the tie are given; `conditionOver` → the access condition, built on the stores alone, as `tokens` asks it while it is being built itself; `familyReader` (stores, clock) → a token's family and whether it has ended; `familyTie` (the contract) → the `family` tie.
 
 ## Invariants
-- `of` answers only for a token the caller verified, reads the record every time, and names the token asked for, never the family.
-- An end racing an adoption is run again.
+- `of` answers only for a token the caller verified, reads the record every time, and names the token asked for, never the family; the tie names the family's session, if any, for a token issued from it to be issued from.
+- A family that ends as a token is adopted has that token withdrawn, and answers ended.
 
 ## Depends on
 - `client-allowance`, `kernel`; `grant`'s founding, the package's records and store interfaces

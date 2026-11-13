@@ -99,6 +99,13 @@ export interface Sessions {
 	 * cannot be read is Unavailable.
 	 */
 	handleOf(request: HttpRequest): Promise<string | undefined>;
+	/**
+	 * The subject of the session's record under this handle, in any state, from one read: not an
+	 * entry check; for an owner reading whose a record keyed by a session handle is. It writes nothing
+	 * and checks no lifetime, revocation or requirement. None where no record is, or it holds no
+	 * subject; a record that cannot be read is Unavailable. Optional until 0.22, which requires it.
+	 */
+	subjectOf?(handle: string): Promise<string | undefined>;
 	closeRequest(request: HttpRequest): Promise<CloseOutcome>;
 	close(id: string, request?: HttpRequest): Promise<CloseOutcome>;
 	/**

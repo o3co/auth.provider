@@ -1,4 +1,5 @@
-import { check, readBundles } from "./contract.ts";
+import { check } from "./check.ts";
+import { readBundles } from "./workspace.ts";
 
 const problems = check(readBundles(process.env.INIT_CWD ?? process.cwd()));
 for (const problem of problems) process.stdout.write(`${problem}\n`);

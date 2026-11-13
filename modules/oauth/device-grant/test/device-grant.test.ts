@@ -16,6 +16,7 @@ import { sessionIssuances, targetRules } from "@mod/grants";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { type MetadataItem, metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
@@ -144,6 +145,7 @@ function assembly(
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			clientsModule,
 			secretHashModule,
 			issuerModule,

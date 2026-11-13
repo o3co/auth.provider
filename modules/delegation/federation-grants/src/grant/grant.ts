@@ -89,9 +89,6 @@ const stepShape = z
 	})
 	.readonly();
 
-/** How long a grant's record stays after it can no longer be used, so status still answers. */
-export const retentionMs = 30 * 86_400_000;
-
 /** A secret from `random`: 32 bytes, base64url. */
 export const secretFrom = (random: Random) => () =>
 	Buffer.from(random.bytes(32)).toString("base64url");
@@ -224,7 +221,9 @@ export type Records = ReturnType<typeof recordsWith>;
 export function listingWith(subjects: SubjectGrants, log: Log) {
 	return async (grant: Grant, lifetimeMs: number) => {
 		try {
-			await subjects.add(grant.subject, grant.id, lifetimeMs);
+			const added = await subjects.add(grant.subject, grant.id, lifetimeMs);
+			// Not listed, its subject erased or the listing another's: passed as a failed write is.
+			if (typeof added !== "object") log.warn("federation-grants.listing_failed", { kind: added });
 		} catch (error) {
 			const kind = error instanceof Error ? error.name : typeof error;
 			log.warn("federation-grants.listing_failed", { kind });

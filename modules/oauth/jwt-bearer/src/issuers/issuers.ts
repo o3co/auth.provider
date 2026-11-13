@@ -18,6 +18,9 @@ import {
 } from "../contract.ts";
 import { contributedSigners, fetchedSigners, type Signers, writtenSigners } from "../signers.ts";
 
+/** The widest clock skew a setting takes, the section's or an issuer's: 5 minutes, in seconds. */
+export const widestSkewSeconds = 300;
+
 /** The issuer's host, the only one its key set is fetched from; none for an issuer that is no URL. */
 const hostsOf = (issuer: string) => (URL.canParse(issuer) ? [new URL(issuer).hostname] : []);
 
@@ -81,7 +84,7 @@ const narrowing = {
 		),
 	"clock-skew": setting
 		.duration("s")
-		.pipe(z.number().int().min(0).max(300))
+		.pipe(z.number().int().min(0).max(widestSkewSeconds))
 		.optional()
 		.describe(
 			"This issuer's clock allowance for what is taken, no wider than the section's; a revocation keeps the section's.",
@@ -324,6 +327,15 @@ export async function trustedWith(p: {
 					? fetchedSigners(p.jwt, keySetOf(i), p.policyOf(i))
 					: contributedSigners(p.jwt, keys as NonNullable<typeof keys>, p.policyOf(i), thumbprint),
 		);
+		// Deprecated: a certificate's key is taken with nothing of the certificate checked.
+		for (const [n, key] of ("keys" in i ? i.keys : []).entries()) {
+			if (publicPem(key["public-key"], { withForm: true })?.form === "certificate") {
+				warnings.push({
+					event: "jwt-bearer.certificate_key",
+					where: `${where}.keys.${n}.public-key`,
+				});
+			}
+		}
 		if ("jwks-uri" in i && i["accept-key-set-elsewhere"]) {
 			warnings.push({ event: "jwt-bearer.key_set_elsewhere", where });
 		}

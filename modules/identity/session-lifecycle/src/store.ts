@@ -1,3 +1,10 @@
+import type {
+	MigrationReport,
+	SetReading,
+	SpaceReport,
+	SubjectReading,
+	Walk,
+} from "@mod/erasure-extensions";
 import { contract } from "@mod/kernel";
 
 declare const stored: unique symbol;
@@ -12,14 +19,39 @@ export interface ChangedSession {
 
 /** Where sessions are kept, by handle. Every call throws Unavailable when the place cannot tell. */
 export interface SessionStore {
-	/** Keeps a new session's record for its lifetime, unless the handle holds one already. */
-	save(handle: string, record: StoredSession, lifetimeMs: number): Promise<"created" | "exists">;
+	/**
+	 * Keeps a new session's record for its lifetime and its subject, unless the handle holds one
+	 * already (`exists`) or, where the Store fences saves past a subject's erasure, the subject is
+	 * erased there (`erased`). The subject comes last: keep this value, this long, for this subject.
+	 */
+	save(
+		handle: string,
+		record: StoredSession,
+		lifetimeMs: number,
+		subject: string,
+	): Promise<"created" | "exists" | "erased">;
 	read(handle: string): Promise<StoredSession | undefined>;
-	/** Changes the record from what it holds; `change` reruns on a race, so it is pure. Nothing when gone. */
+	/**
+	 * Changes the record from what it holds; `change` reruns on a race, so it is pure. Nothing when
+	 * gone, or, where the Store fences saves past a subject's erasure, when its subject is erased.
+	 */
 	update(
 		handle: string,
 		change: (record: StoredSession) => ChangedSession | undefined,
 	): Promise<{ readonly before: StoredSession; readonly after: StoredSession } | undefined>;
+	/**
+	 * Erases a subject's sessions here, where the Store can: optional in 0.20, required in 0.22, as a
+	 * Store not built through `subject-records` cannot be erased. `eachRemoved`, where given, is told
+	 * each record a committed write removed, once, and must not throw or write. This store's `erase`
+	 * and `migrate` and the listing's come together or none; a part refuses the boot.
+	 */
+	erase?(
+		subject: string,
+		signal: AbortSignal,
+		eachRemoved?: (record: StoredSession) => void,
+	): Promise<SpaceReport>;
+	/** Once, under the maintenance key, each record read by session-lifecycle's reading; optional as `erase` is. */
+	migrate?(walk: Walk, subjectOf: SubjectReading, signal: AbortSignal): Promise<MigrationReport>;
 }
 
 /** Which session a cookie opens, by the cookie's secret; the place never keeps the secret in clear. */
@@ -40,14 +72,22 @@ export interface ClosingList {
 
 /** Each subject's live sessions, listed for their lifetime, so a revocation closes them all. Every call throws Unavailable when the place cannot tell. */
 export interface SubjectSessions {
-	/** Lists the handle for its lifetime; answers the others pushed out over the place's cap, never the handle being added. */
+	/**
+	 * Lists the handle for its lifetime; answers the others pushed out over the place's cap, never the
+	 * handle being added. Where the Store fences saves past a subject's erasure, `erased` for an
+	 * erased subject; a Store keying listings otherwise may answer `another-subject`. Either is a refusal.
+	 */
 	add(
 		subject: string,
 		handle: string,
 		lifetimeMs: number,
-	): Promise<{ readonly pushedOut: readonly string[] }>;
+	): Promise<{ readonly pushedOut: readonly string[] } | "erased" | "another-subject">;
 	members(subject: string): Promise<readonly { readonly member: string }[]>;
 	remove(subject: string, handle: string): Promise<void>;
+	/** Erases a subject's listing, where the Store can; with the session store's ports, or none. */
+	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
+	/** Once, under the maintenance key: raw listings of a space keyed by subject stay raw (0/0). */
+	migrate?(walk: Walk, reading: SetReading, signal: AbortSignal): Promise<MigrationReport>;
 }
 
 export const sessionStore = contract<SessionStore>("session-lifecycle.session-store");

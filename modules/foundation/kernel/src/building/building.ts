@@ -148,25 +148,45 @@ export function buildingWith({
 		refusals.push({ where: item.module.name, reason: taken });
 		throw new DependencyFailed();
 	};
-	/** Each take beyond a declaring module's takes, refused once, even where the taker catches the throw. */
-	const beyondTakes = new Map<Module, Set<Handle>>();
-	const mayName = (handle: Handle, item: Buildable) => {
+	/** A take refused by its reason, once per module and handle, even where the taker catches the throw. */
+	const refusedTakes = new Map<Module, Map<Handle, Set<string>>>();
+	const refuseTake = (item: Buildable, handle: Handle, reason: string): never => {
+		const byHandle = refusedTakes.get(item.module) ?? new Map<Handle, Set<string>>();
+		const reasons = byHandle.get(handle) ?? new Set<string>();
+		if (!reasons.has(reason)) refusals.push({ where: item.module.name, reason });
+		refusedTakes.set(item.module, byHandle.set(handle, reasons.add(reason)));
+		throw new DependencyFailed();
+	};
+	/** The take naming `handle`, or none for the module's own provision; a take beyond its takes is refused. */
+	const mayName = (handle: Handle, item: Buildable): Handle | undefined => {
 		// Every module is held once the preflight passed; one it could not ask holds nothing.
 		const held = heldTakes.get(item.module) ?? new Set<Handle>();
-		if (held.has(handle)) {
-			watch?.took(item.module.name, handle);
-			return;
+		// A contract taken optionally is named by its optional take.
+		const named = held.has(handle)
+			? handle
+			: [...held].find((take) => take.kind === "optional" && take.contract === handle);
+		if (named) {
+			watch?.took(item.module.name, named);
+			return named;
 		}
-		if (item.module.provides?.some((provision) => provision.contract === handle)) return;
-		const refused = beyondTakes.get(item.module) ?? new Set<Handle>();
-		if (!refused.has(handle)) {
-			refusals.push({
-				where: item.module.name,
-				reason: `takes ${handle.label}, which its takes do not name`,
-			});
+		if (item.module.provides?.some((provision) => provision.contract === handle)) return undefined;
+		return refuseTake(item, handle, `takes ${handle.label}, which its takes do not name`);
+	};
+	/** `get` and `late` of a contract taken optionally are refused: its takes say it may be missing. */
+	const mayRequire = (handle: Handle, item: Buildable) => {
+		if (mayName(handle, item)?.kind === "optional") {
+			refuseTake(item, handle, `takes ${handle.label} optionally: ask getOptional for it`);
 		}
-		beyondTakes.set(item.module, refused.add(handle));
-		throw new DependencyFailed();
+	};
+	/** `getOptional` answers only a contract taken optionally: a plain take is required at every call. */
+	const mayGetOptional = (contract: Contract<unknown>, item: Buildable) => {
+		if (mayName(contract, item)?.kind !== "optional") {
+			refuseTake(
+				item,
+				contract,
+				`asks getOptional for ${contract.label}, which its takes name plainly: take it optionally or get it`,
+			);
+		}
 	};
 	/** What a factory sees while `item` is built; `next` is the stack its requests extend. */
 	const contextFor = (item: Buildable, next: readonly Buildable[]): BuildContext<unknown> =>
@@ -174,7 +194,7 @@ export function buildingWith({
 			...runtime,
 			section: sections.get(item.module),
 			get: async <T>(contract: Contract<T>) => {
-				mayName(contract as Contract<unknown>, item);
+				mayRequire(contract as Contract<unknown>, item);
 				mayTake(contract as Contract<unknown>, item);
 				const provider = providers.get(contract as Contract<unknown>);
 				if (!provider) {
@@ -185,6 +205,12 @@ export function buildingWith({
 					throw new DependencyFailed();
 				}
 				return (await build(provider, next)) as T;
+			},
+			getOptional: async <T>(contract: Contract<T>) => {
+				mayGetOptional(contract as Contract<unknown>, item);
+				mayTake(contract as Contract<unknown>, item);
+				const provider = providers.get(contract as Contract<unknown>);
+				return provider ? ((await build(provider, next)) as T) : undefined;
 			},
 			collect: async <T>(point: ExtensionPoint<T>) => {
 				mayName(point, item);
@@ -208,7 +234,7 @@ export function buildingWith({
 				}
 			},
 			late: <T>(contract: Contract<T>) => {
-				mayName(contract as Contract<unknown>, item);
+				mayRequire(contract as Contract<unknown>, item);
 				mayTake(contract as Contract<unknown>, item);
 				lateNamed.push({ contract: contract as Contract<unknown>, by: item.module.name });
 				return () => {

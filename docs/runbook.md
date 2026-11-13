@@ -10,6 +10,8 @@ How to run auth-provider 0.19: Redis, rotating keys, upgrading, and what to watc
 - [Rotating the sealing key](#rotating-the-sealing-key)
 - [Upgrading](#upgrading)
 - [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)
+- [Ending tokens exchanged from another](#ending-tokens-exchanged-from-another)
+- [Staff who sign in through an upstream IdP only](#staff-who-sign-in-through-an-upstream-idp-only)
 - [Keeping the second-factor witness at the ledger](#keeping-the-second-factor-witness-at-the-ledger)
 - [Second factors left without their claim](#second-factors-left-without-their-claim)
 - [Passkey list entries 0.18 left](#passkey-list-entries-018-left)
@@ -17,6 +19,7 @@ How to run auth-provider 0.19: Redis, rotating keys, upgrading, and what to watc
 - [Filling the passkey witness's marks](#filling-the-passkey-witnesss-marks)
 - [Passkey logins into a session](#passkey-logins-into-a-session)
 - [Resetting a subject's passkeys](#resetting-a-subjects-passkeys)
+- [Checking outbound peers' revocation](#checking-outbound-peers-revocation)
 - [Name resolution](#name-resolution)
 - [Probes and alerts](#probes-and-alerts)
 - [Stopping](#stopping)
@@ -35,7 +38,7 @@ The app relies on the deployment for these. Each is required, not advice. What e
 8. **Give names an outside party chose a share where `clients-cimd` runs.** `outbound` resolves `outbound.max-lookups` names at once (four by default) and gives names an outside party chose (a client's metadata document) half of them, rounded down: with `max-lookups` at 1 they get none, and `clients-cimd` refuses boot, naming it. With `outbound.resolution = in-process`, lookups run on Node's threadpool and at most half of it resolves at once: keep `UV_THREADPOOL_SIZE` at 4 or more there.
 9. **`jti-ledger-http` uses each assertion's `jti` up at the ledger, for every service that accepts the issuer's assertions.** Each JWT bearer assertion from its issuer is one `POST` to `consume-url`, bounded only by the token endpoint's requests per source, as `signer-keys-http`'s are. The ledger answers `204` to one of two consumes of a `jti` at once, keeps each record through a crash and a failover as long as any service using it up may still accept that assertion (past the `exp` it was sent by the slowest one's allowance and the hosts' clock differences; an hour past it covers the grant's own), and every service accepting those assertions uses them up in it. While it is out, that issuer's grant answers 503: never switch the issuer to the store to ride it out, which splits the record; switching either way follows [the migration guide's steps](migration.md#moving-an-issuer-between-the-store-and-a-ledger).
 10. **A JWT bearer grant naming no client is checked before any client is authenticated.** Where an entry of `jwt-bearer.issuers` has a `client`, a request with no client credentials has its assertion's signature checked, its keys fetched again for an unknown `kid`, and a linked subject looked up, with nothing but the token endpoint's requests per source (`token-endpoint.requests` per `window`) before it. Where one sender's agents reach the server from a few addresses, raise that limit for them, and size the key set's host and the user ledger for that rate.
-11. **One `oidc` IdP whose discovery cannot be read at boot refuses boot of the whole provider.** A timeout reads `the upstream could not be reached`; a `503` reads `the upstream does not match its settings`. For an IdP whose discovery is not highly available, set its `discovery = false` with explicit endpoints (`authorization-endpoint`, `token-endpoint`, `jwks-uri`).
+11. **An `oidc` IdP whose description cannot be read at boot is unavailable on its own; the provider boots.** Where outbound cannot fetch the issuer's description (unreachable, a timeout, any failure in outbound's own words) or the issuer answers 5xx or 429, boot goes on and warns `idp-oidc.description_unavailable` with the IdP and why. Until a read holds, that IdP's logins, the refresh of its upstream tokens, its delegations and the end of its session answer 503; everything else runs, and no readiness probe counts it. The description is read again only when a request needs it, at most once a minute, never on a timer: the first login after the issuer is back still answers 503, and the next goes through. A logout through that IdP meanwhile ends this provider's session but not the IdP's (`federation-tokens.end_session_failed`). A description that answers but does not hold (another issuer, an endpoint on a host not named, a 404) still refuses boot. Nothing needs setting. For an IdP whose description is not highly available, `discovery = false` with explicit endpoints (`authorization-endpoint`, `token-endpoint`, `jwks-uri`) avoids the wait.
 
 ## Redis
 
@@ -76,7 +79,7 @@ A managed, non-cluster Redis or Valkey with replicas and automatic failover serv
 
 Where the service keeps these in a parameter group whose defaults are 0 or another policy, make a group of your own with these values: declaring them while the server holds the defaults is a statement the check cannot see past.
 
-**Allow these commands and keys**: `EVAL`; the commands its scripts call (`TIME`, `INFO server` and `INFO replication`, `EXISTS`, `GET`, `HGET`, `HMGET`, `PTTL`, `PEXPIRETIME`, `SET`, `INCR`, `HSET`, `HINCRBY`, `PEXPIRE`, `PEXPIREAT`, `DEL`); `SCAN`; `ROLE` and `INFO`; `PING`, which the readiness probe sends on both connections; and the keys under `redis.prefix`. Where `redis.replication` is set, a write is confirmed by a round of `ROLE`, `INFO server` and a `SET` of `<prefix>:#confirm`, and with `replicas` a `WAIT`, so allow that key and `WAIT` too. Boot sends each of these once, a script's on keys of the store's own (`<prefix>:{#check}:…`) that it then removes (where the service refuses both `PEXPIRE` and `DEL`, they stay until you remove them), and is refused naming a command or the keys the service refuses; the readiness probe sends them again, so one refused later answers `/readyz` 503 and logs `redis.settings_unmet` naming it. Boot's check does not send `PING`: refused, it keeps `/readyz` at 503 from the first probe, with no `redis.settings_unmet`. A replica that is missing or lags still shows only as 503s on replicated writes, as [Choosing `replication`](#choosing-replication) says: a write refused for want of replicas leaves a command unjudged.
+**Allow these commands and keys**: `EVAL`; the commands its scripts call (`TIME`, `INFO server` and `INFO replication`, `EXISTS`, `GET`, `HGET`, `HMGET`, `PTTL`, `PEXPIRETIME`, `SET`, `INCR`, `HSET`, `HINCRBY`, `PEXPIRE`, `PEXPIREAT`, `DEL`); `SCAN`; `ROLE` and `INFO`; `PING`, which the readiness probe sends on both connections; and the keys under `redis.prefix`. Where `redis.replication` is set, a write is confirmed by a round of `ROLE`, `INFO server` and a `SET` of `<prefix>:#confirm`, and with `replicas` a `WAIT`, so allow that key and `WAIT` too. Boot sends each of these once, a script's on keys of the store's own (`<prefix>:{#check}:…`) that it then removes (where the service refuses both `PEXPIRE` and `DEL`, they stay until you remove them), and is refused naming a command or the keys the service refuses; the readiness probe sends them again, so one refused later answers `/readyz` 503 and logs `redis.settings_unmet` naming it. Boot's check does not send `PING`: refused, it keeps `/readyz` at 503 from the first probe, with no `redis.settings_unmet`. A replica that is missing or lags shows as 503s on replicated writes, as [Choosing `replication`](#choosing-replication) says, and once fewer replicas are good than `min-replicas-to-write`, as `/readyz` 503 with `redis.settings_unmet`: a write refused for want of replicas leaves a command unjudged, and boot goes on.
 
 **One server, and scripts it runs.** Boot also checks, once and on every probe, that where `redis.replication` is set the confirming connection reaches the same server as the operations (by its run id; a server that changes while it is asked, as in a failover, refuses nothing), and runs two of the store's scripts, `read` and `batchAcross` (a write across partitions), on keys of its own, naming the one the server fails. Where `redis.replication` is set, a URL whose name a DNS record or a load balancer resolves to more than one server refuses boot when the two connections land on different servers, as does a service whose Lua lacks what the scripts use (`cjson`); both showed only as 503s on writes before. Point `redis.url` at one endpoint that resolves to the primary.
 
@@ -84,10 +87,10 @@ Where the service keeps these in a parameter group whose defaults are 0 or anoth
 
 ### Choosing `replication`
 
-- `replicas`: writes that must survive a failover wait until every replica has them. While no replica is seen, or replicas lag, those writes are unavailable and the requests that need them answer 503. The system denies rather than allows. With an IdP name declared, boot needs a confirmed read of the link store too, so a replica outage refuses a restart.
+- `replicas`: writes that must survive a failover wait until every replica has them. While no replica is seen, or replicas lag, those writes are unavailable and the requests that need them answer 503. The system denies rather than allows. Once fewer replicas are good than the server's `min-replicas-to-write`, which then refuses every write, `/readyz` answers 503 too, logging `redis.settings_unmet`, so an instance on a primary cut off from its replicas leaves the load balancer; boot is not refused for it. With an IdP name declared, boot needs a confirmed read of the link store too, so a replica outage refuses a restart.
 - `none`: you state there is no failover. A failover then loses even confirmed writes, and a replica seen at boot or at runtime is refused or unavailable.
 
-Keeping a detached or lagging replica from being promoted is the operator's job, and so are the replicas' own disk settings. A `CONFIG SET` after boot that takes away what boot checked shows within about a second: `/readyz` answers 503, warning `redis.settings_unmet`, until it holds again.
+Keeping a detached or lagging replica from being promoted is the operator's job, and so are the replicas' own disk settings. A `CONFIG SET` after boot that takes away what boot checked shows within about a second: `/readyz` answers 503, warning `redis.settings_unmet`, until it holds again. A primary demoted after boot, with `redis.replication` set, answers the probe's confirming `SET` with `READONLY`: `/readyz` answers 503 and the probe's failure is logged as `kernel.probe_failed` (`ReplyError`), not as `redis.settings_unmet`.
 
 ### Outages
 
@@ -99,18 +102,29 @@ Rate limits fail closed by default (`rate-limit.fail-mode = closed`), so an outa
 
 ### Many instances
 
-Each instance walks every federation grant kept every `federation-grants.sweep-interval` (default `1h`), erasing the credentials of grants past their end or ended by their subject's revocation that no request reads. A pass reads every grant record kept (each lives its lifetime and 30 days more) and, for each grant holding credentials, the subject's revocation boundary once or twice; every instance makes its own passes. Lengthen the interval where there are many grants or many instances.
+Each instance walks every federation grant kept every `federation-grants.sweep-interval` (default `1h`), erasing the credentials of grants past their end or ended by their subject's revocation that no request reads. A pass reads every grant record kept (each lives its lifetime and `federation-grants.retention` more, or that retention past its revocation; 30 days by default) and, for each grant holding credentials, the subject's revocation boundary once or twice; every instance makes its own passes. Lengthen the interval where there are many grants or many instances.
 
 Give every instance the same configuration, and keep their clocks in step: what that covers is in [Guarantees by deployment](deployment-guarantees.md#several-instances). Set `kernel.deployment = multi` when more than one instance runs. Which modules boot then refuses is [promise 5 of the security model](security-model.md#promises-across-modules); read it for your own modules. A pattern created with an in-memory store says in its README that it runs as one instance.
 
+#### Changing a shard count
+
+Four stores keep work for their sweeps in shards: code-grant-store's `void-shards`, session-store's `closing-shards`, rp-logout-store's `notice-shards` and session-tokens-store's `pending-shards`. A job's shard is found from the count, and a sweep walks only the shards the count names. So a count changed while jobs are kept loses them: lowered, the jobs in the shards past the new count are never walked again (a session's close its participants never hear of, a logout notice never sent, a code's tokens never revoked); raised, a job is looked for in another shard, and handled again at every sweep. While users are served the stores keep receiving work, so changing a count takes a short stop. Changing a `*-per-shard` limit needs none: it limits only what a shard takes in.
+
+1. **Stop user traffic** to every instance, at the load balancer. Keep the instances running: their sweeps go on with the kept work.
+2. **Let the sweeps finish the kept work.** Wait two of the longest sweep interval among `code-grant.sweep-interval`, `session-lifecycle.sweep-interval`, `rp-logout.sweep-interval` and `session-tokens.sweep-interval` (two minutes with the defaults), or longer where one sweep over a store's shards (1024 by default) takes longer than its interval: a job kept while a sweep runs may land in a shard that sweep has passed, and the next whole sweep finds it. Work that keeps failing stays and is retried: a session's close after half its age, at most an hour; a notice until its logout token expires. If `session-lifecycle.closing_pending` (a close put off after its participants failed), `session-lifecycle.sweep_failed`, `code-grant.void_retry_failed`, `rp-logout.notices_kept` or `session-tokens.revoke_retry_failed` was logged in the last hour, wait until an hour passes without them, or accept that the work they count is lost by the change.
+3. **Change the count on every instance at once**: stop them all, set the new count, start them all. Never run instances with two counts together: one keeps adding to shards the other no longer walks.
+4. **Resume user traffic.**
+
+Nothing checks a count against the one the kept work was written with: a count changed without these steps loses the work silently.
+
 ## Rotating the signing key
 
-Tokens name the key that signed them (`kid`). An instance verifies a token by the key it names and publishes the public keys as its key set (the `jwks_uri` its metadata names), which verifiers may cache for 300 seconds.
+Tokens name the key that signed them (`kid`). An instance verifies a token by the key it names and publishes the public keys as its key set (the `jwks_uri` its metadata names), which verifiers may cache for `keys.jwks-cache` (300 seconds by default).
 
 `keys.signing` signs, `keys.next` is published but never signs, and each `keys.previous` entry is published until its `expires-at`. The ring is read at boot, so every step ends with restarting every instance.
 
 1. **Publish the new key.** Write the new key in `keys.next`, then restart every instance. Tokens are still signed with the current key.
-2. **Wait for caches.** Wait at least 300 seconds after the last instance restarted, so every verifier that cached the key set has the new key.
+2. **Wait for caches.** Wait at least `keys.jwks-cache` (300 seconds by default) after the last instance restarted, so every verifier that cached the key set has the new key.
 3. **Sign with the new key.**
    - Move the new key from `keys.next` to `keys.signing`.
    - Where the new key's `alg` is another, set `oidc.id-token-alg` to it in the same change, and any registered client's `sections.oidc.id-token-alg` that names the old one: an instance whose signing key does not sign with `oidc.id-token-alg` refuses to boot. Until then each start warns `oidc.next_key_alg_differs`. A client read from a metadata document that names the old one in `id_token_signed_response_alg` is refused from the promotion on, at each request, until its relying party changes the document: neither the boot nor the warning shows it, so tell those relying parties first.
@@ -179,6 +193,37 @@ When the outside user ledger suspends a user, its answers stop new logins and gr
 - Every subject revoked keeps its record with no end, so the records grow with the subjects you revoke. With `mfa-revocation`, each revocation also writes the subject's factor list in `mfa`'s store, empty for a subject who never enrolled, so that store grows with them too.
 - With second factors composed, `mfa-revocation` makes a revocation complete only once no enrollment begun before it can bind; an app composed by hand must compose it, as `combinations` does.
 - Likewise `mfa-entry` holds sessions to second factors; `mfa` refuses to boot without it, whatever the mode, so an app composed by hand must compose it.
+
+## Ending tokens exchanged from another
+
+A token issued by token exchange answers to its subject: it ends when its subject's refresh family is revoked, its session closes or falls short, or its subject is revoked. It does not end when:
+
+- the subject token it came from is revoked by id (`POST /oauth/revoke`, by the client it was issued to);
+- the actor's session closes, or the actor token expires.
+
+Until then, it lives to its own end: never past the subject token's expiry, at most `token-exchange.max-lifetime` where set (optional, `2s` to `1d`), else `tokens.access-token-lifetime` (default `1h`). Introspection answers it active meanwhile.
+
+**Finding them.** The audit cannot list the tokens exchanged from one: `token.issued` names no parent or child token, subject, session or family.
+
+**Ending them now.** Revoke their subject (`POST /ledger/subject-revocations`, with `subject-revocation-http` composed: [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)): its boundary ends every token for it, exchanged ones included, and closes its sessions. Without it, the levers are the session, the family, or waiting out the lifetime. Ending a session or a refresh family reaches the tokens exchanged under it too, where you know which one from elsewhere.
+
+**Keeping the window short.** Set `token-exchange.max-lifetime` below `tokens.access-token-lifetime` where an exchanged token reaches an API of high value.
+
+## Staff who sign in through an upstream IdP only
+
+Where staff sign in through an upstream IdP alone, such as a company's Microsoft Entra ID, provision them in the user ledger, not by linking:
+
+- Set `users-http.upstream-url`. The ledger looks a user up by upstream identity (`{"idp", "subject"}`), and its answer is the last word: the provider reads and writes no link of its own (`users`' card). Without `upstream-url`, the provider keeps the links itself, and the ledger does not see them.
+- Give such a user no password in the ledger: its password call answers `404` with `{"error":"not_found"}` for them, and no temporary password is issued. There is no link to make, and no password to retire later.
+- Map the IdP's word for its own MFA into `federation.idps.<name>.upstream-amr`. A login whose amr holds `mfa` passes the second-factor gate unasked (`mfa-flows`' card), so it meets `mfa.mode = required` without a local factor. A login the IdP says no `mfa` of is held at binding a first factor, as any login without one. Changing credentials, such as binding a factor, also needs the IdP to say when the user signed in (`auth_time`; `mfa-entry`'s card).
+- The ledger must know, before the first sign-in, the subject the provider reads for the user at that IdP: the ID token's `sub` (`upstream-client`'s ID token reader). Until it does, the lookup answers that the ledger knows no such user, and the sign-in is refused `unknown_user`.
+
+**Microsoft Entra ID.** Entra's `sub` is pairwise, one value per app registration, and is not the user's directory object ID (`oid`), so a staff member cannot be provisioned from their `oid` before their first sign-in. This rests on Microsoft's description of the ID token's claims; it was not run against Entra here. Provision a staff member where the ledger can know the provider's `sub`:
+
+- the ledger reads the `sub` through the same app registration as the provider, or
+- an administrator ties the `sub` the ledger receives at the first sign-in to the staff member, after checking who they are.
+
+A user who signs in with a password and links an upstream identity instead goes through `federation-link`: under `mfa.mode = required`, a user signed in with a password alone binds a counting factor first (its card).
 
 ## Keeping the second-factor witness at the ledger
 
@@ -336,6 +381,21 @@ While the ledger cannot answer, every password login outside the exempt group an
 - **To recover from a leaked passkey**, stop the subject's work first: no new login, session or passkey registration for the subject, and wait for the running ones to finish. Then reset, check the subject with the backfill (`none`), and let the subject back in. Without that, someone holding the leaked passkey can sign in between the first boundary and the removal and register a passkey of their own that the reset leaves.
 - **While 0.18 instances still run**, which write a passkey's record and the list apart, these guarantees hold only once they and the requests they took are gone.
 - **A subject whose store lost its records**, the mark alone left, is mended by a reset, which makes the subject's holder anew: stop the subject's work first, as above.
+
+## Checking outbound peers' revocation
+
+`outbound` checks the revocation of each HTTPS peer's certificate by CRL before a request goes, where `outbound.revocation.hosts` lists the hosts its CRLs are fetched from. In 0.20 it warns and sends; from 0.22 it refuses a peer revoked or unconfirmed (`accept-unconfirmed` aside).
+
+- **Find a peer's CRL hosts:** `openssl s_client -connect idp.example.com:443 -showcerts </dev/null`, then for each certificate but the root, `openssl x509 -noout -ext crlDistributionPoints`. List each `http://` host in `outbound.revocation.hosts`; `outbound.allow` and `deny` hold for them too.
+- **Read the warnings:** `outbound.revocation_unconfirmed` gives a reason and a count, at most once a minute per reason; `outbound.revocation_revoked` a count. Neither names a host.
+  - `unlisted`: a CRL host is not in `outbound.revocation.hosts`. `https-only`: the CA publishes its CRL over https alone, which is not fetched. `unsupported`: no point for every reason, or one past 2 KiB.
+  - `proxy-refused`: the egress proxy refused the plain-http GET (403, 405 or 407), as one that takes CONNECT alone does. Let it take GET to the hosts in `outbound.revocation.hosts`, or list them in `outbound.direct-hosts`.
+  - `unreachable`, `refused`, `too-large` (past 1 MiB), `malformed`, `stale`, `signature`, `issuer`, `rollback` (an older CRL than one seen): the CRL host or the CRL itself; a failure is held `outbound.revocation.failure-lifetime` before it is fetched again.
+  - `path`: the peer's chain is outside the path rules (server authentication on every certificate, RSA of 2048 bits at least, EC on P-256/384/521, six intermediates), though TLS took it. `revocation-state-full`: more issuers or revocations than the bounds keep; a restart clears them.
+- **A private CA** cannot be confirmed: a CRL is fetched at public addresses alone. Under `--use-openssl-ca` the platform store's OpenSSL directory is not read, so those roots cannot be confirmed either.
+- **Large CRLs:** one past 1 MiB is not read. CRLs are read one at a time per process.
+- **Replay:** an older CRL not yet seen may be served until its next update, a CA's CRL period (up to ten days for a public TLS CA's subscribers). A restart forgets which CRLs were seen.
+- **Before 0.22:** clear every reason above, or set `outbound.revocation.accept-unconfirmed` where a peer cannot be confirmed (every start warns `outbound.revocation_unconfirmed_accepted`); with no `hosts` and no `accept-unconfirmed`, 0.22 refuses to boot.
 
 ## Name resolution
 

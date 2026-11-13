@@ -489,6 +489,7 @@ it("loses on failover a batch across whose answer was lost, mark and all, and ke
 	expect(await request(kept, "kept")).toEqual({
 		kind: "committed",
 		versions: entries.map((e) => e?.version),
+		at: expect.any(Number),
 	});
 });
 

@@ -2,7 +2,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { areaTarget, type Started } from "@mod/conformance";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { deviceScene } from "../src/main.ts";
+import { deviceScene } from "../src/area.ts";
 
 const issuer = "https://issuer.example";
 const deviceGrant = "urn:ietf:params:oauth:grant-type:device_code";

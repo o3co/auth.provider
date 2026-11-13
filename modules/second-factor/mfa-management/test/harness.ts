@@ -5,12 +5,13 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
 import { type FactorStore, factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
-import { type MfaSettings, mfaConfig, updatingTogether } from "@mod/mfa/testing";
+import { type MfaSettings, mfaConfig, updatingAsOne } from "@mod/mfa/testing";
 import { factorBinding } from "@mod/mfa-binding";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
@@ -122,7 +123,7 @@ const factorStand = () => {
 					return changed;
 				},
 				scan: stand.records.scan,
-				updateTogether: updatingTogether(stand.records),
+				updateAsOne: updatingAsOne(stand.records),
 			}),
 		),
 	]);
@@ -144,6 +145,7 @@ export async function serve(settings: Settings = {}) {
 	const input = {
 		modules: [
 			http,
+			httpServer,
 			auditStandIn().module,
 			csrfStandIn,
 			cookiesModule,

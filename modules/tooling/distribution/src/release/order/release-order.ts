@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { readBundles } from "../../contract.ts";
+import { readBundles } from "../../workspace.ts";
 import { packOrder } from "./pack-order.ts";
 
 /** What `pnpm bundles` built, read for the release: its root, the order the release packs it in, and each package's name and version. */

@@ -2,8 +2,9 @@ import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
 import { areaTarget, type Fake, fakeHttp, type Started } from "@mod/conformance";
 import { exportJWK, SignJWT } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { mtlsScene } from "../src/area.ts";
 import { crlOf, type Issued, issue, ocspAnswer, pemOf, thumbprintOf } from "../src/authority.ts";
-import { type MtlsPart, mtlsScene } from "../src/main.ts";
+import type { MtlsPart } from "../src/main.ts";
 
 /** The code a certificate refused at issuance is answered with, by the target. */
 const refusedCertificate = areaTarget().differs("certificate-refused-as-invalid-client")

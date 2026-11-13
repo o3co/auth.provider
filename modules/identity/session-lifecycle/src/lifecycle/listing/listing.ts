@@ -54,7 +54,9 @@ export function listingOver(parts: ListingParts): Listing {
 		try {
 			const left = await parts.leftOf(handle);
 			if (left <= 0) return { ended: 0, lost: 0 };
-			({ pushedOut } = await listed.add(subject, handle, left));
+			const listedAs = await listed.add(subject, handle, left);
+			if (typeof listedAs === "string") return ended([handle]);
+			({ pushedOut } = listedAs);
 		} catch {
 			return ended([handle]);
 		}

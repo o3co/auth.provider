@@ -16,6 +16,7 @@
 		"@mod/client-documents": "workspace:*",
 		"@mod/clients": "workspace:*",
 		"@mod/csrf": "workspace:*",
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/redirect-uris": "workspace:*",
@@ -26,6 +27,7 @@
 	},
 	"devDependencies": {
 		"@mod/cookies": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",

@@ -39,6 +39,7 @@ export interface Parts {
 	readonly random: Random;
 	readonly log: Log;
 	readonly refreshBeforeMs: number;
+	readonly lockMs: number;
 	readonly rotations: number;
 	readonly rotationWindowMs: number;
 }
@@ -146,9 +147,9 @@ export function refreshWith(parts: Parts) {
 			if (!due(held, asked))
 				return carries(held, asked) ? handed(held, asked, false) : { kind: "scope" };
 			const mark = Buffer.from(parts.random.bytes(16)).toString("base64url");
-			if (!(await locked(parts.locks, grant.id, mark)))
+			if (!(await locked(parts.locks, grant.id, mark, parts.lockMs)))
 				return heldOr(grant.id, held, asked, { kind: "lock_timeout" });
-			const kept = keeping(parts.locks, grant.id, mark);
+			const kept = keeping(parts.locks, grant.id, mark, parts.lockMs);
 			try {
 				// Read again under the lock: another request may have refreshed, ended or revoked it, or the
 				// subject's revocation or the grant's end may have come while it waited.
@@ -193,6 +194,7 @@ export const refreshOver = async (
 		random: c.random,
 		log: c.log,
 		refreshBeforeMs: c.section["refresh-before"] * 1000,
+		lockMs: c.section["lock-lifetime"] * 1000,
 		rotations: c.section.rotations,
 		rotationWindowMs: c.section["rotation-window"] * 1000,
 	});

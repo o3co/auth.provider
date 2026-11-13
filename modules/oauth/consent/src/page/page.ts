@@ -108,8 +108,15 @@ export async function answerOver(c: BuildContext<unknown>): Promise<Pick<Route, 
 			const pending = pendingOf(marked?.after);
 			if (!pending || pending.answer !== decision || pending.deadline <= now)
 				return jsonAnswer(400, { error: "unknown_challenge" });
-			if (decision === "accept")
-				await grants.keep(pending.clientId, pending.subject, pending.range, pending.under);
+			// A refused acceptance is no completed answer: its subject was erased meanwhile, its sessions
+			// with it, so it is answered as one with no session, recording and sending on nothing.
+			if (
+				decision === "accept" &&
+				(await grants.keep(pending.clientId, pending.subject, pending.range, pending.under)) ===
+					"refused"
+			) {
+				return jsonAnswer(401, { error: "no_session" });
+			}
 			// A resend that completes the same decision again is recorded again.
 			const source = determinedSource(request);
 			declaredAudit(recorded, events).record(

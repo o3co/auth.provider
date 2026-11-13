@@ -9,29 +9,27 @@
 - Fetching: the caller's sources.
 
 ## Offers
-- `revocationOver` (revocation policy, the path's RSA bits, sources): a check of a path, answering good, revoked, or a refusal or an outage with a reason.
+- `revocationOver` (revocation policy, the path's RSA bits and signature algorithms, sources): a check of a path, answering good, revoked, or a refusal or an outage with a reason.
 
 ## Invariants
-- Nothing in revocation material is used before its signature is checked by an algorithm the path would take.
+- CRLs and OCSP answers are read and judged by `x509-path`, as its `revocation` card states: nothing in them is used before their signature is checked by an algorithm the path would take.
 - Material is used from its this update (up to the allowance ahead) to its next update, or for a set time without one.
-- CRL: read from http and https full-name points covering every reason and naming no other issuer.
-- CRL: the issuer's key usage, where given, signs CRLs; no next update is stale.
-- CRL: a delta or scoped CRL, an indirect entry, or any other critical extension is unsupported.
-- OCSP: the request names the certificate by SHA-1 hashes of its issuer's name and key, with a nonce the answer must carry back where asked.
-- OCSP: the signer is the issuer, or a responder it signed: in date, for OCSP signing, held to the path's key rules, with no unknown or unparsable extension.
 - OCSP: a delegated responder's own revocation is checked before its good is taken, unless it says it needs none.
-- Under both, OCSP comes first, and the CRL may only add a revocation to an unknown.
+- Under both, OCSP comes first, and the CRL may only add a revocation to an unknown; where OCSP gives no answer it can use, the CRL alone decides.
 - Any certificate revoked revokes the path.
-- Only a fetch that failed (unreachable, out of time or size, a server failing, busy or timed out, a responder's internal error or try later) is an outage.
+- Only a fetch that failed (unreachable, out of time or size, a server failing, busy or timed out, a responder's internal error or try later) is an outage; so is a fetched CRL that gets no turn to be read within one fetch's time (`timeout`), as x509-path reads one at a time, and nothing of it is remembered.
 - Anything else not confirmed good refuses, and a refusal outweighs an outage.
 - One check fetches from at most the policy's number of sources; past them is an outage, not remembered as failing.
 
 ## Data
-- CRLs by location, until their next update, their issuer's end, or their time to live.
+- CRLs as verified once when fetched, by location and the issuer whose key verified them, until their next update, their issuer's end, or their time to live; each check judges what was kept.
+- The serials kept CRLs list are held to 2^19 together, the oldest CRLs going first; one listing more alone is not kept. Their serial maps, measured: some 46 to 60 MiB at the full budget (`x509-path` holds a serial to 20 octets and keeps copies alone); with `outbound`'s, some 92 to 120 MiB a process. Apart from them: each body's issuer name, 4 KiB at most, and the one being read, a measured case.
+- What is kept is keyed by a CRL's location (2 KiB at most: `x509-path` counts a point with a longer one unusable, so it is refused), its issuer's name (4 KiB at most, else refused) and its issuer's key (RSA of 16,384 bits at most: OpenSSL refuses RSA operations past that, so no path takes a larger one; no refusal of mtls's own).
+- A CRL is read after its fetch gives its place back, so the bodies waiting to be read are bounded not by `outbound`'s `max-concurrent` but by the distinct CRL locations the trusted client CAs name within `revocation.hosts`, 1 MiB each.
 - OCSP answers by the issuer's name and key and the serial, until they end or their signer does.
 - A revocation other than a hold (certificateHold), by issuer and serial, after what said it ends; a hold is asked again.
 - A failed source, not asked again for a while.
 - Each held to a number of entries, oldest first out, in this process alone; checks under way together look each up one at a time.
 
 ## Depends on
-- `pkijs`, `asn1js`; `pki`'s reading of DER, signatures and the path's key rules
+- `x509-path` (reading and judging CRLs and OCSP answers); `pkijs`, `asn1js`

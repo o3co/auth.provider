@@ -49,9 +49,9 @@ export function upstreamTokenStoreContract(
 			const { records } = await open();
 			const [key, other] = [fresh(), fresh()];
 			const odd = held({ idps: { corp: { version: "v", sealed: "x" } }, list: [1, "two"] });
-			expect(await records.save(key, odd, 60_000)).toBe("created");
-			expect(await records.save(key, held({ n: 1 }), 60_000)).toBe("exists");
-			await records.save(other, held({ n: 2 }), 60_000);
+			expect(await records.save(key, odd, 60_000, "alice")).toBe("created");
+			expect(await records.save(key, held({ n: 1 }), 60_000, "alice")).toBe("exists");
+			await records.save(other, held({ n: 2 }), 60_000, "alice");
 			expect(await records.read(key)).toEqual(odd);
 			await records.remove(key);
 			await records.remove(fresh());
@@ -63,7 +63,7 @@ export function upstreamTokenStoreContract(
 			const place = await open();
 			const key = fresh();
 			expect(await place.records.update(key, plus)).toBeUndefined();
-			await place.records.save(key, held({ n: 1 }), 60_000);
+			await place.records.save(key, held({ n: 1 }), 60_000, "alice");
 			place.raceNextUpdate(key, (record) => held({ n: counted(record) * 10 }));
 			expect(await place.records.update(key, plus)).toEqual({
 				before: held({ n: 10 }),
@@ -74,7 +74,7 @@ export function upstreamTokenStoreContract(
 		it("ends a record at its lifetime, which a change renews", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.records.save(key, held({ n: 1 }), 1000);
+			await place.records.save(key, held({ n: 1 }), 1000, "alice");
 			place.advance(999);
 			await place.records.update(key, (record) => ({ value: record, lifetimeMs: 1000 }));
 			place.advance(999);
@@ -86,7 +86,7 @@ export function upstreamTokenStoreContract(
 		it("keeps a record's lifetime through a change that names none", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.records.save(key, held({ n: 1 }), 1000);
+			await place.records.save(key, held({ n: 1 }), 1000, "alice");
 			place.advance(500);
 			await place.records.update(key, (record) => ({ value: held({ n: counted(record) + 1 }) }));
 			place.advance(499);
@@ -98,7 +98,7 @@ export function upstreamTokenStoreContract(
 		it("walks the sessions whose records live, over pages", async () => {
 			const place = await open();
 			const keys = Array.from({ length: 120 }, fresh);
-			for (const key of keys) await place.records.save(key, held({ n: 1 }), 60_000);
+			for (const key of keys) await place.records.save(key, held({ n: 1 }), 60_000, "alice");
 			await place.records.remove(keys[0] as string);
 			const seen = new Set<string>();
 			let cursor: string | undefined;
@@ -128,12 +128,25 @@ export function upstreamTokenStoreContract(
 			expect(await hold.call(place.locks, lock, "c", 1000)).toBe("created");
 		});
 
+		it("refuses, where the Store erases, every save for a subject it erased, and only for that subject", async (context) => {
+			const place = await open();
+			const { erase } = place.records;
+			if (!erase) return context.skip();
+			await place.records.save(fresh(), held({ n: 1 }), 60_000, "erin");
+			const report = await erase.call(place.records, "erin", new AbortController().signal);
+			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+			if (report.kind === "stopped") return context.skip();
+			expect(["erased", "fenced"]).toContain(report.kind);
+			expect(await place.records.save(fresh(), held({ n: 2 }), 60_000, "erin")).toBe("erased");
+			expect(await place.records.save(fresh(), held({ n: 3 }), 60_000, "finn")).toBe("created");
+		});
+
 		it("keeps a change whose answer was lost, through a failover", async (context) => {
 			const place = await open();
 			const { loseNextAnswer: lose, failover } = place;
 			if (!lose || !failover) return context.skip();
 			const key = fresh();
-			await place.records.save(key, held({ n: 1 }), 60_000);
+			await place.records.save(key, held({ n: 1 }), 60_000, "alice");
 			lose();
 			expect((await place.records.update(key, plus))?.after).toEqual(held({ n: 2 }));
 			await failover();

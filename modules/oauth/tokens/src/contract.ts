@@ -153,7 +153,9 @@ export interface Tokens extends TokenValidity<AccessCheck> {
 	 * from there, their wait included; what it answers is left runs from signing. Refuses, as its
 	 * own rule, a token with less than a second left once signed, its cap passed, its lifetime spent
 	 * in the policies' wait or its signing slow: policy `tokens`, reason `no_lifetime_left`, the
-	 * client's word `expired`. Such a token is handed to no one, and nothing of it is kept.
+	 * client's word `expired`; and one past 16 KiB once signed, which it does not read: reason
+	 * `token_too_large`, the client's word `too large`. Such a token is handed to no one, and nothing
+	 * of it is kept.
 	 */
 	issue(request: IssuanceRequest, limits?: IssueLimits): Promise<Issued>;
 	verifyAccess(token: string): Promise<AccessCheck>;
@@ -200,5 +202,39 @@ export interface SubjectCheck {
 export const subjectChecks = extensionPoint<SubjectCheck>("tokens.subject-checks", {
 	multiplicity: "many",
 });
+
+/** A bundle of credentials about to be answered, as a fence sees it: its subject and its receipt's id. */
+export interface FencedBundle {
+	readonly subject: string;
+	readonly receiptId: string;
+}
+
+/** A fence every bundle of credentials passes before it is answered, contributed by the module that owns it. */
+export interface IssuanceFence {
+	readonly name: string;
+	/** Throws Unavailable when it cannot tell. */
+	fence(bundle: FencedBundle): Promise<"passed" | "refused">;
+}
+
+export const issuanceFences = extensionPoint<IssuanceFence>("tokens.issuance-fences", {
+	multiplicity: "many",
+});
+
+/** Passing a bundle of credentials through every issuance fence, once, before any of it is answered. */
+export interface IssuanceFencing {
+	/**
+	 * Passes the bundle through the fences in collect order, under one receipt id; refused by the
+	 * first to refuse, which is named, with the description of any refused issuance, the rest not
+	 * asked. With no fence, passes.
+	 */
+	pass(bundle: {
+		readonly subject: string;
+	}): Promise<
+		| { readonly kind: "passed" }
+		| { readonly kind: "refused"; readonly fence: string; readonly description: string }
+	>;
+}
+
+export const issuanceFencing = contract<IssuanceFencing>("tokens.issuance-fencing");
 
 export { type RevokedTokens, revokedTokens, revokedTokensNeeds } from "@mod/token-denylist";

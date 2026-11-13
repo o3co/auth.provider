@@ -15,12 +15,14 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
+		"@mod/x509-path": "workspace:*",
 		"asn1js": "4.0.0",
 		"pkijs": "4.0.1",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"vitest": "5.0.5"
 	}
 }

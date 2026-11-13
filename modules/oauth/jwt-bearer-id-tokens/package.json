@@ -25,6 +25,7 @@
 		"@mod/external-jwt": "workspace:*",
 		"@mod/grants": "workspace:*",
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/jwt-bearer-store": "workspace:*",
 		"@mod/keys": "workspace:*",
@@ -42,7 +43,7 @@
 		"@mod/tokens": "workspace:*",
 		"@mod/tokens-store": "workspace:*",
 		"@mod/users": "workspace:*",
-		"jose": "6.2.13",
+		"jose": "6.2.15",
 		"vitest": "5.0.5"
 	}
 }

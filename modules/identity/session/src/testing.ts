@@ -1,7 +1,7 @@
 import { cookiesFor } from "@mod/cookies";
 import { type HttpRequest, site } from "@mod/http";
 import { defineModule, isUnavailable, type Log, Unavailable } from "@mod/kernel";
-import { keptAttributes, type SourcedAttributes } from "@mod/login-attributes";
+import { attributeCaps, keepingWith, type SourcedAttributes } from "@mod/login-attributes";
 import { revocationFollowers, subjectRevocation } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
 import {
@@ -22,6 +22,9 @@ import {
 	checkAuthenticatedAt,
 	checkProvenSince,
 } from "./rules/authenticated.ts";
+
+/** Keeping under login-attributes' default caps, as an app that sets none keeps a login's attributes. */
+const keptByDefault = keepingWith(attributeCaps.parse({}));
 
 /** The session and cookies an `open` answered, for a test that opens one: a refused one throws. */
 export function openedOf(answer: Opened): {
@@ -527,7 +530,7 @@ export function sessionsContract(
 				{ source: "users", values: null },
 			];
 			for (const given of givens) {
-				expect(await keptOf(given), JSON.stringify(given)).toEqual(keptAttributes(given).kept);
+				expect(await keptOf(given), JSON.stringify(given)).toEqual(keptByDefault(given).kept);
 			}
 		});
 
@@ -548,6 +551,40 @@ export function sessionsContract(
 			expect((await place.sessions.enter(place.request(raised?.cookies)))?.id).toBe(
 				done.session.id,
 			);
+		});
+
+		it("reads, where offered, the subject of a session's record in any state, writing nothing, and none where no record is", async (context) => {
+			const place = await open();
+			const { subjectOf } = place.sessions;
+			if (!subjectOf) return context.skip();
+			const read = (handle: string) => subjectOf.call(place.sessions, handle);
+			const done = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
+			expect(await read(done.session.id)).toBe("bob");
+			// Short of a requirement, or closed, the record still names its subject: no entry is judged.
+			await place.sessions.close(done.session.id);
+			expect(await read(done.session.id)).toBe("bob");
+			expect(await read("no-such-handle")).toBeUndefined();
+			// It ends no session and calls no participant.
+			const live = openedOf(await place.sessions.open(place.request(), facts(place, "carol")));
+			place.advance(place.lifetimeMs - 1);
+			const closedBefore = [...place.closed];
+			expect(await read(live.session.id)).toBe("carol");
+			expect(place.closed).toEqual(closedBefore);
+			expect((await place.sessions.entryOf(live.session.id)).kind).toBe("entered");
+		});
+
+		it("reads, where offered, the subject of a record kept past its session's lifetime, writing nothing", async (context) => {
+			const place = await open();
+			const { subjectOf } = place.sessions;
+			if (!subjectOf) return context.skip();
+			const done = openedOf(await place.sessions.open(place.request(), facts(place, "carol")));
+			place.advance(place.lifetimeMs + 1);
+			const subject = await subjectOf.call(place.sessions, done.session.id);
+			// A place whose store ends the record with its lifetime holds none to read past it.
+			if (subject === undefined) return context.skip();
+			expect(subject).toBe("carol");
+			// Nothing was written: the close finds the record still open, never ended by the read.
+			expect((await place.sessions.close(done.session.id)).from).toBe("open");
 		});
 
 		it("closes the session a request's cookie points to, and destroys the cookie", async () => {
@@ -689,7 +726,7 @@ export const standInLifetimeSeconds = 3600;
 
 /** What the stand-in keeps of a login's attributes, as login-attributes keeps them, logging dropped names. */
 function keptAtLogin(given: unknown, log: Log): SourcedAttributes | undefined {
-	const { kept, dropped, others } = keptAttributes(given);
+	const { kept, dropped, others } = keptByDefault(given);
 	if (dropped.length > 0 || others > 0) {
 		log.warn("session.attributes_dropped", { dropped: dropped.join(","), others });
 	}
@@ -894,6 +931,11 @@ export const sessionStandIn = defineModule(
 					};
 				},
 				handleOf: async (request) => handleIn(request),
+				// Its record in any state until it ends, as a store keeps it; nothing is written.
+				subjectOf: async (handle) => {
+					const found = kept.get(handle);
+					return found && found.until > c.clock.now() ? found.context.subject : undefined;
+				},
 				closeRequest: async (request) => {
 					const handle = handleIn(request);
 					const carried = jar.lookup(request, "session").kind !== "absent";

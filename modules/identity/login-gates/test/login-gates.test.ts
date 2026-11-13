@@ -1,5 +1,6 @@
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import {
 	assemble,
 	BootRefused,
@@ -38,7 +39,7 @@ async function boot(
 	environment: "production" | "development" = "production",
 ) {
 	const app = await assemble({
-		modules: [http, session, subjectRevocationStandIn, gatesModule, ...extra],
+		modules: [http, httpServer, session, subjectRevocationStandIn, gatesModule, ...extra],
 		config: {
 			...kernelConfig({ environment }),
 			...httpConfig({ "public-origin": "https://as.example" }),
@@ -538,7 +539,7 @@ it("resumes through the gates composed now: one added before the hold runs only 
 });
 
 it("takes every handle its takes name", async () => {
-	const modules = [http, sessionStandIn, subjectRevocationStandIn, gatesModule];
+	const modules = [http, httpServer, sessionStandIn, subjectRevocationStandIn, gatesModule];
 	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
 	expect((await takesUnused({ modules, config }))["login-gates"]).toBeUndefined();
 });

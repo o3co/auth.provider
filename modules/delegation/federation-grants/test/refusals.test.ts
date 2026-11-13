@@ -145,7 +145,8 @@ describe("a token request", () => {
 
 describe("status and revocation", () => {
 	it("answers a revoked grant past its life as revoked, an ended one without its reason, and a pending one without a scope", async () => {
-		const h = await harness();
+		// Kept past the revocation longer than the grant's life, so its status still answers past it.
+		const h = await harness({ settings: { retention: "60d" } });
 		const pending = String((await h.lodge()).json?.grant_id);
 		expect((await h.grantCall(pending, "status")).json).not.toHaveProperty("scope");
 		const { id: revoked } = await h.connected();

@@ -1,11 +1,23 @@
 packages:
   - "modules/*/*"
 
-# pnpm holds back a version until it is a day old, against a hijacked
-# third-party release. The project's own packages are not a third party, so a
-# fresh @o3co release (ts.hocon) installs at once.
+# pnpm holds back a version until it is a day old (1440 minutes), against a
+# hijacked third-party release: stated here, so a pnpm whose default differs
+# keeps it. The project's own packages are not a third party, so a fresh
+# @o3co release (ts.hocon) installs at once.
+minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - "@o3co/*"
+
+# A package whose trust evidence is weaker than an earlier version's (published
+# without the provenance or trusted publisher it had before) is refused: a
+# sign of a hijacked account. pnpm reads each package's metadata to judge it.
+trustPolicy: no-downgrade
+
+# A dependency of a dependency may come only from the registry, never from a
+# git repository or a tarball URL, which no registry check or release age
+# covers. The workspace's own manifests name none either.
+blockExoticSubdeps: true
 
 # vitest takes vite as a peer; 8.3.0–8.3.2 carry launch-editor advisories
 # (GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv, GHSA-r825-w8mm-5pxw), so the
@@ -21,3 +33,14 @@ minimumReleaseAgeExclude:
 overrides:
   "vite@>=8.3.0 <8.3.3": "8.3.3"
   "typedoc>minimatch": "11.0.3"
+
+# Keeps pnpm-lock.yaml one YAML document. Otherwise pnpm writes the pnpm that
+# packageManager pins into a document of its own ahead of the lockfile, which
+# GitHub's dependency graph does not read (Dependabot's alerts go), nor do the
+# readers of the lockfile here. It also stops pnpm checking that it runs the
+# pinned version. What holds the version and its integrity instead: CI's
+# pnpm/action-setup installs packageManager's exact version, corepack checks
+# the pnpm package against packageManager's sha512, and that package checks the
+# native binary it fetches against npm's signature. Interim: once GitHub's graph
+# reads that document, the readers learn it, check-outside last, and this goes.
+pmOnFail: ignore

@@ -28,6 +28,8 @@ export function memoryStores() {
 		closing: unavailableSwitch<ClosingList>("closing list"),
 		listed: unavailableSwitch<SubjectSessions>("subject sessions"),
 	};
+	/** Subjects erased: a session saved, or a listing added, for one is answered `erased`, as a Store that erases does. */
+	const erased = { sessions: new Set<string>(), listed: new Set<string>() };
 	/** The writes that take effect once more and then answer Unavailable, as a place whose answer was lost. */
 	const lost = new Set<"sessions.save" | "listed.add" | "cookies.save">();
 	/** What runs once, after the cookie index's next read answers. */
@@ -43,14 +45,20 @@ export function memoryStores() {
 	const sets = kept.keyedSets(size.perShard);
 	const listed = down.listed.wrap({
 		...sets,
-		add: (...given) => answered("listed.add", sets.add(...given)),
+		add: async (subject, handle, lifetimeMs) =>
+			erased.listed.has(subject)
+				? "erased"
+				: answered("listed.add", sets.add(subject, handle, lifetimeMs)),
 	});
 	const module = defineModule({ name: "session-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(sessionStore).by((c) => {
 			clock = c.clock.now;
 			const { create: save, read, change: update } = kept.records;
 			return down.sessions.wrap({
-				save: (...given) => answered("sessions.save", save(...given)),
+				save: async (handle, record, lifetimeMs, subject) =>
+					erased.sessions.has(subject)
+						? "erased"
+						: answered("sessions.save", save(handle, record, lifetimeMs)),
 				read,
 				update,
 			});
@@ -72,5 +80,15 @@ export function memoryStores() {
 		m.provide(closingList).by(() => down.closing.wrap(kept.deferred)),
 		m.provide(subjectSessions).by(() => listed),
 	]);
-	return { module, kept, index, listed, listingCap: size.perShard, down, lost, afterIndexRead };
+	return {
+		module,
+		kept,
+		index,
+		listed,
+		listingCap: size.perShard,
+		down,
+		lost,
+		afterIndexRead,
+		erased,
+	};
 }

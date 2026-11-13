@@ -8,7 +8,7 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
-import { type Message, mail } from "@mod/mail";
+import { type Message, mail, mailPurposes, mailTemplates } from "@mod/mail";
 import {
 	type BindingProof,
 	type BindingProofs,
@@ -18,6 +18,7 @@ import {
 import { subjectAttributes } from "@mod/subject-attributes";
 import { type Users, users } from "@mod/users";
 import { beforeEach, expect, it } from "vitest";
+import { proofName } from "../src/contract.ts";
 import proofModule from "../src/module.ts";
 
 let now = 1_800_000_000_000;
@@ -45,8 +46,10 @@ beforeEach(() => {
 });
 
 const seen = contract<BindingProof>("seen");
+/** The purposes declared to mail and the templates contributed for them, by purpose. */
+const told = contract<{ purposes: readonly string[]; templates: readonly string[] }>("told");
 const outside = defineModule(
-	{ name: "outside", replicaSafe: false, takes: [bindingProofs] },
+	{ name: "outside", replicaSafe: false, takes: [bindingProofs, mailPurposes, mailTemplates] },
 	(m) => [
 		m.provide(mail).by(() => ({
 			send: async (message) => {
@@ -77,6 +80,10 @@ const outside = defineModule(
 			},
 		})),
 		m.provide(seen).by(async (c) => (await c.collect(bindingProofs))[0] as BindingProof),
+		m.provide(told).by(async (c) => ({
+			purposes: (await c.collect(mailPurposes)).map((p) => p.purpose),
+			templates: (await c.collect(mailTemplates)).map((t) => t.purpose),
+		})),
 	],
 );
 
@@ -106,28 +113,38 @@ it("refuses to boot without mfa-binding-proof composed, naming its contract, so 
 	);
 });
 
-it("proves the account's address before a first binding, by a long code good for ten minutes at most", async () => {
+it("proves the account's address before a first binding, by a long code good until its transaction ends", async () => {
 	const proof = await boot();
 	expect(proof.name).toBe("account-email");
 	contacts.set("ann", "ann@example.com");
 	expect([await proof.available("ann"), await proof.available("bob")]).toEqual([true, false]);
 	const asked = await proof.send("ann", now + 3_600_000);
 	if (asked.kind !== "sent") throw new Error("not sent");
-	expect(last()).toMatchObject({ purpose: "mfa-email.proof", values: { minutes: "10" } });
+	expect(last()).toMatchObject({
+		purpose: "mfa-email-proof.account-email",
+		values: { minutes: "60" },
+	});
 	const code = String(last().values.code);
 	expect(await proof.check("ann", asked.kept, "0".repeat(16))).toBe(false);
 	expect(verified).toEqual([]);
+	now += 3_600_000;
 	expect(await proof.check("ann", asked.kept, code)).toBe(true);
 	// The address the code went to is the subject's now: users keeps it as verified.
 	expect(verified).toEqual([["ann", { kind: "email", value: "ann@example.com" }]]);
-	now += 600_001;
+	now += 1;
 	expect(await proof.check("ann", asked.kept, code)).toBe(false);
 	expect(await proof.send("bob", now + 60_000)).toEqual({ kind: "refused" });
-	// The caller's end, when it comes first; a limited sender keeps nothing.
+	// A shorter transaction, a shorter code; a limited sender keeps nothing.
 	expect(await proof.send("ann", now + 30_000)).toMatchObject({ show: { expires_in: 30 } });
 	expect(last().values.minutes).toBe("1");
 	answer = "limited";
 	expect(await proof.send("ann", now + 3_600_000)).toEqual({ kind: "limited" });
+});
+
+it("declares the purpose it mails under, and words none: its wording module does", async () => {
+	const app = await assemble(composition);
+	expect(app.get(told)).toEqual({ purposes: ["mfa-email-proof.account-email"], templates: [] });
+	expect(app.get(seen).name).toBe(proofName);
 });
 
 it("passes a right code though users keeps no more verified contacts, logging that it kept none and never the address", async () => {
@@ -177,12 +194,12 @@ it("takes the address users stands behind: a session's or a held login's it vouc
 	expect(sent).toEqual([]);
 });
 
-it("joins mfa-email, so it comes wherever a code by email is composed, and opts in alone", async () => {
+it("joins nothing, so it is composed on its own, and opts in", async () => {
 	const { readFile } = await import("node:fs/promises");
 	const manifest = JSON.parse(
 		await readFile(new URL("../package.json", import.meta.url), "utf8"),
 	) as { joins?: unknown; optIn?: unknown };
-	expect([manifest.joins, manifest.optIn]).toEqual([["@mod/mfa-email"], true]);
+	expect([manifest.joins, manifest.optIn]).toEqual([undefined, true]);
 });
 
 it("takes all it names", async () => {

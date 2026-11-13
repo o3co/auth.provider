@@ -41,7 +41,7 @@
 - The workspace's declarations, and in a bundle the index's published names, each read once per process; nothing is written.
 
 ## Depends on
-- `pnpm` (asks it for the packages the workspace definition lists); `kinds` (the kinds' words, and `mayNeed` for a declaration's needs).
+- `workspace-packages` (the packages the workspace definition lists); `kinds` (the kinds' words, and `mayNeed` for a declaration's needs).
 
 ## Vocabulary
 - axis: an owner's adapters to outside systems; default: the adapter composed unless another is chosen.

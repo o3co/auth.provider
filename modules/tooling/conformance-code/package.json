@@ -11,7 +11,7 @@
 	"scripts": {
 		"conformance": "vitest run --config vitest.config.ts",
 		"conformance:faults": "SPEC_EVIDENCE_RUN=faults vitest run --config vitest.faults.config.ts",
-		"evidence-runs": "node -p \"JSON.stringify([{ entry: '@mod/conformance-code#faults', kind: 'faults', matrix: '@mod/conformance-code', files: '.faults.case.ts', noSkip: true }])\""
+		"evidence-runs": "node -p \"JSON.stringify([{ entry: '@mod/conformance-code#faults', kind: 'faults', matrix: '@mod/conformance-code', files: '.faults.case.ts', noSkip: true, shards: 3 }])\""
 	},
 	"dependencies": {
 		"@mod/conformance": "workspace:*",
@@ -26,7 +26,7 @@
 	},
 	"devDependencies": {
 		"@mod/spec-checklist": "workspace:*",
-		"jose": "6.2.13",
+		"jose": "6.2.15",
 		"vitest": "5.0.5"
 	}
 }

@@ -9,7 +9,7 @@
 ## Offers
 - Composition definition (`./module`), providing `tlsOptions`: the floor (`minVersion`, `ciphers`, `rejectUnauthorized`), as `node:tls` takes it, frozen, from the section.
 - `heldToFloor` (the floor, a caller's options) → those options with the floor's own keys copied last, so nothing the caller passes loosens it, whatever keys the floor comes to hold. A value `isFloor` refuses throws a `TypeError`, as do options with a key `node:tls` would take past the floor: `secureContext` (its own versions, suites and authorities), `secureProtocol` or `secureOptions` (beside `minVersion`), `checkServerIdentity` or `pskCallback` (in place of the certificate check).
-- Operator section `tls-options`: `min-version` (`TLSv1.2` (default) or `TLSv1.3`) and `suites` (TLS 1.3's and TLS 1.2's ECDHE with AES-GCM or ChaCha20-Poly1305, every one by default; at least one, each once).
+- Operator section `tls-options` (`Settings`, as read): `min-version` (`TLSv1.2` (default) or `TLSv1.3`) and `suites` (TLS 1.3's and TLS 1.2's ECDHE with AES-GCM or ChaCha20-Poly1305, every one by default; at least one, each once).
 - `isFloor` (a value): whether it is a floor tls-options made, by any copy of the package; a caller refuses any other.
 - For tests, `tlsOptionsForTests` (the module, its section left to its defaults), `tlsOptionsFor` (a section as written, read through its schema, made as the module makes it) and `testTlsOptions` (the options the defaults give).
 - For tests (`./testing`), each `Offer` a localhost peer offering one thing alone (TLS 1.1, the RSA key exchange, CBC, ECDHE with AEAD on TLS 1.2, or TLS 1.3): `handshakeWith` (a client's options, an offer, and whether the peer's certificate is trusted, by default so) → the version and suite agreed, or refused.

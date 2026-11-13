@@ -18,8 +18,8 @@
 - Recording before that, or with no `metrics` composed, does nothing.
 - `metrics.read()` gives every instrument with its declared label names and series, and no series for a gauge.
 - A histogram's counts are cumulative per bucket, then one for all.
-- `metrics.sample()` gives what `read()` gives, with every gauge read now, each within 2 seconds.
-- `./testing` gives the contract test of gauges, and a stand-in that decides by the same rules within a bound the test sets.
+- `metrics.sample()` gives what `read()` gives, with every gauge read now, each within 2 seconds: a fixed bound under any scrape timeout (Prometheus's default is 10 s), as a source slower than that fails requests too.
+- `./testing` gives `metricsContract`, the contract test of gauges, and `metricsStandIn`, a stand-in that decides by the same rules within a bound the test sets.
 - Composition definition: comes by default with `http`, with no operator section and no store.
 
 ## Invariants

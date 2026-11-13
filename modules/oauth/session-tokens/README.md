@@ -10,13 +10,13 @@
 - Session expiry: participants are not called for a session that ends by expiry, and its tokens live out their own lifetimes. The promise is that closing a session ends its tokens.
 
 ## Offers
-- `sessionOf(token id)` → bound, with the session handle, or unbound when no session recorded it.
+- `sessionTokens.sessionOf(token id)` → bound, with the session handle, or unbound when no session recorded it.
 - `grants`' token tie `session`: a token's session, `ended` (`session has ended`, `session is short of a requirement`) or held with its handle while `session` lets it in; joining a token issued from it checks that again and records nothing, as `issue` records it.
 - Store interfaces, each with its needs (never evicted, survives a crash, does not come back on failover) and contract test (`./testing`):
-  - the tokens issued in each session: add a reference for its lifetime → the references pushed out, which await in that same write until settled; the references kept, each with how long it still lives; how many it keeps to a session;
-  - the token index: token id → session handle, saved once per id, for a lifetime;
-  - the sessions pending a push-out: add, done, go through them; one whose handling fails stays, and is counted. It never pushes one out, and refuses when full.
-- A stand-in (`./testing`): all its store interfaces in memory, for tests that compose the real module.
+  - `issuedTokens` (`issuedTokensNeeds`, `issuedTokensContract`), the tokens issued in each session: add a reference for its lifetime → the references pushed out, which await in that same write until settled; the references kept, each with how long it still lives; how many it keeps to a session;
+  - `tokenIndex` (`tokenIndexNeeds`, `tokenIndexContract`), the token index: token id → session handle, saved once per id, for a lifetime;
+  - `pendingSessions` (`pendingSessionsNeeds`, `pendingSessionsContract`), the sessions pending a push-out: add, done, go through them; one whose handling fails stays, and is counted. It never pushes one out, and refuses when full.
+- A stand-in, `sessionTokensInMemory` (`./testing`): all its store interfaces in memory, for tests that compose the real module.
 - Operator section: `sweep-interval` (written with its unit, `1s` to `1h` in whole seconds, default `30s`); `push-out-margin` (default 8, below the store's size, else boot is refused). How many tokens a session keeps is the store's size.
 - Composition definition: the participant for closing, and the contribution to `grants`' session issuances, recording each token issued from a session; it answers after a confirmed write. It is the only way a token is recorded.
 
@@ -35,7 +35,7 @@
 - Boot is refused where access tokens cannot be revoked.
 
 ## Data
-- References of the tokens issued in each session, and the token index, each kept for the token's remaining lifetime on `kernel`'s clock plus an allowance. If lost, tokens would survive a closed session, or answer no session. Pushed-out references still to revoke are kept until done.
+- References of the tokens issued in each session, and the token index, each kept for the token's remaining lifetime on `kernel`'s clock plus an allowance of two minutes, for hosts whose clocks lag (keeping them synchronized is the deployment's). If lost, tokens would survive a closed session, or answer no session. Pushed-out references still to revoke are kept until done.
 
 ## Depends on
 - `kernel`, `session`, `session-participants`, `tokens`, `grants`

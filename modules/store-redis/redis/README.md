@@ -10,10 +10,10 @@
 - Space names and meanings, and the shapes of values. Which feature uses it.
 
 ## Offers
-- Composition definition only.
-- The probe `redis` at `kernel`'s `probes`: each run PINGs both connections and, at most once a second, checks again what boot checked of the server, answering unready and logging `redis.settings_unmet` with what no longer holds when that changes.
+- Composition definition only; with the store, `storeControl` and `storeUpkeep` (internal module `upkeep`).
+- The probe `redis` at `kernel`'s `probes` (internal module `probe`), given what boot checked of the server to check again.
 - Operator section:
-  - `url` (`redis` or `rediss`, with no query), `address-family` (`ipv4`, `ipv6`, or either unset), `prefix` (lower-case letters, digits and `-`; default `store`).
+  - `url` (`redis` or `rediss`, with no query), `accept-plaintext` (false), `address-family` (`ipv4`, `ipv6`, or either unset), `prefix` (lower-case letters, digits and `-`; default `store`).
   - `connect-timeout` (default `2s`), `command-timeout` (default `1s`), `replication-timeout` (default `1s`); times written with their unit, a bare number refused.
   - `replication`: `replicas` or `none`, required when a space needs replicated or confirmed reads.
   - `durability`: `none`, or unset.
@@ -24,13 +24,13 @@
 - Boot is refused, naming what is unmet, when the server is not what Deployment states.
 - Boot sends once every command the store sends, a script's on keys of the store's own (`<prefix>:{#check}:…`) it then removes, unless the server refuses that too; one the server refuses for good (`NOPERM`, or unknown or renamed), or keys it refuses the user, refuse boot, named. A write refused for want of replicas leaves a command unjudged, never refused.
 - Boot then runs once what a confirmation would and a store script does: with `replication`, the confirming connection reaching another server than the operations (their run ids differ, and the operations' did not change meanwhile, as in a failover), and a store script (`read`, `batchAcross`) the server cannot run, refuse boot, named. A replica missing or lagging is neither.
-- A setting is read by `CONFIG GET`. Where the server refuses it for good (`NOPERM`, or an unknown command or subcommand) or answers it empty, not showing it, the declared value is taken, a needed one left undeclared refusing boot, and every boot warns `redis.settings_declared` with the names taken so; where it answers, a declared value that differs refuses boot; any other error (`BUSY`, say) refuses boot.
+- Boot reads the server's settings as internal module `settings` does: each it takes as declared, the server not showing it, is warned of at every boot as `redis.settings_declared`; one it cannot judge refuses boot.
 - `durability` `none`: the operator states the server does not fsync every write, so a crash loses the latest writes, spent assertion and proof ids and lockout records among them; every boot warns `redis.durability_none` naming the durable spaces.
 - A refusal or a warning never tells the URL, which may hold a password; a failure is told by its code alone, never its message: an error event as `redis.error` with `code`, and a refused connection in `redis.url`'s reason.
 - `replicas`: no replica seen is unavailable, a confirmed read at boot too, so a module reading at boot refuses a restart.
 - `none`: the operator states there is no failover, so even confirmed writes are lost by one; a replica seen at runtime is unavailable; every boot warns `redis.replication_none` naming the replicated spaces.
 - A timeout, too few replicas, or another server than the one that answered is unavailable, the answer then unknown.
-- Internal module `client`: boot warns `redis.plaintext` where the URL is in the clear. Production refuses `url` while `DEBUG` covers ioredis. Another floor refuses boot.
+- Internal module `client`: boot warns `redis.plaintext` where the URL is in the clear, deprecated in production without `accept-plaintext`. Production refuses `url` while `DEBUG` covers ioredis. Another floor refuses boot.
 - Every script first deletes keys whose expiry is at or before its time, as Redis still holds them then.
 - Versions are `server.epoch.n` and never repeat after a restart, a failover, or the end of the key counting them.
 - Nothing a connection does ends the process.
@@ -49,7 +49,7 @@
 - The operator's, outside these checks: keeping a detached or lagging replica from promotion, replicas' disk writes, and what a `CONFIG SET` or a failover after boot lets through until a probe answers unready.
 
 ## Data
-- Keys under the prefix, one hash tag per space and partition, holding values, counts, versions and marks.
+- Keys under the prefix, one hash tag per space and partition, holding values, counts, versions and marks; and the control record and the ledger of spaces (internal module `upkeep`).
 
 ## Depends on
 - `kernel`, `store`, `tls-options` (`tlsOptions`, `isFloor`; more inside `client`), `url-setting` (inside `client`)

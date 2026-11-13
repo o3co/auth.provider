@@ -1,7 +1,7 @@
 # clients
 
 ## Responsibilities
-- Looks up and authenticates clients, checking and freezing their records at the boundary, with built-in methods `client_secret_basic`, `client_secret_post` and `none`.
+- Looks up and authenticates clients, checking and freezing their records at the boundary, with built-in methods `client_secret_basic`, `client_secret_post` and `none`, and freezing the registry every taker shares, so none reassigns a member for the others.
 
 ## Not here
 - What each metadata field means: the module that reads one contributes it as a section, and its default applies to a client without it.
@@ -19,7 +19,7 @@
 - Extension point `authMethods`: a method names its challenge for a refusal and its signing algorithms (at least one where it names any, never the JWS algorithm `none` in any case: boot refuses a method that breaks either), may say a request carries its credentials malformed, and may say it authenticates by an assertion (RFC 7521), when it names at least one signing algorithm (boot refuses one that does not).
 - Extension points `clientSources` and `metadataSections`; a section may give `checkAtBoot`, which takes a registered client's value of that section after the schema, and the client that holds it, and may give a reason to refuse boot.
 - Operator section `registered`: a list of `id`, `kind` (`public` or `confidential`), `method` and `sections` (values by section name); built-in section `client-secret` holds `hash`, a bcrypt or scrypt hash in the forms `secret-hash` reads.
-- `./testing`: test clients and configuration builders.
+- `./testing`: `confidentialClient` and `publicClient` (test clients; `clientSecret` is the former's secret) and `clientsConfig`.
 
 ## Invariants
 - A request uses one authentication method: two or more are refused first, then credentials a method finds malformed, both before any lookup. Where an assertion method claims the request, it uses an assertion: either refusal is then marked `assertion` and carries the challenges of every method claiming the request or finding it malformed, as RFC 7521 §4.2.1 answers it `invalid_client`; a method that only finds the request malformed marks nothing, and an unmarked refusal carries no challenge.
@@ -30,7 +30,7 @@
 - `client_secret_post` and `none` read `client_id` and `client_secret` from a form or JSON body, where a value that is not a string still counts as sent.
 - A registered client wins over the same id from another source.
 - A record failing any section check is refused as a whole; a source's record is also refused unless it passes the registered rule, names a known method and carries the id asked, and when reading it throws.
-- An id that is empty, over 256 UTF-16 code units, with a lone surrogate, or with a C0, DEL, C1, U+2028, U+2029 or BOM character is unknown, and no source is asked; registered, it refuses boot.
+- An id that is empty, over 256 UTF-16 code units (a fixed bound: an id is also a store key, and every reader of an id holds it to this one), with a lone surrogate, or with a C0, DEL, C1, U+2028, U+2029 or BOM character is unknown, and no source is asked; registered, it refuses boot.
 - `checkAtBoot` sees each registered client that carries the section, and never a source's client, which the section's owner checks at request time.
 - A `checkAtBoot` reason refuses boot at `clients.registered.<i>.sections.<name>`, which names the client by its place and the section; the reason is the check's own, unchanged, so it never holds a configuration value, the client's id included.
 - A secret is checked through `secret-hash`, within its assembly's `max-concurrent`, with decoys of the registered hashes' work; boot refuses a registered `hash` it cannot read (plain text included) or a secret method's client with none, and a source's such secret matches nothing.

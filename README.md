@@ -179,7 +179,7 @@ A pattern is a ready-made selection of modules for one kind of deployment. Choos
 | Pattern | Use it for | Storage and outside services |
 |---|---|---|
 | `simple-web` | Password login for web apps (code flow with refresh tokens); client credentials for services with `--add @mod/client-credentials` | In-memory store, one instance; users in the configuration; audit to the log |
-| `mfa-web` | `simple-web` with TOTP, email codes and recovery codes | Redis and SMTP |
+| `mfa-web` | `simple-web` with TOTP and recovery codes, the account's address proved by mail before a first binding; email codes with `--add @mod/mfa-email` | Redis and SMTP |
 | `device` | `simple-web` with the Device Authorization Grant, where users approve a code on another screen | In-memory store, one instance |
 | `native-app` | Native apps and single-page apps as public clients, with PKCE, refresh tokens and DPoP | In-memory store, one instance |
 | `a2a` | Service-to-service tokens with no users: client credentials or JWT bearer, `private_key_jwt`, mTLS and DPoP | In-memory store, one instance; a proxy that forwards client certificates for mTLS |

@@ -1,5 +1,5 @@
 import { type BuildContext, Unavailable } from "@mod/kernel";
-import { isAddress } from "./address.ts";
+import { isAddress } from "@mod/mail-address";
 import { type Message, mailPurposes, mailTemplates } from "./contract.ts";
 import { bodyControls, controls } from "./lines.ts";
 
@@ -40,9 +40,10 @@ function checkedCopy(message: Message): Message {
 }
 
 /**
- * For a sender, at build: refuses boot when a declared purpose has no template. The function it
- * gives copies and checks a message, and renders it; it throws a TypeError for a bad message and
- * Unavailable once expired, synchronously, so call it inside the async send.
+ * For a sender, at build: refuses boot when a declared purpose has no template, or a template's
+ * purpose is undeclared. The function it gives copies and checks a message, and renders it; it
+ * throws a TypeError for a bad message and Unavailable once expired, synchronously, so call it
+ * inside the async send.
  * Every sender sends only what it returns.
  */
 export async function preparer<S>(c: BuildContext<S>): Promise<(message: Message) => Prepared> {
@@ -51,6 +52,11 @@ export async function preparer<S>(c: BuildContext<S>): Promise<(message: Message
 	const missing = [...declared].filter((p) => !templates.has(p));
 	if (missing.length > 0) {
 		c.refuse("mail.templates", `no template for ${missing.join(", ")}`);
+	}
+	// A template nothing declares is never sent: its owner is not composed, or no longer sends it.
+	const undeclared = [...templates.keys()].filter((p) => !declared.has(p));
+	if (undeclared.length > 0) {
+		c.refuse("mail.templates", `a template for an undeclared purpose: ${undeclared.join(", ")}`);
 	}
 	return (input) => {
 		const message = checkedCopy(input);

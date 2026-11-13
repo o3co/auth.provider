@@ -1,7 +1,14 @@
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { revocations, subjectRevocation } from "../src/contract.ts";
+import {
+	erasedSubjects,
+	erasureFence,
+	erasureGuards,
+	revocations,
+	subjectErasure,
+	subjectRevocation,
+} from "../src/contract.ts";
 import revocationModule from "../src/module.ts";
 import { type BoundaryStore, boundaryStore, type StoredBoundary } from "../src/store.ts";
 import {
@@ -34,21 +41,36 @@ function movable() {
 }
 
 /** subject-revocation over the records stand-in, on a clock the test moves; `front` may stand in front of the store. */
-async function boot(front: (boundaries: BoundaryStore) => BoundaryStore = (b) => b) {
+async function boot(
+	front: (boundaries: BoundaryStore) => BoundaryStore = (b) => b,
+	readsOn = false,
+) {
 	const { clock, runtime, adapter } = movable();
 	const stores = memoryBoundaries(() => clock.at);
+	// As the store reads erasure at this process's start, which holds it.
+	stores.erasure.on = readsOn;
 	const app = await assemble({
 		modules: [
 			revocationModule,
 			defineModule({ name: "boundaries", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(boundaryStore).by(() => front(stores.boundaries)),
+				// Guarded where erasure reads on, as such a composition must be.
+				...(readsOn ? [m.contribute(erasureGuards).by(() => ({ name: "test" }))] : []),
 			]),
 		],
 		config: kernelConfig(),
 		runtime,
 	});
 	const revocation = app.get(subjectRevocation);
-	return { ...stores, clock, adapter, revocation, revocations: app.get(revocations) };
+	return {
+		...stores,
+		clock,
+		adapter,
+		revocation,
+		revocations: app.get(revocations),
+		erasure: app.get(subjectErasure),
+		erasedSubjects: app.get(erasedSubjects),
+	};
 }
 
 it("refuses authentications up to the boundary's second, and only for that subject", async () => {
@@ -212,9 +234,17 @@ it("is unavailable when another request's first boundary is gone before it moves
 });
 
 subjectRevocationContract("subject-revocation over the records stand-in", async () => {
-	const { adapter, revocation, revocations } = await boot();
+	// Read on, so a subject's mark is read: where erasure reads off at start, no subject is marked.
+	const { adapter, revocation, revocations, erasure, erasedSubjects } = await boot(undefined, true);
 	// A boundary is its write's deadline: an authentication counts as after it a patience later.
-	return { revocation, revocations, ...adapter, settlesAfterMs: patience + 1000 };
+	return {
+		revocation,
+		revocations,
+		erasure,
+		erasedSubjects,
+		...adapter,
+		settlesAfterMs: patience + 1000,
+	};
 });
 
 subjectRevocationContract("the stand-in", async () => {
@@ -224,7 +254,27 @@ subjectRevocationContract("the stand-in", async () => {
 		config: kernelConfig(),
 		runtime,
 	});
-	return { revocation: app.get(subjectRevocation), revocations: app.get(revocations), ...adapter };
+	return {
+		revocation: app.get(subjectRevocation),
+		revocations: app.get(revocations),
+		erasure: app.get(subjectErasure),
+		erasedSubjects: app.get(erasedSubjects),
+		...adapter,
+	};
+});
+
+it("lets the stand-in's fence pass a subject until it is marked, and refuses a receipt id fenced twice", async () => {
+	const app = await assemble({
+		modules: [subjectRevocationStandIn],
+		config: kernelConfig(),
+		runtime: quietRuntime({ clock: { now: () => now } }),
+	});
+	const fence = app.get(erasureFence);
+	expect(await fence.fence("alice", "r-1")).toBe("passed");
+	await expect(fence.fence("alice", "r-1")).rejects.toThrow("a fence's receipt id is used");
+	await app.get(subjectErasure).markErased("alice");
+	expect(await fence.fence("alice", "r-2")).toBe("erased");
+	expect(await fence.fence("bob", "r-3")).toBe("passed");
 });
 
 subjectRevocationContract("the lagging stand-in, caught up", async () => {
@@ -234,7 +284,13 @@ subjectRevocationContract("the lagging stand-in, caught up", async () => {
 		config: kernelConfig(),
 		runtime,
 	});
-	return { revocation: app.get(subjectRevocation), revocations: app.get(revocations), ...adapter };
+	return {
+		revocation: app.get(subjectRevocation),
+		revocations: app.get(revocations),
+		erasure: app.get(subjectErasure),
+		erasedSubjects: app.get(erasedSubjects),
+		...adapter,
+	};
 });
 
 it("answers, while it lags, by the boundaries as they stood when it began, and by the latest once caught up", async () => {

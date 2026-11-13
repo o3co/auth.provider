@@ -278,6 +278,20 @@ describe("the logout a client starts", () => {
 		expect(await h.stillOpen(session.id)).toBe(true);
 	});
 
+	it("refuses a hint issued longer ago than the section's hint-max-age, and takes one just within it", async () => {
+		const h = await serve({ settings: { "hint-max-age": "1h" } });
+		const { session: old } = await h.login();
+		const iat = 1_800_000_000 - 3601;
+		const stale = await h.hintFor(old.id, { iat, exp: iat + 86_400 });
+		const out = await h.call("GET", { id_token_hint: stale });
+		expect([out.status, out.json?.error]).toEqual([400, "invalid_token"]);
+		expect(await h.stillOpen(old.id)).toBe(true);
+		const { session, cookie } = await h.login();
+		const within = await h.hintFor(session.id, { iat: iat + 2, exp: iat + 86_400 });
+		expect((await h.call("GET", { id_token_hint: within }, { cookie })).status).toBe(200);
+		expect(await h.stillOpen(session.id)).toBe(false);
+	});
+
 	it("sends the browser back with its state only to a return the hint's client registered [oidc-rpinit-2-b] [oidc-rpinit-3-b]", async () => {
 		const h = await serve();
 		const go = async (asked: string, over: Record<string, unknown> = {}) => {

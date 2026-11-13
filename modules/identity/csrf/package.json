@@ -12,6 +12,7 @@
 	"dependencies": {
 		"@mod/cookies": "workspace:*",
 		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
 		"@mod/kernel": "workspace:*"
 	}
 }

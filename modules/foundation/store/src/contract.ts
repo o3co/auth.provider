@@ -1,4 +1,16 @@
 import { contract, extensionPoint } from "@mod/kernel";
+import type { Honours, KeptSpace, StoreUpkeep } from "./upkeep/upkeep.ts";
+
+export {
+	type Control,
+	type Honours,
+	type KeptSpace,
+	type Mark,
+	type StoreControl,
+	type StoreUpkeep,
+	storeControl,
+	storeUpkeep,
+} from "./upkeep/upkeep.ts";
 
 /**
  * Plain JSON data only: no undefined, non-finite numbers, dates, class instances or cycles.
@@ -21,10 +33,35 @@ export type Json =
  */
 export type Guarantee = "no-eviction" | "durable" | "replicated" | "confirmed-reads";
 
+/**
+ * What a space holds of a subject's data, as its owner declares it for erasing an account, which
+ * reads it. To store, each is opaque but `none` (`noSubjectData`).
+ */
+export type SubjectData =
+	| "online-indexed"
+	| "online-keyed"
+	| "bounded"
+	| "window"
+	| "none"
+	| "pseudonymous"
+	| "retained"
+	| "internal";
+
+/** The space holds no subject's data; any other category, or none declared, may hold some. */
+export const noSubjectData = "none" satisfies SubjectData;
+
 /** A namespace a module declares, with the guarantees its data needs; only declared ones are accepted. */
 export interface Space {
 	readonly name: string;
 	readonly guarantees: readonly Guarantee[];
+	/** What it holds of a subject's data. Erasure's word, carried on the declaration for erasure to read. */
+	readonly subjectData?: SubjectData;
+	/** The eraser that erases it, by its key, for erasure to find. */
+	readonly erasedBy?: string;
+	/** For a bounded space: the longest a record lives from its creation, in ms. */
+	readonly boundedMs?: number;
+	/** Once erasure is enabled, every process must declare it to start (the control record's `requires`). */
+	readonly requiredOnceErasing?: boolean;
 }
 
 /** Keys in one partition can be written together and read consistently. */
@@ -51,11 +88,17 @@ export interface WriteOptions {
 	readonly deadline?: number;
 	/**
 	 * Resends of the same request with the same mark in the partition get the first answer until
-	 * the deadline plus a second of skew, or five minutes and a second without a deadline; a
-	 * different request under a used mark is refused.
+	 * the deadline plus a second of skew, or five minutes and a second without a deadline
+	 * (`idempotencyWindows`); a different request under a used mark is refused.
 	 */
 	readonly idempotency?: string;
 }
+
+/** How long every store keeps an idempotency mark, in ms: past its deadline, or from now without one; then past that too. */
+export const idempotencyWindows = Object.freeze({
+	withoutDeadlineMs: 300_000,
+	pastDeadlineMs: 1000,
+});
 
 /**
  * Opaque, compared for equality only, never repeating for a key. Counters go back on restart,
@@ -86,6 +129,16 @@ export type Condition =
 export type BatchWrite =
 	| { readonly key: Key; readonly put: Json; readonly expiry: Expiry }
 	| { readonly key: Key; readonly remove: true };
+
+/**
+ * A batch's writes applied: each version (none for a removal), and the store time it committed at,
+ * where the store tells it; a resend under its mark answers the first commit's.
+ */
+export type Committed = {
+	readonly kind: "committed";
+	readonly versions: readonly (Version | null)[];
+	readonly at?: number;
+};
 
 /**
  * In a replicated space, a written answer (written, removed, taken, committed, counted) confirms
@@ -132,12 +185,7 @@ export interface Store {
 		conditions: readonly Condition[],
 		writes: readonly BatchWrite[],
 		options?: Omit<WriteOptions, "expiry">,
-	): Promise<
-		| { readonly kind: "committed"; readonly versions: readonly (Version | null)[] }
-		| Late
-		| Reused
-		| { readonly kind: "conflict"; readonly index: number }
-	>;
+	): Promise<Committed | Late | Reused | { readonly kind: "conflict"; readonly index: number }>;
 	/**
 	 * As `batch`, over keys of any partition, and of any spaces declaring the same guarantees. Its
 	 * mark binds the request (its keys in their order) and is kept, with one answer and one end, in
@@ -149,12 +197,7 @@ export interface Store {
 		conditions: readonly Condition[],
 		writes: readonly BatchWrite[],
 		options?: Omit<WriteOptions, "expiry">,
-	): Promise<
-		| { readonly kind: "committed"; readonly versions: readonly (Version | null)[] }
-		| Late
-		| Reused
-		| { readonly kind: "conflict"; readonly index: number }
-	>;
+	): Promise<Committed | Late | Reused | { readonly kind: "conflict"; readonly index: number }>;
 	/** A fixed window counted on the store clock; at the limit nothing is written. */
 	count(
 		key: Key,
@@ -166,6 +209,11 @@ export interface Store {
 		| Late
 		| Reused
 	>;
+	/**
+	 * Reads of several keys, each as `get` reads one, in the order asked: at one store time where the
+	 * store is one server, else each at its own. A store without it leaves it out.
+	 */
+	getMany?(keys: readonly Key[]): Promise<readonly Read[]>;
 	/** The store clock's present time, the one every expiry and deadline is judged by. */
 	now(): Promise<number>;
 	/** A page of the space's live value keys (no counter) and the cursor on; none when done. */
@@ -372,6 +420,12 @@ function readWriteOptions(value: unknown): WriteOptions {
 	};
 }
 
+/**
+ * The longest cursor taken back: longer than any a store gives, as memory's names a whole key
+ * (three texts of 512 characters, each escaped to at most 6) and Redis's is a number.
+ */
+const cursorLength = 16_384;
+
 /** The largest count a window may allow. */
 const largestLimit = 1_000_000_000;
 
@@ -404,15 +458,90 @@ function readBatchWrite(value: unknown, key: (value: unknown) => Key): BatchWrit
 	return { key: k, put: json(read.put), expiry: readExpiry(read.expiry) };
 }
 
+const subjectDataKinds: readonly SubjectData[] = [
+	"online-indexed",
+	"online-keyed",
+	"bounded",
+	"window",
+	"none",
+	"pseudonymous",
+	"retained",
+	"internal",
+];
+const spaceFields = [
+	"name",
+	"guarantees",
+	"subjectData",
+	"erasedBy",
+	"boundedMs",
+	"requiredOnceErasing",
+];
+const guarantees: readonly Guarantee[] = [
+	"no-eviction",
+	"durable",
+	"replicated",
+	"confirmed-reads",
+];
+
+/** The declared spaces by name, each declaration's own fields checked for their shape alone. */
+function declaredSpaces(declared: readonly Space[]): ReadonlyMap<string, Space> {
+	for (const space of declared) {
+		const read = fields("space", space, spaceFields);
+		text("space", read.name);
+		if (
+			read.subjectData !== undefined &&
+			!subjectDataKinds.includes(read.subjectData as SubjectData)
+		)
+			fail(`space ${read.name} declares an unknown subjectData`);
+		if (read.erasedBy !== undefined) text("erasedBy", read.erasedBy);
+		if (read.boundedMs !== undefined) whole("boundedMs", read.boundedMs, 1);
+		if (read.requiredOnceErasing !== undefined && typeof read.requiredOnceErasing !== "boolean")
+			fail("requiredOnceErasing must be a boolean");
+	}
+	return new Map(declared.map((space) => [space.name, space]));
+}
+
+/** The declared space a value names. */
+function spaceIn(known: ReadonlyMap<string, Space>, value: unknown): Space {
+	const name = text("space", fields("space", value, spaceFields).name);
+	const space = known.get(name);
+	if (!space) fail(`space ${name} is not declared`);
+	return space;
+}
+
+/** Checks upkeep's input once, as `checkedStore` checks the store's: names, values and spaces. */
+export function checkedUpkeep(inner: StoreUpkeep, declared: readonly Space[]): StoreUpkeep {
+	const known = declaredSpaces(declared);
+	return {
+		mark: async (name, value) => inner.mark(text("mark name", name), json(value)),
+		require: async (names) => {
+			if (!Array.isArray(names) || names.length === 0) fail("require needs one space or more");
+			return inner.require([...new Set([...names].map((n) => text("space", n)))]);
+		},
+		enterMaintenance: () => inner.enterMaintenance(),
+		leaveMaintenance: () => inner.leaveMaintenance(),
+		kept: (): Promise<readonly KeptSpace[]> => inner.kept(),
+		retire: async (name) => inner.retire(text("space", name)),
+		honours: async (asked): Promise<Honours> => {
+			if (!Array.isArray(asked)) fail("guarantees must be a list");
+			for (const g of asked) if (!guarantees.includes(g)) fail(`unknown guarantee ${String(g)}`);
+			return inner.honours([...new Set(asked)]);
+		},
+		sweep: async (target, cursor) =>
+			inner.sweep(
+				spaceIn(known, target),
+				cursor === undefined ? undefined : text("cursor", cursor, cursorLength),
+			),
+	};
+}
+
 /** Checks every input once, the same way for every implementation: read once into plain data,
  * keys in declared spaces, and a whole batch before anything is written. */
 export function checkedStore(inner: Store, declared: readonly Space[]): Store {
-	const known = new Map(declared.map((space) => [space.name, space]));
+	const known = declaredSpaces(declared);
 	const key = (value: unknown): Key => {
 		const read = fields("key", value, ["space", "partition", "name"]);
-		const name = text("space", fields("space", read.space, ["name", "guarantees"]).name);
-		const space = known.get(name);
-		if (!space) fail(`space ${name} is not declared`);
+		const space = spaceIn(known, read.space);
 		return {
 			space,
 			partition: text("partition", read.partition),
@@ -433,6 +562,7 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 		if (sets.size > 1) fail("a batch across spaces joins spaces of the same guarantees only");
 	};
 	const batchAcross = inner.batchAcross?.bind(inner);
+	const getMany = inner.getMany?.bind(inner);
 	return {
 		...(batchAcross
 			? {
@@ -458,12 +588,12 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 				readLimits(o),
 			),
 		count: async (k, window, o) => inner.count(key(k), readWindow(window), readLimits(o)),
-		scan: async (target, cursor) => {
-			const name = text("space", fields("space", target, ["name", "guarantees"]).name);
-			const declaredSpace = known.get(name);
-			if (!declaredSpace) fail(`space ${name} is not declared`);
-			return inner.scan(declaredSpace, cursor === undefined ? undefined : text("cursor", cursor));
-		},
+		...(getMany ? { getMany: async (keys) => getMany([...keys].map(key)) } : {}),
+		scan: async (target, cursor) =>
+			inner.scan(
+				spaceIn(known, target),
+				cursor === undefined ? undefined : text("cursor", cursor, cursorLength),
+			),
 		now: () => inner.now(),
 	};
 }

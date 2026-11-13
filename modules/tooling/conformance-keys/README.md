@@ -8,7 +8,7 @@
 - Scene composition and drivers (`conformance`). Starting the legacy system (`conformance-legacy`).
 
 ## Offers
-- Area `keys` and the shape of its parts (signing key, previous key, unknown configuration)
+- Area `keys` (`keysArea`) and the shape of its parts (signing key, previous key, unknown configuration)
 
 ## Invariants
 - The legacy set-up lives only in `src/legacy.ts`.

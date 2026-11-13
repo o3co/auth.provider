@@ -63,7 +63,13 @@ export function heldOver(seal: Seal, store: HeldLoginStore): Held {
 	return {
 		keep: async (carry, login, lifetimeMs) => {
 			const sealed = seal.seal(JSON.stringify(login), contextOf(carry));
-			const saved = await store.save(carry, stored({ format: 1, sealed }), lifetimeMs);
+			const saved = await store.save(
+				carry,
+				stored({ format: 1, sealed }),
+				lifetimeMs,
+				login.subject,
+			);
+			// `erased` too: the subject's erasure fenced it, so nothing is kept, and a retry never succeeds.
 			if (saved !== "created") throw new Unavailable("upstream-handoff");
 		},
 		take: async (carry, subject, use) => {

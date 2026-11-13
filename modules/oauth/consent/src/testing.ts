@@ -75,10 +75,11 @@ const fresh = () => `k-${++n}-${Math.random().toString(36).slice(2)}`;
 
 /**
  * What consent needs from any implementation of one of its store interfaces: records kept whole
- * and once, read back, changed only from what they hold, ended at exactly their lifetime or never,
- * through lost answers, restarts, memory pressure and failovers.
+ * and once, read back, changed only from what they hold, ended at exactly their lifetime or, where
+ * `endless` (grants, not asks, which end by their challenge), never, through lost answers,
+ * restarts, memory pressure and failovers.
  */
-function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
+function recordTests<T>(open: () => Promise<ConsentPlace<T>>, endless: boolean): void {
 	const held = (value: object) => value as unknown as T;
 	const counted = (record: T) => (record as unknown as { n: number }).n;
 	const plus = (record: T) => ({ value: held({ n: counted(record) + 1 }) });
@@ -87,8 +88,8 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 		const { records } = await open();
 		const key = fresh();
 		const odd = held({ state: "unheard-of", nested: { list: [1, "two"] } });
-		expect(await records.save(key, odd, 60_000)).toBe("created");
-		expect(await records.save(key, held({ n: 1 }), 60_000)).toBe("exists");
+		expect(await records.save(key, odd, 60_000, "alice")).toBe("created");
+		expect(await records.save(key, held({ n: 1 }), 60_000, "alice")).toBe("exists");
 		expect(await records.read(key)).toEqual(odd);
 		expect(await records.update(key, () => undefined)).toEqual({ before: odd, after: odd });
 		expect(await records.read(fresh())).toBeUndefined();
@@ -98,7 +99,7 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 	it("changes a record only from what it holds, again after a racing writer", async () => {
 		const place = await open();
 		const key = fresh();
-		await place.records.save(key, held({ n: 1 }), 60_000);
+		await place.records.save(key, held({ n: 1 }), 60_000, "alice");
 		expect(await place.records.update(key, plus)).toEqual({
 			before: held({ n: 1 }),
 			after: held({ n: 2 }),
@@ -110,19 +111,32 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 		});
 	});
 
-	it("ends a record at exactly its lifetime, which a change keeps, or never", async () => {
+	it(`ends a record at exactly its lifetime, which a change keeps${endless ? ", or never" : ""}`, async () => {
 		const place = await open();
-		const [ending, endless] = [fresh(), fresh()];
-		await place.records.save(ending, held({ n: 1 }), 1000);
-		await place.records.save(endless, held({ n: 1 }), "endless");
+		const [ending, kept] = [fresh(), fresh()];
+		await place.records.save(ending, held({ n: 1 }), 1000, "alice");
+		if (endless) await place.records.save(kept, held({ n: 1 }), "endless", "alice");
 		place.advance(999);
 		await place.records.update(ending, plus);
 		expect(await place.records.read(ending)).toEqual(held({ n: 2 }));
 		place.advance(1);
 		expect(await place.records.read(ending)).toBeUndefined();
-		expect(await place.records.save(ending, held({ n: 3 }), 1000)).toBe("created");
+		expect(await place.records.save(ending, held({ n: 3 }), 1000, "alice")).toBe("created");
 		place.advance(10 * 365 * 86_400_000);
-		expect(await place.records.read(endless)).toEqual(held({ n: 1 }));
+		if (endless) expect(await place.records.read(kept)).toEqual(held({ n: 1 }));
+	});
+
+	it("refuses, where the Store erases, every save for a subject it erased, and only for that subject", async (context) => {
+		const place = await open();
+		const { erase } = place.records;
+		if (!erase) return context.skip();
+		await place.records.save(fresh(), held({ n: 1 }), 60_000, "erin");
+		const report = await erase.call(place.records, "erin", new AbortController().signal);
+		// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+		if (report.kind === "stopped") return context.skip();
+		expect(["erased", "fenced"]).toContain(report.kind);
+		expect(await place.records.save(fresh(), held({ n: 2 }), 60_000, "erin")).toBe("erased");
+		expect(await place.records.save(fresh(), held({ n: 3 }), 60_000, "finn")).toBe("created");
 	});
 
 	it("keeps records through a restart and through memory pressure", async (context) => {
@@ -130,7 +144,7 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 		const { restart, pressMemory } = place;
 		if (!restart || !pressMemory) return context.skip();
 		const key = fresh();
-		await place.records.save(key, held({ n: 1 }), 60_000);
+		await place.records.save(key, held({ n: 1 }), 60_000, "alice");
 		await restart();
 		await pressMemory();
 		expect(await place.records.read(key)).toEqual(held({ n: 1 }));
@@ -142,7 +156,7 @@ function recordTests<T>(open: () => Promise<ConsentPlace<T>>): void {
 		if (!lose || !failover) return context.skip();
 		const key = fresh();
 		lose();
-		expect(await place.records.save(key, held({ n: 1 }), 60_000)).toBe("created");
+		expect(await place.records.save(key, held({ n: 1 }), 60_000, "alice")).toBe("created");
 		lose();
 		expect((await place.records.update(key, plus))?.after).toEqual(held({ n: 2 }));
 		await failover();
@@ -156,14 +170,14 @@ export function grantStoreContract(
 	open: () => Promise<ConsentPlace<StoredGrant>>,
 ): void {
 	describe(`consent's grant store: ${name}`, () => {
-		recordTests(open);
+		recordTests(open, true);
 
 		it("reads only what is confirmed", async (context) => {
 			const place = await open();
 			const { stallReplicas: stall } = place;
 			if (!stall) return context.skip();
 			const key = fresh();
-			await place.records.save(key, {} as StoredGrant, "endless");
+			await place.records.save(key, {} as StoredGrant, "endless", "alice");
 			stall(true);
 			await expect(place.records.read(key)).rejects.toSatisfy(isUnavailable);
 			stall(false);
@@ -175,14 +189,14 @@ export function grantStoreContract(
 /** What consent needs from any implementation of its ask store. */
 export function askStoreContract(name: string, open: () => Promise<ConsentPlace<StoredAsk>>): void {
 	describe(`consent's ask store: ${name}`, () => {
-		recordTests(open);
+		recordTests(open, false);
 
 		it("never gives an ask's key to what the place holds, in clear", async (context) => {
 			const place = await open();
 			const { holds } = place;
 			if (!holds) return context.skip();
 			const [key, kept] = [fresh(), fresh()];
-			await place.records.save(key, { kept } as unknown as StoredAsk, 60_000);
+			await place.records.save(key, { kept } as unknown as StoredAsk, 60_000, "alice");
 			await place.records.read(key);
 			await place.records.update(key, (record) => ({ value: record }));
 			expect([holds(kept), holds(key)]).toEqual([true, false]);

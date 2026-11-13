@@ -10,11 +10,11 @@
 - Keeping sessions: their records, store interfaces, operator section and sweep (`session-lifecycle`, the default implementation).
 
 ## Offers
-- `enter`: request → session or none, throwing when unavailable; `entryOf` answers by handle the entry its cookie would get, at `use` unless another level is asked.
-- `open`: login fact → `opened` with the session and cookie at `kernel`'s time, or `revoked`; an authentication time neither epoch milliseconds (0 to 8.64e15), `opening` nor `unknown`, or a `provenSince` missing or not epoch milliseconds, is a `TypeError`, before anything is closed; the login is unavailable when the carried session's close cannot be added to the closings, or the new session cannot be listed under its subject.
+- `enter`: request → session or none, throwing when unavailable; `entryOf` answers by handle the entry its cookie would get, at `use` unless another level is asked; `subjectOf` (optional; deprecated where missing, and 0.22 requires it): handle → its record's subject in any state, from one read that writes and judges nothing; none where no record is, or it names none.
+- `open`: login fact → `opened` with the session and cookie at `kernel`'s time, or `revoked`; a login fact `rules`' checks refuse (`checkAuthenticatedAt`, `checkProvenSince`) is a `TypeError`, before anything is closed; the login is unavailable when the carried session's close cannot be added to the closings, or the new session cannot be listed under its subject.
   - `provenSince`, when the proof began, is compared with the subject's boundary once the session is saved, before any cookie; revoked, it is closed. A login's authentication time, and what counts from the opening instead, follow `rules`' card.
 - `enterFor`: request and level (use / none / credentials) → entered (with its end: the opening plus the lifetime in force), absent, or short with the requirement's name and its answer, passed on unread; a session closed or revoked while the requirements are asked is absent.
-- Extension point `entryJudge`: context and level → the first requirement that falls short, or admitted with whether one judged the level; asked with "use" by `enter` and the checks by handle. Where nothing judges `credentials`, `sessionRules` holds the floor (`rules`' card), for an implementation and the stand-in alike.
+- Extension point `entryJudge`: context and level → the first requirement that falls short, or admitted with whether one judged the level; asked with "use" by `enter` and the checks by handle; `sessionRules` (`rules`' card).
 - `refusedEntry`: an entry that did not enter → its answer, absent `401` `{"error":"login_required"}`, short `403` with the requirement's answer, both kept out of caches.
 - `raise`: request and amr → the raised session and a new cookie, the session unraised with `raised: false` where its record could not be written, or none; it adds the amr and keeps the raise time (`kernel`'s clock).
 - `recent`: a time (`kernel`'s clock) → whether it is within the one recent-authentication window, at most `longestRecentMs` (1 hour); the checker passes the time of what it judges.
@@ -24,8 +24,8 @@
 - Extension point `closingParticipants`: the session (its handle and context, never the cookie secret) → each participant that failed, by name and the error's kind.
   - None is called for a session that ends by expiry alone, while a close calls them for a session whose record it finds, even one the lifetime in force has ended.
 - Each seam takes at most one contribution, from the module keeping the requirements (`session-requirements`) or the participants (`session-participants`); its factory takes `sessions` only late.
-- An implementation refuses to boot where a seam has no contribution; the stand-in takes none as no requirement and no participant, the `credentials` floor still kept.
-- `./testing`: a stub, a stand-in in memory behind cookies by `cookies`' rule (each subject's listing as the contract has it; a pending close goes on only when asked again), `openedOf` (`open`'s session and cookie, or its throw), and contract tests of the sessions.
+- An implementation refuses to boot where a seam has no contribution; the stand-in boots without them (`sessionStandIn`).
+- `./testing`: `stubSessions`; `sessionStandIn`, in memory behind cookies, as its doc comment says, with `standInListingCap`, `standInLifetimeSeconds` and `failStandInListing`; `openedOf` (`open`'s session and cookie, or its throw); `sessionsContract`, the contract tests.
 
 ## Invariants
 - A session's state only moves forward. A host that cannot read a record (one a newer host wrote, during a rolling upgrade) lets nobody in on it and answers a login or close over its cookie Unavailable; the cookie stays.

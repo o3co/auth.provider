@@ -3,7 +3,7 @@
 ## Responsibilities
 - Contributes token-exchange's verifier of `urn:ietf:params:oauth:token-type:id_token`: Apple's and Google's id_tokens, exchanged for a token of the account users links the upstream subject to.
 - Decides which client of this provider may exchange each app's id_token, and takes each id_token once.
-- Offers the same checks to any other grant that takes these id_tokens, over the same record of those taken.
+- Offers the same checks to the other grant its contract names, over the same record of those taken.
 
 ## Not here
 - The exchange itself, the client's allowance and the public client's key (`token-exchange`). The account an upstream subject is linked to (`users`). Fetching and keeping key sets (`external-jwt`). Signing in upstream (the app).
@@ -11,7 +11,7 @@
 ## Offers
 - Composition definition (a verifier for `token-exchange.verifiers`, the Space `exchange-id-tokens.used`, and to `users.upstream-names` each kind's upstream name with its issuer).
 - Contract `idTokenChecks` (`.`): each written kind's `iss` values; `check`, the id_token `taken` (the account, the kind's issuer, `iat` and `exp`, the standing time, `iat` less `clock-skew`, the one client, a `holderDigest`) or invalid; `consume`, `consumed` once, then `replayed`. The exchange's verifier is these checks.
-- Store interface `usedIdTokens` (`.`), wired by the assembly with `usedIdTokensNeeds` (no eviction, a crash and a failover survived): `save` a name under its kind for a lifetime, answering `created` or `exists`.
+- Store interface `usedIdTokens` (`.`), wired by the assembly with `usedIdTokensNeeds` (no eviction, a crash and a failover survived): `save` a name under its kind for a lifetime, answering `created` or `exists`; `longestUsedMs`, the longest that lifetime is (the longest max-age, twice the longest skew and a minute), for the wiring to declare.
 - Operator section, times written with their unit:
   - `max-age` (`1m` to `1h`, default `10m`): the oldest an id_token may be, from its `iat`. `clock-skew` (`0s` to `5m`, default `30s`): set it no lower than the issuers' real clock drift, as narrowing it can admit an id_token a wider skew refused at a revocation.
   - `apple` and `google`, each optional, at least one: `upstream` (default the kind's name), the name users links the upstream subject under; `clients`, this provider's client IDs, each with `audiences` (one or more) and `authorized-parties` (default none); `algorithms` (`external-jwt`'s `algorithmsSetting`, default RS256).
@@ -26,6 +26,7 @@
 - An id_token needs `iat`, no older than `max-age` with `clock-skew`, and is refused past `exp` or from the future, as `external-jwt` reads them.
 - Its `sub` must have a subject's shape. The account is `users.byUpstream(upstream, sub)`; none is invalid. One issued before the account's `sessions` revocation boundary, widened by `clock-skew`, is invalid: an issuer's clock running ahead never lets one issued before it through.
 - The checks hold for every grant that takes them. The exchange's answer is a `foreign` token: the account as subject, the issuer, the id_token's `exp` as its end, its standing time, the one client as `clients`, and a `nonce` of a SHA-256 digest's shape as `holderDigest`; no scope or audience of its own.
+- `idTokenChecks`' `takenBy` (this package and `jwt-bearer-id-tokens`) is a composition rule, held by the kernel at assembly and by the guard on shipped imports (imported only by the packages named), not a runtime defence: which grant may turn an upstream's id_token into this provider's login or tokens is a security choice, made by naming it.
 - Boot is refused with neither `apple` nor `google`, with two clients of one kind taking one (`aud`, `azp`) pair (the second refused, naming the first by its key path), and with a client no registered client is. Users refuses it too where another module names the same upstream for another issuer; the same name for the same issuer (federation's `google`) boots.
 - Users, the store and the key sets failing are Unavailable, never a refusal.
 - The expected flow: the app signs in with Apple or Google, exchanges the id_token once for a short token, and proves a device key to the operator's API with it. A public app makes a DPoP key first and passes `BASE64URL(SHA-256(jkt))` as the sign-in `nonce`.

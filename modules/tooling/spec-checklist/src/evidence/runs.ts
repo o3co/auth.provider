@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { guaranteeSpec, type Item, type Role, roles } from "../checklist.ts";
 import { classOf, itemId, specOf } from "../ids.ts";
 import type { TestRef } from "../report.ts";
+import { reportedOf } from "./legs/legs.ts";
 import type { EvidenceReport } from "./reporter.ts";
 
 /** A run a CI run makes: its report's entry, its job's kind and matrix value, and whether only a release makes it. */
@@ -16,6 +17,8 @@ export interface Run {
 	readonly noSkip?: true;
 	/** A test of it that failed stops a release, whatever items it names or none. */
 	readonly gate?: true;
+	/** How many legs share its files, each reporting the files its shard ran (`i/n`); unset, one. */
+	readonly shards?: number;
 }
 
 /** A package's printed runs, each checked to be a run; a value that is not refused naming the package. */
@@ -29,7 +32,8 @@ export function runsPrinted(pkg: string, printed: unknown): Run[] {
 			(o.releaseOnly === undefined || o.releaseOnly === true) &&
 			(o.files === undefined || (typeof o.files === "string" && o.files !== "")) &&
 			(o.noSkip === undefined || o.noSkip === true) &&
-			(o.gate === undefined || o.gate === true)
+			(o.gate === undefined || o.gate === true) &&
+			(o.shards === undefined || (Number.isInteger(o.shards) && o.shards >= 2))
 		);
 	};
 	if (!Array.isArray(printed) || !printed.every(isRun))
@@ -61,6 +65,8 @@ export interface Expected {
 	readonly noSkip: ReadonlySet<string>;
 	/** The runs whose failed tests stop a release. */
 	readonly gate: ReadonlySet<string>;
+	/** The runs whose legs each run a shard of their files, by how many. */
+	readonly shards: ReadonlyMap<string, number>;
 }
 
 export type RunStatus =
@@ -116,52 +122,6 @@ export interface ItemStatus {
 	readonly holes?: readonly string[];
 	/** Each marked test of a guarantee's faults not passed in a run of its file, as `<entry>: <file> > <title>: <failed|skipped|pending|no result>`. */
 	readonly columns?: readonly string[];
-}
-
-/** A job's mark that it was attempted, written before it can fail: the run, the attempt, and the runs it makes. */
-export interface Attempted {
-	readonly attempted: {
-		readonly run: string;
-		readonly attempt: number;
-		readonly job: string;
-		readonly kind: string;
-		readonly matrix?: string;
-	};
-}
-
-/** The last attempt of this run that each entry's job was marked attempted in, by the runs the marks name. */
-export function attemptsOf(marks: readonly Attempted[], runs: readonly Run[], run: string) {
-	const last = new Map<string, number>();
-	for (const { attempted: a } of marks.filter((m) => m.attempted.run === run)) {
-		const named = runs.filter((r) => r.kind === a.kind && r.matrix === a.matrix);
-		for (const r of named) last.set(r.entry, Math.max(last.get(r.entry) ?? 0, a.attempt));
-	}
-	return last;
-}
-
-/**
- * Of the reports given, this commit's and run's for the new system, all of each entry and job's last
- * attempt, and none older than the last attempt its job was marked in: a job that failed before it
- * reported leaves its earlier attempt's evidence behind.
- */
-export function selectReports(
-	reports: readonly EvidenceReport[],
-	of: { readonly commit: string; readonly run: string },
-	attempted: ReadonlyMap<string, number> = new Map(),
-): EvidenceReport[] {
-	const ours = reports.filter(
-		(r) =>
-			r.identity.commit === of.commit &&
-			r.identity.run === of.run &&
-			r.identity.target === "new" &&
-			r.identity.attempt >= (attempted.get(r.identity.entry) ?? 0),
-	);
-	const keyOf = (r: EvidenceReport) => JSON.stringify([r.identity.entry, r.identity.job]);
-	const lastAttempt = new Map<string, number>();
-	for (const r of ours)
-		lastAttempt.set(keyOf(r), Math.max(lastAttempt.get(keyOf(r)) ?? 0, r.identity.attempt));
-	// Every report of the last attempt: two processes of one entry, job and attempt both count.
-	return ours.filter((r) => r.identity.attempt === lastAttempt.get(keyOf(r)));
 }
 
 /**
@@ -303,7 +263,7 @@ export function itemStatuses(
 	expected: Expected,
 	pkgDirs: ReadonlyMap<string, string>,
 ): ItemStatus[] {
-	const present = new Set(reports.map((r) => r.identity.entry));
+	const { present } = reportedOf(reports, expected);
 	const errored = new Set(reports.filter((r) => r.errors > 0).map((r) => r.identity.entry));
 	const brokenFiles = new Set(
 		reports.flatMap((r) =>

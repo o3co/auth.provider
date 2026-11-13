@@ -1,5 +1,6 @@
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
+import httpServer from "@mod/http-server/module";
 import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { counter, gauge, histogram, type Instrument, instruments } from "@mod/metrics";
@@ -31,7 +32,7 @@ const boot = (modules: Module[], settings?: Record<string, unknown>) =>
 	});
 
 async function serve(settings?: Record<string, unknown>, ...more: Module[]) {
-	const app = await boot([http, metricsModule, prometheus, ...more], settings);
+	const app = await boot([http, httpServer, metricsModule, prometheus, ...more], settings);
 	await app.start();
 	stops.push(() => app.stop(1000));
 	return `http://127.0.0.1:${app.get(listening).port()}`;
@@ -122,7 +123,7 @@ describe("scrape", () => {
 describe("refusals at boot", () => {
 	it("refuses a path that is not one plain path, without printing it", async () => {
 		for (const path of ["zq9", "/zq9/*", "/zq9?x=1", "/zq9#f", "/zq9 n", "/zq9\u0007"]) {
-			const found = await refusals([http, metricsModule, prometheus], { path });
+			const found = await refusals([http, httpServer, metricsModule, prometheus], { path });
 			expect(found).toHaveLength(1);
 			expect(found[0]).toMatch(/^metrics-prometheus\.path: /);
 			expect(found[0]).not.toContain("zq9");
@@ -130,7 +131,7 @@ describe("refusals at boot", () => {
 	});
 
 	it("refuses to boot without metrics", async () => {
-		expect(await refusals([http, prometheus])).toEqual([
+		expect(await refusals([http, httpServer, prometheus])).toEqual([
 			"metrics-prometheus: no module provides metrics",
 		]);
 	});
@@ -149,7 +150,7 @@ describe("refusals at boot", () => {
 				),
 			() => counter({ name: "auth_provider_nodejs_gc_duration_seconds_sum", help: "", labels: {} }),
 		);
-		expect(await refusals([http, metricsModule, prometheus, emitter])).toEqual([
+		expect(await refusals([http, httpServer, metricsModule, prometheus, emitter])).toEqual([
 			"metrics-prometheus:h: a histogram label is named le",
 			"metrics-prometheus:auth_provider_process_start_time_seconds: a name it takes is the process's",
 			"metrics-prometheus:x: a name it takes is another instrument's",

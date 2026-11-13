@@ -35,7 +35,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out the umbrella (o3co/auth) at develop
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: o3co/auth
           ref: develop
@@ -48,7 +48,7 @@ jobs:
       # its merge commit into main — is already local, so the checkout finds
       # it although no branch on origin points at it.
       - name: Check out this change as the umbrella's auth.provider
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: umbrella/repos/auth.provider
           persist-credentials: false
@@ -73,7 +73,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # The rest mirrors the umbrella's own e2e workflow.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
 
@@ -94,15 +94,18 @@ jobs:
       - name: Provide npmrc secret file
         run: touch ~/.npmrc
 
-      # Docker Compose builds the images with the classic builder, not Bake.
-      # Bake refuses to read a secret file outside the working directory
-      # unless `--allow fs.read=<path>` grants it, and Compose passes that
-      # grant for build contexts only, never for the ~/.npmrc secret. The
-      # classic builder reads only the files the compose file declares.
+      # Docker Compose builds the images with Bake, as o3co/auth's own E2E
+      # workflow does. Bake refuses to read a secret file outside the working
+      # directory unless `--allow fs.read=<path>` grants it, and Compose passes
+      # that grant for build contexts only, never for the ~/.npmrc secret.
+      # Turning the filesystem entitlement check off is safe here: the only
+      # build definitions are the ones Compose derives from the umbrella's
+      # compose file, and the only host file they read outside a context is
+      # the empty ~/.npmrc made above.
       - name: Run the umbrella E2E suite with this change as auth.provider
         working-directory: umbrella
         env:
-          COMPOSE_BAKE: "false"
+          BUILDX_BAKE_ENTITLEMENTS_FS: "0"
           PROVIDER_SHA: ${{ steps.revs.outputs.provider }}
         run: make test-e2e PROVIDER_REV="$PROVIDER_SHA"
 

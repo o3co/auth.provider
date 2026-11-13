@@ -1,4 +1,5 @@
 import type { RequestEndObserver } from "@mod/http";
+import type { Log } from "@mod/kernel";
 import { type Histogram, histogram } from "@mod/metrics";
 
 type Label = "method" | "route" | "status";
@@ -27,14 +28,19 @@ export function requestDuration(paths: readonly string[]): Duration {
 	});
 }
 
-/** Counts each request's end once by method, the declared route reached and the status written. */
-export function timing(duration: Duration): RequestEndObserver {
+/**
+ * Counts each request's end once by method, the declared route reached and the status written, and
+ * writes it at debug as `http.request`, with no value the request brought.
+ */
+export function timing(duration: Duration, log: Log): RequestEndObserver {
 	return {
 		ended: ({ method, route, status, ms }) => {
 			// 499: the client closed before any answer was written.
 			const written = status === "closed" ? "499" : String(status);
 			const known = METHODS.find((m) => m === method) ?? "other";
-			duration.observe({ method: known, route: route ?? UNMATCHED, status: written }, ms / 1000);
+			const reached = route ?? UNMATCHED;
+			duration.observe({ method: known, route: reached, status: written }, ms / 1000);
+			log.debug("http.request", { method: known, route: reached, status, ms });
 		},
 	};
 }

@@ -1,6 +1,6 @@
 import type { Pkg } from "@mod/guard-imports";
 import { describe, expect, it, vi } from "vitest";
-import { check } from "../src/contract.ts";
+import { check } from "../src/check.ts";
 import { budget, pkg } from "./workspace.ts";
 
 // A fixture with exports has its contract surface built by the type checker, which is slow when the machine is busy.

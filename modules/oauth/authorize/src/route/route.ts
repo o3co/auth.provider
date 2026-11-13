@@ -16,9 +16,6 @@ import { urlFrom } from "../url.ts";
 
 export const path = "/oauth/authorize";
 
-/** Length limits: state is echoed back, so it is kept short enough for any Location header. */
-const maxValue = 2048;
-const maxState = 512;
 const found = (status: number, location: string): HttpResponse => ({
 	status,
 	headers: { ...noStore, location },
@@ -31,6 +28,8 @@ export interface RouteParts extends Place {
 	readonly log: Log;
 	/** The composed rule for the audience a request asks for, which may answer a repeated parameter it reads. */
 	readonly rule: Pick<TargetRule, "repeated">;
+	/** The longest `state` taken, in characters (the package's `state-limit`): it goes back in the redirect's Location. */
+	readonly stateLimit: number;
 }
 
 /** The routes' declared answer to Unavailable, and the one before a session is found. */
@@ -45,6 +44,7 @@ export function routeWith({
 	flow,
 	log,
 	rule,
+	stateLimit,
 }: RouteParts): Pick<Route, "handle" | "unavailable"> {
 	const audited = declaredAudit(recorder, events);
 	const urlWith = urlFrom(self);
@@ -60,10 +60,9 @@ export function routeWith({
 		}
 		const source = request.query;
 		const repeated = source.repeated();
-		const tooLong = [...source]
-			.filter(([, values]) => values.some((v) => v.length > maxValue))
-			.map(([name]) => name);
-		const one = (name: string) => (tooLong.includes(name) ? undefined : source.single(name));
+		// Each value is held to its reader's bound (the client's id, the registered redirect URI, the
+		// nonce, the claims request, the hint), and the request to `http`'s; only `state` is this route's.
+		const one = (name: string) => source.single(name);
 
 		const clientId = one("client_id");
 		if (!clientId) return oauthError(400, "invalid_request", "client_id is required once");
@@ -77,7 +76,7 @@ export function routeWith({
 
 		// From here on the redirect URI is trusted, and every answer goes back to it.
 		const stateText = one("state");
-		const state = stateText !== undefined && stateText.length <= maxState ? stateText : undefined;
+		const state = stateText !== undefined && stateText.length <= stateLimit ? stateText : undefined;
 		const back = (params: Record<string, string>) =>
 			answerTo(redirectUri, { ...params, state, iss: issuer });
 		/** The answer a decision makes: here, on to another page, or back to the client. */
@@ -103,7 +102,7 @@ export function routeWith({
 				? ruled
 					? refusal(ruled.error, ruled.description)
 					: refusal("invalid_request", "repeated parameter")
-				: tooLong.length > 0 || (stateText !== undefined && state === undefined)
+				: stateText !== undefined && state === undefined
 					? refusal("invalid_request", "parameter too long")
 					: undefined;
 		const params = new Map([...source].map(([name, values]) => [name, values[0] ?? ""]));
@@ -158,5 +157,6 @@ export async function routeOver(c: BuildContext<Settings>) {
 		flow: await flowOver(c, place),
 		log: c.log,
 		rule: await c.get(targets),
+		stateLimit: c.section["state-limit"],
 	});
 }

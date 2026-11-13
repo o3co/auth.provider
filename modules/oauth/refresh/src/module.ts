@@ -1,7 +1,7 @@
 import { additions } from "@mod/code-grant";
+import { erasers } from "@mod/erasure-extensions";
 import { grants, tokenTies } from "@mod/grants";
 import { defineModule } from "@mod/kernel";
-import { participants } from "@mod/session-participants";
 import { revocableKinds } from "@mod/token-control";
 import { accessConditions } from "@mod/tokens";
 import { lineage } from "./contract.ts";
@@ -9,12 +9,14 @@ import { additionOver } from "./founding/founding.ts";
 import { grantOver, grantTakes } from "./grant/grant.ts";
 import { conditionOver, families, familyTie, lineageIn } from "./lineage/lineage.ts";
 import { section } from "./section.ts";
-import { participantOver, revocableOver, settlingTakes } from "./settle/settle.ts";
+import { familyEraser } from "./settle/eraser.ts";
+import { revocableOver, settlingTakes } from "./settle/settle.ts";
+import { familyStore } from "./store.ts";
 
 // Each factory's helpers say what they take; `families` is the module's own.
 export default defineModule(
-	// Safe on many instances: every instance runs the sweep over the shared store, and finishing a revocation
-	// twice does no harm.
+	// Safe on many instances: families, their marks and links are in the shared store, and marking twice
+	// does no harm.
 	{ name: "refresh", replicaSafe: true, section, takes: [...settlingTakes, ...grantTakes] },
 	(m) => [
 		m.contribute(grants).by(grantOver),
@@ -24,6 +26,7 @@ export default defineModule(
 		m.contribute(tokenTies).by(async (c) => familyTie(await c.get(families))),
 		m.contribute(accessConditions).by(conditionOver),
 		m.contribute(revocableKinds).by(revocableOver),
-		m.contribute(participants).by(participantOver),
+		// Its build takes only its family store, collecting no probes: the erasure gate collects erasers.
+		m.contribute(erasers).by(async (c) => familyEraser(await c.get(familyStore))),
 	],
 );

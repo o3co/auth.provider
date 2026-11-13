@@ -5,21 +5,19 @@
 	"type": "module",
 	"kind": "feature",
 	"optIn": true,
-	"joins": [
-		"@mod/mfa-email"
-	],
 	"exports": {
+		".": "./src/contract.ts",
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
+		"@mod/account-mail-code": "workspace:*",
 		"@mod/kernel": "workspace:*",
+		"@mod/mail": "workspace:*",
 		"@mod/mfa-binding-proof": "workspace:*",
-		"@mod/mfa-email": "workspace:*",
 		"@mod/users": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
-		"@mod/mail": "workspace:*",
 		"@mod/subject-attributes": "workspace:*",
 		"vitest": "5.0.5"
 	}

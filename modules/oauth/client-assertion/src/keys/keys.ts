@@ -1,5 +1,5 @@
 import type { Section } from "@mod/clients";
-import type { KeySource } from "@mod/external-jwt";
+import { type Algorithm, boundAlgorithm, type KeySource } from "@mod/external-jwt";
 import type { BuildContext } from "@mod/kernel";
 import { publicJwk, verifiesUnder } from "@mod/keys";
 import { destinationRefusal, type OutboundRefusals, outboundRefusals } from "@mod/outbound-policy";
@@ -31,7 +31,7 @@ export const clientKeys: Section<ClientKeys> = {
 				)
 				.prefault([])
 				.describe(
-					"The client's public keys for its assertions, as JWKs: RSA, EC or OKP, with no private member; never beside `jwks-uri`.",
+					"The client's public keys for its assertions, as JWKs: RSA, EC or OKP, with no private member; never beside `jwks-uri`. A registered client's key that none of `client-assertion.algorithms` reads is warned of at every start, by its place; deprecated, a later release refuses boot for it.",
 				),
 			"jwks-uri": urlSetting({ schemes: ["https", "http"] })
 				.optional()
@@ -59,7 +59,14 @@ export function keysOf(section: ClientKeys): KeySource {
 		: { jwks: { url: uri, hosts: [new URL(uri).hostname] } };
 }
 
-/** The section with a check at boot that `outbound`'s policy lets a registered client's jwks-uri through. */
+/** The places (`keys.<n>`) of the written keys that none of the algorithms taken reads. */
+export function unreadKeys(section: ClientKeys, algorithms: readonly Algorithm[]): string[] {
+	return section.keys.flatMap((jwk, i) =>
+		boundAlgorithm(jwk, algorithms) === undefined ? [`keys.${i}`] : [],
+	);
+}
+
+/** The section with its check at boot: `outbound`'s policy lets a registered client's jwks-uri through. */
 export function clientKeysUnder(refusals: OutboundRefusals): Section<ClientKeys> {
 	return {
 		...clientKeys,

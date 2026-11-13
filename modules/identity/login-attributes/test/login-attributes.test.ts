@@ -1,7 +1,15 @@
 import { userAttribute } from "@mod/users";
 import { describe, expect, it } from "vitest";
-import { keptAttributes, loginSource, sourcedAttributesShape } from "../src/contract.ts";
+import {
+	attributeCaps,
+	keptAttributes as deprecatedKept,
+	keepingWith,
+	loginSource,
+	sourcedAttributesShape,
+} from "../src/contract.ts";
 
+/** Keeping under the default caps. */
+const keptAttributes = keepingWith(attributeCaps.parse({}));
 const keptOf = (source: unknown, values: unknown) => keptAttributes({ source, values }).kept;
 const bytes = (count: number) => `${"é".repeat(Math.floor(count / 2))}${"a".repeat(count % 2)}`;
 const groups = (count: number) => Array.from({ length: count }, (_, n) => `g${n}`);
@@ -15,6 +23,15 @@ describe("login sources", () => {
 		}
 		expect(Object.isFrozen(loginSource)).toBe(true);
 	});
+});
+
+it("still offers keptAttributes, deprecated, keeping as keepingWith does under the default caps", () => {
+	const given = {
+		source: "users",
+		values: { name: "Al", groups: Array.from({ length: 65 }, (_, n) => `g${n}`) },
+	};
+	expect(deprecatedKept(given)).toEqual(keptAttributes(given));
+	expect(deprecatedKept(given).kept?.values).toEqual({ name: "Al" });
 });
 
 describe("keeping a login's attributes", () => {
@@ -45,6 +62,46 @@ describe("keeping a login's attributes", () => {
 		};
 		expect(keptOf("users", counted)?.values).toEqual({ name: "Al" });
 		expect(reads).toBe(1);
+	});
+
+	it("keeps under the caps it is given, the name's and the source's fixed", () => {
+		const caps = attributeCaps.parse({
+			"groups-limit": 100,
+			"group-limit": "512B",
+			"picture-limit": "4KiB",
+		});
+		expect(caps).toEqual({ "groups-limit": 100, "group-limit": 512, "picture-limit": 4096 });
+		const keep = (values: unknown) => keepingWith(caps)({ source: "users", values }).kept?.values;
+		const wide = {
+			picture: `https://p.example/${"a".repeat(4096 - 18)}`,
+			groups: [...groups(99), bytes(512)],
+		};
+		expect(keep(wide)).toEqual(wide);
+		expect(keep({ name: "Al", groups: groups(101) })).toEqual({ name: "Al" });
+		expect(keep({ name: "Al", groups: [bytes(513)] })).toEqual({ name: "Al" });
+		expect(keep({ name: bytes(513) })).toBeUndefined();
+	});
+
+	it("takes caps from 1 to their ceilings, sizes written with a unit, and the defaults unset", () => {
+		expect(attributeCaps.parse(undefined)).toEqual({
+			"groups-limit": 64,
+			"group-limit": 256,
+			"picture-limit": 2048,
+		});
+		const takes = (caps: unknown) => attributeCaps.safeParse(caps).success;
+		expect(
+			[{ "groups-limit": 200 }, { "group-limit": "1KiB" }, { "picture-limit": "8KiB" }].map(takes),
+		).toEqual([true, true, true]);
+		for (const refused of [
+			{ "groups-limit": 0 },
+			{ "groups-limit": 201 },
+			{ "group-limit": "1025B" },
+			{ "picture-limit": "8193B" },
+			{ "picture-limit": 2048 },
+			{ other: 1 },
+		]) {
+			expect(takes(refused), JSON.stringify(refused)).toBe(false);
+		}
 	});
 
 	it("keeps only the named attributes within their caps, dropping each other one whole", () => {

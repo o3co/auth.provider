@@ -29,6 +29,7 @@ function primary() {
 	const redis = fakeRedis();
 	redis.settings["min-replicas-to-write"] = "1";
 	redis.settings["min-replicas-max-lag"] = "10";
+	redis.replication.connected = 1;
 	return redis;
 }
 
@@ -120,6 +121,37 @@ describe("a confirmation round, run once", () => {
 			{ problems: expect.stringMatching(/reaches another server/) },
 		]);
 		redis.servers.runIds = ["abc"];
+		expect(await ready()).toBe("ready");
+		redis.down();
+	});
+});
+
+describe("good replicas, with replicas", () => {
+	it("answers unready while fewer replicas are good than min-replicas-to-write, booting all the same, and ready once enough are", async () => {
+		const redis = primary();
+		redis.replication.goodReplicas = 0;
+		redis.writes.noReplicas = true;
+		const { warned, ready } = await boot(await redis.listen(), "replicas");
+		expect(await ready()).toBe("unready");
+		expect(warned()).toContainEqual([
+			"redis.settings_unmet",
+			{
+				problems: expect.stringMatching(
+					/fewer good replicas \(0\) than min-replicas-to-write \(1\)/,
+				),
+			},
+		]);
+		redis.replication.goodReplicas = 1;
+		redis.writes.noReplicas = false;
+		expect(await ready()).toBe("ready");
+		redis.down();
+	});
+
+	it("asks them only where replicas are declared", async () => {
+		const redis = primary();
+		redis.replication.goodReplicas = 0;
+		redis.replication.connected = 0;
+		const { ready } = await boot(await redis.listen(), "none");
 		expect(await ready()).toBe("ready");
 		redis.down();
 	});

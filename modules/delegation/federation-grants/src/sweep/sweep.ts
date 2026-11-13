@@ -1,6 +1,7 @@
-import { type Audit, declaredAudit } from "@mod/audit";
+import type { Audit } from "@mod/audit";
 import type { BuildContext, Clock, Log, Random } from "@mod/kernel";
-import events from "../audit-events.ts";
+import { type ErasedSubjects, erasedSubjects } from "@mod/subject-revocation";
+import { auditedAbout } from "../grant/audit.ts";
 import {
 	type Grant,
 	type Judge,
@@ -8,6 +9,7 @@ import {
 	secretFrom,
 	withoutCredentials,
 } from "../grant/grant.ts";
+import type { Revocation, Unlisting } from "../retention/retention.ts";
 import type { Settings } from "../section.ts";
 import { type GrantStore, grantStore } from "../store.ts";
 
@@ -15,7 +17,11 @@ export interface SweepParts {
 	readonly grants: GrantStore;
 	readonly records: Records;
 	readonly judge: Judge;
+	readonly revocation: Revocation;
+	readonly unlisted: Unlisting;
 	readonly audit: Audit;
+	/** Whether a subject is marked erased: for what an audit names, never for access. */
+	readonly erased: ErasedSubjects;
 	readonly clock: Clock;
 	readonly random: Random;
 	readonly log: Log;
@@ -29,7 +35,7 @@ export interface SweepParts {
 export function sweepWith(p: SweepParts) {
 	const { grants, records, judge } = p;
 	const version = secretFrom(p.random);
-	const audited = declaredAudit(p.audit, events);
+	const about = auditedAbout(p.audit, p.erased);
 	const ended = (grant: Grant) => {
 		const end = judge.endOf(grant);
 		return end !== undefined && end <= p.clock.now();
@@ -46,26 +52,22 @@ export function sweepWith(p: SweepParts) {
 	 * judgement to the subject and the authorization it was made on. Answers whether it wrote.
 	 */
 	const revoke = async (id: string, judged: Grant) => {
+		const at = p.clock.now();
 		const changed = await grants.change(id, (stored) => {
 			const now = records.grantOf(stored);
 			if (!now?.sealed || now.status === "revoked") return undefined;
 			if (now.subject !== judged.subject || now.authorizedAt !== judged.authorizedAt)
 				return undefined;
-			return {
-				value: records.stored({
-					...withoutCredentials(now),
-					status: "revoked",
-					reason: "backstop",
-				}),
-			};
+			const revoked = p.revocation(now, "backstop", at);
+			return { value: records.stored(revoked.grant), lifetimeMs: revoked.lifetimeMs };
 		});
 		const after = records.grantOf(changed?.after);
 		if (records.grantOf(changed?.before)?.status === "revoked" || after?.status !== "revoked")
 			return false;
-		audited.record("federation.grant.revoked", {
-			subject: after.subject,
-			attributes: { client: after.client, connection: after.connection, outcome: "backstop" },
-		});
+		await p.unlisted(after);
+		// Revoked because its subject's boundary ends it, erasure among the reasons: audited without it where so.
+		const attributes = { client: after.client, connection: after.connection, outcome: "backstop" };
+		await about("federation.grant.revoked", after.subject, attributes);
 		return true;
 	};
 	/** Sweeps one grant; a grant authorized again since the judgement is read and judged once more. */
@@ -106,18 +108,19 @@ export function sweepWith(p: SweepParts) {
 	};
 }
 
-export const sweepTakes = [grantStore] as const;
+export const sweepTakes = [grantStore, erasedSubjects] as const;
 
 /** Starts the sweep on this host every `sweep-interval`, over the contracts the assembly gives. */
 export async function sweepIn(
 	c: BuildContext<Settings>,
-	parts: { readonly records: Records; readonly judge: Judge },
+	parts: Pick<SweepParts, "records" | "judge" | "revocation" | "unlisted">,
 	audit: Audit,
 ) {
 	const sweep = sweepWith({
 		grants: await c.get(grantStore),
 		...parts,
 		audit,
+		erased: await c.get(erasedSubjects),
 		clock: c.clock,
 		random: c.random,
 		log: c.log,

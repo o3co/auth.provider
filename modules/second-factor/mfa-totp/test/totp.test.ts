@@ -1,11 +1,15 @@
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import httpServer from "@mod/http-server/module";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { type FactorKind, factorKinds } from "@mod/mfa-extensions";
 import { expect, it } from "vitest";
 import totpModule from "../src/module.ts";
-import { base32, codeAt } from "../src/totp.ts";
+import { base32, codeAt as codeUnder, unmarked } from "../src/totp.ts";
+
+/** A code under 0.19's parameters, which an unmarked secret is read with. */
+const codeAt = (secret: string, at: number) => codeUnder(unmarked, secret, at);
 
 /** The last millisecond of its step, so a step rounded instead of floored would be the next one. */
 const now = 1_800_000_029_999;
@@ -23,6 +27,7 @@ const composition = (
 ) => ({
 	modules: [
 		http,
+		httpServer,
 		totpModule,
 		defineModule({ name: "reader", replicaSafe: true, takes: [factorKinds] }, (m) => [
 			m.provide(kinds).by((c) => c.collect(factorKinds)),

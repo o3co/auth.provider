@@ -41,14 +41,14 @@ export interface NoticeParts {
 	readonly random: Random;
 	readonly log: Log;
 	readonly notifyMs: number;
+	/** Seconds a logout token lives; it is sent at once. */
+	readonly tokenSeconds: number;
 	/** How long a notice whose try failed waits before it is tried again. */
 	readonly retryMs: number;
 }
 
 /** OpenID Connect Back-Channel Logout 1.0 §2.4: the event a logout token carries. */
 const logoutEvent = "http://schemas.openid.net/event/backchannel-logout";
-/** Seconds a logout token lives; it is sent at once. */
-const tokenSeconds = 300;
 /** The client took the notice: Back-Channel Logout 1.0 §2.8 answers a logout done with `200`. */
 const delivered = (status: number) => status >= 200 && status < 300;
 /** A client that is busy or down may take it later; any other answer, §2.8's `400` among them, is final. */
@@ -75,7 +75,7 @@ export function noticesOver(p: NoticeParts) {
 				sub: fields.subject,
 				aud: fields.client,
 				iat,
-				exp: iat + tokenSeconds,
+				exp: iat + p.tokenSeconds,
 				jti: fields.jti ?? tokenId(),
 				events: { [logoutEvent]: {} },
 				...(withSession ? { sid: fields.session } : {}),
@@ -202,6 +202,7 @@ export async function noticesFrom(c: BuildContext<Settings>): Promise<Notices> {
 		random: c.random,
 		log: c.log,
 		notifyMs: c.section["notify-within"] * 1000,
+		tokenSeconds: c.section["logout-token-lifetime"],
 		// At least a sweep apart, so the sweep after a failure never tries it again at once.
 		retryMs: c.section["sweep-interval"] * 1000,
 	});

@@ -1,8 +1,10 @@
+import { mailedCodesIn, mailedTakes } from "@mod/account-mail-code";
 import { defineModule } from "@mod/kernel";
+import { mailPurposes } from "@mod/mail";
 import { bindingProof, bindingProofs } from "@mod/mfa-binding-proof";
-import { mailedCodesIn, mailedTakes } from "@mod/mfa-email";
 import { users } from "@mod/users";
 import { accountEmailProof } from "./proof.ts";
+import { purposes } from "./purposes.ts";
 
 /** What the proof takes: `mailedCodesIn`'s, `users`, and `bindingProof` late. */
 const takes = [...mailedTakes, users, bindingProof];
@@ -19,4 +21,5 @@ export default defineModule({ name: "mfa-email-proof", replicaSafe: true, takes 
 			random: c.random.bytes,
 		});
 	}),
+	...Object.values(purposes).map((purpose) => m.contribute(mailPurposes).by(() => ({ purpose }))),
 ]);

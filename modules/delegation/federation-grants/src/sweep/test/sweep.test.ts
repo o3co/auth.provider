@@ -4,6 +4,7 @@ import type { Seal } from "@mod/seal";
 import { expect, it } from "vitest";
 import { memoryStores } from "../../../test/stores.ts";
 import { type Grant, type Judge, recordsWith } from "../../grant/grant.ts";
+import { revocationWith, unlistingWith } from "../../retention/retention.ts";
 import { sweepWith } from "../sweep.ts";
 
 const day = 86_400_000;
@@ -24,6 +25,8 @@ async function swept() {
 	const logged = recordingLog();
 	const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
 	const revoked = new Set<string>();
+	/** Subjects marked erased: what the audit withholds. */
+	const erased = new Set<string>();
 	const judged: string[] = [];
 	const judge: Judge = {
 		revoked: async (grant) => {
@@ -38,7 +41,10 @@ async function swept() {
 		grants: stores.grants,
 		records,
 		judge,
+		revocation: revocationWith(judge, 30 * day),
+		unlisted: unlistingWith(stores.subjects, logged.log),
 		audit: { record: (event) => void events.push(event), lost: () => ({}) },
+		erased: { erased: async (subject) => erased.has(subject) },
 		...runtime,
 	});
 	/** Keeps an active grant with credentials, ending in `life` ms. */
@@ -65,7 +71,7 @@ async function swept() {
 			obtainedAt: now,
 			scope: ["openid"],
 		});
-		await stores.grants.create(id, records.stored({ ...grant, sealed }), 30 * day);
+		await stores.grants.create(id, records.stored({ ...grant, sealed }), 30 * day, grant.subject);
 	};
 	const read = async (id: string) => records.grantOf(await stores.grants.read(id));
 	return {
@@ -73,6 +79,7 @@ async function swept() {
 		kept,
 		read,
 		revoked,
+		erased,
 		judged,
 		events,
 		logs: () => logged.lines(),
@@ -117,6 +124,18 @@ it("revokes a grant its subject's revocation ends, though its listing missed it,
 			subject: "bob",
 			attributes: { client: "worker", connection: "cal", outcome: "backstop" },
 		}),
+	]);
+});
+
+it("revokes the grant of a subject marked erased, its eraser yet to run, auditing it without the subject", async () => {
+	const s = await swept();
+	await s.kept("held", "erin", day);
+	s.revoked.add("erin");
+	s.erased.add("erin");
+	await s.run();
+	expect((await s.read("held"))?.status).toBe("revoked");
+	expect(s.events.map((e) => [e.kind, e.subject, e.attributes?.withheld])).toEqual([
+		["federation.grant.revoked", undefined, "erased"],
 	]);
 });
 
