@@ -20,8 +20,8 @@ export function codeGrantConfig(settings: Partial<CodeGrantSettings> = {}) {
 export interface CodePlace {
 	readonly codes: CodeStore;
 	readonly voids: VoidList;
-	/** Where the place keeps redemption records: checked as codes are, on the same clock and faults. */
-	readonly redemptionRecords?: RedemptionRecords;
+	/** The place's redemption records: checked as codes are, on the same clock and faults. */
+	readonly redemptionRecords: RedemptionRecords;
 	/** Moves the place's clock on, so lifetimes run out. */
 	advance(ms: number): void;
 	/** Before the next update of `name` writes, another writer changes its record as given. */
@@ -121,9 +121,8 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			expect(await place.codes.create(code, held({ n: 2 }), 1000, "alice")).toBe("created");
 		});
 
-		it("keeps a redemption record whole and once per name, read as kept, changed only from what it holds", async (context) => {
+		it("keeps a redemption record whole and once per name, read as kept, changed only from what it holds", async () => {
 			const { redemptionRecords: records } = await open();
-			if (!records) return context.skip();
 			const [name, other] = [fresh(), fresh()];
 			const odd = redeemed({ state: "unheard-of", nested: { list: [1, "two"] } });
 			expect(await records.create(name, odd, 60_000, "alice")).toBe("created");
@@ -143,10 +142,9 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 			]);
 		});
 
-		it("ends a redemption record at exactly its lifetime, a change keeping its end", async (context) => {
+		it("ends a redemption record at exactly its lifetime, a change keeping its end", async () => {
 			const place = await open();
-			const { redemptionRecords: records } = place;
-			if (!records) return context.skip();
+			const records = place.redemptionRecords;
 			const name = fresh();
 			await records.create(name, redeemed({ n: 1 }), 1000, "alice");
 			place.advance(500);
@@ -195,7 +193,7 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 
 		it("keeps redemption records through a restart and through memory pressure", async (context) => {
 			const { restart, pressMemory, redemptionRecords: records } = await open();
-			if (!restart || !pressMemory || !records) return context.skip();
+			if (!restart || !pressMemory) return context.skip();
 			const name = fresh();
 			await records.create(name, redeemed({ n: 1 }), 60_000, "alice");
 			await restart();
@@ -205,7 +203,7 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 
 		it("settles a redemption record's writes whose answers were lost, and keeps them through a failover", async (context) => {
 			const { loseNextAnswer: lose, failover, redemptionRecords: records } = await open();
-			if (!lose || !failover || !records) return context.skip();
+			if (!lose || !failover) return context.skip();
 			const name = fresh();
 			lose();
 			expect(await records.create(name, redeemed({ n: 1 }), 60_000, "alice")).toBe("created");
