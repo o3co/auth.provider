@@ -42,6 +42,17 @@ export interface RefreshStorePlace {
 	readonly loseNextAnswer?: () => void;
 	/** Where the place replicates: a replica takes over, keeping only what was confirmed. */
 	readonly failover?: () => Promise<void>;
+	/**
+	 * Where a write applies before it is confirmed: runs `run` once the next family write has applied,
+	 * before its confirmation. The case's change writing nothing runs inside `run` and must answer
+	 * there: a store that waits for that confirmation, or throws as it cannot tell, would hang or fail
+	 * the case, so it offers no hook.
+	 */
+	readonly beforeFamilyConfirms?: (run: () => Promise<void>) => void;
+	/** As `beforeFamilyConfirms`, for the next write of an erasure of the family store, once it erases. */
+	readonly beforeErasureConfirms?: (run: () => Promise<void>) => void;
+	/** Where writes can fail: while on, writes are unavailable and not applied; reads still answer. */
+	readonly failWrites?: (on: boolean) => void;
 	/** Where the place can restart: it does, keeping only what it holds durably. */
 	readonly restart?: () => Promise<void>;
 	/** Where memory can run short: it does, keeping only what is kept from eviction. */
@@ -52,6 +63,9 @@ export interface RefreshStorePlace {
  * What refresh needs from any implementation of its store interfaces: records kept whole and
  * once, changed only from what they hold, ended at exactly their lifetime; lists capped by
  * pushing out the first to end; settles kept until done, through lost answers and failovers.
+ * A case needing a hook the place does not offer is skipped, not passed: the confirmed-change cases
+ * run only where it offers `failover`, `failWrites` and `beforeFamilyConfirms` (a revoked mark) or
+ * `beforeErasureConfirms` (an absence).
  */
 export function refreshStoreContract(name: string, open: () => Promise<RefreshStorePlace>): void {
 	let n = 0;
@@ -63,6 +77,27 @@ export function refreshStoreContract(name: string, open: () => Promise<RefreshSt
 	const plus = (by: number) => (record: StoredFamily) => ({
 		value: held({ n: counted(record) + by }),
 	});
+	/**
+	 * A change writing nothing to `id`, as the reading of whose a family is asks it, while `write`'s
+	 * write is applied but not confirmed; then the replica takes over, and the writer is gone, so
+	 * nothing it retries lands. Its answer; none where nothing was written to confirm.
+	 */
+	const peekedAcross = async (
+		place: RefreshStorePlace,
+		hook: (run: () => Promise<void>) => void,
+		id: string,
+		write: () => Promise<unknown>,
+	) => {
+		let peeked: { readonly answered: unknown } | undefined;
+		hook(async () => {
+			peeked = { answered: await place.families.update(id, () => undefined) };
+			await place.failover?.();
+			place.failWrites?.(true);
+		});
+		await write().catch(() => undefined);
+		place.failWrites?.(false);
+		return peeked as { readonly answered: unknown } | undefined;
+	};
 	const listed = async (settles: SettleList) => {
 		const found: string[] = [];
 		await settles.each(async (id) => {
@@ -215,6 +250,27 @@ export function refreshStoreContract(name: string, open: () => Promise<RefreshSt
 			expect(await place.tokenFamilies.read(key)).toEqual(linked({ family: id }));
 			expect(await listed(place.settles)).toEqual([kept]);
 		});
+
+		it("answers a change writing nothing only as confirmed: a revoked mark, or an erasure, a failover loses is never answered", async (context) => {
+			const place = await open();
+			const { families, beforeFamilyConfirms: marking, beforeErasureConfirms: erasing } = place;
+			if (!marking || !place.failover || !place.failWrites) return context.skip();
+			const [id, gone] = [fresh(), fresh()];
+			await families.save(id, held({ n: 1 }), 60_000, "alice");
+			await families.save(gone, held({ n: 1 }), 60_000, "erin");
+			const revoked = { value: held({ format: 1, revoked: true }) };
+			const mark = await peekedAcross(place, marking, id, () => families.update(id, () => revoked));
+			// A family there all along is never answered as none, which would read it as ended.
+			expect(mark?.answered).toBeDefined();
+			expect(await families.update(id, () => undefined)).toEqual(mark?.answered);
+			const { erase } = families;
+			if (!erasing || !erase) return;
+			const erasure = () => erase.call(families, "erin", new AbortController().signal);
+			const absence = await peekedAcross(place, erasing, gone, erasure);
+			// A Store that erases nothing now (its records not indexed yet) writes nothing to confirm.
+			if (absence) expect(await families.update(gone, () => undefined)).toEqual(absence.answered);
+			// A writer gone retries until it gives up: about ten seconds for the erasure, and for a store answering unconfirmed.
+		}, 60_000);
 
 		// Each interface fails over after its own writes: a later write in another space would
 		// confirm them, and hide a space that does not replicate.

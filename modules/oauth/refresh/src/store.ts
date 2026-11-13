@@ -36,7 +36,8 @@ export interface FamilyStore {
 	read(id: string): Promise<StoredFamily | undefined>;
 	/**
 	 * Changes the record from what it holds; `change` reruns on a race, so it is pure. Nothing when
-	 * gone, or, where the Store fences a subject's erasure, when its subject is erased.
+	 * gone, or, where the Store fences a subject's erasure, when its subject is erased. Its answer is
+	 * confirmed, a rewrite that writes nothing and an absence included.
 	 */
 	update(
 		id: string,

@@ -12,6 +12,7 @@ Internal module of `refresh`: the stores, the revoker, and what revokes families
 - `settlingIn` (the build context) → the stores, the revoker and the family lifetime, refusing where access tokens cannot be revoked; `revocableOver` → `token-control`'s revocable kind.
 - `portsRefused` (the family store) → why its ports cannot be used, or none: `erase`, `migrate` and `unowned` come together or none, a part refused at build in `settlingIn`, as it would leave families refresh cannot erase, or a mark saved with no subject into a space keeping each record for one; `portsOf` → the set, whole, or none.
 - `familyEraser` (the family store) → the eraser `refresh`, contributed to `erasure-extensions`' `erasers`: a subject's families erased through the store's `erase`, a window doing so for each subject, `migrate` reading a family's subject from it and a revoked mark, which holds none, as an orphan by its shape; `erasable` only where the store offers its ports whole.
+- `familySubjectsIn` (the family store) → whose a family is, contributed to `claims-selection`'s `familySubjects` for its migration of a family's target 0.19 kept without one: one `update` writing nothing, whose answer the store confirms, its `before` read as the migration reads a family's record; no record, a revoked mark, or none answered as its subject is erased, ended, as nothing refreshes such a family again and its id is never issued again; a record it cannot read throws, never ended.
 
 ## Invariants
 - Revocation is the mark alone; its access tokens are not revoked by id, nor is it listed or swept. No record: gone by its end, by its subject's erasure, or never founded; each reads as ended, and nothing is marked.
@@ -26,4 +27,7 @@ Internal module of `refresh`: the stores, the revoker, and what revokes families
 - The store interfaces for each session's families, each family's access tokens and the families to revoke, with their needs and their parts of the contract test (`./testing`): neither read nor written. A later release removes them.
 
 ## Depends on
-- `tokens` (withdrawing a token, and its references), `erasure-extensions` (the eraser, its reports and readings), `kernel`; the package's records and store interfaces
+- `tokens` (withdrawing a token, and its references), `erasure-extensions` (the eraser, its reports and readings), `claims-selection` (`familySubjects`), `kernel`; the package's records and store interfaces
+
+## Vocabulary
+- revoker: what revokes a family.

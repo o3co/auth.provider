@@ -24,11 +24,11 @@ export function selectionRecordsContract(name: string, open: () => Promise<Recor
 	let n = 0;
 	const fresh = () => `r-${++n}-${Math.random().toString(36).slice(2)}`;
 	describe(`claims-selection's store interface: ${name}`, () => {
-		it("keeps the first record saved under a name for exactly its lifetime", async () => {
+		it("keeps the first record created under a name for exactly its lifetime", async () => {
 			const place = await open();
 			const [kept, other] = [fresh(), fresh()];
-			expect(await place.records.save(kept, value(1), 1000)).toBe("created");
-			expect(await place.records.save(kept, value(2), 5000)).toBe("exists");
+			expect(await place.records.create(kept, value(1), 1000, "alice")).toBe("created");
+			expect(await place.records.create(kept, value(2), 5000, "alice")).toBe("exists");
 			expect(await place.records.read(kept)).toEqual(value(1));
 			expect(await place.records.read(other)).toBeUndefined();
 			place.advance(999);
@@ -42,14 +42,31 @@ export function selectionRecordsContract(name: string, open: () => Promise<Recor
 			const { loseNextAnswer: lose, failover, restart, pressMemory } = place;
 			if (!lose || !failover || !restart || !pressMemory) return context.skip();
 			const [kept, settled] = [fresh(), fresh()];
-			await place.records.save(kept, value(1), 60_000);
+			await place.records.create(kept, value(1), 60_000, "alice");
 			lose();
-			expect(await place.records.save(settled, value(2), 60_000)).toBe("created");
+			expect(await place.records.create(settled, value(2), 60_000, "alice")).toBe("created");
 			await failover();
 			await restart();
 			await pressMemory();
 			expect(await place.records.read(kept)).toEqual(value(1));
 			expect(await place.records.read(settled)).toEqual(value(2));
+		});
+
+		it("erases, where the place erases, a subject's records and refuses any created for it after, and only for that subject", async (context) => {
+			const { records } = await open();
+			const { create, erase } = records;
+			if (!erase) return context.skip();
+			const [erins, finns] = [fresh(), fresh()];
+			await create.call(records, erins, value(1), 60_000, "erin");
+			await create.call(records, finns, value(4), 60_000, "finn");
+			const report = await erase.call(records, "erin", new AbortController().signal);
+			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+			if (report.kind === "stopped") return context.skip();
+			expect(report.kind).toBe("erased");
+			expect(await records.read(erins)).toBeUndefined();
+			expect(await records.read(finns)).toEqual(value(4));
+			expect(await create.call(records, fresh(), value(2), 60_000, "erin")).toBe("erased");
+			expect(await create.call(records, fresh(), value(3), 60_000, "finn")).toBe("created");
 		});
 	});
 }
@@ -67,8 +84,10 @@ export function claimsSelectionInMemory(
 		const found = entries.get(name);
 		return found && found.ends > now() ? found : undefined;
 	};
+	// Filing nothing by subject and fencing no erasure: `erase` and `migrate` need `subject-records`,
+	// which a template's store is built on.
 	const records: SelectionRecords = {
-		save: async (name, kept, lifetimeMs) => {
+		create: async (name, kept, lifetimeMs) => {
 			if (live(name)) return "exists";
 			entries.set(name, { value: kept, ends: now() + lifetimeMs });
 			return "created";

@@ -265,8 +265,9 @@ describe("the claims a code's selection asks of the ID token", () => {
 				userinfo: { names: [{ name: "email", scope: "email" }], constraints: [] },
 			},
 			600_000,
+			alice.subject,
 		);
-		await hook.pin("r-1");
+		await hook.pin("r-1", alice.subject);
 		const { payload } = decoded(
 			await maker.make(request({ ...alice, scope: ["openid", "email"], redemption: "r-1" })),
 		);
@@ -277,7 +278,7 @@ describe("the claims a code's selection asks of the ID token", () => {
 
 	it("carries the scope's claims alone for a code pinned without a selection", async () => {
 		const { maker, hook } = await served();
-		await hook.pin("r-2");
+		await hook.pin("r-2", alice.subject);
 		const { payload } = decoded(
 			await maker.make(request({ ...alice, scope: ["openid", "email"], redemption: "r-2" })),
 		);

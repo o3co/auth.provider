@@ -17,6 +17,7 @@
 		"@mod/client-allowance": "workspace:*",
 		"@mod/clients": "workspace:*",
 		"@mod/code-grant": "workspace:*",
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/grants": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"zod": "4.6.7"

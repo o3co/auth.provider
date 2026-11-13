@@ -1,10 +1,19 @@
 import { redemptionHooks } from "@mod/code-grant";
+import { erasers } from "@mod/erasure-extensions";
 import { tokenTies } from "@mod/grants";
 import { type BuildContext, defineModule } from "@mod/kernel";
-import { claimScopes, claimsSelections, selectionConsents, selectionRecords } from "./contract.ts";
+import {
+	claimScopes,
+	claimsSelections,
+	familySubjects,
+	selectionConsents,
+	selectionRecords,
+} from "./contract.ts";
+import { selectionEraser } from "./erasure/eraser.ts";
+import { portsRefused } from "./erasure/ports.ts";
 import { selectionsWith } from "./selections.ts";
 
-const takes = [selectionRecords, selectionConsents, claimScopes];
+const takes = [selectionRecords, selectionConsents, claimScopes, familySubjects];
 
 const built = async (c: Pick<BuildContext<unknown>, "get" | "collect" | "clock">) => {
 	const [consent] = await c.collect(selectionConsents);
@@ -25,8 +34,19 @@ export default defineModule({ name: "claims-selection", replicaSafe: true, takes
 		if ((await c.collect(claimScopes)).length > 1) {
 			return c.refuse("claims-selection", "more than one table of claim scopes");
 		}
+		if ((await c.collect(familySubjects)).length > 1) {
+			return c.refuse("claims-selection", "more than one reading of whose a family is");
+		}
+		const refused = portsRefused(await c.get(selectionRecords));
+		if (refused) return c.refuse("claims-selection", refused);
 		return (await built(c)).selections;
 	}),
 	m.contribute(redemptionHooks).by(async (c) => (await built(c)).hook),
 	m.contribute(tokenTies).by(async (c) => (await built(c)).tie),
+	// Its build takes only its store and the family reading, collecting no probes: the erasure gate collects erasers.
+	m
+		.contribute(erasers)
+		.by(async (c) =>
+			selectionEraser(await c.get(selectionRecords), (await c.collect(familySubjects))[0]),
+		),
 ]);

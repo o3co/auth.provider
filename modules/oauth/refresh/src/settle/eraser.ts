@@ -1,4 +1,6 @@
+import type { FamilySubjects } from "@mod/claims-selection";
 import type { Eraser, SubjectReading } from "@mod/erasure-extensions";
+import { Unavailable } from "@mod/kernel";
 import { fromStored } from "../record.ts";
 import type { FamilyStore, StoredFamily } from "../store.ts";
 import { portsOf } from "./ports.ts";
@@ -14,6 +16,19 @@ export const familySubjectOf: SubjectReading = async (_key, value) => {
 		return { kind: "unreadable", reason: "a family's record of another shape" };
 	return "current" in kept ? { kind: "subject", subject: kept.subject } : { kind: "orphan" };
 };
+
+/** Whose a family is, for `claims-selection`: one confirmed change writing nothing (the card). */
+export function familySubjectsIn(families: FamilyStore): FamilySubjects {
+	return {
+		subjectOf: async (familyId) => {
+			const answered = await families.update(familyId, () => undefined);
+			if (answered === undefined) return { kind: "ended" };
+			const whose = await familySubjectOf(familyId, answered.before);
+			if (whose.kind === "unreadable") throw new Unavailable(`refresh: ${whose.reason}`);
+			return whose.kind === "subject" ? whose : { kind: "ended" };
+		},
+	};
+}
 
 /**
  * refresh's eraser, `refresh`, as its space's `erasedBy` names it: a subject's families erased through

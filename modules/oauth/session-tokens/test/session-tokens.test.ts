@@ -450,18 +450,18 @@ it("ties a token to its session as `session` while the session lets it in, and j
 	if (held.kind !== "held") throw new Error(`not held: ${held.kind}`);
 	expect([held.session, held.ends]).toEqual([s.session.id, undefined]);
 	const from = await issuedAccess(s.t);
-	expect(await held.join(from)).toBe(true);
+	expect(await held.join(from, grant.subject)).toBe(true);
 	expect(await s.app.get(sessionTokens).sessionOf(from.id)).toEqual({ kind: "unbound" });
 	short = true;
 	expect(await tie.tieOf(a.id)).toEqual({
 		kind: "ended",
 		reason: "session is short of a requirement",
 	});
-	expect(await held.join(from)).toBe(false);
+	expect(await held.join(from, grant.subject)).toBe(false);
 	short = false;
 	expect((await s.opened.close(s.session.id)).kind).toBe("closed");
 	expect(await tie.tieOf(a.id)).toEqual({ kind: "ended", reason: "session has ended" });
-	expect(await held.join(from)).toBe(false);
+	expect(await held.join(from, grant.subject)).toBe(false);
 });
 
 it("keeps a token bound to its session after the session closes", async () => {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Client } from "@mod/clients";
-import type { Grant, GrantInput, GrantOutcome, TokenTie } from "@mod/grants";
+import type { Grant, GrantInput, GrantOutcome, TokenTie, TokenTieAnswer } from "@mod/grants";
 import { Unavailable } from "@mod/kernel";
 import { type Binding, carried } from "@mod/sender-binding";
 import type { Actor, IssuedAccess, Tokens } from "@mod/tokens";
@@ -36,7 +36,8 @@ type Role = "subject" | "actor";
 interface Tie {
 	readonly ends?: number;
 	readonly session?: string;
-	readonly joins: readonly ((issued: Pick<IssuedAccess, "id" | "expiresAt">) => Promise<boolean>)[];
+	/** As grants types a held tie's `join`, so a change there reaches every call here. */
+	readonly joins: readonly Extract<TokenTieAnswer, { kind: "held" }>["join"][];
 }
 
 const refused = (description: string, error = "invalid_request"): Refusal => ({
@@ -142,11 +143,14 @@ export function exchangeGrant(parts: Parts): Grant {
 		};
 	};
 
-	/** Joins the issued token to each of the subject's ties in order; at the first that ended meanwhile, revokes it. */
-	const join = async (tie: Tie, issued: IssuedAccess) => {
+	/**
+	 * Joins the issued token, for the account it was issued to, to each of the subject token's ties in
+	 * order; at the first that ended meanwhile, revokes it.
+	 */
+	const join = async (tie: Tie, issued: IssuedAccess, account: string) => {
 		const reference = { id: issued.id, expiresAt: issued.expiresAt };
 		for (const one of tie.joins) {
-			if (await one(reference)) continue;
+			if (await one(reference, account)) continue;
 			// Its answer is not read: a tie may have revoked the token already.
 			await parts.tokens.revokeAccess(issued.token);
 			return false;
@@ -273,7 +277,7 @@ export function exchangeGrant(parts: Parts): Grant {
 			});
 			if (allowed.kind === "refused") return allowed;
 			const issued = allowed.access;
-			if (!(await join(tie, issued))) return refused("subject_token has ended");
+			if (!(await join(tie, issued, access.subject))) return refused("subject_token has ended");
 			// A once-only token is used up last, once its token is issued, so a refusal or a failure
 			// before leaves it usable. That token is never handed out unless it was used up here; one
 			// whose revocation fails is held by no one.

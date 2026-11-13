@@ -80,6 +80,12 @@ for (const phase of ["reader", "indexed"] as const) {
 				crowd: { limit: settlesSize.perShard, ids: crowdingFor(settlesSize).jobs },
 				loseNextAnswer: () => simulated.loseNextReply(),
 				failover: () => simulated.failover(),
+				beforeFamilyConfirms: (run) =>
+					simulated.beforeConfirm(familyWrite, "refresh-store.families", run),
+				// An erasure's first write: the subject's tombstone, in the index space's own batch.
+				beforeErasureConfirms: (run) =>
+					simulated.beforeConfirm("batch", "refresh-store.families.index", run),
+				failWrites: (on) => simulated.failWrites(on),
 				restart: () => simulated.restart(),
 				pressMemory: () => simulated.pressMemory(),
 			};

@@ -1217,8 +1217,8 @@ describe("redemption hooks", () => {
 		defineModule({ name: "hooking", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(redemptionHooks).by(() => ({
 				name: "hooking",
-				pin: async (redemption) => {
-					seen.push(`pin ${redemption}`);
+				pin: async (redemption, subject) => {
+					seen.push(`pin ${redemption} for ${subject}`);
 					if (fail.pin) throw new Error("cannot pin");
 				},
 				redeemed: async (redeemed) => {
@@ -1239,7 +1239,7 @@ describe("redemption hooks", () => {
 			})),
 		]);
 
-	it("pins a used-up code before its token is issued, and tells of the redemption after the additions", async () => {
+	it("pins a used-up code, with its subject, before its token is issued, and tells of the redemption after the additions", async () => {
 		const seen: string[] = [];
 		const redeemedSeen: Redeemed[] = [];
 		const s = await serve({ extra: [hooking(seen, {}, redeemedSeen)] });
@@ -1253,7 +1253,12 @@ describe("redemption hooks", () => {
 			},
 		});
 		expect(answer).toMatchObject({ kind: "issued" });
-		expect(seen).toEqual([`pin ${name}`, "issue", `addition ${name}`, `redeemed ${name}`]);
+		expect(seen).toEqual([
+			`pin ${name} for alice`,
+			"issue",
+			`addition ${name}`,
+			`redeemed ${name}`,
+		]);
 		expect(redeemedSeen).toMatchObject([{ redemption: name, subject: "alice", scope: ["read"] }]);
 		expect(redeemedSeen[0]?.access.id).toEqual(expect.any(String));
 	});
@@ -1272,7 +1277,7 @@ describe("redemption hooks", () => {
 			},
 		});
 		expect(answer).toEqual(refusedOutcome);
-		expect(seen).toEqual([`pin ${name}`]);
+		expect(seen).toEqual([`pin ${name} for alice`]);
 	});
 
 	it("pins nothing for a code refused before it is used up, or used up by a wrong verifier", async () => {

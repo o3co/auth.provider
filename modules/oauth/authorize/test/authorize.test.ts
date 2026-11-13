@@ -1309,7 +1309,7 @@ describe("authorize: the claims a request names beyond its scope", () => {
 
 	it("answers temporarily_unavailable where the code's selection cannot be kept", async () => {
 		const down = unavailableSwitch<SelectionRecords>("selections");
-		down.unavailable("save");
+		down.unavailable("create");
 		const failing = switchedModule(claimsSelectionInMemory().module, selectionRecords, down);
 		const s = await serve({ selectionStore: failing });
 		const cookie = await s.login();

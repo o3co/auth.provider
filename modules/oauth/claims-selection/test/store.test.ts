@@ -9,7 +9,7 @@ selectionRecordsContract("records stand-in", async () => {
 	let now = 0;
 	const { records } = memoryRecords<StoredSelection>(() => now, { shards: 1, perShard: 1 });
 	return {
-		records: { save: records.create, read: records.read },
+		records: { create: (name, kept, ms) => records.create(name, kept, ms), read: records.read },
 		advance: (ms) => {
 			now += ms;
 		},
@@ -36,9 +36,9 @@ it("hands the composition its records through what a test wraps them in, on the 
 	const seen: string[] = [];
 	const stand = claimsSelectionInMemory({
 		around: (records) => ({
-			save: async (name, kept, ms) => {
+			create: async (name, kept, ms, subject) => {
 				seen.push(name);
-				return records.save(name, kept, ms);
+				return records.create(name, kept, ms, subject);
 			},
 			read: records.read,
 		}),
@@ -50,7 +50,7 @@ it("hands the composition its records through what a test wraps them in, on the 
 		runtime: quietRuntime({ clock: { now: () => now } }),
 	});
 	const kept = { format: 1 } as unknown as StoredSelection;
-	await app.get(selectionRecords).save("c.one", kept, 1000);
+	await app.get(selectionRecords).create?.("c.one", kept, 1000, "alice");
 	expect(seen).toEqual(["c.one"]);
 	expect(await stand.records.read("c.one")).toEqual(kept);
 	now = 1000;

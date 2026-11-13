@@ -1,5 +1,6 @@
 import type { Client } from "@mod/clients";
 import { type Redeemed, type RedemptionHook, redemptionHooks } from "@mod/code-grant";
+import { type Eraser, erasers } from "@mod/erasure-extensions";
 import { type TokenTie, tokenTies } from "@mod/grants";
 import {
 	assemble,
@@ -9,12 +10,14 @@ import {
 	isUnavailable,
 	kernelConfig,
 	type Module,
+	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { afterEach, expect, it } from "vitest";
 import {
 	claimScopes,
 	claimsSelections,
+	familySubjects,
 	type Selection,
 	type SelectionConsent,
 	selectionConsents,
@@ -23,7 +26,9 @@ import {
 	withinLimits,
 } from "../src/contract.ts";
 import claimsSelectionModule from "../src/module.ts";
+import { read, stored } from "../src/stored.ts";
 import { claimsSelectionInMemory } from "../src/testing.ts";
+import { readAt0191 } from "./frozen-0.19.1.ts";
 
 let shift = 0;
 const runtime = quietRuntime({ clock: { now: () => 1_000_000 + shift } });
@@ -95,6 +100,7 @@ const asked: Selection = {
 const redeemedOf = (redemption: string, id: string, expiresIn = 600_000) =>
 	({
 		redemption,
+		subject: "alice",
 		access: { id, expiresAt: runtime.clock.now() + expiresIn, expiresIn: 600, tokenType: "Bearer" },
 	}) as unknown as Redeemed;
 
@@ -151,7 +157,9 @@ it("refuses a selection past its bounds, or with a value no scalar", async () =>
 			s.selections.select(client, "alice", constrained(past)),
 			JSON.stringify(past),
 		).rejects.toThrow(TypeError);
-		await expect(s.selections.keepForCode("r", constrained(past), 1000)).rejects.toThrow(TypeError);
+		await expect(s.selections.keepForCode("r", constrained(past), 1000, "alice")).rejects.toThrow(
+			TypeError,
+		);
 	}
 	const many: Selection = {
 		idToken: none,
@@ -165,13 +173,13 @@ it("refuses a selection past its bounds, or with a value no scalar", async () =>
 
 it("pins a code's selection at its redemption, and answers that pin through the exchange, even past the code's own record", async () => {
 	const s = await serve();
-	await s.selections.keepForCode("r-1", asked, 10_000);
-	await s.hook.pin("r-1");
+	await s.selections.keepForCode("r-1", asked, 10_000, "alice");
+	await s.hook.pin("r-1", "alice");
 	// The code's record ends at its lifetime and a minute; the pin still answers.
 	shift = 10_000 + 60_000;
 	expect(await s.selections.forCode("r-1")).toEqual(asked);
 	// A code with no selection is pinned as none.
-	await s.hook.pin("r-2");
+	await s.hook.pin("r-2", "alice");
 	expect(await s.selections.forCode("r-2")).toBeUndefined();
 	// The pin holds five minutes, not as a deadline: after that, a read fails rather than answer none.
 	shift += 300_000;
@@ -183,28 +191,28 @@ it("pins a code's selection at its redemption, and answers that pin through the 
 
 it("keeps a code's selection for its lifetime and a minute more, so a code still alive at its pin finds it", async () => {
 	const s = await serve();
-	await s.selections.keepForCode("r-1", asked, 600_000);
-	await s.selections.keepForCode("r-2", asked, 600_000);
+	await s.selections.keepForCode("r-1", asked, 600_000, "alice");
+	await s.selections.keepForCode("r-2", asked, 600_000, "alice");
 	shift = 600_000 + 59_999;
-	await s.hook.pin("r-1");
+	await s.hook.pin("r-1", "alice");
 	expect(await s.selections.forCode("r-1")).toEqual(asked);
 	shift = 600_000 + 60_000;
-	await s.hook.pin("r-2");
+	await s.hook.pin("r-2", "alice");
 	expect(await s.selections.forCode("r-2")).toBeUndefined();
 });
 
 it("keeps nothing for a code whose selection holds no name and no constraint, and never a second for one name", async () => {
 	const s = await serve();
-	await s.selections.keepForCode("r-1", { idToken: none, userinfo: none }, 600_000);
+	await s.selections.keepForCode("r-1", { idToken: none, userinfo: none }, 600_000, "alice");
 	expect(s.stores.names()).toEqual([]);
-	await s.selections.keepForCode("r-2", asked, 600_000);
-	await expect(s.selections.keepForCode("r-2", asked, 600_000)).rejects.toThrow();
+	await s.selections.keepForCode("r-2", asked, 600_000, "alice");
+	await expect(s.selections.keepForCode("r-2", asked, 600_000, "alice")).rejects.toThrow();
 });
 
 it("keeps for a redeemed code's token the pinned userinfo target, until the token's end and two minutes more", async () => {
 	const s = await serve();
-	await s.selections.keepForCode("r-1", asked, 600_000);
-	await s.hook.pin("r-1");
+	await s.selections.keepForCode("r-1", asked, 600_000, "alice");
+	await s.hook.pin("r-1", "alice");
 	await s.hook.redeemed(redeemedOf("r-1", "tok-1", 3_600_000));
 	expect(await s.selections.forToken("tok-1")).toEqual(asked.userinfo);
 	shift = 3_600_000 + 119_999;
@@ -212,7 +220,7 @@ it("keeps for a redeemed code's token the pinned userinfo target, until the toke
 	shift = 3_600_000 + 120_000;
 	expect(await s.selections.forToken("tok-1")).toBeUndefined();
 	// None for a token whose code had no selection; a redemption whose pin is gone fails.
-	await s.hook.pin("r-2");
+	await s.hook.pin("r-2", "alice");
 	await s.hook.redeemed(redeemedOf("r-2", "tok-2"));
 	expect(await s.selections.forToken("tok-2")).toBeUndefined();
 	await expect(s.hook.redeemed(redeemedOf("r-3", "tok-3"))).rejects.toThrow();
@@ -223,8 +231,8 @@ it("keeps a family's target, and cuts a refreshed token's names to what is allow
 	const s = await serve([judging(agreed)]);
 	const scopes = ["openid", "profile"];
 	const client = clientAllowed(scopes);
-	await s.selections.keepForCode("r-1", asked, 600_000);
-	await s.hook.pin("r-1");
+	await s.selections.keepForCode("r-1", asked, 600_000, "alice");
+	await s.hook.pin("r-1", "alice");
 	await s.selections.follow("r-1", "fam-1", 86_400_000);
 	await s.selections.forRefreshed("fam-1", client, "alice", {
 		id: "tok-1",
@@ -267,7 +275,7 @@ it("keeps a family's target, and cuts a refreshed token's names to what is allow
 		constraints: asked.userinfo.constraints,
 	});
 	// A family founded from a code without a selection keeps none; its refreshed tokens none.
-	await s.hook.pin("r-2");
+	await s.hook.pin("r-2", "alice");
 	await s.selections.follow("r-2", "fam-2", 86_400_000);
 	await s.selections.forRefreshed("fam-2", client, "alice", {
 		id: "tok-5",
@@ -280,22 +288,24 @@ it("keeps a family's target, and cuts a refreshed token's names to what is allow
 
 it("ties an exchanged token to the constraints of its subject token, never to its names", async () => {
 	const s = await serve();
-	await s.selections.keepForCode("r-1", asked, 600_000);
-	await s.hook.pin("r-1");
+	await s.selections.keepForCode("r-1", asked, 600_000, "alice");
+	await s.hook.pin("r-1", "alice");
 	await s.hook.redeemed(redeemedOf("r-1", "tok-1"));
 	const tie = await s.tie.tieOf("tok-1");
 	if (tie.kind !== "held") throw new Error("not held");
 	expect(tie.ends).toBeUndefined();
 	expect(tie.session).toBeUndefined();
-	expect(await tie.join({ id: "tok-x", expiresAt: runtime.clock.now() + 600_000 })).toBe(true);
+	expect(await tie.join({ id: "tok-x", expiresAt: runtime.clock.now() + 600_000 }, "alice")).toBe(
+		true,
+	);
 	expect(await s.selections.forToken("tok-x")).toEqual({
 		names: [],
 		constraints: asked.userinfo.constraints,
 	});
 	// A token with names only, or with nothing, ties nothing.
 	const named: Selection = { idToken: none, userinfo: { names: [name], constraints: [] } };
-	await s.selections.keepForCode("r-2", named, 600_000);
-	await s.hook.pin("r-2");
+	await s.selections.keepForCode("r-2", named, 600_000, "alice");
+	await s.hook.pin("r-2", "alice");
 	await s.hook.redeemed(redeemedOf("r-2", "tok-2"));
 	expect(await s.tie.tieOf("tok-2")).toEqual({ kind: "none" });
 	expect(await s.tie.tieOf("tok-unknown")).toEqual({ kind: "none" });
@@ -310,6 +320,152 @@ it("fails a read of a record it cannot read as unavailable, never taking it for 
 	await expect(s.selections.forCode("r-1")).rejects.toMatchObject(unreadable);
 	await expect(s.tie.tieOf("tok-1")).rejects.toMatchObject(unreadable);
 	await expect(s.selections.forToken("tok-1")).rejects.toSatisfy(isUnavailable);
+});
+
+it("reads a record of either format alike: 2 keeping its subject, 1 as 0.19 wrote it, without one", async () => {
+	const s = await serve();
+	for (const [n, format] of [
+		[1, { format: 1 }],
+		[2, { format: 2, subject: "alice" }],
+	] as const) {
+		s.stores.overwrite(`c.r-${n}`, { ...format, selection: asked });
+		s.stores.overwrite(`t.tok-${n}`, { ...format, target: asked.userinfo });
+		s.stores.overwrite(`p.r-${n + 2}`, { ...format, selection: asked });
+		await s.hook.pin(`r-${n}`, "alice");
+		expect(await s.selections.forCode(`r-${n}`)).toEqual(asked);
+		expect(await s.selections.forCode(`r-${n + 2}`)).toEqual(asked);
+		expect(await s.selections.forToken(`tok-${n}`)).toEqual(asked.userinfo);
+	}
+	// Format 2 without its subject is a record it cannot read.
+	s.stores.overwrite("t.tok-5", { format: 2, target: asked.userinfo });
+	await expect(s.selections.forToken("tok-5")).rejects.toSatisfy(isUnavailable);
+});
+
+it("writes every record in format 2, keeping its subject", () => {
+	expect(stored.code(asked, "alice")).toEqual({ format: 2, subject: "alice", selection: asked });
+	expect(stored.pin(undefined, "alice")).toEqual({ format: 2, subject: "alice" });
+	expect(stored.target(none, "alice")).toEqual({ format: 2, subject: "alice", target: none });
+	expect(read.code(stored.code(asked, "alice"))).toEqual({ selection: asked, subject: "alice" });
+});
+
+/** Records in memory offered through `create`, answering `erased` for a subject in `erased`. */
+const fencing = (erased: Set<string>) =>
+	claimsSelectionInMemory({
+		around: (records) => ({
+			read: records.read,
+			create: async (name, kept, ms, subject) =>
+				erased.has(subject) ? "erased" : records.create(name, kept, ms, subject),
+		}),
+	});
+const issuedAt = (id: string) => ({ id, expiresAt: runtime.clock.now() + 600_000 });
+
+it("refuses to keep a code's selection for an erased subject, as unavailable, apart from a name kept already", async () => {
+	const s = await serve(undefined, fencing(new Set(["erin"])));
+	await expect(s.selections.keepForCode("r-1", asked, 600_000, "erin")).rejects.toSatisfy(
+		isUnavailable,
+	);
+	expect(s.stores.names()).toEqual([]);
+	await s.selections.keepForCode("r-2", asked, 600_000, "alice");
+	await expect(s.selections.keepForCode("r-2", asked, 600_000, "alice")).rejects.toSatisfy(
+		isUnavailable,
+	);
+});
+
+it("fails every write past its subject's erasure as unavailable, except a join, which answers false", async () => {
+	const erased = new Set<string>();
+	const s = await serve(undefined, fencing(erased));
+	const client = clientAllowed(["openid", "profile"]);
+	await s.selections.keepForCode("r-1", asked, 600_000, "alice");
+	await s.hook.pin("r-1", "alice");
+	await s.selections.follow("r-1", "fam-1", 86_400_000);
+	await s.hook.redeemed(redeemedOf("r-1", "tok-1"));
+	const tie = await s.tie.tieOf("tok-1");
+	if (tie.kind !== "held") throw new Error("not held");
+	await s.selections.keepForCode("r-2", asked, 600_000, "alice");
+	erased.add("alice");
+	await expect(s.hook.pin("r-2", "alice")).rejects.toSatisfy(isUnavailable);
+	await expect(s.hook.redeemed(redeemedOf("r-1", "tok-2"))).rejects.toSatisfy(isUnavailable);
+	await expect(s.selections.follow("r-1", "fam-2", 86_400_000)).rejects.toSatisfy(isUnavailable);
+	await expect(
+		s.selections.forRefreshed("fam-1", client, "alice", issuedAt("tok-3")),
+	).rejects.toSatisfy(isUnavailable);
+	expect(await tie.join(issuedAt("tok-4"), "alice")).toBe(false);
+});
+
+it("takes a format-2 record's own subject, refusing as unavailable a caller's that differs", async () => {
+	const s = await serve();
+	const client = clientAllowed(["openid", "profile"]);
+	await s.selections.keepForCode("r-1", asked, 600_000, "alice");
+	await expect(s.hook.pin("r-1", "bob")).rejects.toSatisfy(isUnavailable);
+	await s.hook.pin("r-1", "alice");
+	await expect(
+		s.hook.redeemed({ ...redeemedOf("r-1", "tok-1"), subject: "bob" }),
+	).rejects.toSatisfy(isUnavailable);
+	// Told no subject, a redemption's differs from its pin's: unavailable, as data, not a caller's bug.
+	const untold = { ...redeemedOf("r-1", "tok-1"), subject: undefined } as unknown as Redeemed;
+	await expect(s.hook.redeemed(untold)).rejects.toSatisfy(isUnavailable);
+	await s.hook.redeemed(redeemedOf("r-1", "tok-1"));
+	const tie = await s.tie.tieOf("tok-1");
+	if (tie.kind !== "held") throw new Error("not held");
+	await expect(tie.join(issuedAt("tok-2"), "bob")).rejects.toSatisfy(isUnavailable);
+	expect(await tie.join(issuedAt("tok-3"), "alice")).toBe(true);
+	expect(await s.stores.records.read("t.tok-3")).toMatchObject({ format: 2, subject: "alice" });
+	await s.selections.follow("r-1", "fam-1", 86_400_000);
+	await expect(
+		s.selections.forRefreshed("fam-1", client, "bob", issuedAt("tok-4")),
+	).rejects.toSatisfy(isUnavailable);
+});
+
+it("refuses as unavailable a family or a token written from a pin without its subject, a defect", async () => {
+	const s = await serve();
+	s.stores.overwrite("p.r-1", { format: 1, selection: asked });
+	await expect(s.selections.follow("r-1", "fam-1", 86_400_000)).rejects.toSatisfy(isUnavailable);
+	await expect(s.hook.redeemed(redeemedOf("r-1", "tok-1"))).rejects.toSatisfy(isUnavailable);
+	// An empty pin without one is the same defect.
+	s.stores.overwrite("p.r-2", { format: 1 });
+	await expect(s.selections.follow("r-2", "fam-2", 86_400_000)).rejects.toSatisfy(isUnavailable);
+	expect(s.stores.names().filter((n) => !n.startsWith("p."))).toEqual([]);
+});
+
+it("throws a TypeError for a write a caller past the types gives no subject, its bug, writing nothing", async () => {
+	const s = await serve();
+	const keep = s.selections.keepForCode as (r: string, s: Selection, ms: number) => Promise<void>;
+	await expect(keep("r-1", asked, 600_000)).rejects.toThrow(TypeError);
+	const pin = s.hook.pin as (redemption: string) => Promise<void>;
+	await expect(pin("r-1")).rejects.toThrow(TypeError);
+	await s.selections.keepForCode("r-2", asked, 600_000, "alice");
+	await s.hook.pin("r-2", "alice");
+	await s.hook.redeemed(redeemedOf("r-2", "tok-1"));
+	const tie = await s.tie.tieOf("tok-1");
+	if (tie.kind !== "held") throw new Error("not held");
+	const join = tie.join as (issued: { id: string; expiresAt: number }) => Promise<boolean>;
+	await expect(join(issuedAt("tok-2"))).rejects.toThrow(TypeError);
+	expect(s.stores.names().filter((n) => !["c.r-2", "p.r-2", "t.tok-1"].includes(n))).toEqual([]);
+});
+
+it("refuses to start on a store offering part of erase and migrate", async () => {
+	const erase = async () => {
+		throw new Error("not called");
+	};
+	const partial = claimsSelectionInMemory({ around: (records) => ({ ...records, erase }) });
+	const refused = await serve(undefined, partial).catch((e: unknown) => e);
+	expect(refused).toMatchObject({
+		refusals: [expect.objectContaining({ reason: expect.stringContaining("both, or neither") })],
+	});
+});
+
+it("fails closed on 0.19.1, which reads a format-2 record as unavailable, never as none", () => {
+	const written = [
+		[readAt0191.code, stored.code(asked, "alice")],
+		[readAt0191.pin, stored.pin(asked, "alice")],
+		[readAt0191.pin, stored.pin(undefined, "alice")],
+		[readAt0191.target, stored.target(asked.userinfo, "alice")],
+	] as const;
+	for (const [reading, record] of written) {
+		expect(() => reading(record)).toThrow(Unavailable);
+	}
+	// Its own format 1 reads there as before.
+	expect(readAt0191.code({ format: 1, selection: asked })).toEqual({ format: 1, selection: asked });
 });
 
 it("has no section: a configuration that writes one is refused at boot", async () => {
@@ -342,6 +498,37 @@ it("names a claim's scope as the contributed table does, none without one, and r
 	await expect(twice).rejects.toMatchObject({
 		refusals: [expect.objectContaining({ reason: "more than one table of claim scopes" })],
 	});
+});
+
+/** A reading of whose a family is, as the module keeping families contributes it. */
+const familyReading = (name: string) =>
+	defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
+		m
+			.contribute(familySubjects)
+			.by(() => ({ subjectOf: async () => ({ kind: "ended" as const }) })),
+	]);
+
+it("starts with one reading of whose a family is, and refuses to start with two", async () => {
+	await serve([familyReading("families")]);
+	await stop();
+	const twice = serve([familyReading("families"), familyReading("second-families")]);
+	await expect(twice).rejects.toMatchObject({
+		refusals: [expect.objectContaining({ reason: "more than one reading of whose a family is" })],
+	});
+});
+
+it("contributes its eraser, `claims-selection`, not erasable over a store without the ports", async () => {
+	const found = contract<readonly Eraser[]>("found-erasers");
+	const finder = defineModule({ name: "finder", replicaSafe: false, takes: [erasers] }, (m) => [
+		m.provide(found).by((c) => c.collect(erasers)),
+	]);
+	const s = await serve([finder]);
+	const [eraser] = s.app.get(found);
+	expect([eraser?.name, eraser?.erasable, eraser?.after]).toEqual([
+		"claims-selection",
+		false,
+		undefined,
+	]);
 });
 
 it("offers the bounds check a selection is held to", () => {
