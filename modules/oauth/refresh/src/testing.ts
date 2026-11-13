@@ -42,6 +42,10 @@ export interface RefreshStorePlace {
 	readonly loseNextAnswer?: () => void;
 	/** Where the place replicates: a replica takes over, keeping only what was confirmed. */
 	readonly failover?: () => Promise<void>;
+	/** Where a write applies before it is confirmed: runs `run` once the next family write has applied, before its confirmation. */
+	readonly beforeFamilyConfirms?: (run: () => Promise<void>) => void;
+	/** Where writes can fail: while on, writes are unavailable and not applied; reads still answer. */
+	readonly failWrites?: (on: boolean) => void;
 	/** Where the place can restart: it does, keeping only what it holds durably. */
 	readonly restart?: () => Promise<void>;
 	/** Where memory can run short: it does, keeping only what is kept from eviction. */
@@ -52,6 +56,8 @@ export interface RefreshStorePlace {
  * What refresh needs from any implementation of its store interfaces: records kept whole and
  * once, changed only from what they hold, ended at exactly their lifetime; lists capped by
  * pushing out the first to end; settles kept until done, through lost answers and failovers.
+ * A case needing a hook the place does not offer is skipped, not passed: the confirmed-change case
+ * runs only where it offers `beforeFamilyConfirms`, `failover` and `failWrites`.
  */
 export function refreshStoreContract(name: string, open: () => Promise<RefreshStorePlace>): void {
 	let n = 0;
@@ -218,6 +224,28 @@ export function refreshStoreContract(name: string, open: () => Promise<RefreshSt
 
 		// Each interface fails over after its own writes: a later write in another space would
 		// confirm them, and hide a space that does not replicate.
+		it("answers a change writing nothing only as confirmed: a revoked mark a failover loses is never answered", async (context) => {
+			const place = await open();
+			const { beforeFamilyConfirms, failover, failWrites } = place;
+			if (!beforeFamilyConfirms || !failover || !failWrites) return context.skip();
+			const id = fresh();
+			await place.families.save(id, held({ n: 1 }), 60_000, "alice");
+			let peeked: unknown;
+			// Asked while the mark is applied but not confirmed; then the replica takes over, and the
+			// writer is gone, so nothing it retries lands.
+			beforeFamilyConfirms(async () => {
+				peeked = await place.families.update(id, () => undefined);
+				await failover();
+				failWrites(true);
+			});
+			await place.families
+				.update(id, () => ({ value: held({ format: 1, revoked: true }) }))
+				.catch(() => undefined);
+			failWrites(false);
+			expect(await place.families.update(id, () => undefined)).toEqual(peeked);
+			// A store answering unconfirmed waits out the writer's retries first: about ten seconds.
+		}, 30_000);
+
 		it("settles writes whose answers were lost, and keeps each interface's through a failover", async (context) => {
 			const place = await open();
 			const { loseNextAnswer: lose, failover } = place;

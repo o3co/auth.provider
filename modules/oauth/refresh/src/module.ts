@@ -1,3 +1,4 @@
+import { familySubjects } from "@mod/claims-selection";
 import { additions } from "@mod/code-grant";
 import { erasers } from "@mod/erasure-extensions";
 import { grants, tokenTies } from "@mod/grants";
@@ -9,7 +10,7 @@ import { additionOver } from "./founding/founding.ts";
 import { grantOver, grantTakes } from "./grant/grant.ts";
 import { conditionOver, families, familyTie, lineageIn } from "./lineage/lineage.ts";
 import { section } from "./section.ts";
-import { familyEraser } from "./settle/eraser.ts";
+import { familyEraser, familySubjectsIn } from "./settle/eraser.ts";
 import { revocableOver, settlingTakes } from "./settle/settle.ts";
 import { familyStore } from "./store.ts";
 
@@ -28,5 +29,6 @@ export default defineModule(
 		m.contribute(revocableKinds).by(revocableOver),
 		// Its build takes only its family store, collecting no probes: the erasure gate collects erasers.
 		m.contribute(erasers).by(async (c) => familyEraser(await c.get(familyStore))),
+		m.contribute(familySubjects).by(async (c) => familySubjectsIn(await c.get(familyStore))),
 	],
 );
