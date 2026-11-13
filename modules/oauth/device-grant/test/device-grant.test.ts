@@ -47,6 +47,7 @@ import {
 	type DeviceStore,
 	deviceGrantType,
 	deviceStore,
+	type StoredApproval,
 	type StoredDevice,
 	type UserCodes,
 	userCodes,
@@ -54,6 +55,7 @@ import {
 import deviceGrant from "../src/module.ts";
 import { section } from "../src/section.ts";
 import { type DeviceGrantSettings, deviceGrantConfig } from "../src/testing.ts";
+import { pollAt0191, readAt0191 } from "./frozen-0.19.1.ts";
 import { recordsStandIn } from "./stand-in.ts";
 
 const origin = "https://as.example";
@@ -260,6 +262,7 @@ async function serve(...given: Parameters<typeof assembly>) {
 	return {
 		app,
 		down,
+		kept,
 		slowNextUpdate,
 		tamper,
 		stored,
@@ -272,6 +275,8 @@ async function serve(...given: Parameters<typeof assembly>) {
 		events: audit.events,
 	};
 }
+
+type Served = Awaited<ReturnType<typeof serve>>;
 
 describe("device authorization", () => {
 	it("gives an allowed client a device code and a user code, and refuses a client not allowed the grant [rfc8628-3.2-a] [rfc8628-3.2-b] [rfc8628-3.2-c] [rfc8628-3.2-d] [rfc8628-3.3-b] [rfc8628-6.1-a] [rfc8628-3.1-d] [rfc8628-5.1-a]", async () => {
@@ -582,22 +587,22 @@ describe("polling", () => {
 		expect(await s.poll(code)).toBe("slow_down");
 	});
 
-	it("reads an approval it does not know as none", async () => {
+	it("reads an approval it does not know as none, and an approved device with none in hand as pending, never taking it", async () => {
 		const s = await serve();
 		const cookie = await s.login();
-		const changes = [
-			({ approval: _, ...rest }: Record<string, unknown>) => rest,
-			(kept: Record<string, unknown>) => ({
-				...kept,
-				approval: { ...(kept.approval as object), extra: 1 },
-			}),
-		];
-		for (const change of changes) {
-			const { code, user } = await s.started();
-			await s.verify(cookie, { action: "approve", user_code: user });
-			await s.tamper(code, change);
-			expect(await s.poll(code)).toBe("invalid_grant");
-		}
+		const { code, user } = await s.started();
+		await s.verify(cookie, { action: "approve", user_code: user });
+		await s.tamper(code, (kept) => ({
+			...kept,
+			approval: { ...(kept.approval as object), extra: 1 },
+		}));
+		expect(await s.poll(code)).toBe("invalid_grant");
+		// Approved, with its approval neither on the record nor kept apart: it waits, untaken.
+		const other = await s.started();
+		await s.verify(cookie, { action: "approve", user_code: other.user });
+		await s.tamper(other.code, ({ approval: _, ...rest }) => rest);
+		expect(await s.poll(other.code)).toBe("authorization_pending");
+		expect(await s.stored(other.code)).toMatchObject({ state: "approved" });
 	});
 
 	it("leaves the scope out of a token answer when it has none", async () => {
@@ -842,6 +847,78 @@ describe("polling", () => {
 		s.slowNextUpdate(600_000);
 		expect(await s.poll(code)).toBe("expired_token");
 		expect(await s.poll(code)).toBe("expired_token");
+	});
+});
+
+describe("approvals kept apart, and a mixed fleet with 0.19.1", () => {
+	/** An approval as verification keeps it apart. */
+	const approvalOf = (subject = "alice") =>
+		({
+			format: 1,
+			subject,
+			approvedAt: runtime.clock.now(),
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+		}) as unknown as StoredApproval;
+	/** Makes an approved device of a pending one, the approval kept apart, as 0.20's verification will. */
+	const approvedApart = async (s: Served, code: string) => {
+		const name = s.kept.devices.nameOf(code);
+		expect(await s.kept.approvals.create(name, approvalOf(), 600_000, "alice")).toBe("created");
+		await s.tamper(code, (kept) => ({ ...kept, state: "approved" }));
+	};
+
+	it("issues from an approval kept apart, the record holding none", async () => {
+		const s = await serve();
+		const { code } = await s.started();
+		await approvedApart(s, code);
+		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
+		expect(await s.stored(code)).toMatchObject({ state: "taken" });
+		expect((await s.stored(code)).approval).toBeUndefined();
+	});
+
+	it("takes nothing approved after its read, its approval not in hand, and issues at the next poll", async () => {
+		const s = await serve();
+		const { code } = await s.started();
+		const name = s.kept.devices.nameOf(code);
+		await s.kept.approvals.create(name, approvalOf(), 600_000, "alice");
+		// Read pending; approved before the take, by another request.
+		s.kept.kept.raceNextChange((record) => ({ ...record, state: "approved" }) as never);
+		expect(await s.poll(code)).toBe("authorization_pending");
+		expect(await s.stored(code)).toMatchObject({ state: "approved" });
+		now += 5000;
+		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
+	});
+
+	it("issues, at 0.20, a device 0.19.1 approved, its approval on the record", async () => {
+		const s = await serve();
+		const cookie = await s.login();
+		const { code, user } = await s.started();
+		// Before the switch, verification still writes as 0.19.1 does.
+		await s.verify(cookie, { action: "approve", user_code: user });
+		expect(readAt0191((await s.stored(code)) as never)?.approval).toMatchObject({
+			subject: "alice",
+		});
+		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
+	});
+
+	it("is used up at 0.19.1 with invalid_grant, a device approved with its approval kept apart", async () => {
+		const s = await serve();
+		const { code } = await s.started();
+		await approvedApart(s, code);
+		const name = s.kept.devices.nameOf(code);
+		expect(await pollAt0191(s.kept.devices, name, "tv", runtime.clock.now())).toBe("invalid_grant");
+		expect(await s.stored(code)).toMatchObject({ state: "taken" });
+		expect(await s.poll(code)).toBe("invalid_grant");
+	});
+
+	it("writes no field 0.19.1 does not read: each record it keeps parses there", async () => {
+		const s = await serve();
+		const { code } = await s.started();
+		expect(readAt0191((await s.stored(code)) as never)).toBeDefined();
+		await approvedApart(s, code);
+		expect(readAt0191((await s.stored(code)) as never)).toBeDefined();
+		await s.poll(code);
+		expect(readAt0191((await s.stored(code)) as never)).toMatchObject({ state: "taken" });
 	});
 });
 

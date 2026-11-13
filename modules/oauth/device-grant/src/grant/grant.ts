@@ -2,9 +2,10 @@ import type { Grant, GrantOutcome, OAuthError } from "@mod/grants";
 import type { BuildContext, Runtime } from "@mod/kernel";
 import { type Sessions, sessions } from "@mod/session";
 import { type SubjectRevocation, subjectRevocation } from "@mod/subject-revocation";
+import { approvalOf } from "../approval-record/approval-record.ts";
 import { deviceGrantType } from "../contract.ts";
 import { type Approval, type Device, fromStored, rewriteAt } from "../record.ts";
-import { type DeviceStore, deviceStore } from "../store.ts";
+import { type ApprovalRecords, approvalRecords, type DeviceStore, deviceStore } from "../store.ts";
 
 /** RFC 8628 §3.5's answers to a poll, owned by this grant beside OAuth's own. */
 type PollError = "authorization_pending" | "slow_down" | "access_denied" | "expired_token";
@@ -24,11 +25,16 @@ const answered: Readonly<Record<Exclude<Poll, "issue">, OAuthError | PollError>>
 /** RFC 8628 §3.5: a poll that comes before its interval is over widens the interval by this. */
 const slowerBy = 5000;
 
-/** What a poll by `clientId` decides on the record it reads, and what it writes there; another client's writes nothing. */
+/**
+ * What a poll by `clientId` decides on the record it reads, and what it writes there; another
+ * client's writes nothing. An approved device issues only with its approval in hand (`held`):
+ * without, it is pending, and a later poll takes it.
+ */
 function polled(
 	device: Device,
 	clientId: string,
 	now: number,
+	held: Approval | undefined,
 ): { readonly answer: Poll; readonly left?: Device } {
 	if (device.clientId !== clientId || device.state === "taken") return { answer: "not-yours" };
 	if (device.expiresAt <= now) return { answer: "expired" };
@@ -40,6 +46,7 @@ function polled(
 		case "pending":
 			return { answer: "pending", left: seen };
 		case "approved":
+			if (!(device.approval ?? held)) return { answer: "pending", left: seen };
 			return { answer: "issue", left: { ...seen, state: "taken" } };
 		case "denied":
 			return { answer: "denied", left: { ...seen, state: "taken" } };
@@ -63,6 +70,7 @@ const sessionOf = (approval: Approval) => (approval.session ? { session: approva
 /** The device code grant: a device polls until its code is approved, denied or ends. */
 export function grantWith(
 	devices: DeviceStore,
+	approvals: ApprovalRecords,
 	revocation: SubjectRevocation,
 	open: Pick<Sessions, "entryOf">,
 	runtime: Runtime,
@@ -81,19 +89,26 @@ export function grantWith(
 			const name = devices.nameOf(code);
 			// Asked before the poll takes the approval, so a refusal leaves the code to a later poll.
 			const seen = fromStored(await devices.read(name));
-			if (seen?.state === "approved" && seen.approval && seen.clientId === client.id) {
-				if (!(await stillOpen(seen.approval))) return refused("invalid_grant");
-				const admitted = await admits(grantOf(seen, seen.approval), sessionOf(seen.approval));
+			// The approval in hand: one a 0.19 instance kept on the record (TODO(0.22): read no more),
+			// else the one kept apart; read before the take, which issues only with it.
+			const kept =
+				seen?.state === "approved" && !seen.approval
+					? await approvalOf(approvals, name)
+					: undefined;
+			const inHand = seen?.approval ?? kept;
+			if (seen?.state === "approved" && inHand && seen.clientId === client.id) {
+				if (!(await stillOpen(inHand))) return refused("invalid_grant");
+				const admitted = await admits(grantOf(seen, inHand), sessionOf(inHand));
 				if (admitted.kind === "refused") return admitted;
 			}
 			const read = await rewriteAt(devices, name, runtime.clock, (held, at) => {
-				return polled(held, client.id, at).left;
+				return polled(held, client.id, at, kept).left;
 			});
 			if (!read) return refused("invalid_grant");
 			const { before, at } = read;
-			const { answer } = polled(before, client.id, at);
+			const { answer } = polled(before, client.id, at, kept);
 			if (answer !== "issue") return refused(answered[answer]);
-			const approval = before.approval;
+			const approval = before.approval ?? kept;
 			if (!approval) return refused("invalid_grant");
 			if ((await revocation.check(approval.subject, approval.authenticatedAt)) === "revoked") {
 				return refused("invalid_grant");
@@ -130,8 +145,14 @@ export function grantWith(
 }
 
 /** What `grantOver` takes. */
-export const grantTakes = [deviceStore, subjectRevocation, sessions];
+export const grantTakes = [deviceStore, approvalRecords, subjectRevocation, sessions];
 
 /** The grant over the contracts the assembly gives. */
 export const grantOver = async (c: BuildContext<unknown>) =>
-	grantWith(await c.get(deviceStore), await c.get(subjectRevocation), await c.get(sessions), c);
+	grantWith(
+		await c.get(deviceStore),
+		await c.get(approvalRecords),
+		await c.get(subjectRevocation),
+		await c.get(sessions),
+		c,
+	);
