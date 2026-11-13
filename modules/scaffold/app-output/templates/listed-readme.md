@@ -28,6 +28,7 @@ SIGTERM or SIGINT stops it, draining what is under way, within `kernel.stop-dead
 
 {{listening}}Docker reads one line per variable from an env file: write a value of several lines, such as a PEM key, in the local layer instead.
 The image runs as a user other than root and installs the locked production dependencies only. `tini` runs as process 1, so `docker stop` reaches the app and it stops cleanly.
+It holds no package manager but apk: npm, npx, corepack and yarn are taken out, so `docker exec` cannot run them. A scanner that reads the image's filesystem does not find the packages they bundle; one that reads every layer still lists them, as their files stay in Node's image's own layer.
 `--pull` takes the newest patch of the image's Node minor, and `--no-cache-filter=runtime` builds the stage the app runs in again, so it takes the Alpine repository's current packages: a cached stage keeps those of an earlier build.
 A build by other means does the same: compose with `build: { pull: true, no_cache: true }`, `docker/build-push-action` with `pull: true` and `no-cache-filters: runtime`, any other builder with `--no-cache`.
 {{healthCheck}}

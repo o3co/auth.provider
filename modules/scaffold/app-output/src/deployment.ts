@@ -303,9 +303,12 @@ FROM ${nodeImage} AS runtime
 # Node's image takes Alpine's fixes later than Alpine publishes them, so this stage takes Alpine's current
 # packages; build with --pull --no-cache-filter=runtime, as a cached layer keeps an earlier build's.
 RUN apk upgrade --no-cache
-# An init as process 1 passes signals on and reaps what node leaves behind; the corepack and the yarn
-# Node's image bundles go, as the app runs neither.
-RUN apk add --no-cache tini && npm uninstall --global corepack && rm -rf /opt/yarn-v* /usr/local/bin/yarn /usr/local/bin/yarnpkg
+# An init as process 1 passes signals on and reaps what node leaves behind.
+RUN apk add --no-cache tini
+# The app runs node alone, so no package manager but apk stays: the npm, npx, corepack and yarn Node's
+# image bundles go, with the packages they bundle, which the app never loads.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-v* \\
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
