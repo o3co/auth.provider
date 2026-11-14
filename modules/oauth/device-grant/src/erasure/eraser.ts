@@ -60,6 +60,7 @@ export function deviceGrantEraser(stores: ErasableStores): Eraser {
 		},
 		migrate: async (walk, signal) => {
 			const approvals = await ports.approvals.migrate(walk, noneRead, signal);
+			// TODO(0.22): goes with the 0.19 approval read (`grant/grant.ts`), and the devices' walk with it.
 			// The devices space holds no subject from 0.20, but a 0.19 approval stays on its record:
 			// 0.20 never removes one. The owner's stop for a part subject-records does not read.
 			let held = "";

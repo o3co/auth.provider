@@ -20,7 +20,8 @@ export interface DeviceStore {
 	): Promise<{ readonly before: StoredDevice; readonly after: StoredDevice } | undefined>;
 	/**
 	 * Once, under the maintenance key: hands `visit` each device record a walk of the store meets,
-	 * until `visit` answers false; optional in 0.20, required in 0.22. `walked` when every record
+	 * until `visit` answers false; optional in 0.20. TODO(0.22): goes with the 0.19 approval read
+	 * (`grant/grant.ts`). `walked` when every record
 	 * was handed over; `stopped` where `visit` stopped it; `unfinished` with why where the walk could
 	 * not finish, which tells nothing of the records it did not reach. Its reads need no
 	 * confirmation: 0.19's approval writes were confirmed and survive a failover, and 0.20 never
@@ -74,7 +75,7 @@ export interface ApprovalRecords {
 	): Promise<{ readonly before: StoredApproval; readonly after: StoredApproval } | undefined>;
 	/**
 	 * Erases a subject's approvals here, where the Store can: optional in 0.20, required in 0.22.
-	 * With the devices' `walk`, all three or none.
+	 * In 0.20, with the devices' `walk`, all three or none.
 	 */
 	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
 	/** Once, under the maintenance key; optional as `erase` is. */
