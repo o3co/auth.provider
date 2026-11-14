@@ -65,6 +65,14 @@ export interface ApprovalRecords {
 	): Promise<"created" | "exists" | "erased">;
 	read(name: string): Promise<StoredApproval | undefined>;
 	/**
+	 * Changes the approval from what it holds; `change` reruns on a race, so it is pure. Nothing when
+	 * gone. Its answer is confirmed, a rewrite that writes nothing and an absence included.
+	 */
+	update?(
+		name: string,
+		change: (record: StoredApproval) => { readonly value: StoredApproval } | undefined,
+	): Promise<{ readonly before: StoredApproval; readonly after: StoredApproval } | undefined>;
+	/**
 	 * Erases a subject's approvals here, where the Store can: optional in 0.20, required in 0.22.
 	 * With the devices' `walk`, all three or none.
 	 */

@@ -140,6 +140,26 @@ export function deviceStoreContract(name: string, open: () => Promise<DevicePlac
 			expect(await approvals.create(name, approved({ n: 2 }), 1000, "alice")).toBe("created");
 		});
 
+		it("answers a change of an approval that writes nothing from what is kept, confirmed, through lost answers and a failover", async (context) => {
+			const place = await open();
+			const { approvals, loseNextAnswer: lose, failover } = place;
+			const { update } = approvals;
+			if (!update) return context.skip();
+			const [kept, gone] = [fresh(), fresh()];
+			await approvals.create(kept, approved({ n: 1 }), 60_000, "alice");
+			const nothing = () => undefined;
+			expect(await update.call(approvals, kept, nothing)).toEqual({
+				before: approved({ n: 1 }),
+				after: approved({ n: 1 }),
+			});
+			expect(await update.call(approvals, gone, nothing)).toBeUndefined();
+			if (!lose || !failover) return;
+			lose();
+			expect((await update.call(approvals, kept, nothing))?.before).toEqual(approved({ n: 1 }));
+			await failover();
+			expect((await update.call(approvals, kept, nothing))?.before).toEqual(approved({ n: 1 }));
+		});
+
 		it("keeps approvals through a restart, memory pressure, lost answers and a failover", async (context) => {
 			const place = await open();
 			const { approvals, restart, pressMemory, loseNextAnswer: lose, failover } = place;
