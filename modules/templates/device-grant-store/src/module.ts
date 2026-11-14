@@ -95,6 +95,7 @@ export default defineModule(
 			return {
 				create: builder.create,
 				read: builder.read,
+				update: builder.change,
 				erase: builder.erase,
 				migrate: builder.migrate,
 			};
