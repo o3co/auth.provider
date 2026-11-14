@@ -1205,6 +1205,20 @@ describe("verification", () => {
 		expect(s.kept.lifetimes).toEqual([approvalRecordMaxMs]);
 	});
 
+	it("keeps an approval at most its bound where the authorizing clock ran a minute ahead (Codex's case)", async () => {
+		const s = await serve({ "code-lifetime": "1h" });
+		// Authorized on a clock 60 s ahead; approved a second later on one in step.
+		now += 60_000;
+		const { code, user } = await s.started();
+		now -= 59_000;
+		const cookie = await s.login();
+		expect((await s.verify(cookie, { action: "approve", user_code: user })).status).toBe(200);
+		expect(await s.approved(code)).toMatchObject({ subject: "alice" });
+		// Unclamped, it would ask 3,779,000 ms of a space bounded at 3,720,000 ms.
+		expect(s.kept.lifetimes).toEqual([approvalRecordMaxMs]);
+		expect(approvalRecordMaxMs).toBe(3_720_000);
+	});
+
 	it("refuses an approval for an erased subject, naming no one, and the device waits to its end", async () => {
 		const s = await serve();
 		const { code, user } = await s.started();
