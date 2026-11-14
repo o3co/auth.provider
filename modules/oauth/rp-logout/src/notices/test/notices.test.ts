@@ -1,8 +1,9 @@
 import type { Client } from "@mod/clients";
 import { recordingLog } from "@mod/kernel/testing";
 import { OutboundUnavailable } from "@mod/outbound";
+import { memoryRecords } from "@mod/records/testing";
 import { expect, it } from "vitest";
-import type { PendingNotices } from "../../store.ts";
+import type { NoticeBodies, PendingNotices } from "../../store.ts";
 import { noticesOver } from "../notices.ts";
 
 const retryMs = 60_000;
@@ -44,6 +45,13 @@ function noticesFor(answers: (() => Promise<number>)[] = []) {
 			return { failed };
 		},
 	};
+	// The bodies and their queue in memory.
+	const stand = memoryRecords<string>(() => now, { shards: 1, perShard: 100 });
+	const bodies: NoticeBodies = {
+		create: async (id, body, ms) => stand.records.create(id, body, ms),
+		read: stand.records.read,
+		remove: stand.records.remove,
+	};
 	const sent: string[] = [];
 	const client: Client = {
 		id: "app",
@@ -65,6 +73,8 @@ function noticesFor(answers: (() => Promise<number>)[] = []) {
 		clients: { find: async () => client },
 		issuer: "https://as.example",
 		pending,
+		bodies,
+		queue: stand.deferred,
 		sessionClients: { members: async () => [] },
 		clock: { now: () => now },
 		random: { bytes: (length) => new Uint8Array(length) },

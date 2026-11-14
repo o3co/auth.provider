@@ -8,6 +8,10 @@ import { z } from "zod";
 import { registration } from "../registration/registration.ts";
 import type { Settings } from "../section.ts";
 import {
+	type NoticeBodies,
+	type NoticeQueue,
+	noticeBodies,
+	noticeQueue,
 	type PendingNotices,
 	pendingNotices,
 	type SessionClients,
@@ -36,6 +40,8 @@ export interface NoticeParts {
 	readonly clients: { find(id: string): Promise<Client | undefined> };
 	readonly issuer: string;
 	readonly pending: PendingNotices;
+	readonly bodies: NoticeBodies;
+	readonly queue: NoticeQueue;
 	readonly sessionClients: Pick<SessionClients, "members">;
 	readonly clock: Clock;
 	readonly random: Random;
@@ -186,6 +192,8 @@ export const noticesTakes = [
 	clients,
 	issuer,
 	pendingNotices,
+	noticeBodies,
+	noticeQueue,
 	sessionClients,
 ] as const;
 
@@ -197,6 +205,8 @@ export async function noticesFrom(c: BuildContext<Settings>): Promise<Notices> {
 		clients: await c.get(clients),
 		issuer: (await c.get(issuer)).url,
 		pending: await c.get(pendingNotices),
+		bodies: await c.get(noticeBodies),
+		queue: await c.get(noticeQueue),
 		sessionClients: await c.get(sessionClients),
 		clock: c.clock,
 		random: c.random,

@@ -10,10 +10,12 @@ import { loopbackPagesRefused } from "@mod/url-setting";
 import { confirmFrom, confirmPath, confirmTakes, unavailable } from "./confirm/confirm.ts";
 import { upstreamEnds } from "./contract.ts";
 import { endingFrom, endingTakes } from "./ending/ending.ts";
+import { portsRefused } from "./erasure/ports.ts";
 import { type Notices, noticesFrom, noticesTakes } from "./notices/notices.ts";
 import { remembering, rememberingTakes } from "./redemptions/redemptions.ts";
 import { registrationIn } from "./registration/registration.ts";
 import { type Settings, section } from "./section.ts";
+import { noticeBodies } from "./store.ts";
 
 type Handler = (request: HttpRequest) => Promise<HttpResponse>;
 
@@ -52,6 +54,9 @@ export default defineModule(
 		m.contribute(metadataSections).by(registrationIn),
 		remembering(m, name),
 		m.provide(shared).by(async (c) => {
+			// The bodies' erasure ports come whole or not at all.
+			const refused = portsRefused(await c.get(noticeBodies));
+			if (refused) return c.refuse(name, refused);
 			const notices = await noticesFrom(c);
 			c.every(c.section["sweep-interval"] * 1000, async () => {
 				const { failed } = await notices.sweep();
