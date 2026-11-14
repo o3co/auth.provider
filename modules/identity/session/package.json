@@ -16,7 +16,7 @@
 		"@mod/subject-revocation": "workspace:*"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	},
 	"peerDependenciesMeta": {
 		"vitest": {
@@ -25,6 +25,6 @@
 	},
 	"devDependencies": {
 		"@mod/http-server": "workspace:*",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	}
 }

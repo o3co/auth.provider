@@ -30,7 +30,7 @@
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/users": "workspace:*",
-		"jose": "6.2.15",
+		"jose": "6.2.16",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
@@ -40,10 +40,10 @@
 		"@mod/store": "workspace:*",
 		"@mod/tls-options": "workspace:*",
 		"@mod/tokens": "workspace:*",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	},
 	"peerDependenciesMeta": {
 		"vitest": {

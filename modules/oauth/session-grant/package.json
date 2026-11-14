@@ -26,6 +26,6 @@
 		"@mod/secret-hash": "workspace:*",
 		"@mod/session-tokens": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	}
 }
