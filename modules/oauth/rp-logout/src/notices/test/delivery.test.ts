@@ -2,7 +2,7 @@ import { keys } from "@mod/keys";
 import { DestinationRefused } from "@mod/outbound";
 import { sessions } from "@mod/session";
 import { expect, it } from "vitest";
-import { issuer, keptNotices, servedEach, settled, until } from "./harness.ts";
+import { issuer, keptNotices, servedEach, settled, until } from "../../../test/harness.ts";
 
 const serve = servedEach();
 
