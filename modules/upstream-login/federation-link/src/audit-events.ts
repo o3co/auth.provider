@@ -7,6 +7,6 @@ export default auditEvents({
 	},
 	"federation.identity.link_refused": {
 		attributes: ["idp", "source", "userAgent", "reason"],
-		when: "a link's callback refused to tie it, with the subject it started for and why (`reason`)",
+		when: "a link's callback refused to tie it, and why (`reason`), with the subject it started for while that session still lives",
 	},
 });

@@ -1,7 +1,7 @@
 import { type Audit, audit, declaredAudit } from "@mod/audit";
 import { type OriginEvidence, originEvidence } from "@mod/csrf";
 import { type HttpResponse, jsonAnswer, noStore, site } from "@mod/http";
-import type { BuildContext, Log } from "@mod/kernel";
+import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { type Sessions, sessions } from "@mod/session";
 import { type Handoff, handoff, type Joined } from "@mod/upstream-handoff";
 import type { UpstreamContinuation } from "@mod/upstreams";
@@ -17,15 +17,23 @@ export interface LinkParts {
 	readonly audit: Pick<Audit, "record">;
 	readonly handoff: Pick<Handoff, "joined" | "withdrawn">;
 	readonly log: Pick<Log, "warn">;
+	/** Holds a refusal's recording, made off the answer's path, until the process stops. */
+	readonly track: (work: Promise<void>) => void;
 	/** The step-up page a start short of a requirement is told of, and the public origin it comes back on. */
 	readonly stepUp?: { readonly page: string; readonly origin: string };
 }
 
-/** What a link keeps from its start: the session it is for, and its subject. */
-const kept = z.strictObject({ session: z.string(), subject: z.string() });
-const linkOf = (value: unknown) => {
+/** What a link keeps from its start: the session it is for, by its handle alone; its subject is the session's. */
+const kept = z.strictObject({ session: z.string() });
+/** What 0.19 kept: the session and its subject, the subject read only to refuse one that differs. TODO(0.22): goes. */
+const keptBefore = z.strictObject({ session: z.string(), subject: z.string() });
+const linkOf = (
+	value: unknown,
+): { readonly session: string; readonly subject?: string } | undefined => {
 	const read = kept.safeParse(value);
-	return read.success ? read.data : undefined;
+	if (read.success) return read.data;
+	const was = keptBefore.safeParse(value);
+	return was.success ? was.data : undefined;
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -52,7 +60,15 @@ export const linkTakes = [site, originEvidence, sessions, users, audit, handoff]
 export async function linkIn(c: BuildContext<Settings>): Promise<UpstreamContinuation> {
 	const page = c.section["step-up-page"];
 	const origin = (await c.get(site)).origin;
+	const running = new Set<Promise<void>>();
+	c.onStop(async () => {
+		await Promise.all(running);
+	});
 	return linkWith({
+		track: (work) => {
+			running.add(work);
+			void work.then(() => running.delete(work));
+		},
 		origin: await c.get(originEvidence),
 		sessions: await c.get(sessions),
 		users: await c.get(users),
@@ -65,7 +81,7 @@ export async function linkIn(c: BuildContext<Settings>): Promise<UpstreamContinu
 
 /** What an audit event of a link says besides its kind and IdP, each only when known. */
 interface Recorded {
-	readonly subject: string;
+	readonly subject?: string | undefined;
 	readonly reason?: string | undefined;
 	readonly source?: string | undefined;
 	readonly userAgent?: string | undefined;
@@ -92,7 +108,7 @@ function undoneIfClosed(
 		readonly upstream: { readonly idp: string; readonly subject: string };
 		readonly linked: Awaited<ReturnType<LinkParts["users"]["link"]>>;
 		readonly name: string;
-		readonly refused: (status: number, reason: string, error?: string) => HttpResponse;
+		readonly refused: (status: number, reason: string, error?: string) => Promise<HttpResponse>;
 	},
 ) {
 	/** Whether the session still enters at the start's level, as the subject the link is for. */
@@ -135,7 +151,7 @@ export function linkWith(p: LinkParts): UpstreamContinuation {
 	const audited = declaredAudit(p.audit, events);
 	const record = (outcome: "linked" | "link_refused", idp: string, at: Recorded) =>
 		audited.record(`federation.identity.${outcome}`, {
-			subject: at.subject,
+			...(at.subject === undefined ? {} : { subject: at.subject }),
 			attributes: {
 				idp,
 				...(at.source === undefined ? {} : { source: at.source }),
@@ -143,6 +159,23 @@ export function linkWith(p: LinkParts): UpstreamContinuation {
 				...(at.reason === undefined ? {} : { reason: at.reason }),
 			},
 		});
+	/**
+	 * The subject of the link's session while it lives, from one read that judges no requirement; none
+	 * once it is closed, ended or revoked. A read that fails changes no answer: an outage records none,
+	 * and any other failure is warned by its kind too, naming no subject.
+	 */
+	const subjectNow = async (handle: string): Promise<string | undefined> => {
+		try {
+			const entry = await p.sessions.entryOf(handle, "none");
+			return entry.kind === "entered" ? entry.session.context.subject : undefined;
+		} catch (error) {
+			if (!isUnavailable(error)) {
+				const kind = error instanceof Error ? error.name : typeof error;
+				p.log.warn("federation.link_subject_unread", { kind });
+			}
+			return undefined;
+		}
+	};
 	return {
 		name: "link",
 		begin: async (request, name) => {
@@ -161,38 +194,56 @@ export function linkWith(p: LinkParts): UpstreamContinuation {
 				const named = page === undefined ? {} : { page };
 				return { answer: jsonAnswer(403, { ...said, requirement: entry.requirement, ...named }) };
 			}
-			const { id, context } = entry.session;
-			return { kept: { session: id, subject: context.subject } };
+			return { kept: { session: entry.session.id } };
 		},
 		failed: ({ idp: name, reason, kept: was, source, userAgent }) => {
 			const link = linkOf(was);
-			if (link) record("link_refused", name, { subject: link.subject, reason, source, userAgent });
+			// Recorded once the session's subject is read, off the answer's path; held until stop.
+			if (link)
+				p.track(
+					subjectNow(link.session).then((subject) =>
+						record("link_refused", name, { subject, reason, source, userAgent }),
+					),
+				);
 		},
 		complete: async (at) => {
 			const { request, idp: name, upstreamLogin, lands, source, userAgent, cleared } = at;
 			// Kept by this link's own start, so it is always there: a missing one is a broken round trip.
-			const link = linkOf(at.kept);
-			if (!link) throw new Error("a link's round trip names its session");
-			const refused = (status: number, reason: string, error = reason) => {
-				record("link_refused", name, { subject: link.subject, reason, source, userAgent });
+			const started = linkOf(at.kept);
+			if (!started) throw new Error("a link's round trip names its session");
+			// Recorded before the answer, with the subject the session holds then, or none.
+			const refusal = (
+				subject: string | undefined,
+				status: number,
+				reason: string,
+				error = reason,
+			) => {
+				record("link_refused", name, { subject, reason, source, userAgent });
 				return jsonAnswer(status, { error }, { cookies: cleared });
 			};
+			const refused = async (status: number, reason: string, error = reason) =>
+				refusal(await subjectNow(started.session), status, reason, error);
 			// The browser in no session lets the recorded one decide (a posted answer carries no cookie);
 			// one in another session logged in as someone else since.
 			const current = await p.sessions.enter(request);
-			if (current !== undefined && current.id !== link.session)
+			if (current !== undefined && current.id !== started.session)
 				return refused(401, "login_required");
 			// At the level its start entered at, by its handle (a posted answer carries no cookie).
-			const held = await p.sessions.entryOf(link.session, "credentials");
+			const held = await p.sessions.entryOf(started.session, "credentials");
 			// Short of a requirement is answered as closed, but recorded with its own reason.
 			if (held.kind === "short") return refused(401, "session_short", "login_required");
-			if (held.kind !== "entered" || held.session.context.subject !== link.subject) {
-				return refused(401, "login_required");
-			}
+			// A 0.19 start's subject, where kept, only refuses one that differs.
+			const differs =
+				started.subject !== undefined &&
+				held.kind === "entered" &&
+				held.session.context.subject !== started.subject;
+			if (held.kind !== "entered" || differs) return refused(401, "login_required");
 			const { context } = held.session;
+			const link = { session: started.session, subject: context.subject };
 			const upstream = { idp: name, subject: upstreamLogin.subject };
 			const linked = await p.users.link(link.subject, upstream);
-			if (linked === "conflict") return refused(409, "conflict", "identity_conflict");
+			// The session entered, so its subject is recorded with no read more.
+			if (linked === "conflict") return refusal(link.subject, 409, "conflict", "identity_conflict");
 			if (linked === "linked") record("linked", name, { subject: link.subject, source, userAgent });
 			const { stillHeld, undo, closedSince } = undoneIfClosed(p, {
 				link,

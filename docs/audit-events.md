@@ -60,7 +60,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `federation.identity.link_refused` | `idp`, `source`, `userAgent`, `reason` | a link's callback refused to tie it, with the subject it started for and why (`reason`) |
+| `federation.identity.link_refused` | `idp`, `source`, `userAgent`, `reason` | a link's callback refused to tie it, and why (`reason`), with the subject it started for while that session still lives |
 | `federation.identity.linked` | `idp`, `source`, `userAgent` | a link's callback tied the upstream identity to the subject it started for |
 
 ## @mod/federation-tokens
