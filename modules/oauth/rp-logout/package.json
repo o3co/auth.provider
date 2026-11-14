@@ -16,6 +16,7 @@
 		"@mod/clients": "workspace:*",
 		"@mod/code-grant": "workspace:*",
 		"@mod/csrf": "workspace:*",
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
