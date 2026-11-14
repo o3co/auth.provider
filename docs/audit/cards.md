@@ -570,6 +570,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `held` (`src/held`): the logins a gate held, kept sealed until taken.
 - `@mod/upstream-handoff-seal` (feature, `modules/upstream-login/upstream-handoff-seal`): Gives `upstream-handoff` the seal it keeps a held login's tokens under, bridging `upstream-handoff` and `seal`.
 - `@mod/upstream-round-trip` (feature, `modules/upstream-login/upstream-round-trip`): Keeps one authorization round trip to an upstream, from its start to its callback, so a callback takes it once.
+  - `erasure` (`src/erasure`): checking, once, that no round trip a 0.19 instance began, which may hold a subject, remains. TODO(0.22): goes with the legacy reading.
 - `@mod/upstreams` (feature, `modules/upstream-login/upstreams`): Says what an upstream IdP is to this provider: the IdP types that open one, what an opened upstream does, and who receives a login's upstream tokens.
 
 ## user-ledger-http
