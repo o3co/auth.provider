@@ -211,31 +211,30 @@ describe("the token endpoint issuing no token for a device code while the store 
 			i.relay.reset("operations");
 			await reconnected(i, moved.upstream());
 			const from = performance.now();
-			const confirmed = i.relay.observe(confirmation({ replicas: 1 }));
 			const answer = await polledAt(i, d);
-			const wait = await confirmed;
 			const upstreamOf = (id: number) => i.relay.connections().find((x) => x.id === id)?.upstream;
-			// The poll read the device's record and then the approving session's entry on the new primary;
-			// the entry's read is confirmed (the device's record is not), its round passing on the old one.
+			// The poll read the device's record on the new primary; its reads that decide are confirmed
+			// (the record's is not), the first being its approval's, then the approving session entry's.
 			const record = i.relay
 				.executions(recordReadOf(d))
 				.find((e) => e.at > from && runIdOf(e.reply) === newId);
 			expect(record).toBeDefined();
-			// The approving session's: the first entry read on the record's connection after it.
-			const ran = i.relay
+			// The first confirmation after the record's read: its round passes on the old primary.
+			const wait = i.relay
+				.executions(confirmation({ replicas: 1 }))
+				.find((e) => record !== undefined && e.at > record.at);
+			expect(wait && upstreamOf(wait.connection)).toEqual(old.upstream());
+			// Any session entry read before it ran on the new primary, on the record's connection.
+			const entries = i.relay
 				.executions(sessionEntryRead)
-				.find(
-					(e) =>
-						record !== undefined &&
-						e.connection === record.connection &&
-						e.at > record.at &&
-						e.at < wait.at,
+				.filter(
+					(e) => record !== undefined && wait !== undefined && e.at > record.at && e.at < wait.at,
 				);
-			expect(ran && runIdOf(ran.reply)).toBe(newId);
-			expect(ran && upstreamOf(ran.connection)).toEqual(moved.upstream());
-			expect(upstreamOf(wait.connection)).toEqual(old.upstream());
-			// The comparison refuses at the session entry's confirmation, before any take, so no take is
-			// written. With the comparison taken out, the poll gives a token.
+			for (const e of entries) {
+				expect([e.connection, runIdOf(e.reply)]).toEqual([record?.connection, newId]);
+			}
+			// The comparison refuses at that confirmation, before any take, so no take is written.
+			// With the comparison taken out, the poll gives a token.
 			expect(successes(i, takeOf(d)).filter((e) => e.at > from)).toEqual([]);
 			noToken(answer);
 			i.relay.reset("confirming");
