@@ -24,7 +24,7 @@ export default defineModule(
 		m.provide(roundTripStore).by(async (c) => {
 			const place = { store: await c.get(store), space: roundTrips, log: c.log, random: c.random };
 			const records = recordsFor<StoredRoundTrip>(place);
-			return { save: records.create, update: records.change };
+			return { save: records.create, update: records.change, walk: records.walk };
 		}),
 	],
 );
