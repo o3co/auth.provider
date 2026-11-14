@@ -42,7 +42,7 @@ it("stops its migration on the first round trip it meets, never opening one, the
 	expect(answer?.kind).toBe("owner-stopped");
 	const { reason } = answer as { reason: string };
 	expect(reason).toContain(
-		"run again up to 3,600 s after the provider's connections were locked out",
+		"run again once the longest lifetime this deployment's callers give has passed since the provider's connections were locked out (at most 3,600 s for 0.19.1's own callers)",
 	);
 	expect(reason).toContain("a stop past that means something still begins round trips");
 	expect(reason).not.toContain("alice");
