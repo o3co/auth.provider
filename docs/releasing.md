@@ -13,6 +13,7 @@ How a maintainer cuts a release. The release workflow (`release.yml`) does the b
 - [When a publish stops partway](#when-a-publish-stops-partway)
 - [When the release finds no evidence](#when-the-release-finds-no-evidence)
 - [A security release](#a-security-release)
+- [A patch from main](#a-patch-from-main)
 - [The API site](#the-api-site)
 - [After the release](#after-the-release)
 
@@ -146,7 +147,7 @@ A fix for a reported hole is made and tested in the security repository (`o3co/a
 What the owner sets up once: the GitHub App that reads the security repository's runs, installed there alone; the `security-evidence` environment, its reviewer and its `v*` tag rule; and that repository's branch rules. The App's private key exists only from step 6 to step 11.
 
 1. Draft the advisory and request its CVE. Add the finding to the ledger.
-2. Bring the security repository's mirror of `main` up to date, after checking that `git remote get-url security` names it: `git fetch origin`, so the mirror gets this repository's current `main` and not a stale checkout's, then `git push security origin/main:refs/heads/mirror/main`. The refspec is fast-forward only; never force-push. The fix is made from `main` alone: `develop` is not mirrored, as it is reset at each release.
+2. Bring the security repository's mirror of `main` up to date, after checking that `git remote get-url security` names it: `git fetch origin`, so the mirror gets this repository's current `main` and not a stale checkout's, then `git push security origin/main:refs/heads/mirror/main`. The refspec is fast-forward only; never force-push. The fix is made from `main` alone: `develop` is not mirrored, as it is reset at each release cut from its tree.
 3. Make the fix on `security/<finding>` from `mirror/main`: the fix, the version's commit, the changelog (the kind of hole and the module, never how to reach it) and the migration guide. For a final version released by this route, the fixes are merged on one branch from `mirror/main`, then one commit takes `develop`'s tree for `docs/`, `CHANGELOG.md` and `SECURITY.md`, with the fixes' changes to them kept, and the version's commit comes last. Run the checks locally.
 4. Have it reviewed.
 5. Push its head to the security repository as `release/<version>`: CI there runs every job a release needs. Wait for that run to finish and pass before going on: the release takes only a successful run as its evidence, and from step 7 the fix is public. Where it fails, fix it on `security/<finding>`, have it reviewed and push again. Run `pnpm release:sbom` locally over the release check's tarballs, the one job of the release CI does not run.
@@ -162,6 +163,18 @@ Where `main` here moved after step 2, start again from step 2 before step 6. Whe
 
 A security release does not wait for [the pages a person reviews](#before-the-tag): they are reviewed and recorded after it is published, on the public run of step 10, and a `ng` opens an issue. One that is a security hole goes as [findings and fixes](audit/findings.md#nothing-public-before-the-fix-is-released) says; the run's own records are public already.
 
+## A patch from main
+
+Where `develop` holds the next minor's work, a patch of the minor released is cut from `main` and takes only the pull requests the maintainers name for it, where [Before the tag](#before-the-tag) takes `develop`'s whole tree. It is for a fix that cannot wait for the next minor, a security one above all, already public in `develop`: a reported hole not yet public goes by [A security release](#a-security-release).
+
+1. Each change lands in `develop` first, by its own pull request, reviewed as any is, and adds no upgrade notice there: its notice is written at the cut (step 4), as its number is the release's to give, and reaches `develop` with `main` (step 7).
+2. Cut `release/<version>` from `main`'s head. Merging into `develop` does not stop: the branch takes nothing of its tree.
+3. For each pull request, in the order it was merged, take its change as one commit, not its merge: `git cherry-pick -m 1 <its merge commit>`. Each commit's subject is that change in the form the contributing guide gives, its body the pull request's number. Where the change meets something `develop` holds and `main` does not, resolve it against `main`'s tree and say how in the commit's body; where it needs that change, take that pull request too, as its own commit naming its number, or leave the fix for the minor.
+4. Then the migration guide's notices, numbered after the highest `main` holds, in `main`'s form; the changelog's dated section; and the version's commit last, by itself. [Before the tag](#before-the-tag)'s steps 1 to 7 hold, the changelog's section written here rather than taken from `develop`.
+5. Push the branch, and wait for its CI, the jobs [Before the tag](#before-the-tag)'s step 8 names. Then run the umbrella repository's cross-component tests once, at the branch's head: dispatch `umbrella-e2e.yml` on it, or, where `main`'s copy of that workflow fails for a reason `develop` has since fixed, run its tests by hand as `develop`'s copy does and say so in the pull request; they must pass. Then a pull request from it to `main`, merged with a merge commit, nothing pushed to the branch since its CI ran. Tag as [Tagging](#tagging) says, within 30 days of that run.
+6. The OpenID conformance suite's pages are reviewed after the release is published, on the run the release took as its evidence, and recorded as [Before the tag](#before-the-tag)'s step 9 says, by a pull request into `develop`; a `ng` opens an issue, one that is a security hole as [findings and fixes](audit/findings.md#nothing-public-before-the-fix-is-released) says.
+7. After it, `develop` is not reset, as it holds what `main` does not. Bring `main` into `develop` by a pull request merged with a merge commit; a conflict on the changelog's heading resolves to `main`'s. Each notice the merge brings is kept in `develop`'s form. Read the whole merge, not only its conflicts: where `develop` changed a document's form, a merge with no conflict can keep both. Merging never stopped, so no open branch moves, and `develop` keeps its commits ([After the release](#after-the-release)).
+
 ## The API site
 
 The site on GitHub Pages is built from the `gh-pages` branch: one dir per minor, the root and `versions.html` (`modules/tooling/api-docs`). Only the release workflow and the API site workflow write it.
@@ -169,6 +182,8 @@ The site on GitHub Pages is built from the `gh-pages` branch: one dir per minor,
 Once, before the 0.19.0 tag: the branch still holds the 0.17 site (v0.3.0 to v0.17.0, and files a deploy left in by mistake). Remove every file but `.nojekyll` in one commit to `gh-pages`, with a placeholder `index.html` saying the 0.19 API comes with 0.19.0 and that the old system's API is in the source at tag v0.17.0. Never force-push: the old pages stay in the branch's history.
 
 ## After the release
+
+After [a patch from main](#a-patch-from-main), the reset, the rebase and what is said below of the commits only `develop` held do not apply: its step 7 brings `main` into `develop` instead.
 
 - Install the entrance from npm (`npx @o3co/create-auth-provider@<version>`), generate a pattern and boot it.
 - For a final release, check that `latest` names the version for every package, the placeholders' included.
