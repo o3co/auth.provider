@@ -45,6 +45,7 @@ import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	type ApprovalRecords,
+	approvalRecordMaxMs,
 	approvalRecords,
 	type DeviceStore,
 	deviceGrantType,
@@ -1190,6 +1191,18 @@ describe("verification", () => {
 		expect([denial.status, denial.body.error]).toEqual([409, "already_decided"]);
 		now += 5000;
 		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
+	});
+
+	it("keeps an approval at most its bound, approved on a clock behind the one that set the device's end", async () => {
+		const s = await serve({ "code-lifetime": "1h" });
+		const { code, user } = await s.started();
+		const cookie = await s.login();
+		// The verifier's clock five seconds behind the authorizing one's.
+		now -= 5000;
+		const approved = await s.verify(cookie, { action: "approve", user_code: user });
+		expect(approved.status).toBe(200);
+		expect(await s.approved(code)).toMatchObject({ subject: "alice" });
+		expect(s.kept.lifetimes).toEqual([approvalRecordMaxMs]);
 	});
 
 	it("refuses an approval for an erased subject, naming no one, and the device waits to its end", async () => {

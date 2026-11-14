@@ -1,10 +1,8 @@
 import { Unavailable } from "@mod/kernel";
 import { z } from "zod";
+import { approvalDriftMs } from "../bounds.ts";
 import type { Approval } from "../record.ts";
-import type { ApprovalRecords, StoredApproval } from "../store.ts";
-
-/** An approval outlives its device by this much, for clock drift between hosts. */
-const driftMs = 120_000;
+import { type ApprovalRecords, approvalRecordMaxMs, type StoredApproval } from "../store.ts";
 
 const time = z.number().min(0).max(8.64e15);
 /** An approval as it is kept, in its own record: format 1. */
@@ -31,7 +29,9 @@ const fromStored = (stored: StoredApproval): Approval => {
 
 /**
  * Keeps a device's approval, by the device's name, for its subject, until the device ends and the
- * drift after; `exists` where the name holds one, `erased` where the subject is erased.
+ * drift after, at most `approvalRecordMaxMs`: a clock behind the one that set the device's end
+ * would otherwise ask more than the bound. `exists` where the name holds one, `erased` where the
+ * subject is erased.
  */
 export const createApproval = (
 	approvals: ApprovalRecords,
@@ -43,7 +43,7 @@ export const createApproval = (
 	approvals.create(
 		name,
 		toStored(approval),
-		Math.max(1, deviceEndsAt - now + driftMs),
+		Math.min(approvalRecordMaxMs, Math.max(1, deviceEndsAt - now + approvalDriftMs)),
 		approval.subject,
 	);
 

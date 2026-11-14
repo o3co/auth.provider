@@ -1,6 +1,7 @@
 import { setting } from "@mod/kernel";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
+import { codeLifetimeMaxSeconds } from "./bounds.ts";
 
 export const section = z.strictObject({
 	"verification-uri": urlSetting({ schemes: ["https"] }).describe(
@@ -12,7 +13,7 @@ export const section = z.strictObject({
 		.describe("Whether to answer also the page's address with the code filled in."),
 	"code-lifetime": setting
 		.duration("s")
-		.pipe(z.number().int().min(30).max(3600))
+		.pipe(z.number().int().min(30).max(codeLifetimeMaxSeconds))
 		.prefault("10m")
 		.describe(
 			"How long a device code and its user code live, from `30s` to `1h` in whole seconds.",

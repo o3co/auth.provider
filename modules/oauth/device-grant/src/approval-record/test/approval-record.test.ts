@@ -2,7 +2,8 @@ import { isUnavailable } from "@mod/kernel";
 import { memoryRecords } from "@mod/records/testing";
 import { expect, it } from "vitest";
 import type { Approval } from "../../record.ts";
-import type { ApprovalRecords, StoredApproval } from "../../store.ts";
+import { section } from "../../section.ts";
+import { type ApprovalRecords, approvalRecordMaxMs, type StoredApproval } from "../../store.ts";
 import { approvalOf, createApproval } from "../approval-record.ts";
 
 const approval: Approval = {
@@ -39,6 +40,18 @@ it("keeps an approval for its subject until its device ends and two minutes afte
 	).toBe("exists");
 	expect(await approvalOf(p.approvals, "n-1")).toEqual(approval);
 	expect(await approvalOf(p.approvals, "n-2")).toBeUndefined();
+});
+
+it("keeps an approval at most the bound, asked from a clock behind the one that set the device's end", async () => {
+	const p = placed();
+	await createApproval(p.approvals, "n-1", approval, 3_600_000, -5000);
+	expect(p.lifetimes).toEqual([approvalRecordMaxMs]);
+});
+
+it("pins the bound to `code-lifetime`'s ceiling and the drift", () => {
+	expect(approvalRecordMaxMs).toBe(3600 * 1000 + 120_000);
+	expect(section.shape["code-lifetime"].safeParse("3601s").success).toBe(false);
+	expect(section.shape["code-lifetime"].safeParse("3600s").success).toBe(true);
 });
 
 it("keeps an approval at least a millisecond, past its device's end too", async () => {

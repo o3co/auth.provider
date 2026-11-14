@@ -1,5 +1,6 @@
 import type { MigrationReport, SpaceReport, SubjectReading, Walk } from "@mod/erasure-extensions";
 import { contract } from "@mod/kernel";
+import { approvalDriftMs, codeLifetimeMaxSeconds } from "./bounds.ts";
 
 declare const stored: unique symbol;
 /** A device's record as the store keeps it: the store never reads it, and only device-grant opens it. */
@@ -84,7 +85,7 @@ export const approvalRecords = contract<ApprovalRecords>("device-grant.approvals
  * The longest an approval is kept: `code-lifetime`'s longest, 3600 s, as an approval is needed
  * only while its device lives, and 120 s for clock drift between hosts.
  */
-export const approvalRecordMaxMs = (3600 + 120) * 1000;
+export const approvalRecordMaxMs = codeLifetimeMaxSeconds * 1000 + approvalDriftMs;
 
 /** A lost approval would leave its approved device waiting to its end; one kept past it, nothing. */
 export const approvalRecordsNeeds = {
