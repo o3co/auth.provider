@@ -48,7 +48,7 @@ export const takeOf = (d: Device) =>
 
 /** The write that decides the device: approved or denied, the record keeping no approval. */
 export const decisionOf = (d: Device, state: "approved" | "denied") =>
-	recordWrite(d, (r) => r.state === state);
+	recordWrite(d, (r) => r.state === state && r.approval === undefined);
 
 /**
  * The write that keeps a device's approval apart, by the device's name, for its subject. Approvals are
