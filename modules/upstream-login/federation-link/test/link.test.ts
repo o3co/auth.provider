@@ -344,16 +344,14 @@ it("fails as unavailable when the tokens cannot be handed over, the link and its
 const upstream = { idp: "corp", subject: "u-1" };
 const undone = ["federation.identity.linked", "federation.identity.link_refused"];
 
-it("undoes a link it wrote, and takes the tokens back, when the session closed, fell short or changed hands meanwhile: 401", async () => {
+// A session keeps its login's subject while its record lives (session's card): none changes hands.
+it("undoes a link it wrote, and takes the tokens back, when the session closed or fell short meanwhile: 401", async () => {
 	const changes: Record<string, (set: Settings) => void> = {
 		closed: (set) => {
 			set.byHandle = { kind: "absent" };
 		},
 		short: (set) => {
 			set.byHandle = short;
-		},
-		subject: (set) => {
-			set.byHandle = enteredAs("bob");
 		},
 	};
 	for (const [change, apply] of Object.entries(changes)) {
@@ -489,6 +487,8 @@ it("completes a link a 0.19 instance began, taking the subject from the session,
 	const refused = await other.link.complete(other.completing({ kept: keptBy0191 }));
 	expect(answered(refused)).toEqual([401, { error: "login_required" }]);
 	expect(other.links).toEqual([]);
+	// The session entered, so its subject is recorded with no check more.
+	expect(other.asked).toEqual([["s1", "credentials"]]);
 	// No event takes its subject from what was kept: bob is the session's, read then.
 	expect(other.events.map((e) => [e.subject, e.attributes?.reason])).toEqual([
 		["bob", "login_required"],
@@ -527,7 +527,7 @@ it("records the conflict with the entered session's subject, reading nothing mor
 it("changes no answer where the subject's read fails: an outage records none, another failure is warned by kind", async () => {
 	for (const [thrown, warned] of [
 		[new Unavailable("session"), []],
-		[new TypeError("broken"), [{ kind: "TypeError" }]],
+		[new TypeError("broken"), [{ idp: "corp", kind: "TypeError" }]],
 	] as const) {
 		const s = standIn();
 		s.set.entered = { id: "s2", context: alice };
@@ -539,7 +539,9 @@ it("changes no answer where the subject's read fails: an outage records none, an
 		expect(s.events.map((e) => ["subject" in e, e.attributes?.reason])).toEqual([
 			[false, "login_required"],
 		]);
-		const unread = s.logged.lines().filter((l) => l.event === "federation.link_subject_unread");
+		const unread = s.logged
+			.lines()
+			.filter((l) => l.event === "federation.link_subject_read_failed");
 		expect(unread.map((l) => l.fields)).toEqual(warned);
 	}
 });
