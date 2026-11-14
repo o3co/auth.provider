@@ -265,7 +265,7 @@ async function serve(...given: Parameters<typeof assembly>) {
 		(await kept.devices.read(kept.devices.nameOf(code))) as unknown as Record<string, unknown>;
 	/** The approval kept apart for a device, as kept. */
 	const approved = async (code: string) =>
-		(await kept.approvals.read(kept.devices.nameOf(code))) as unknown as
+		(await kept.approved.records.read(kept.devices.nameOf(code))) as unknown as
 			| Record<string, unknown>
 			| undefined;
 	/** Rewrites the approval kept apart for a device, as a store that hands back what it was not given. */

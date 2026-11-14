@@ -54,6 +54,9 @@ export function deviceStoreContract(name: string, open: () => Promise<DevicePlac
 	const counted = (record: StoredDevice) => (record as unknown as { n: number }).n;
 	const plus = (record: StoredDevice) => ({ value: held({ n: counted(record) + 1 }) });
 	const approved = (value: object) => value as unknown as StoredApproval;
+	/** What an approval holds, as the poll reads it: a confirmed change that writes nothing. */
+	const readOf = async (approvals: ApprovalRecords, name: string) =>
+		(await approvals.update(name, () => undefined))?.before;
 
 	describe(`device-grant's store interfaces: ${name}`, () => {
 		it("names a device code the same way every time, never as the code, and apart from another", async () => {
@@ -132,19 +135,21 @@ export function deviceStoreContract(name: string, open: () => Promise<DevicePlac
 			const odd = approved({ state: "unheard-of", nested: { list: [1, "two"] } });
 			expect(await approvals.create(name, odd, 1000, "alice")).toBe("created");
 			expect(await approvals.create(name, approved({ n: 1 }), 1000, "alice")).toBe("exists");
-			expect([await approvals.read(name), await approvals.read(other)]).toEqual([odd, undefined]);
+			expect([await readOf(approvals, name), await readOf(approvals, other)]).toEqual([
+				odd,
+				undefined,
+			]);
 			place.advance(999);
-			expect(await approvals.read(name)).toEqual(odd);
+			expect(await readOf(approvals, name)).toEqual(odd);
 			place.advance(1);
-			expect(await approvals.read(name)).toBeUndefined();
+			expect(await readOf(approvals, name)).toBeUndefined();
 			expect(await approvals.create(name, approved({ n: 2 }), 1000, "alice")).toBe("created");
 		});
 
-		it("answers a change of an approval that writes nothing from what is kept, confirmed, through lost answers and a failover", async (context) => {
+		it("answers a change of an approval that writes nothing from what is kept, confirmed, through lost answers and a failover", async () => {
 			const place = await open();
 			const { approvals, loseNextAnswer: lose, failover } = place;
 			const { update } = approvals;
-			if (!update) return context.skip();
 			const [kept, gone] = [fresh(), fresh()];
 			await approvals.create(kept, approved({ n: 1 }), 60_000, "alice");
 			const nothing = () => undefined;
@@ -171,8 +176,8 @@ export function deviceStoreContract(name: string, open: () => Promise<DevicePlac
 			lose();
 			expect(await approvals.create(settled, approved({ n: 2 }), 60_000, "alice")).toBe("created");
 			await failover();
-			expect(await approvals.read(kept)).toEqual(approved({ n: 1 }));
-			expect(await approvals.read(settled)).toEqual(approved({ n: 2 }));
+			expect(await readOf(approvals, kept)).toEqual(approved({ n: 1 }));
+			expect(await readOf(approvals, settled)).toEqual(approved({ n: 2 }));
 		});
 
 		it("walks every device record, handing each over, and stops where the visitor does", async (context) => {

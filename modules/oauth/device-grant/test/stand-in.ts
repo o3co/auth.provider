@@ -38,7 +38,7 @@ export function recordsStandIn(clock: () => number) {
 			}
 			return erased.has(subject) ? "erased" : approved.records.create(name, record, lifetimeMs);
 		},
-		read: approved.records.read,
+		update: approved.records.change,
 	};
 	return { devices, userCodes, approvals, erased, lifetimes, kept, approved };
 }

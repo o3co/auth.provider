@@ -47,8 +47,11 @@ export const createApproval = (
 		approval.subject,
 	);
 
-/** The approval kept for a device, or none. */
+/**
+ * The approval kept for a device, or none, read confirmed by a change that writes nothing: an
+ * approval read so is one a failover keeps, so the approval issued from is always the one kept.
+ */
 export const approvalOf = async (approvals: ApprovalRecords, name: string) => {
-	const stored = await approvals.read(name);
-	return stored === undefined ? undefined : fromStored(stored);
+	const read = await approvals.update(name, () => undefined);
+	return read === undefined ? undefined : fromStored(read.before);
 };

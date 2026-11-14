@@ -25,7 +25,7 @@ const placed = () => {
 			subjects.push(subject);
 			return records.create(name, record, ms);
 		},
-		read: records.read,
+		update: records.change,
 	};
 	return { approvals, records, lifetimes, subjects, advance: (ms: number) => (now += ms) };
 };

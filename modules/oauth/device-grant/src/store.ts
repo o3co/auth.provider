@@ -63,12 +63,12 @@ export interface ApprovalRecords {
 		lifetimeMs: number,
 		subject: string,
 	): Promise<"created" | "exists" | "erased">;
-	read(name: string): Promise<StoredApproval | undefined>;
 	/**
 	 * Changes the approval from what it holds; `change` reruns on a race, so it is pure. Nothing when
-	 * gone. Its answer is confirmed, a rewrite that writes nothing and an absence included.
+	 * gone. Its answer is confirmed, a rewrite that writes nothing and an absence included: the poll
+	 * reads an approval so.
 	 */
-	update?(
+	update(
 		name: string,
 		change: (record: StoredApproval) => { readonly value: StoredApproval } | undefined,
 	): Promise<{ readonly before: StoredApproval; readonly after: StoredApproval } | undefined>;
