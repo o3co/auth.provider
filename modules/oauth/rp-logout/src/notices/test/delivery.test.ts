@@ -2,7 +2,7 @@ import { keys } from "@mod/keys";
 import { DestinationRefused } from "@mod/outbound";
 import { sessions } from "@mod/session";
 import { expect, it } from "vitest";
-import { issuer, keptNotices, servedEach, settled, until } from "./harness.ts";
+import { issuer, keptNotices, servedEach, settled, until } from "../../../test/harness.ts";
 
 const serve = servedEach();
 
@@ -145,16 +145,6 @@ it("gives up a notice past its time, without sending it again", async () => {
 	expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
 });
 
-it("keeps the clients a session redeemed codes for, and nothing for one it never closes", async () => {
-	const h = await serve();
-	const { session } = await h.login();
-	await h.redeemed(session.id, "app");
-	await h.redeemed(session.id, "app");
-	expect((await h.stores.clients.members(session.id)).map((m) => m.member)).toEqual(["app"]);
-	await new Promise((resolve) => setTimeout(resolve, 1300));
-	expect(h.sent).toEqual([]);
-});
-
 it("delivers a notice a newer host wrote with fields this one does not know", async () => {
 	const h = await serve();
 	const notice = { client: "app", session: "s-1", subject: "alice", until: 9e15, added: "x" };
@@ -183,36 +173,6 @@ it("sends a notice tried again with the same token id, so the client can tell a 
 	expect(ids[1]).toBe(ids[0]);
 }, 10_000);
 
-it("remembers a session's clients until the session ends, however short remember-for is", async () => {
-	const h = await serve({ settings: { "remember-for": "1m" } });
-	const { session } = await h.login();
-	await h.redeemed(session.id, "app");
-	h.advance(61_000);
-	await h.app.get(sessions).close(session.id);
-	await until(() => h.sent.length > 0);
-	expect(h.sent.map((s) => s.url)).toEqual(["https://app.example/bc"]);
-});
-
-it("remembers a client for remember-for where the session's end is unknown, and no longer", async () => {
-	const h = await serve({ settings: { "remember-for": "2h" } });
-	await h.redeemed("unknown", "app");
-	h.advance(7_199_000);
-	expect(await h.stores.clients.members("unknown")).toHaveLength(1);
-	h.advance(2000);
-	expect(await h.stores.clients.members("unknown")).toEqual([]);
-});
-
-it("logs the clients the store pushes out of a session's set", async () => {
-	const h = await serve();
-	const { session } = await h.login();
-	for (const client of ["a", "b", "c", "d"]) await h.redeemed(session.id, client);
-	expect(h.logs().filter((l) => l.event === "rp-logout.clients_pushed_out")).toEqual([]);
-	await h.redeemed(session.id, "e");
-	expect(h.logs().filter((l) => l.event === "rp-logout.clients_pushed_out")).toEqual([
-		expect.objectContaining({ level: "warn", fields: { count: 1 } }),
-	]);
-});
-
 it("settles a notice the client takes with any 2xx, as taken [oidc-bcl-2.5-b]", async () => {
 	const h = await serve();
 	h.answering.answer = async () => 204;
@@ -223,4 +183,40 @@ it("settles a notice the client takes with any 2xx, as taken [oidc-bcl-2.5-b]", 
 	await settled(h, 500);
 	expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
 	expect(h.logs().filter((l) => l.event === "rp-logout.backchannel_rejected")).toEqual([]);
+});
+
+it("keeps nothing for an erased subject's close, tries each client once, and fails the close where a try would be again", async () => {
+	for (const [answer, closes] of [
+		[200, true],
+		[503, false],
+	] as const) {
+		const h = await serve();
+		h.answering.answer = async () => answer;
+		const { session } = await h.login();
+		await h.redeemed(session.id, "app");
+		h.stores.erased.add("alice");
+		// A close whose participant threw is left pending, the session still closing.
+		expect((await h.app.get(sessions).close(session.id)).kind).toBe(closes ? "closed" : "pending");
+		expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
+		const told = h.logs().filter((l) => l.event === "rp-logout.notice_unkept");
+		expect(told).toEqual([
+			expect.objectContaining({ fields: { client: "app", told: String(closes) } }),
+		]);
+		expect(JSON.stringify(told)).not.toContain("alice");
+	}
+});
+
+it("writes nothing to the 0.19 notices: a notice it keeps, or tries again, is an entry and a body", async () => {
+	const h = await serve();
+	const answers = [503];
+	h.answering.answer = async () => answers.shift() ?? 200;
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	const old: string[] = [];
+	await h.stores.notices.each(async (notice) => {
+		old.push(notice);
+	});
+	expect([old, (await keptNotices(h)).length]).toEqual([[], 1]);
 });

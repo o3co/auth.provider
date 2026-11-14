@@ -192,7 +192,7 @@ flowchart LR
 | `@mod/redirect-uris` | feature | `@mod/client-documents`, `@mod/clients`, `@mod/url-setting` |
 | `@mod/refresh` | feature | `@mod/audit`, `@mod/claims-selection`, `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/erasure-extensions`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/subject-revocation`, `@mod/token-control`, `@mod/tokens` |
 | `@mod/resource-indicators` | feature | `@mod/grants`, `@mod/kernel` |
-| `@mod/rp-logout` | feature | `@mod/audit`, `@mod/clients`, `@mod/code-grant`, `@mod/csrf`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/oidc`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/session-participants`, `@mod/url-setting` |
+| `@mod/rp-logout` | feature | `@mod/audit`, `@mod/clients`, `@mod/code-grant`, `@mod/csrf`, `@mod/erasure-extensions`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/oidc`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/session-participants`, `@mod/url-setting` |
 | `@mod/sender-binding` | feature | `@mod/clients`, `@mod/http`, `@mod/issuer`, `@mod/kernel` |
 | `@mod/session-grant` | feature | `@mod/client-allowance`, `@mod/csrf`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/session`, `@mod/tokens` |
 | `@mod/session-tokens` | feature | `@mod/grants`, `@mod/kernel`, `@mod/session`, `@mod/session-participants`, `@mod/tokens` |
@@ -288,7 +288,7 @@ flowchart LR
 | `@mod/mfa-flows-store` | wiring | `@mod/kernel`, `@mod/mfa-flows`, `@mod/store`, `@mod/subject-records` |
 | `@mod/mfa-store` | wiring | `@mod/kernel`, `@mod/mfa`, `@mod/store`, `@mod/subject-records` |
 | `@mod/refresh-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/refresh`, `@mod/store`, `@mod/subject-records` |
-| `@mod/rp-logout-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/rp-logout`, `@mod/store` |
+| `@mod/rp-logout-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/rp-logout`, `@mod/store`, `@mod/subject-records` |
 | `@mod/session-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-lifecycle`, `@mod/store`, `@mod/subject-records` |
 | `@mod/session-tokens-store` | wiring | `@mod/kernel`, `@mod/records`, `@mod/session-tokens`, `@mod/store` |
 | `@mod/subject-revocation-store` | wiring | `@mod/erasure-extensions`, `@mod/kernel`, `@mod/records`, `@mod/store`, `@mod/subject-revocation` |
