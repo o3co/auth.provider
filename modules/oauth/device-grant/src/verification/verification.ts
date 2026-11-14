@@ -126,8 +126,10 @@ export function verificationWith(v: Verifying): Pick<Route, "handle" | "unavaila
 		).catch(unknown);
 		if (decided && decided.before.expiresAt <= decided.at) return oauthError(410, "expired_token");
 		const { before } = decided ?? {};
-		// Approved, with no approval kept (one whose approval was never created): this approver's
-		// is kept now. Its read is confirmed, as a rewrite that writes nothing confirms what it read.
+		// Approved, with no approval kept (one whose approval was never created): this approver's is
+		// kept now. A device's state only moves forward, so 409 and 410 are right even on a stale
+		// read; a stale `approved` with no approval at worst keeps an approval that is bounded,
+		// erasable and never used.
 		const unkept = action === "approve" && before?.state === "approved" && !before.approval;
 		// Decided once: a decision made first, here or elsewhere, stands.
 		if (before?.state !== "pending" && !unkept) return oauthError(409, "already_decided");

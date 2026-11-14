@@ -23,8 +23,9 @@ export interface DeviceStore {
 	 * until `visit` answers false; optional in 0.20, required in 0.22. `walked` when every record
 	 * was handed over; `stopped` where `visit` stopped it; `unfinished` with why where the walk could
 	 * not finish, which tells nothing of the records it did not reach. Its reads need no
-	 * confirmation: 0.20 never removes a 0.19 approval from a record, so a stale read errs toward a
-	 * stop.
+	 * confirmation: 0.19's approval writes were confirmed and survive a failover, and 0.20 never
+	 * removes one, so a record holding one is met; a new one appears only while a 0.19 instance
+	 * still writes, which the stop's reason names.
 	 */
 	walk?(
 		walk: Walk,

@@ -62,17 +62,17 @@ export function deviceGrantEraser(stores: ErasableStores): Eraser {
 			const approvals = await ports.approvals.migrate(walk, noneRead, signal);
 			// The devices space holds no subject from 0.20, but a 0.19 approval stays on its record:
 			// 0.20 never removes one. The owner's stop for a part subject-records does not read.
-			let held: string | undefined;
+			let held = "";
 			const walked = await ports.devices.walk(
 				walk,
 				(stored) => {
-					held = heldIn(stored);
-					return held === undefined;
+					held = heldIn(stored) ?? "";
+					return held === "";
 				},
 				signal,
 			);
 			if (walked.kind === "walked") return [approvals];
-			if (walked.kind === "stopped") return [approvals, ownerStopped(held ?? rerun)];
+			if (walked.kind === "stopped") return [approvals, ownerStopped(held)];
 			// A walk that did not finish proves nothing of the records it did not reach.
 			return [
 				approvals,

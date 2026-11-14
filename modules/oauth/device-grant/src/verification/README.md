@@ -11,7 +11,6 @@ Internal module of `device-grant`: the interface the deployment's page calls, wh
 ## Offers
 - `verificationOver` (the build context) → `verificationWith` (`session`, `rate-limit`'s attempt limit, `audit`, `tokens`' admits, the store interfaces and the approvals, the runtime, the settings) → the route's handler and its answer to Unavailable, `503` `temporarily_unavailable`.
 
-
 ## Invariants
 - An approval is put to `tokens`' issuance policies with its session once counted and found, before it is kept; a refusal is `access_denied`.
 - Approve against deny is decided once by the device's record, a rewrite from `pending` that keeps no subject; a decision made first stands. An approval is kept apart (`approval-record`), holding the subject, the approval time, the session, its amr and its authentication time; whose approval is kept is the first created.

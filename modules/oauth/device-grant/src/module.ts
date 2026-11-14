@@ -16,13 +16,7 @@ import { verificationOver, verificationTakes } from "./verification/verification
 export const authorizationPath = "/oauth/device_authorization";
 export const verificationPath = "/oauth/device/verification";
 
-const takes = [
-	...authorizationTakes,
-	...verificationTakes,
-	...grantTakes,
-	sessionIssuances,
-	approvalRecords,
-];
+const takes = [...authorizationTakes, ...verificationTakes, ...grantTakes, sessionIssuances];
 
 // Safe on many instances: a code's expiry and polling interval are judged by the instance's clock, kept in
 // step with the others' by the operator (deployment-guarantees, Several instances).

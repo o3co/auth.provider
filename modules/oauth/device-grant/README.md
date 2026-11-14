@@ -33,10 +33,10 @@
 - Every action counts against the subject in `rate-limit`'s attempt limit. A count it cannot make is answered as unavailable.
 - A code is decided once, and an approval put to the issuance policies before it is kept (`verification`'s card).
 - A poll issues once, to its client, with its approval's subject and authentication, if the policies and the session allow (`grant`'s card).
-- A kept record is read only in the shape written here or the format before, with times a date can hold; any other, or one that throws, is no record.
+- A kept device's record is read only in the shape written here or the format before, with times a date can hold; any other, or one that throws, is no record.
 - Times are on `kernel`'s clock. A decision or a poll reads it in the rewrite of the record, so a code that ends meanwhile is `expired_token`.
 - A record is kept as long again past its end, so a late poll is told `expired_token`.
-- Internal modules `authorization`, `verification`, `grant` and `erasure` each take their contracts from the build context; the package's module only declares.
+- Internal modules `authorization`, `verification` and `grant` each take their contracts from the build context, and `erasure` is handed the stores; the package's module only declares.
 
 ## Depends on
 - `kernel`, `audit`, `http`, `url-setting`, `request-source`, `clients`, `client-allowance`, `issuer`, `grants`, `token-endpoint`, `tokens`, `session`, `subject-revocation`, `rate-limit`, `csrf`, `erasure-extensions`
