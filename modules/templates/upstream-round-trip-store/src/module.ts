@@ -13,10 +13,11 @@ const { namesFromSecret: recordsFor, ...guaranteeFor } = {
 	namesFromSecret: secretRecordsIn,
 } satisfies Record<keyof typeof roundTripStoreNeeds, Guarantee | typeof secretRecordsIn>;
 /**
- * The round trips: no subject's data from 0.20, as callers carry none. A round trip remains, which
- * a 0.19 instance may have begun holding a subject, up to 3,600 s after the provider's connections
- * were locked out, or the longest lifetime this deployment's own callers give; upstream-round-trip's
- * migration stops until none remains, and a stop past that means something still begins round trips.
+ * The round trips: no subject's data from 0.20, as callers carry none. A round trip a 0.19 instance
+ * began may carry a subject's data until its record's lifetime ends: upstream-round-trip's migration
+ * stops until none remains, once the longest lifetime this deployment's callers give has passed since
+ * the provider's connections were locked out (at most 3,600 s for 0.19.1's own callers); a stop past
+ * that means something still begins round trips.
  */
 const roundTrips: Space = {
 	name: "upstream-round-trip-store.round-trips",
