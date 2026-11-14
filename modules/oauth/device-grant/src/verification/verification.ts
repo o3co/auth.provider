@@ -156,7 +156,7 @@ export function verificationWith(v: Verifying): Pick<Route, "handle" | "unavaila
 					outcome: "subject_unknown",
 					withheld: "erased",
 				};
-				declaredAudit(v.audit, events).record("device.approval_withheld", {
+				declaredAudit(v.audit, events).record("device.approval_refused", {
 					attributes: { ...withheld, ...source },
 				});
 				return oauthError(403, "access_denied", "subject_unknown");

@@ -1215,8 +1215,9 @@ describe("verification", () => {
 			"access_denied",
 			"subject_unknown",
 		]);
+		expect(s.events.at(-1)).not.toHaveProperty("subject");
 		expect(s.events.at(-1)).toEqual({
-			kind: "device.approval_withheld",
+			kind: "device.approval_refused",
 			at: now,
 			attributes: {
 				client: "tv",
