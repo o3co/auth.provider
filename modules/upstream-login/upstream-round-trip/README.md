@@ -14,8 +14,9 @@
 - `roundTrips.take` (the callback's request, the name, its `state`) → `taken` (what was carried, the verifier and nonce for the exchange, when it started, and the cookie cleared) or `none`.
 - `roundTrips.current` (a request, the name) → the browser's live round trip as its start made it (state, nonce, S256 challenge, what was carried), or none.
 - Composition definition (`./module`): provides `roundTrips` over the store interface the assembly wires and `cookies`.
-- Store interface for round trips, its needs (survives failover, names from the secret) and contract test (`./testing`).
+- Store interface for round trips, its needs (survives failover, names from the secret) and contract test (`./testing`); its `walk` for erasure is optional (TODO(0.22): goes with the legacy reading).
 - The caller adds the cookie cleared to every answer after a take, and reads what it carried with its own schema.
+- What a caller carries holds no subject's data (a link keeps its session's handle alone); federation login's `redirectTo`, which the browser gives, is tied to no subject.
 
 ## Invariants
 - The cookie, state, nonce and verifier are 256 random bits each; the challenge is the verifier's S256.
@@ -33,7 +34,7 @@
 - Round trip record, by its cookie: format 1, the name, state, nonce, verifier, start time, what was carried, whether cross-site, and whether taken. The store derives its name from the cookie and never keeps the cookie in clear.
 
 ## Depends on
-- `kernel`, `cookies`, `http` (the request type)
+- `kernel`, `cookies`, `http` (the request type), `erasure-extensions` (the walk's type)
 
 ## Vocabulary
 - round trip: one authorization request to an upstream and its callback, taken once.
