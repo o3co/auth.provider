@@ -94,7 +94,6 @@ export default defineModule(
 			const builder = await c.get(placed);
 			return {
 				create: builder.create,
-				read: builder.read,
 				update: builder.change,
 				erase: builder.erase,
 				migrate: builder.migrate,

@@ -16,6 +16,22 @@
 		"@mod/subject-records": "workspace:*"
 	},
 	"devDependencies": {
-		"@mod/erasure-extensions": "workspace:*"
+		"@mod/audit": "workspace:*",
+		"@mod/client-allowance": "workspace:*",
+		"@mod/clients": "workspace:*",
+		"@mod/cookies": "workspace:*",
+		"@mod/csrf": "workspace:*",
+		"@mod/erasure-extensions": "workspace:*",
+		"@mod/grants": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/http-server": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"@mod/token-endpoint": "workspace:*",
+		"@mod/tokens": "workspace:*"
 	}
 }
