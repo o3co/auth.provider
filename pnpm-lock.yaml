@@ -604,6 +604,10 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../store
+    devDependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../erasure-extensions
 
   modules/foundation/request-source:
     dependencies:
@@ -1500,6 +1504,9 @@ importers:
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/grants':
         specifier: workspace:*
         version: link:../grants
@@ -4139,6 +4146,61 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
+    devDependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/client-allowance':
+        specifier: workspace:*
+        version: link:../../oauth/client-allowance
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
+      '@mod/csrf':
+        specifier: workspace:*
+        version: link:../../identity/csrf
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
+      '@mod/grants':
+        specifier: workspace:*
+        version: link:../../oauth/grants
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/http-server':
+        specifier: workspace:*
+        version: link:../../foundation/http-server
+      '@mod/issuer':
+        specifier: workspace:*
+        version: link:../../oauth/issuer
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+      '@mod/token-endpoint':
+        specifier: workspace:*
+        version: link:../../oauth/token-endpoint
+      '@mod/tokens':
+        specifier: workspace:*
+        version: link:../../oauth/tokens
 
   modules/templates/dpop-store:
     dependencies:

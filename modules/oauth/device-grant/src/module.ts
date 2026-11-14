@@ -1,12 +1,16 @@
 import { csrfChecked } from "@mod/csrf";
+import { erasers } from "@mod/erasure-extensions";
 import { grants, sessionIssuances } from "@mod/grants";
 import { routes, use } from "@mod/http";
 import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
 import { authorizationOver, authorizationTakes } from "./authorization/authorization.ts";
+import { deviceGrantEraser } from "./erasure/eraser.ts";
+import { portsRefused } from "./erasure/ports.ts";
 import { grantOver, grantTakes } from "./grant/grant.ts";
 import { section } from "./section.ts";
+import { approvalRecords, deviceStore } from "./store.ts";
 import { verificationOver, verificationTakes } from "./verification/verification.ts";
 
 export const authorizationPath = "/oauth/device_authorization";
@@ -49,6 +53,17 @@ export default defineModule({ name: "device-grant", replicaSafe: true, section, 
 				"its tokens must be recorded to the session that approved them, so that a logout ends them",
 			);
 		}
+		// Approvals are required; erasure's ports come whole or not at all.
+		const ports = { devices: await c.get(deviceStore), approvals: await c.get(approvalRecords) };
+		const refused = portsRefused(ports);
+		if (refused) return c.refuse("device-grant", refused);
 		return grantOver(c);
 	}),
+	// Its build takes only its stores, collecting no probes: the erasure gate collects erasers.
+	m.contribute(erasers).by(async (c) =>
+		deviceGrantEraser({
+			devices: await c.get(deviceStore),
+			approvals: await c.get(approvalRecords),
+		}),
+	),
 ]);

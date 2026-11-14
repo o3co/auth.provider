@@ -1,6 +1,7 @@
 import { Unavailable } from "@mod/kernel";
 import type { Json, WriteOptions } from "@mod/store";
 import { type DeferredSize, shardOf } from "./shards.ts";
+import { type Walk, type Walked, walkRecords } from "./walk/walk.ts";
 import {
 	type Attempt,
 	again,
@@ -26,6 +27,7 @@ export {
 	overCap,
 	type StrictSet,
 } from "./keyed-sets/keyed-sets.ts";
+export type { Unfinished, Walk, Walked } from "./walk/walk.ts";
 export { type Attempt, type Changed, type Place, writeDeadline } from "./writing/writing.ts";
 export type { DeferredSize };
 
@@ -78,6 +80,15 @@ function recordsOf<T extends Json>(place: Place) {
 			const { entry } = await place.store.get(keyOf(key));
 			return entry?.value as T | undefined;
 		},
+		/**
+		 * Hands `visit` each record's value a walk of the space meets, until it answers false; starts
+		 * over on a changed server, and answers whether it finished (internal module `walk`).
+		 */
+		walk: (
+			walk: Walk,
+			visit: (value: T) => Promise<boolean> | boolean,
+			signal?: AbortSignal,
+		): Promise<Walked> => walkRecords(place, walk, (value) => visit(value as T), signal),
 		/**
 		 * Removes the record whatever it holds. An absence may be another's removal not confirmed yet,
 		 * so a write of its own made only while the key holds none confirms it; else it tries again.
@@ -137,6 +148,7 @@ export function secretRecordsIn<T extends Json>(place: Place) {
 		change: (secret: string, change: (current: T) => Changed<T> | undefined) =>
 			named.change(nameFor(secret), change),
 		remove: (secret: string) => named.remove(nameFor(secret)),
+		walk: named.walk,
 		named,
 	};
 }

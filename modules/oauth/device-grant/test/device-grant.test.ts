@@ -12,6 +12,7 @@ import {
 } from "@mod/clients/testing";
 import cookiesModule from "@mod/cookies/module";
 import { csrfStandIn } from "@mod/csrf/testing";
+import { type Eraser, erasers } from "@mod/erasure-extensions";
 import { sessionIssuances, targetRules } from "@mod/grants";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
@@ -43,9 +44,13 @@ import { issuancePolicies, subjectChecks, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	type ApprovalRecords,
+	approvalRecordMaxMs,
+	approvalRecords,
 	type DeviceStore,
 	deviceGrantType,
 	deviceStore,
+	type StoredApproval,
 	type StoredDevice,
 	type UserCodes,
 	userCodes,
@@ -53,6 +58,7 @@ import {
 import deviceGrant from "../src/module.ts";
 import { section } from "../src/section.ts";
 import { type DeviceGrantSettings, deviceGrantConfig } from "../src/testing.ts";
+import { approveAt0191, pollAt0191, readAt0191 } from "./frozen-0.19.1.ts";
 import { recordsStandIn } from "./stand-in.ts";
 
 const origin = "https://as.example";
@@ -125,6 +131,7 @@ function assembly(
 	const down = {
 		devices: unavailableSwitch<DeviceStore>("device store"),
 		codes: unavailableSwitch<UserCodes>("user codes"),
+		approvals: unavailableSwitch<ApprovalRecords>("approvals"),
 	};
 	/** Time that passes before the next rewrite of a device reads it, as when the store is slow. */
 	let stall = 0;
@@ -140,6 +147,7 @@ function assembly(
 			}),
 		),
 		m.provide(userCodes).by(() => down.codes.wrap(kept.userCodes)),
+		m.provide(approvalRecords).by(() => down.approvals.wrap(kept.approvals)),
 	]);
 	const audit = auditStandIn();
 	const input = {
@@ -255,12 +263,25 @@ async function serve(...given: Parameters<typeof assembly>) {
 	/** What the store keeps for a device. */
 	const stored = async (code: string) =>
 		(await kept.devices.read(kept.devices.nameOf(code))) as unknown as Record<string, unknown>;
+	/** The approval kept apart for a device, as kept. */
+	const approved = async (code: string) =>
+		(await kept.approved.records.read(kept.devices.nameOf(code))) as unknown as
+			| Record<string, unknown>
+			| undefined;
+	/** Rewrites the approval kept apart for a device, as a store that hands back what it was not given. */
+	const tamperApproval = (code: string, change: (kept: Record<string, unknown>) => object) =>
+		kept.approved.records.change(kept.devices.nameOf(code), (record) => ({
+			value: change(record as unknown as Record<string, unknown>) as unknown as StoredApproval,
+		}));
 	return {
 		app,
 		down,
+		kept,
 		slowNextUpdate,
 		tamper,
 		stored,
+		approved,
+		tamperApproval,
 		authorize,
 		started,
 		login,
@@ -270,6 +291,8 @@ async function serve(...given: Parameters<typeof assembly>) {
 		events: audit.events,
 	};
 }
+
+type Served = Awaited<ReturnType<typeof serve>>;
 
 describe("device authorization", () => {
 	it("gives an allowed client a device code and a user code, and refuses a client not allowed the grant [rfc8628-3.2-a] [rfc8628-3.2-b] [rfc8628-3.2-c] [rfc8628-3.2-d] [rfc8628-3.3-b] [rfc8628-6.1-a] [rfc8628-3.1-d] [rfc8628-5.1-a]", async () => {
@@ -580,22 +603,23 @@ describe("polling", () => {
 		expect(await s.poll(code)).toBe("slow_down");
 	});
 
-	it("reads an approval it does not know as none", async () => {
+	it("reads an approval it does not know as none, and an approved device with none in hand as pending, never taking it", async () => {
 		const s = await serve();
 		const cookie = await s.login();
-		const changes = [
-			({ approval: _, ...rest }: Record<string, unknown>) => rest,
-			(kept: Record<string, unknown>) => ({
-				...kept,
-				approval: { ...(kept.approval as object), extra: 1 },
-			}),
-		];
-		for (const change of changes) {
-			const { code, user } = await s.started();
-			await s.verify(cookie, { action: "approve", user_code: user });
-			await s.tamper(code, change);
-			expect(await s.poll(code)).toBe("invalid_grant");
-		}
+		const { code, user } = await s.started();
+		await s.verify(cookie, { action: "approve", user_code: user });
+		// One a 0.19 instance kept on the record, of a shape it does not know: the record reads as none.
+		await s.tamper(code, (kept) => ({
+			...kept,
+			approval: { subject: "alice", approvedAt: now, amr: ["pwd"], authenticatedAt: now, extra: 1 },
+		}));
+		expect(await s.poll(code)).toBe("invalid_grant");
+		// Approved, with its approval neither on the record nor kept apart: it waits, untaken.
+		const other = await s.started();
+		await s.verify(cookie, { action: "approve", user_code: other.user });
+		await s.kept.approved.records.remove(s.kept.devices.nameOf(other.code));
+		expect(await s.poll(other.code)).toBe("authorization_pending");
+		expect(await s.stored(other.code)).toMatchObject({ state: "approved" });
 	});
 
 	it("leaves the scope out of a token answer when it has none", async () => {
@@ -708,7 +732,7 @@ describe("polling", () => {
 		const s = await serve({}, [policy]);
 		const { code, user } = await s.started();
 		await s.verify(await s.login(), { action: "approve", user_code: user });
-		const approval = (await s.stored(code)).approval as { session?: string };
+		const approval = (await s.approved(code)) as { session?: string };
 		expect(approval.session).toEqual(expect.any(String));
 		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
 		expect(asked.length).toBeGreaterThanOrEqual(2);
@@ -721,7 +745,7 @@ describe("polling", () => {
 		now += 3_000_000;
 		const { code, user } = await s.started();
 		await s.verify(cookie, { action: "approve", user_code: user });
-		const approval = (await s.stored(code)).approval as { session: string };
+		const approval = (await s.approved(code)) as { session: string };
 		const entry = await s.app.get(sessions).entryOf(approval.session);
 		if (entry.kind !== "entered") throw new Error("not entered");
 		const { endsAt } = entry;
@@ -736,7 +760,7 @@ describe("polling", () => {
 		const s = await serve();
 		const { code, user } = await s.started();
 		await s.verify(await s.login(), { action: "approve", user_code: user });
-		const approval = (await s.stored(code)).approval as { session: string };
+		const approval = (await s.approved(code)) as { session: string };
 		await s.app.get(sessions).close(approval.session);
 		expect(await s.poll(code)).toBe("invalid_grant");
 	});
@@ -777,7 +801,7 @@ describe("polling", () => {
 		const s = await serve({}, [closing]);
 		const { code, user } = await s.started();
 		await s.verify(await s.login(), { action: "approve", user_code: user });
-		const approval = (await s.stored(code)).approval as { session: string };
+		const approval = (await s.approved(code)) as { session: string };
 		close = async () => {
 			await s.app.get(sessions).close(approval.session);
 		};
@@ -804,10 +828,7 @@ describe("polling", () => {
 		const s = await serve({}, [standingChecked], undefined, true, lagging.module);
 		const { code, user } = await s.started();
 		await s.verify(await s.login(), { action: "approve", user_code: user });
-		await s.tamper(code, (kept) => {
-			const { session: _, ...approval } = kept.approval as Record<string, unknown>;
-			return { ...kept, approval };
-		});
+		await s.tamperApproval(code, ({ session: _, ...approval }) => approval);
 		now += 1000;
 		lagging.lag();
 		await s.app.get(subjectRevocation).revoke("alice");
@@ -840,6 +861,77 @@ describe("polling", () => {
 		s.slowNextUpdate(600_000);
 		expect(await s.poll(code)).toBe("expired_token");
 		expect(await s.poll(code)).toBe("expired_token");
+	});
+});
+
+describe("approvals kept apart, and a mixed fleet with 0.19.1", () => {
+	/** An approval as verification keeps it apart. */
+	const approvalOf = (subject = "alice") =>
+		({
+			format: 1,
+			subject,
+			approvedAt: runtime.clock.now(),
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+		}) as unknown as StoredApproval;
+	/** Makes an approved device of a pending one, the approval kept apart, as 0.20's verification will. */
+	const approvedApart = async (s: Served, code: string) => {
+		const name = s.kept.devices.nameOf(code);
+		expect(await s.kept.approvals.create(name, approvalOf(), 600_000, "alice")).toBe("created");
+		await s.tamper(code, (kept) => ({ ...kept, state: "approved" }));
+	};
+
+	it("issues from an approval kept apart, the record holding none", async () => {
+		const s = await serve();
+		const { code } = await s.started();
+		await approvedApart(s, code);
+		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
+		expect(await s.stored(code)).toMatchObject({ state: "taken" });
+		expect((await s.stored(code)).approval).toBeUndefined();
+	});
+
+	it("takes nothing approved after its read, its approval not in hand, and issues at the next poll", async () => {
+		const s = await serve();
+		const { code } = await s.started();
+		const name = s.kept.devices.nameOf(code);
+		await s.kept.approvals.create(name, approvalOf(), 600_000, "alice");
+		// Read pending; approved before the take, by another request.
+		s.kept.kept.raceNextChange((record) => ({ ...record, state: "approved" }) as never);
+		expect(await s.poll(code)).toBe("authorization_pending");
+		expect(await s.stored(code)).toMatchObject({ state: "approved" });
+		now += 5000;
+		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
+	});
+
+	it("issues, at 0.20, a device 0.19.1 approved, its approval on the record", async () => {
+		const s = await serve();
+		const { code } = await s.started();
+		// As 0.19.1's verification writes it: approved, the approval on the record, none kept apart.
+		const approval = { subject: "alice", approvedAt: now, amr: ["pwd"], authenticatedAt: now };
+		await s.tamper(code, (kept) => ({ ...kept, state: "approved", approval }));
+		expect(readAt0191((await s.stored(code)) as never)?.approval).toEqual(approval);
+		expect(await s.approved(code)).toBeUndefined();
+		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
+	});
+
+	it("is used up at 0.19.1 with invalid_grant, a device approved with its approval kept apart", async () => {
+		const s = await serve();
+		const { code } = await s.started();
+		await approvedApart(s, code);
+		const name = s.kept.devices.nameOf(code);
+		expect(await pollAt0191(s.kept.devices, name, "tv", runtime.clock.now())).toBe("invalid_grant");
+		expect(await s.stored(code)).toMatchObject({ state: "taken" });
+		expect(await s.poll(code)).toBe("invalid_grant");
+	});
+
+	it("writes no field 0.19.1 does not read: each record it keeps parses there", async () => {
+		const s = await serve();
+		const { code } = await s.started();
+		expect(readAt0191((await s.stored(code)) as never)).toBeDefined();
+		await approvedApart(s, code);
+		expect(readAt0191((await s.stored(code)) as never)).toBeDefined();
+		await s.poll(code);
+		expect(readAt0191((await s.stored(code)) as never)).toMatchObject({ state: "taken" });
 	});
 });
 
@@ -974,7 +1066,8 @@ describe("verification", () => {
 		const cookie = await s.login();
 		now += 2_000;
 		expect((await s.verify(cookie, { action: "approve", user_code: user })).status).toBe(200);
-		expect((await s.stored(code)).approval).toEqual({
+		expect(await s.approved(code)).toEqual({
+			format: 1,
 			subject: "alice",
 			approvedAt: now,
 			amr: ["pwd"],
@@ -1061,6 +1154,118 @@ describe("verification", () => {
 		for (const code of codes) expect(JSON.stringify(s.events)).not.toContain(code);
 	});
 
+	it("keeps the approval apart, the device's record deciding approve against deny and keeping no subject", async () => {
+		const s = await serve();
+		const { code, user } = await s.started();
+		const cookie = await s.login();
+		expect((await s.verify(cookie, { action: "approve", user_code: user })).status).toBe(200);
+		expect(await s.stored(code)).toMatchObject({ state: "approved" });
+		expect(JSON.stringify(await s.stored(code))).not.toContain("alice");
+		expect(await s.approved(code)).toMatchObject({ format: 1, subject: "alice" });
+		// What 0.20 writes on the device, 0.19.1 reads.
+		expect(readAt0191((await s.stored(code)) as never)).toMatchObject({ state: "approved" });
+		const denied = await s.started();
+		expect((await s.verify(cookie, { action: "deny", user_code: denied.user })).status).toBe(200);
+		expect(await s.approved(denied.code)).toBeUndefined();
+	});
+
+	it("keeps the approval of the next approver where the first's was never kept, answering a third already decided", async () => {
+		const s = await serve();
+		const { code, user } = await s.started();
+		s.down.approvals.failNext("create");
+		const first = await s.verify(await s.login(), { action: "approve", user_code: user });
+		expect([first.status, first.body.error]).toEqual([503, "temporarily_unavailable"]);
+		expect(s.events.at(-1)).toMatchObject({
+			kind: "device.decision_outcome_unknown",
+			subject: "alice",
+			attributes: { action: "approve", client: "tv" },
+		});
+		expect(await s.stored(code)).toMatchObject({ state: "approved" });
+		expect(await s.poll(code)).toBe("authorization_pending");
+		const second = await s.verify(await s.login("bob"), { action: "approve", user_code: user });
+		expect(second.status).toBe(200);
+		expect(await s.approved(code)).toMatchObject({ subject: "bob" });
+		const third = await s.verify(await s.login("carol"), { action: "approve", user_code: user });
+		expect([third.status, third.body.error]).toEqual([409, "already_decided"]);
+		const denial = await s.verify(await s.login("carol"), { action: "deny", user_code: user });
+		expect([denial.status, denial.body.error]).toEqual([409, "already_decided"]);
+		now += 5000;
+		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
+	});
+
+	it("keeps an approval at most its bound, approved on a clock behind the one that set the device's end", async () => {
+		const s = await serve({ "code-lifetime": "1h" });
+		const { code, user } = await s.started();
+		const cookie = await s.login();
+		// The verifier's clock five seconds behind the authorizing one's.
+		now -= 5000;
+		const approved = await s.verify(cookie, { action: "approve", user_code: user });
+		expect(approved.status).toBe(200);
+		expect(await s.approved(code)).toMatchObject({ subject: "alice" });
+		expect(s.kept.lifetimes).toEqual([approvalRecordMaxMs]);
+	});
+
+	it("keeps an approval at most its bound where the authorizing clock ran a minute ahead (Codex's case)", async () => {
+		const s = await serve({ "code-lifetime": "1h" });
+		// Authorized on a clock 60 s ahead; approved a second later on one in step.
+		now += 60_000;
+		const { code, user } = await s.started();
+		now -= 59_000;
+		const cookie = await s.login();
+		expect((await s.verify(cookie, { action: "approve", user_code: user })).status).toBe(200);
+		expect(await s.approved(code)).toMatchObject({ subject: "alice" });
+		// Unclamped, it would ask 3,779,000 ms of a space bounded at 3,720,000 ms.
+		expect(s.kept.lifetimes).toEqual([approvalRecordMaxMs]);
+		expect(approvalRecordMaxMs).toBe(3_720_000);
+	});
+
+	it("refuses an approval for an erased subject, naming no one, and the device waits to its end", async () => {
+		const s = await serve();
+		const { code, user } = await s.started();
+		s.kept.erased.add("alice");
+		const refused = await s.verify(await s.login(), { action: "approve", user_code: user });
+		expect([refused.status, refused.body.error, refused.body.error_description]).toEqual([
+			403,
+			"access_denied",
+			"subject_unknown",
+		]);
+		expect(s.events.at(-1)).not.toHaveProperty("subject");
+		expect(s.events.at(-1)).toEqual({
+			kind: "device.approval_refused",
+			at: now,
+			attributes: {
+				client: "tv",
+				outcome: "subject_unknown",
+				withheld: "erased",
+				source: "198.51.100.1",
+			},
+		});
+		expect(await s.poll(code)).toBe("authorization_pending");
+		now += 600_000;
+		expect(await s.poll(code)).toBe("expired_token");
+	});
+
+	it("lets one of a 0.19.1 and a 0.20 approver stand, whichever decides first", async () => {
+		const s = await serve();
+		const legacy = { subject: "bob", approvedAt: now, amr: ["pwd"], authenticatedAt: now };
+		// 0.19.1 first: it decides on the record with its approval; 0.20 then finds it decided.
+		const a = await s.started();
+		const name = s.kept.devices.nameOf(a.code);
+		expect(await approveAt0191(s.kept.devices, name, legacy, now)).toBe("decided");
+		const late = await s.verify(await s.login(), { action: "approve", user_code: a.user });
+		expect([late.status, late.body.error]).toEqual([409, "already_decided"]);
+		expect(await s.approved(a.code)).toBeUndefined();
+		expect(await s.poll(a.code)).toMatchObject({ token_type: "Bearer" });
+		// 0.20 first: 0.19.1, which decides only a pending device, finds it decided.
+		const b = await s.started();
+		expect((await s.verify(await s.login(), { action: "approve", user_code: b.user })).status).toBe(
+			200,
+		);
+		const other = s.kept.devices.nameOf(b.code);
+		expect(await approveAt0191(s.kept.devices, other, legacy, now)).toBe("already");
+		expect(await s.approved(b.code)).toMatchObject({ subject: "alice" });
+	});
+
 	it("records a subject over its attempt limit, and a decision whose write could not be told", async () => {
 		const s = await serve({ attempts: 1 });
 		const { user } = await s.started();
@@ -1143,6 +1348,28 @@ it("refuses to start where nothing records a token to its session, so a logout c
 		where: "device-grant",
 		reason: expect.stringMatching(/recorded to the session/),
 	});
+});
+
+it("refuses to start where the stores offer part of erasure's ports: the devices' walk without the approvals' erase and migrate", async () => {
+	const { input, kept } = assembly();
+	Object.assign(kept.devices, { walk: kept.kept.records.walk });
+	const refused = await assemble(input).catch((e: unknown) => e);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals).toContainEqual({
+		where: "device-grant",
+		reason: expect.stringMatching(/all three, or none/),
+	});
+});
+
+it("contributes its eraser, `device-grant`, not erasable over stores without erasure's ports", async () => {
+	const found = contract<readonly Eraser[]>("found-erasers");
+	const finder = defineModule({ name: "finder", replicaSafe: false, takes: [erasers] }, (m) => [
+		m.provide(found).by((c) => c.collect(erasers)),
+	]);
+	const { input } = assembly({}, [finder]);
+	const app = await assemble(input);
+	const eraser = app.get(found).find((e) => e.name === "device-grant");
+	expect([eraser?.erasable, eraser?.after]).toEqual([false, undefined]);
 });
 
 it("takes all its module names, with a public origin and without", async () => {

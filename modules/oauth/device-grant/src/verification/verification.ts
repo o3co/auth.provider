@@ -6,18 +6,27 @@ import { determinedSource } from "@mod/request-source";
 import { type Sessions, sessions } from "@mod/session";
 import { oauthError } from "@mod/token-endpoint";
 import { type Tokens, tokens } from "@mod/tokens";
+import { createApproval } from "../approval-record/approval-record.ts";
 import events from "../audit-events.ts";
 import { normalized } from "../codes.ts";
 import { deviceGrantType } from "../contract.ts";
-import { type Device, fromStored, rewriteAt } from "../record.ts";
+import { type Approval, type Device, fromStored, rewriteAt } from "../record.ts";
 import type { Settings } from "../section.ts";
-import { type DeviceStore, deviceStore, type UserCodes, userCodes } from "../store.ts";
+import {
+	type ApprovalRecords,
+	approvalRecords,
+	type DeviceStore,
+	deviceStore,
+	type UserCodes,
+	userCodes,
+} from "../store.ts";
 
 export interface Verifying {
 	readonly sessions: Sessions;
 	readonly attempts: RateLimit;
 	readonly audit: Audit;
 	readonly devices: DeviceStore;
+	readonly approvals: ApprovalRecords;
 	readonly userCodes: UserCodes;
 	readonly runtime: Runtime;
 	readonly settings: Settings;
@@ -104,32 +113,56 @@ export function verificationWith(v: Verifying): Pick<Route, "handle" | "unavaila
 				return oauthError(403, "access_denied", admitted.description);
 			}
 		}
-		const decision: Pick<Device, "state" | "approval"> =
-			action === "approve"
-				? {
-						state: "approved",
-						approval: {
-							subject: context.subject,
-							approvedAt: now,
-							amr: [...context.amr],
-							authenticatedAt: context.authenticatedAt,
-							...(context.authenticatedAtUnknown ? { authenticatedAtUnknown: true as const } : {}),
-							session: entry.session.id,
-						},
-					}
-				: { state: "denied" };
-		// Each run of the rewrite reads the clock, so a code that ends meanwhile is not decided.
-		const decided = await rewriteAt(v.devices, name, v.runtime.clock, (held, at) =>
-			held.state === "pending" && held.expiresAt > at ? { ...held, ...decision } : undefined,
-		).catch((error: unknown) => {
+		// The device's record decides approve against deny, once, and keeps no subject.
+		const decision: Pick<Device, "state"> = { state: action === "approve" ? "approved" : "denied" };
+		const unknown = (error: unknown) => {
 			// The write may or may not have landed.
 			audited("device.decision_outcome_unknown", { action, client: device.clientId });
 			throw error;
-		});
+		};
+		// Each run of the rewrite reads the clock, so a code that ends meanwhile is not decided.
+		const decided = await rewriteAt(v.devices, name, v.runtime.clock, (held, at) =>
+			held.state === "pending" && held.expiresAt > at ? { ...held, ...decision } : undefined,
+		).catch(unknown);
 		if (decided && decided.before.expiresAt <= decided.at) return oauthError(410, "expired_token");
+		const { before } = decided ?? {};
+		// Approved, with no approval kept (one whose approval was never created): this approver's is
+		// kept now. A device's state only moves forward, so 409 and 410 are right even on a stale
+		// read; a stale `approved` with no approval at worst keeps an approval that is bounded,
+		// erasable and never used.
+		const unkept = action === "approve" && before?.state === "approved" && !before.approval;
 		// Decided once: a decision made first, here or elsewhere, stands.
-		if (decided?.before.state !== "pending") {
-			return oauthError(409, "already_decided");
+		if (before?.state !== "pending" && !unkept) return oauthError(409, "already_decided");
+		if (action === "approve") {
+			const approval: Approval = {
+				subject: context.subject,
+				approvedAt: now,
+				amr: [...context.amr],
+				authenticatedAt: context.authenticatedAt,
+				...(context.authenticatedAtUnknown ? { authenticatedAtUnknown: true as const } : {}),
+				session: entry.session.id,
+			};
+			const made = await createApproval(
+				v.approvals,
+				name,
+				approval,
+				device.expiresAt,
+				v.runtime.clock.now(),
+			).catch(unknown);
+			// Whose approval is kept is the first created.
+			if (made === "exists") return oauthError(409, "already_decided");
+			if (made === "erased") {
+				// Its subject erased: refused, naming it nowhere; the device waits to its end.
+				const withheld = {
+					client: device.clientId,
+					outcome: "subject_unknown",
+					withheld: "erased",
+				};
+				declaredAudit(v.audit, events).record("device.approval_refused", {
+					attributes: { ...withheld, ...source },
+				});
+				return oauthError(403, "access_denied", "subject_unknown");
+			}
 		}
 		audited(action === "approve" ? "device.approved" : "device.denied", {
 			client: device.clientId,
@@ -142,7 +175,15 @@ export function verificationWith(v: Verifying): Pick<Route, "handle" | "unavaila
 }
 
 /** What `verificationOver` takes. */
-export const verificationTakes = [sessions, attemptLimit, audit, deviceStore, userCodes, tokens];
+export const verificationTakes = [
+	sessions,
+	attemptLimit,
+	audit,
+	deviceStore,
+	approvalRecords,
+	userCodes,
+	tokens,
+];
 
 /** The handler over the contracts the assembly gives. */
 export const verificationOver = async (c: BuildContext<Settings>) =>
@@ -151,6 +192,7 @@ export const verificationOver = async (c: BuildContext<Settings>) =>
 		attempts: await c.get(attemptLimit),
 		audit: await c.get(audit),
 		devices: await c.get(deviceStore),
+		approvals: await c.get(approvalRecords),
 		userCodes: await c.get(userCodes),
 		runtime: c,
 		settings: c.section,

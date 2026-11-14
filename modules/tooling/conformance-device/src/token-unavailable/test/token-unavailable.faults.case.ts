@@ -22,7 +22,13 @@ import {
 	pollAt,
 	said,
 } from "../../faults/test/faults.ts";
-import { isStoreCall, recordReadOf, sessionEntryRead, takeOf } from "../../faults/test/wire.ts";
+import {
+	approvalOf,
+	isStoreCall,
+	recordReadOf,
+	sessionEntryRead,
+	takeOf,
+} from "../../faults/test/wire.ts";
 
 // The area lets requests go uncounted where the store fails (rate-limit's fail-mode open, as the OAuth
 // part sets it), so each scene reaches the device grant's own decision: the device's record, the
@@ -196,7 +202,7 @@ describe("the token endpoint issuing no token for a device code while the store 
 		});
 	});
 
-	it("gives no token for a poll whose approving session's entry is read on one server and confirmed on another [guarantee-3-e] {fault:Fs}", async () => {
+	it("gives no token for a poll whose confirmed read of its approval is made on one server and confirmed on another [guarantee-3-e] {fault:Fs}", async () => {
 		await on({ name: "device-token-unavailable-fs", replicas: 3 }, async (dep) => {
 			const i = instanceOf(dep);
 			await control(i);
@@ -211,31 +217,33 @@ describe("the token endpoint issuing no token for a device code while the store 
 			i.relay.reset("operations");
 			await reconnected(i, moved.upstream());
 			const from = performance.now();
-			const confirmed = i.relay.observe(confirmation({ replicas: 1 }));
 			const answer = await polledAt(i, d);
-			const wait = await confirmed;
 			const upstreamOf = (id: number) => i.relay.connections().find((x) => x.id === id)?.upstream;
-			// The poll read the device's record and then the approving session's entry on the new primary;
-			// the entry's read is confirmed (the device's record is not), its round passing on the old one.
+			// The poll read the device's record on the new primary, then its approval, confirmed: a write
+			// of its own on the new primary, whose confirmation's round passes, and succeeds, on the old one.
 			const record = i.relay
 				.executions(recordReadOf(d))
 				.find((e) => e.at > from && runIdOf(e.reply) === newId);
 			expect(record).toBeDefined();
-			// The approving session's: the first entry read on the record's connection after it.
-			const ran = i.relay
+			const approval = i.relay
+				.executions(approvalOf(d))
+				.find((e) => record !== undefined && e.at > record.at && runIdOf(e.reply) === newId);
+			expect(approval && upstreamOf(approval.connection)).toEqual(moved.upstream());
+			const wait = i.relay
+				.executions(confirmation({ replicas: 1 }))
+				.find((e) => approval !== undefined && e.at > approval.at);
+			expect(wait?.succeeded).toBe(true);
+			expect(wait && upstreamOf(wait.connection)).toEqual(old.upstream());
+			// The approving session's entry is not read before that confirmation.
+			const entries = i.relay
 				.executions(sessionEntryRead)
-				.find(
+				.filter(
 					(e) =>
-						record !== undefined &&
-						e.connection === record.connection &&
-						e.at > record.at &&
-						e.at < wait.at,
+						approval !== undefined && wait !== undefined && e.at > approval.at && e.at < wait.at,
 				);
-			expect(ran && runIdOf(ran.reply)).toBe(newId);
-			expect(ran && upstreamOf(ran.connection)).toEqual(moved.upstream());
-			expect(upstreamOf(wait.connection)).toEqual(old.upstream());
-			// The comparison refuses at the session entry's confirmation, before any take, so no take is
-			// written. With the comparison taken out, the poll gives a token.
+			expect(entries).toEqual([]);
+			// The comparison refuses at that confirmation, before any take, so no take is written.
+			// With the comparison taken out, the poll gives a token.
 			expect(successes(i, takeOf(d)).filter((e) => e.at > from)).toEqual([]);
 			noToken(answer);
 			i.relay.reset("confirming");
