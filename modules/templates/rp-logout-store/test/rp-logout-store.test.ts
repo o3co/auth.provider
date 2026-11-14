@@ -3,6 +3,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { noticeBodies, noticeQueue, pendingNotices, sessionClients } from "@mod/rp-logout";
 import {
 	noticeBodiesContract,
+	noticeQueueContract,
 	pendingNoticesContract,
 	sessionClientsContract,
 } from "@mod/rp-logout/testing";
@@ -65,14 +66,10 @@ for (const phase of ["reader", "indexed"] as const) {
 	);
 }
 
-// The queue goes through as the pending notices do.
-pendingNoticesContract(
-	"rp-logout-store's queue on records, on a simulated replicated store",
-	async () => {
-		const { app, faults } = await open();
-		return { notices: app.get(noticeQueue), ...faults };
-	},
-);
+noticeQueueContract("rp-logout-store on records, on a simulated replicated store", async () => {
+	const { app, faults } = await open();
+	return { queue: app.get(noticeQueue), ...faults };
+});
 
 it("starts over a store's blip unready, out of traffic, and turns ready once the store answers", async () => {
 	const simulated = simulatedStore();

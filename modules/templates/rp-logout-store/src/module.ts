@@ -35,6 +35,7 @@ const noticeGuaranteeFor: Record<keyof typeof pendingNoticesNeeds, Guarantee> = 
 /**
  * The 0.19 notices: no subject's data from 0.20, which never writes here; 0.19's notices, each with
  * a subject, are held only until rp-logout's one migration drains them, before erasure is enabled.
+ * TODO(0.22): retired through `retire-space`, once a walk finds it empty.
  */
 const pending: Space = {
 	name: "rp-logout-store.notices",
