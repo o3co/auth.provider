@@ -4424,6 +4424,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
       zod:
         specifier: 4.6.7
         version: 4.6.7
