@@ -17,6 +17,7 @@ Internal module of `records`: a walk of a space's records over the walk a mainte
 - Only the keys of the place's space and its records are read; another space's, or another name's, are passed over. A record gone since its page was taken is passed over.
 - Values are read as the space's own reads are, confirmed only where it declares confirmed reads, and never opened. A record met twice is handed over twice.
 - A store that cannot tell answers `unavailable`; the caller's signal answers `aborted`. Neither is a finished walk.
+- An abort met once the last page is taken changes nothing: the walk finished, every record met handed over, as `sweep` takes no signal.
 
 ## Depends on
 - `kernel` (`Unavailable`), `store` (`Json`); the package's `Place`.
