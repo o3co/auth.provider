@@ -3,7 +3,7 @@ import { recordingLog } from "@mod/kernel/testing";
 import { OutboundUnavailable } from "@mod/outbound";
 import { memoryRecords } from "@mod/records/testing";
 import { expect, it } from "vitest";
-import { bodyOf, entryOf, idOf, keep } from "../../notice-body/notice-body.ts";
+import { bodyOf, entryOf, idOf, keep, move } from "../../notice-body/notice-body.ts";
 import type { NoticeBodies, PendingNotices } from "../../store.ts";
 import { noticesOver } from "../notices.ts";
 
@@ -46,10 +46,14 @@ function noticesFor(answers: (() => Promise<number>)[] = []) {
 			return { failed };
 		},
 	};
+	const log = recordingLog();
 	// The bodies and their queue in memory.
 	const stand = memoryRecords<string>(() => now, { shards: 1, perShard: 100 });
+	/** Subjects erased: no body is created for them. */
+	const erased = new Set<string>();
 	const bodies: NoticeBodies = {
-		create: async (id, body, ms) => stand.records.create(id, body, ms),
+		create: async (id, body, ms, subject) =>
+			erased.has(subject) ? "erased" : stand.records.create(id, body, ms),
 		read: stand.records.read,
 		remove: stand.records.remove,
 	};
@@ -79,7 +83,7 @@ function noticesFor(answers: (() => Promise<number>)[] = []) {
 		sessionClients: { members: async () => [] },
 		clock: { now: () => now },
 		random: { bytes: (length) => new Uint8Array(length) },
-		log: recordingLog().log,
+		log: log.log,
 		notifyMs,
 		tokenSeconds: 300,
 		retryMs,
@@ -106,6 +110,9 @@ function noticesFor(answers: (() => Promise<number>)[] = []) {
 		enter,
 		waits,
 		bodies,
+		erased,
+		log,
+		pending,
 		queue: stand.deferred,
 		entries,
 		answers,
@@ -186,7 +193,7 @@ it("delivers an entry's notice from its body, then removes the body, then the en
 		until: t.now() + 60_000,
 		jti: "j-2",
 	};
-	expect(await keep(t, one, t.now())).toBe("kept");
+	expect(await keep(t, one, t.now())).toEqual({ entry: entryOf(idOf(bodyOf(one))) });
 	await t.notices.sweep();
 	expect(t.sent).toEqual([uri, uri]);
 	expect([await t.bodies.read(idOf(bodyOf(one))), await t.entries()]).toEqual([undefined, []]);
@@ -213,5 +220,52 @@ it("tries each notice kept nowhere once, naming no subject, and throws NoticeUns
 		message: expect.not.stringContaining("alice"),
 	});
 	await t.notices.tellOnce([one]);
+	expect([t.sent.length, await t.entries()]).toEqual([2, []]);
+});
+
+it("leaves a body of a format it does not know, under its own id, neither sent nor removed", async () => {
+	const t = noticesFor();
+	const newer = JSON.stringify({
+		format: 2,
+		client: "app",
+		session: "s-2",
+		subject: "alice",
+		until: t.now() + 60_000,
+	});
+	await t.bodies.create(idOf(newer), newer, 60_000, "alice");
+	await t.queue.add(entryOf(idOf(newer)));
+	// The 0.19 notice alone is sent; the newer body's try is counted failed, for a newer host.
+	expect(await t.notices.sweep()).toEqual({ failed: 1 });
+	expect([t.sent, await t.bodies.read(idOf(newer)), await t.entries()]).toEqual([
+		[uri],
+		newer,
+		[entryOf(idOf(newer))],
+	]);
+});
+
+it("does a 0.19 notice whose try failed and whose subject is erased, keeping nothing, counted as no failure", async () => {
+	const t = noticesFor([unavailable]);
+	t.erased.add("alice");
+	expect(await t.notices.sweep()).toEqual({ failed: 0 });
+	expect([t.sent, t.kept(), await t.entries()]).toEqual([[uri], [], []]);
+	expect(t.log.lines().map((l) => [l.event, l.fields])).toEqual([
+		["rp-logout.notice_unkept", { client: "app", told: "false" }],
+	]);
+});
+
+it("moves both strings v0.19.1 keeps for one notice, made and tried again, to one body, delivered once", async () => {
+	const t = noticesFor();
+	// As v0.19.1's `closing` writes a notice, and its `later` keeps it after a failed try.
+	const made =
+		'{"client":"app","session":"s-9","subject":"alice","until":1800086400000,"jti":"j-9"}';
+	const later =
+		'{"client":"app","session":"s-9","subject":"alice","until":1800086400000,"jti":"j-9","after":1800000060000}';
+	const stores = { bodies: t.bodies, queue: t.queue, pending: t.pending };
+	for (const notice of [made, later]) {
+		expect(await move(stores, notice, t.log.log, t.now())).toBe("moved");
+	}
+	t.advance(retryMs);
+	await t.notices.sweep();
+	// The fixture's own 0.19 notice, and the one body: its first entry delivers it, the second meets none.
 	expect([t.sent.length, await t.entries()]).toEqual([2, []]);
 });

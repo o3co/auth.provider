@@ -77,12 +77,12 @@ export default defineModule(
 				// Answers once every notice is kept; the first try goes on after, and the sweep takes what it leaves.
 				closing: async (session) => {
 					const { entries, withheld } = await notices.closing(session);
-					// Kept nowhere, their subject erased: tried once now, the close failing where one would be again.
-					if (withheld.length > 0) await notices.tellOnce(withheld);
 					const trying = notices.deliver(entries);
 					running.add(trying);
 					// deliver never rejects, so the try left running ends without an unhandled rejection.
 					void trying.then(() => running.delete(trying));
+					// Kept nowhere, their subject erased: tried once now, the close failing where one would be again.
+					if (withheld.length > 0) await notices.tellOnce(withheld);
 				},
 			};
 		}),

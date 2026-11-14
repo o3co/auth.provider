@@ -5,19 +5,14 @@ import { type Keys, keys } from "@mod/keys";
 import { DestinationRefused, type Outbound, outbound } from "@mod/outbound";
 import type { Session } from "@mod/session";
 import {
-	bodyOf,
 	bodyRead,
 	entryOf,
 	entryRead,
-	idOf,
 	keep,
+	move,
 	type Notice,
 	pendingOf,
 } from "../notice-body/notice-body.ts";
-
-/** A notice's id, its body's. */
-const idOfNotice = (notice: Notice) => idOf(bodyOf(notice));
-
 import { registration } from "../registration/registration.ts";
 import type { Settings } from "../section.ts";
 import {
@@ -146,25 +141,17 @@ export function noticesOver(p: NoticeParts) {
 		try {
 			await attempt(fields, done);
 		} catch (error) {
-			const { after: _, jti, ...told } = fields;
-			const moved = await keep(
-				p,
-				{ ...told, ...(jti ? { jti } : {}) },
-				p.clock.now(),
-				nextAfter(fields),
-			)
-				.then(async (kept) => {
-					if (kept === "erased") p.log.warn("rp-logout.notice_withheld", { client: fields.client });
-					await done();
-				})
-				.catch(() => undefined);
-			// Where the store cannot keep the wait either, the notice stays as it was, tried at the next sweep.
-			void moved;
+			// Moved to a body and an entry; where the store cannot, it stays as it was, for the next sweep.
+			const moved = await move(p, notice, p.log, p.clock.now(), nextAfter(fields)).catch(
+				() => undefined,
+			);
+			// Its subject erased, it is done: no notice is kept to count.
+			if (moved === "withheld") return;
 			throw error;
 		}
 	};
-	/** Tries an entry's notice from its body, as `notices`' card says. */
-	const sendEntry = async (entry: string): Promise<void> => {
+	/** Tries an entry's notice from its body, as `notices`' card says; an id in `tried` once a sweep. */
+	const sendEntry = async (entry: string, tried?: Set<string>): Promise<void> => {
 		const named = entryRead(entry);
 		const done = () => p.queue.done(entry);
 		if (!named) {
@@ -173,7 +160,10 @@ export function noticesOver(p: NoticeParts) {
 		}
 		const body = await p.bodies.read(named.id);
 		if (body === undefined) return done();
+		if (tried?.has(named.id)) return;
 		const fields = bodyRead(named.id, body);
+		// A format this host does not know: left alone, to end at its own lifetime or a newer host.
+		if (fields === "newer") throw new Error("rp-logout: a notice body of a newer format");
 		const settle = async () => {
 			await p.bodies.remove(named.id);
 			await done();
@@ -187,6 +177,7 @@ export function noticesOver(p: NoticeParts) {
 			return settle();
 		}
 		if (named.after !== undefined && p.clock.now() < named.after) return;
+		tried?.add(named.id);
 		try {
 			await attempt(fields, settle);
 		} catch (error) {
@@ -222,8 +213,9 @@ export function noticesOver(p: NoticeParts) {
 					until,
 					jti: tokenId(),
 				};
-				if ((await keep(p, notice, p.clock.now())) === "erased") withheld.push(notice);
-				else entries.push(entryOf(idOfNotice(notice)));
+				const kept = await keep(p, notice, p.clock.now());
+				if (kept === "erased") withheld.push(notice);
+				else entries.push(kept.entry);
 			}
 			return { entries, withheld };
 		},
@@ -249,7 +241,9 @@ export function noticesOver(p: NoticeParts) {
 		},
 		/** Tries every entry, and every 0.19 notice, whose wait is over once; answers how many failed. */
 		sweep: async () => {
-			const entries = await p.queue.each(sendEntry);
+			// Each body tried once a sweep: a replaced entry met again in a later shard is passed.
+			const tried = new Set<string>();
+			const entries = await p.queue.each((entry) => sendEntry(entry, tried));
 			const pending = await p.pending.each(send);
 			return { failed: entries.failed + pending.failed };
 		},

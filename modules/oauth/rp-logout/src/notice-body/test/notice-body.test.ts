@@ -44,9 +44,9 @@ it("keeps one fixed body form, its id the SHA-256 of that string, a 0.19 notice'
 
 it("adds an entry only once the body is kept, created or there already, and none where the subject is erased", async () => {
 	const p = placed();
-	expect(await keep(p, notice, 0)).toBe("kept");
-	expect(await keep(p, notice, 0)).toBe("kept");
 	const id = idOf(bodyOf(notice));
+	expect(await keep(p, notice, 0)).toEqual({ entry: entryOf(id) });
+	expect(await keep(p, notice, 0)).toEqual({ entry: entryOf(id) });
 	expect(await p.bodies.read(id)).toBe(bodyOf(notice));
 	expect(await p.listed(p.queue)).toEqual([entryOf(id)]);
 	p.erased.add("bob");
@@ -79,6 +79,9 @@ it("does a 0.19 notice whose subject is erased, keeping and sending nothing, log
 	expect(await move(p, one, p.log.log, 0)).toBe("withheld");
 	expect([await p.listed(p.pending), await p.listed(p.queue)]).toEqual([[], []]);
 	expect(p.log.lines()).toEqual([
-		expect.objectContaining({ event: "rp-logout.notice_withheld", fields: { client: "app" } }),
+		expect.objectContaining({
+			event: "rp-logout.notice_unkept",
+			fields: { client: "app", told: "false" },
+		}),
 	]);
 });

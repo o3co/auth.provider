@@ -6,7 +6,7 @@ import {
 	type SubjectReading,
 } from "@mod/erasure-extensions";
 import type { Clock, Log } from "@mod/kernel";
-import { bodyRead, idOf, move } from "../notice-body/notice-body.ts";
+import { bodyRead, move, pendingOf } from "../notice-body/notice-body.ts";
 import type { NoticeBodies, NoticeQueue, PendingNotices } from "../store.ts";
 import { portsOf } from "./ports.ts";
 
@@ -20,9 +20,9 @@ export interface NoticeStores {
 /** Whose a body written before indexing is: the subject it names, where it reads and hashes to its id. */
 const bodySubjectOf: SubjectReading = async (key, value) => {
 	const told = typeof value === "string" ? bodyRead(key, value) : undefined;
-	return told
+	return told && told !== "newer"
 		? { kind: "subject", subject: told.subject }
-		: { kind: "unreadable", reason: "a notice body of another shape, or not its id's" };
+		: { kind: "unreadable", reason: "a notice body of another shape or format, or not its id's" };
 };
 
 /**
@@ -46,8 +46,9 @@ export function noticesEraser(stores: NoticeStores, log: Log, clock: Clock): Era
 		const sessions = new Set<string>();
 		let unread = 0;
 		const report = await ports.erase(subject, signal, (body) => {
-			const told = bodyRead(idOf(body), body);
-			if (told) sessions.add(told.session);
+			// Removed by its own id: its session read as it stands, a body of a newer format too.
+			const session = pendingOf(body)?.session;
+			if (session !== undefined) sessions.add(session);
 			else unread += 1;
 		});
 		return { reports: [report], logoutGaps: sessions.size + unread };

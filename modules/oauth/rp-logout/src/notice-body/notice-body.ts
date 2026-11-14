@@ -36,6 +36,15 @@ const parsed = (text: string) => {
 	}
 };
 
+/** A body's format: its number, where it holds one. */
+const formatOf = (body: string): unknown => {
+	try {
+		return (JSON.parse(body) as { format?: unknown } | null)?.format;
+	} catch {
+		return undefined;
+	}
+};
+
 /** A 0.19 notice's fields and its `after`, or none where it does not read as one. */
 export const pendingOf = (notice: string) => parsed(notice);
 
@@ -56,9 +65,14 @@ export const bodyOf = (n: Notice): string =>
 /** A body's id: the SHA-256 of its string, so the same notice always has the same id. */
 export const idOf = (body: string) => createHash("sha256").update(body, "utf8").digest("base64url");
 
-/** A body read back under `id`: its notice where it hashes to that id and reads as one; none otherwise. */
-export const bodyRead = (id: string, body: string): Notice | undefined => {
+/**
+ * A body read back under `id`: its notice where it hashes to that id and reads as format 1; `newer`
+ * where it hashes to its id in a format this host does not know, left to a newer host; none where
+ * it does not hash to its id, or does not read as format 1.
+ */
+export const bodyRead = (id: string, body: string): Notice | "newer" | undefined => {
 	if (idOf(body) !== id) return undefined;
+	if (formatOf(body) !== 1) return "newer";
 	const n = parsed(body);
 	return (
 		n && {
@@ -88,15 +102,15 @@ export const entryRead = (entry: string) => {
 
 /**
  * Keeps a notice's body under its subject until it is given up, then adds its entry: only after the
- * create answered `created` or `exists`, so an entry never names a body not kept. `erased` where the
- * subject is erased: nothing is kept.
+ * create answered `created` or `exists`, so an entry never names a body not kept. Answers the entry,
+ * or `erased` where the subject is erased: nothing is kept.
  */
 export async function keep(
 	stores: { readonly bodies: NoticeBodies; readonly queue: NoticeQueue },
 	notice: Notice,
 	now: number,
 	after?: number,
-): Promise<"kept" | "erased"> {
+): Promise<{ readonly entry: string } | "erased"> {
 	const body = bodyOf(notice);
 	const id = idOf(body);
 	const made = await stores.bodies.create(
@@ -106,27 +120,15 @@ export async function keep(
 		notice.subject,
 	);
 	if (made === "erased") return "erased";
-	await stores.queue.add(entryOf(id, after));
-	return "kept";
+	const entry = entryOf(id, after);
+	await stores.queue.add(entry);
+	return { entry };
 }
 
 /**
- * A 0.19 notice past its time, or one that does not read as a notice: done, and logged, as the
- * worker drops one.
- */
-export async function dropped(pending: PendingNotices, notice: string, log: Log, now: number) {
-	const fields = pendingOf(notice);
-	if (fields && now <= fields.until) return false;
-	if (fields) log.warn("rp-logout.notice_expired", { client: fields.client });
-	else log.warn("rp-logout.notice_unreadable", {});
-	await pending.done(notice);
-	return true;
-}
-
-/**
- * Moves a 0.19 notice to a body and an entry, then done: its `after` on the entry. One past its
- * time or unreadable is dropped; one whose subject is erased is done, nothing kept, logged naming no
- * subject.
+ * Moves a 0.19 notice to a body and an entry, then done: its wait on the entry, or `after` where a
+ * failed try gives a new one. One past its time or unreadable is done and logged, as the worker drops
+ * one; one whose subject is erased is done, nothing kept, logged naming no subject.
  */
 export async function move(
 	stores: {
@@ -137,13 +139,19 @@ export async function move(
 	notice: string,
 	log: Log,
 	now: number,
+	after?: number,
 ): Promise<"moved" | "dropped" | "withheld"> {
-	if (await dropped(stores.pending, notice, log, now)) return "dropped";
 	const fields = pendingOf(notice);
-	if (!fields) return "dropped";
-	const { after, jti, ...rest } = fields;
-	const kept = await keep(stores, { ...rest, ...(jti ? { jti } : {}) }, now, after);
-	if (kept === "erased") log.warn("rp-logout.notice_withheld", { client: fields.client });
+	if (!fields || now > fields.until) {
+		if (fields) log.warn("rp-logout.notice_expired", { client: fields.client });
+		else log.warn("rp-logout.notice_unreadable", {});
+		await stores.pending.done(notice);
+		return "dropped";
+	}
+	const { after: was, jti, ...rest } = fields;
+	const kept = await keep(stores, { ...rest, ...(jti ? { jti } : {}) }, now, after ?? was);
+	if (kept === "erased")
+		log.warn("rp-logout.notice_unkept", { client: fields.client, told: "false" });
 	await stores.pending.done(notice);
 	return kept === "erased" ? "withheld" : "moved";
 }
