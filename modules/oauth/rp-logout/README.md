@@ -14,7 +14,7 @@
 - Extension point `upstreamEnds`: at most one; two or more refuse boot.
 - Client metadata section `rp-logout` (`registration`).
 - Contribution to `code-grant`'s session redemptions (`redemptions`): keeps the client until the session ends, and at least `remember-for`.
-- `session-participants`' participant `notices`: answers once each notice is kept, then tries each once.
+- `session-participants`' participant `notices`: answers once each notice is kept, then tries each once; for a subject erased, tries each client once, keeping nothing, and fails the close where a try would be again (`NoticeUnsent`).
 - `issuer`'s metadata items: `end_session_endpoint` (on the origin `issuer` names its endpoints on, `endpointOrigin`: the public origin wherever one is written), and `frontchannel_logout_supported`, `frontchannel_logout_session_supported`, `backchannel_logout_supported` and `backchannel_logout_session_supported` (true).
 - Audit events with the subject and `sid`, and `source` and `userAgent` when known: `logout.success`, `logout.cascade_failed` (with `store` `session`, the module whose close failed); `logout.close_pending` with `sid` and `source` only, declared exactly as `logout` declares it. All declared in `./audit-events`.
 - Operator section: `remember-for` (1m–30d, default `1d`), `notify-within` (1m–7d, default `1d`), `sweep-interval` (1s–1h, default `1m`), `confirm-within` (1m–15m, default `5m`: how long a carried request and a confirmation may be answered); times are written with their unit, a bare number refused.

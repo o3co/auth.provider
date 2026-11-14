@@ -434,13 +434,15 @@ export function servedEach() {
 	};
 }
 
-/** The notices kept, without settling any: `each` keeps every notice whose handling throws. */
+/** The notices kept, entries and 0.19 notices, without settling any: `each` keeps every one whose handling throws. */
 export async function keptNotices(h: Harness) {
 	const found: string[] = [];
-	await h.stores.notices.each(async (notice) => {
-		found.push(notice);
+	const listing = async (kept: string) => {
+		found.push(kept);
 		throw new Error("only listing");
-	});
+	};
+	await h.stores.queue.each(listing);
+	await h.stores.notices.each(listing);
 	return found;
 }
 

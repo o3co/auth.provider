@@ -4,8 +4,20 @@ import { type BuildContext, type Clock, type Log, type Random, Unavailable } fro
 import { type Keys, keys } from "@mod/keys";
 import { DestinationRefused, type Outbound, outbound } from "@mod/outbound";
 import type { Session } from "@mod/session";
-import { z } from "zod";
-import { bodyRead, entryRead } from "../notice-body/notice-body.ts";
+import {
+	bodyOf,
+	bodyRead,
+	entryOf,
+	entryRead,
+	idOf,
+	keep,
+	type Notice,
+	pendingOf,
+} from "../notice-body/notice-body.ts";
+
+/** A notice's id, its body's. */
+const idOfNotice = (notice: Notice) => idOf(bodyOf(notice));
+
 import { registration } from "../registration/registration.ts";
 import type { Settings } from "../section.ts";
 import {
@@ -19,21 +31,25 @@ import {
 	sessionClients,
 } from "../store.ts";
 
-/**
- * What a notice holds: one client to tell that a session closed, until a time (epoch ms on `kernel`'s
- * clock), the logout token's id every try sends, and, once a try failed, the time before which it is
- * not tried again. Fields it does not know are left unread, so a notice a newer host wrote is still
- * delivered; one with no id gets a new one on each try, and one with no such time is tried at once.
- */
-const fieldsShape = z.object({
-	client: z.string(),
-	session: z.string(),
-	subject: z.string(),
-	until: z.number(),
-	jti: z.string().min(1).optional(),
-	after: z.number().optional(),
-});
-type Fields = z.infer<typeof fieldsShape>;
+/** A 0.19 notice's fields and its wait, or a body's notice. */
+interface Fields {
+	readonly client: string;
+	readonly session: string;
+	readonly subject: string;
+	readonly until: number;
+	readonly jti?: string | undefined;
+	readonly after?: number | undefined;
+}
+
+/** Notices kept nowhere, their subject erased, whose one try would have been tried again: the close fails. */
+export class NoticeUnsent extends Error {
+	override readonly name = "NoticeUnsent";
+	readonly clients: readonly string[];
+	constructor(clients: readonly string[]) {
+		super(`rp-logout: a notice kept nowhere is not delivered to ${clients.join(", ")}`);
+		this.clients = clients;
+	}
+}
 
 export interface NoticeParts {
 	readonly keys: Pick<Keys, "sign">;
@@ -60,16 +76,6 @@ const logoutEvent = "http://schemas.openid.net/event/backchannel-logout";
 const delivered = (status: number) => status >= 200 && status < 300;
 /** A client that is busy or down may take it later; any other answer, §2.8's `400` among them, is final. */
 const mayRetry = (status: number) => status === 408 || status === 429 || status >= 500;
-
-/** A notice's fields, or none when it does not read as one. */
-const fieldsOf = (notice: string): Fields | undefined => {
-	try {
-		const read = fieldsShape.safeParse(JSON.parse(notice));
-		return read.success ? read.data : undefined;
-	} catch {
-		return undefined;
-	}
-};
 
 export function noticesOver(p: NoticeParts) {
 	const tokenId = () => Buffer.from(p.random.bytes(16)).toString("base64url");
@@ -119,26 +125,14 @@ export function noticesOver(p: NoticeParts) {
 		return done();
 	};
 	/**
-	 * Keeps the notice to be tried no sooner than `retryMs` after it was last due, or after it was made
-	 * where it never waited (Back-Channel Logout 1.0 §2.5), its other fields as they were, those it does
-	 * not know among them. The time is read from the notice alone, never the clock, so every host that
-	 * fails the same notice at once keeps the same one, which the store holds once. Kept before the old
-	 * one goes, so a failure between leaves the notice twice, never none: the client tells the repeat
-	 * by its id. Answers the notice kept.
+	 * The time before which a notice whose try failed is not tried again: `retryMs` after it was last
+	 * due, or after it was made where it never waited (Back-Channel Logout 1.0 §2.5), read from the
+	 * notice alone, so every host failing it at once keeps the same one.
 	 */
-	const later = async (notice: string, fields: Fields): Promise<string> => {
-		const due = fields.after ?? fields.until - p.notifyMs;
-		const next = JSON.stringify({ ...JSON.parse(notice), after: due + p.retryMs });
-		await p.pending.add(next);
-		await p.pending.done(notice);
-		return next;
-	};
-	/**
-	 * Tries a notice whose wait is over; one to try again is kept to wait, and throws. The notice kept
-	 * goes into `kept`, so a sweep that comes upon it again, its time still past, passes over it.
-	 */
-	const send = async (notice: string, kept?: Set<string>): Promise<void> => {
-		const fields = fieldsOf(notice);
+	const nextAfter = (fields: Fields) => (fields.after ?? fields.until - p.notifyMs) + p.retryMs;
+	/** A 0.19 notice: tried once its wait is over; a failed try moves it to a body and an entry. */
+	const send = async (notice: string): Promise<void> => {
+		const fields = pendingOf(notice);
 		const done = () => p.pending.done(notice);
 		if (!fields) {
 			p.log.warn("rp-logout.notice_unreadable", {});
@@ -152,9 +146,20 @@ export function noticesOver(p: NoticeParts) {
 		try {
 			await attempt(fields, done);
 		} catch (error) {
+			const { after: _, jti, ...told } = fields;
+			const moved = await keep(
+				p,
+				{ ...told, ...(jti ? { jti } : {}) },
+				p.clock.now(),
+				nextAfter(fields),
+			)
+				.then(async (kept) => {
+					if (kept === "erased") p.log.warn("rp-logout.notice_withheld", { client: fields.client });
+					await done();
+				})
+				.catch(() => undefined);
 			// Where the store cannot keep the wait either, the notice stays as it was, tried at the next sweep.
-			const next = await later(notice, fields).catch(() => undefined);
-			if (next !== undefined) kept?.add(next);
+			void moved;
 			throw error;
 		}
 	};
@@ -182,31 +187,70 @@ export function noticesOver(p: NoticeParts) {
 			return settle();
 		}
 		if (named.after !== undefined && p.clock.now() < named.after) return;
-		await attempt(fields, settle);
+		try {
+			await attempt(fields, settle);
+		} catch (error) {
+			// Its entry replaced, kept before the old one goes; the body is never changed.
+			await p.queue
+				.add(
+					entryOf(
+						named.id,
+						nextAfter({ ...fields, ...(named.after ? { after: named.after } : {}) }),
+					),
+				)
+				.then(done)
+				.catch(() => undefined);
+			throw error;
+		}
 	};
 	return {
-		/** Keeps a notice for each client the session holds; answers the notices once all are kept. */
-		closing: async (session: Session): Promise<readonly string[]> => {
+		/**
+		 * Keeps a body and an entry for each client the session holds; answers the entries once all are
+		 * kept, and the notices kept nowhere, their subject erased.
+		 */
+		closing: async (session: Session) => {
 			const held = await p.sessionClients.members(session.id);
 			const until = p.clock.now() + p.notifyMs;
 			const { subject } = session.context;
-			const notices = held.map(({ member }) =>
-				JSON.stringify({ client: member, session: session.id, subject, until, jti: tokenId() }),
-			);
-			for (const notice of notices) await p.pending.add(notice);
-			return notices;
+			const entries: string[] = [];
+			const withheld: Notice[] = [];
+			for (const { member } of held) {
+				const notice: Notice = {
+					client: member,
+					session: session.id,
+					subject,
+					until,
+					jti: tokenId(),
+				};
+				if ((await keep(p, notice, p.clock.now())) === "erased") withheld.push(notice);
+				else entries.push(entryOf(idOfNotice(notice)));
+			}
+			return { entries, withheld };
 		},
-		/** Tries each notice once and never rejects: one that fails stays for the sweep. */
-		deliver: async (notices: readonly string[]): Promise<void> => {
-			for (const notice of notices) await send(notice).catch(() => undefined);
+		/** Tries each entry once and never rejects: one that fails stays for the sweep. */
+		deliver: async (entries: readonly string[]): Promise<void> => {
+			for (const entry of entries) await sendEntry(entry).catch(() => undefined);
+		},
+		/**
+		 * Tries each notice kept nowhere once, logged naming no subject; throws `NoticeUnsent` where a
+		 * try would be tried again.
+		 */
+		tellOnce: async (notices: readonly Notice[]): Promise<void> => {
+			const unsent: string[] = [];
+			for (const notice of notices) {
+				const told = await attempt(notice, async () => {}).then(
+					() => true,
+					() => false,
+				);
+				p.log.warn("rp-logout.notice_unkept", { client: notice.client, told: String(told) });
+				if (!told) unsent.push(notice.client);
+			}
+			if (unsent.length > 0) throw new NoticeUnsent(unsent);
 		},
 		/** Tries every entry, and every 0.19 notice, whose wait is over once; answers how many failed. */
 		sweep: async () => {
-			const kept = new Set<string>();
 			const entries = await p.queue.each(sendEntry);
-			const pending = await p.pending.each((notice) =>
-				kept.has(notice) ? Promise.resolve() : send(notice, kept),
-			);
+			const pending = await p.pending.each(send);
 			return { failed: entries.failed + pending.failed };
 		},
 	};

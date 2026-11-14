@@ -224,3 +224,39 @@ it("settles a notice the client takes with any 2xx, as taken [oidc-bcl-2.5-b]", 
 	expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
 	expect(h.logs().filter((l) => l.event === "rp-logout.backchannel_rejected")).toEqual([]);
 });
+
+it("keeps nothing for an erased subject's close, tries each client once, and fails the close where a try would be again", async () => {
+	for (const [answer, closes] of [
+		[200, true],
+		[503, false],
+	] as const) {
+		const h = await serve();
+		h.answering.answer = async () => answer;
+		const { session } = await h.login();
+		await h.redeemed(session.id, "app");
+		h.stores.erased.add("alice");
+		// A close whose participant threw is left pending, the session still closing.
+		expect((await h.app.get(sessions).close(session.id)).kind).toBe(closes ? "closed" : "pending");
+		expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
+		const told = h.logs().filter((l) => l.event === "rp-logout.notice_unkept");
+		expect(told).toEqual([
+			expect.objectContaining({ fields: { client: "app", told: String(closes) } }),
+		]);
+		expect(JSON.stringify(told)).not.toContain("alice");
+	}
+});
+
+it("writes nothing to the 0.19 notices: a notice it keeps, or tries again, is an entry and a body", async () => {
+	const h = await serve();
+	const answers = [503];
+	h.answering.answer = async () => answers.shift() ?? 200;
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	const old: string[] = [];
+	await h.stores.notices.each(async (notice) => {
+		old.push(notice);
+	});
+	expect([old, (await keptNotices(h)).length]).toEqual([[], 1]);
+});
