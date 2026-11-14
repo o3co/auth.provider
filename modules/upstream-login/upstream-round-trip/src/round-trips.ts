@@ -41,6 +41,10 @@ export interface Live {
 
 /** One round trip to an upstream, from its start to its callback, taken once. */
 export interface RoundTrips {
+	/**
+	 * Begins a round trip carrying `carried` for its lifetime. What a caller carries holds no
+	 * subject's data: the space is declared to hold none, so erasure never looks in it.
+	 */
 	begin(at: {
 		readonly name: string;
 		readonly carried: Carried;

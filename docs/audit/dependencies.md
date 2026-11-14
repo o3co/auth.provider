@@ -345,7 +345,7 @@ flowchart LR
 | `@mod/upstream-client` | feature | `@mod/external-jwt`, `@mod/kernel`, `@mod/outbound`, `@mod/upstreams`, `@mod/url-setting` |
 | `@mod/upstream-handoff` | feature | `@mod/erasure-extensions`, `@mod/kernel`, `@mod/login-gates`, `@mod/seal`, `@mod/session`, `@mod/upstreams` |
 | `@mod/upstream-handoff-seal` | feature | `@mod/kernel`, `@mod/seal`, `@mod/upstream-handoff` |
-| `@mod/upstream-round-trip` | feature | `@mod/cookies`, `@mod/http`, `@mod/kernel` |
+| `@mod/upstream-round-trip` | feature | `@mod/cookies`, `@mod/erasure-extensions`, `@mod/http`, `@mod/kernel` |
 | `@mod/upstreams` | feature | `@mod/http`, `@mod/kernel`, `@mod/session` |
 
 ### user-ledger-http

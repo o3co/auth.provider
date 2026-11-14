@@ -32,7 +32,7 @@ Internal module of `federation`: one round trip through an upstream IdP, a login
 - Audit records come only after the take, with `idp` and the source when `request-source` determined it: the local subject on success or hold, the reason on failure. None records an unavailable answer.
 
 ## Data
-- What a round trip carries for federation: the return target, `prompt` and max age, and the continuation it goes on to with what that kept. Read back by its own shape: another is none.
+- What a round trip carries for federation: the return target, `prompt` and max age, and the continuation it goes on to with what that kept. Read back by its own shape: another is none. It holds no subject's data: the return target (`redirectTo`) is the browser's, tied to no subject, and a continuation's card says what it keeps.
 - An earlier version's shape, a link's session and subject as a field of their own, which instances not yet upgraded still write, is read as the continuation `link` with them kept; it is never written. A record mixing both shapes is none.
 
 ## Depends on

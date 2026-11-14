@@ -1,8 +1,9 @@
 import cookiesModule from "@mod/cookies/module";
+import { type Eraser, erasers } from "@mod/erasure-extensions";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import httpServer from "@mod/http-server/module";
-import { assemble, defineModule, kernelConfig } from "@mod/kernel";
+import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import { expect, it } from "vitest";
@@ -47,4 +48,25 @@ it("takes all it names", async () => {
 	};
 	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
 	expect((await takesUnused(input))["upstream-round-trip"]).toBeUndefined();
+});
+
+it("contributes its eraser, `upstream-round-trip`, erasable only over a store that walks", async () => {
+	const found = contract<readonly Eraser[]>("found-erasers");
+	const finder = defineModule({ name: "finder", replicaSafe: false, takes: [erasers] }, (m) => [
+		m.provide(found).by((c) => c.collect(erasers)),
+	]);
+	for (const walks of [false, true]) {
+		const kept = memoryRecords<StoredRoundTrip>(() => 0, { shards: 1, perShard: 1 });
+		const ports = { save: kept.records.create, update: kept.records.change };
+		const store = defineModule({ name: "round-trip-store", replicaSafe: false, takes: [] }, (m) => [
+			m.provide(roundTripStore).by(() => (walks ? { ...ports, walk: kept.records.walk } : ports)),
+		]);
+		const app = await assemble({
+			modules: [http, httpServer, cookiesModule, store, roundTripModule, finder],
+			config: { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) },
+			runtime: quietRuntime({ clock: { now: () => 0 } }),
+		});
+		const eraser = app.get(found).find((e) => e.name === "upstream-round-trip");
+		expect([eraser?.erasable, eraser?.after], String(walks)).toEqual([walks, undefined]);
+	}
 });
