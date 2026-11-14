@@ -35,7 +35,7 @@
 - Returns and channel URLs are as `registration` judges them; a registered client's back channel that `outbound`'s policy refuses refuses boot.
 - A record whose section does not fit is refused whole (`clients`).
 - The front-channel page's frames, what it declares it loads, and its script: `page`'s card.
-- A notice names the client, the session's handle and subject, the time it is given up (`notify-within` on `kernel`'s clock), its logout token's `jti` and, once a try failed, the time before which it is not tried again; past that time, it is dropped and logged. Fields it does not know are left unread; one that does not read is dropped and logged.
+- What a notice names, and when it is dropped: `notice-body`'s card.
 - The logout token's signing and claims: `notices`' card.
 - How a try is posted, and what settles it: `notices`' card.
 
