@@ -32,9 +32,14 @@ const held: Space = {
 };
 /** The notices state the same needs; typed by their own, so a need they add alone fails the type check. */
 const noticeGuaranteeFor: Record<keyof typeof pendingNoticesNeeds, Guarantee> = guaranteeFor;
+/**
+ * The 0.19 notices: no subject's data from 0.20, which never writes here; 0.19's notices, each with
+ * a subject, are held only until rp-logout's one migration drains them, before erasure is enabled.
+ */
 const pending: Space = {
 	name: "rp-logout-store.notices",
 	guarantees: Object.values(noticeGuaranteeFor),
+	subjectData: "none",
 };
 /** The bodies state the same needs, typed by their own. */
 const bodyGuaranteeFor: Record<keyof typeof noticeBodiesNeeds, Guarantee> = guaranteeFor;
