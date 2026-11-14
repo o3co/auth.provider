@@ -21,12 +21,11 @@ export interface DeviceStore {
 	/**
 	 * Once, under the maintenance key: hands `visit` each device record a walk of the store meets,
 	 * until `visit` answers false; optional in 0.20. TODO(0.22): goes with the 0.19 approval read
-	 * (`grant/grant.ts`). `walked` when every record
-	 * was handed over; `stopped` where `visit` stopped it; `unfinished` with why where the walk could
-	 * not finish, which tells nothing of the records it did not reach. Its reads need no
-	 * confirmation: 0.19's approval writes were confirmed and survive a failover, and 0.20 never
-	 * removes one, so a record holding one is met; a new one appears only while a 0.19 instance
-	 * still writes, which the stop's reason names.
+	 * (`grant/grant.ts`). `walked` when every record was handed over; `stopped` where `visit` stopped
+	 * it; `unfinished` with why where the walk could not finish, which tells nothing of the records it
+	 * did not reach. Its reads need no confirmation: 0.19's approval writes were confirmed and survive
+	 * a failover, and 0.20 never removes one, so a record holding one is met; a new one appears only
+	 * while a 0.19 instance still writes, which the stop's reason names.
 	 */
 	walk?(
 		walk: Walk,
