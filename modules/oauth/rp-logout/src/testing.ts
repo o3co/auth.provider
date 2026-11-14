@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import type { section } from "./section.ts";
-import type { NoticeBodies, PendingNotices, SessionClients } from "./store.ts";
+import type { NoticeBodies, NoticeQueue, PendingNotices, SessionClients } from "./store.ts";
 
 export type RpLogoutSettings = z.input<typeof section>;
 
@@ -85,11 +85,29 @@ export interface PendingNoticesPlace extends Faults {
 	readonly notices: PendingNotices;
 }
 
-/** What rp-logout needs from any implementation of the notices: each kept until done, a failed one kept, through faults. */
+/** What rp-logout needs from any implementation of the 0.19 notices: each kept until done, a failed one kept, through faults. */
 export function pendingNoticesContract(
 	name: string,
 	open: () => Promise<PendingNoticesPlace>,
 ): void {
+	listContract("rp-logout's pending notices", name, open);
+}
+
+/** A place that keeps the queue of entries, as one implementation of the store interface offers it. */
+export interface NoticeQueuePlace extends Faults {
+	readonly queue: NoticeQueue;
+}
+
+/** What rp-logout needs from any implementation of the queue: each entry kept until done, a failed one kept, through faults. */
+export function noticeQueueContract(name: string, open: () => Promise<NoticeQueuePlace>): void {
+	listContract("rp-logout's notice queue", name, async () => {
+		const { queue, ...faults } = await open();
+		return { notices: queue, ...faults };
+	});
+}
+
+/** The cases a list kept until done answers, the 0.19 notices' or the queue's. */
+function listContract(label: string, name: string, open: () => Promise<PendingNoticesPlace>): void {
 	let n = 0;
 	const fresh = () => `n-${++n}-${Math.random().toString(36).slice(2)}`;
 	const listed = async (notices: PendingNotices) => {
@@ -99,7 +117,7 @@ export function pendingNoticesContract(
 		});
 		return found.sort();
 	};
-	describe(`rp-logout's pending notices: ${name}`, () => {
+	describe(`${label}: ${name}`, () => {
 		it("keeps each notice until done, and one whose handling fails", async () => {
 			const place = await open();
 			const [kept, settled] = [fresh(), fresh()].sort() as [string, string];

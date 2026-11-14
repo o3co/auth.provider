@@ -31,7 +31,7 @@
 - A close left pending records `logout.close_pending` and answers `503 temporarily_unavailable`, clearing the cookie, as `logout` does, however often it is sent again: its tokens live until the close is swept, so it is no logout yet.
 - After a close, `logout.success`, with the subject and `sid`. What a close, or a session closed before or gone, is answered: `ending`'s card for a logout request, `confirm`'s for a confirmation's post.
 - Every answer is `no-store` with `Pragma: no-cache`.
-- Each host sweeps the kept notices every `sweep-interval`, and a session's close never waits for a client: `notices`' card.
+- Each host sweeps the kept notices every `sweep-interval`, and a session's close waits for no client but an erased subject's (tried once, awaited): `notices`' card.
 - A client the store pushes out of a session's set is logged.
 - Returns and channel URLs are as `registration` judges them; a registered client's back channel that `outbound`'s policy refuses refuses boot.
 - A record whose section does not fit is refused whole (`clients`).
@@ -45,3 +45,5 @@
 
 ## Vocabulary
 - notice: one client to tell that a session closed, until it is given up.
+- body: what a notice tells, kept once under its subject, never changed.
+- entry: a body's id and the time before which it is not tried, kept in the queue.

@@ -125,7 +125,7 @@ export function noticesOver(p: NoticeParts) {
 	 * notice alone, so every host failing it at once keeps the same one.
 	 */
 	const nextAfter = (fields: Fields) => (fields.after ?? fields.until - p.notifyMs) + p.retryMs;
-	/** A 0.19 notice: tried once its wait is over; a failed try moves it to a body and an entry. */
+	/** A 0.19 notice: tried once its wait is over; a failed try moves it. TODO(0.22): goes with them. */
 	const send = async (notice: string): Promise<void> => {
 		const fields = pendingOf(notice);
 		const done = () => p.pending.done(notice);

@@ -1,5 +1,6 @@
 import {
 	noticeBodiesContract,
+	noticeQueueContract,
 	pendingNoticesContract,
 	sessionClientsContract,
 } from "../src/testing.ts";
@@ -25,6 +26,4 @@ noticeBodiesContract("records stand-in", async () => ({
 		now += ms;
 	},
 }));
-pendingNoticesContract("records stand-in, the queue", async () => ({
-	notices: memoryStores(() => now).queue,
-}));
+noticeQueueContract("records stand-in", async () => ({ queue: memoryStores(() => now).queue }));

@@ -30,7 +30,7 @@ export const sessionClientsNeeds = {
 /**
  * The back-channel notices not yet delivered, kept until done, as 0.19 kept them. Read and drained:
  * from the switch to bodies kept apart, no new caller adds. Every call throws Unavailable when the
- * place cannot tell.
+ * place cannot tell. TODO(0.22): removed, with the drain and the space retired.
  */
 export interface PendingNotices {
 	add(notice: string): Promise<void>;

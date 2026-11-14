@@ -53,7 +53,7 @@ export function noticesEraser(stores: NoticeStores, log: Log, clock: Clock): Era
 		});
 		return { reports: [report], logoutGaps: sessions.size + unread };
 	};
-	/** Moves each 0.19 notice to a body and an entry; why it did not finish, or none. */
+	/** Moves each 0.19 notice to a body and an entry; why it did not finish, or none. TODO(0.22): goes. */
 	const drained = async (signal: AbortSignal): Promise<string | undefined> => {
 		try {
 			const { failed } = await stores.pending.each(async (notice) => {
