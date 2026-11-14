@@ -3,6 +3,7 @@ import { recordingLog } from "@mod/kernel/testing";
 import { OutboundUnavailable } from "@mod/outbound";
 import { memoryRecords } from "@mod/records/testing";
 import { expect, it } from "vitest";
+import { bodyOf, entryOf, idOf, keep } from "../../notice-body/notice-body.ts";
 import type { NoticeBodies, PendingNotices } from "../../store.ts";
 import { noticesOver } from "../notices.ts";
 
@@ -83,10 +84,18 @@ function noticesFor(answers: (() => Promise<number>)[] = []) {
 		tokenSeconds: 300,
 		retryMs,
 	});
+	const entries = async () => {
+		const found: string[] = [];
+		await stand.deferred.each(async (x) => void found.push(x));
+		return found;
+	};
 	return {
 		notices,
 		notice,
 		made,
+		bodies,
+		queue: stand.deferred,
+		entries,
 		answers,
 		sent,
 		kept: () => [...kept].map((k) => JSON.parse(k) as Record<string, unknown>),
@@ -156,4 +165,31 @@ it("tries at once a notice kept before notices waited, and one a late sweep find
 	expect(t.kept().map((k) => k.after)).toEqual([t.made + 2 * retryMs]);
 	await t.notices.sweep();
 	expect([t.sent.length, t.kept()]).toEqual([3, []]);
+});
+
+it("delivers an entry's notice from its body, then removes the body, then the entry", async () => {
+	const t = noticesFor();
+	const one = {
+		client: "app",
+		session: "s-2",
+		subject: "alice",
+		until: t.now() + 60_000,
+		jti: "j-2",
+	};
+	expect(await keep(t, one, t.now())).toBe("kept");
+	await t.notices.sweep();
+	expect(t.sent).toEqual([uri, uri]);
+	expect([await t.bodies.read(idOf(bodyOf(one))), await t.entries()]).toEqual([undefined, []]);
+});
+
+it("does an entry whose body is gone, or does not hash to its id, sending nothing from it", async () => {
+	const t = noticesFor();
+	const one = { client: "app", session: "s-2", subject: "alice", until: t.now() + 60_000 };
+	await t.queue.add(entryOf("no-such-body"));
+	await t.bodies.create("not-its-id", bodyOf(one), 60_000, "alice");
+	await t.queue.add(entryOf("not-its-id"));
+	await t.notices.sweep();
+	// The 0.19 notice alone is sent.
+	expect(t.sent).toEqual([uri]);
+	expect([await t.bodies.read("not-its-id"), await t.entries()]).toEqual([undefined, []]);
 });

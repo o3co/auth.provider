@@ -17,5 +17,6 @@ Internal module of `rp-logout`: back-channel notices that a session closed.
 - It is posted as a form through `outbound`, which follows no redirect. A 2xx settles it; 408, 429, 5xx or a failure to reach the client keeps it; a destination `outbound` refuses or any other status settles it, logged.
 - A client gone or without a back-channel URL settles it.
 
+- An entry is tried from its body, read back only where it hashes to the entry's id; settled, the body goes, then the entry. An entry whose body is gone (settled, erased or ended) is done, nothing sent; a body that does not read, or is past its time, is removed and the entry done, logged; one whose wait is not over is passed. A sweep tries the entries, then the 0.19 notices, a notice kept again in it not again.
 ## Depends on
 - `clients`, `issuer`, `keys`, `outbound`, `session` (the session's type); the package's store interfaces, section and `registration`

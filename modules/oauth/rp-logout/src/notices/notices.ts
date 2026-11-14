@@ -5,6 +5,7 @@ import { type Keys, keys } from "@mod/keys";
 import { DestinationRefused, type Outbound, outbound } from "@mod/outbound";
 import type { Session } from "@mod/session";
 import { z } from "zod";
+import { bodyRead, entryRead } from "../notice-body/notice-body.ts";
 import { registration } from "../registration/registration.ts";
 import type { Settings } from "../section.ts";
 import {
@@ -157,6 +158,32 @@ export function noticesOver(p: NoticeParts) {
 			throw error;
 		}
 	};
+	/** Tries an entry's notice from its body, as `notices`' card says. */
+	const sendEntry = async (entry: string): Promise<void> => {
+		const named = entryRead(entry);
+		const done = () => p.queue.done(entry);
+		if (!named) {
+			p.log.warn("rp-logout.notice_unreadable", {});
+			return done();
+		}
+		const body = await p.bodies.read(named.id);
+		if (body === undefined) return done();
+		const fields = bodyRead(named.id, body);
+		const settle = async () => {
+			await p.bodies.remove(named.id);
+			await done();
+		};
+		if (!fields) {
+			p.log.warn("rp-logout.notice_unreadable", {});
+			return settle();
+		}
+		if (p.clock.now() > fields.until) {
+			p.log.warn("rp-logout.notice_expired", { client: fields.client });
+			return settle();
+		}
+		if (named.after !== undefined && p.clock.now() < named.after) return;
+		await attempt(fields, settle);
+	};
 	return {
 		/** Keeps a notice for each client the session holds; answers the notices once all are kept. */
 		closing: async (session: Session): Promise<readonly string[]> => {
@@ -173,12 +200,14 @@ export function noticesOver(p: NoticeParts) {
 		deliver: async (notices: readonly string[]): Promise<void> => {
 			for (const notice of notices) await send(notice).catch(() => undefined);
 		},
-		/** Tries every kept notice whose wait is over once, and one kept again in this sweep not again. */
-		sweep: () => {
+		/** Tries every entry, and every 0.19 notice, whose wait is over once; answers how many failed. */
+		sweep: async () => {
 			const kept = new Set<string>();
-			return p.pending.each((notice) =>
+			const entries = await p.queue.each(sendEntry);
+			const pending = await p.pending.each((notice) =>
 				kept.has(notice) ? Promise.resolve() : send(notice, kept),
 			);
+			return { failed: entries.failed + pending.failed };
 		},
 	};
 }
