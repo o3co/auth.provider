@@ -21,6 +21,7 @@
 - Operator section, besides: `requests` (logout requests per source in each `window`, a GET and a POST together, before any hint is checked; 1–100000, default 60), `window` (1s–1d, default `1m`), and `error-page` (optional: the deployment's page a browser's refused logout goes to).
 - Operator section, for the tokens and pages: `logout-token-lifetime` (1m–15m, default `5m`), `hint-max-age` (1m–1d, default `1d`: an older hint is refused, as a logout another site may have started), and `frame-wait` (2s–10s, default `2s`: how long the front-channel page lets the frames load; raised only).
 - Store interfaces, which the assembly wires, each needing no eviction, a crash and a failover survived: the clients of each session (a keyed set with lifetimes, answering those pushed out); the notices' bodies (by id, each for its subject: create, read, remove; erase and migrate, both or neither, optional until 0.22) and their queue (add, done, go through); the pending notices 0.19 kept, read and drained.
+- The eraser `rp-logout` (internal module `erasure`): a subject's notice bodies erased, `logoutGaps` the distinct sessions among them; the 0.19 notices drained into bodies once, in `migrate`.
 - `./testing`: a configuration builder, and the contract tests of the store interfaces.
 
 ## Invariants

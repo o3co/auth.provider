@@ -227,7 +227,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `confirm` (`src/confirm`): the confirmation of a logout `ending` could not close without asking (OpenID Connect RP-Initiated Logout 1.0 §2), and the request `ending` carries in the browser's URL.
   - `carried` (`src/confirm/carried`): the request `ending` carries on in the browser's URL, a logout it checked that closes nothing by itself.
   - `ending` (`src/ending`): the logout a client starts (OpenID Connect RP-Initiated Logout 1.0).
-  - `erasure` (`src/erasure`): erasing a subject's notice bodies.
+  - `erasure` (`src/erasure`): erasing a subject's notice bodies, and draining the 0.19 notices into bodies once.
   - `notice-body` (`src/notice-body`): what a notice tells, kept apart once under its subject, and the entry that names it.
   - `notices` (`src/notices`): back-channel notices that a session closed.
   - `page` (`src/page`): the front-channel page.

@@ -1,5 +1,6 @@
 import { metadataSections } from "@mod/clients";
 import { csrfChecked } from "@mod/csrf";
+import { erasers } from "@mod/erasure-extensions";
 import { type HttpRequest, type HttpResponse, routes, use } from "@mod/http";
 import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { contract, defineModule } from "@mod/kernel";
@@ -10,12 +11,13 @@ import { loopbackPagesRefused } from "@mod/url-setting";
 import { confirmFrom, confirmPath, confirmTakes, unavailable } from "./confirm/confirm.ts";
 import { upstreamEnds } from "./contract.ts";
 import { endingFrom, endingTakes } from "./ending/ending.ts";
+import { noticesEraser } from "./erasure/eraser.ts";
 import { portsRefused } from "./erasure/ports.ts";
 import { type Notices, noticesFrom, noticesTakes } from "./notices/notices.ts";
 import { remembering, rememberingTakes } from "./redemptions/redemptions.ts";
 import { registrationIn } from "./registration/registration.ts";
 import { type Settings, section } from "./section.ts";
-import { noticeBodies } from "./store.ts";
+import { noticeBodies, noticeQueue, pendingNotices } from "./store.ts";
 
 type Handler = (request: HttpRequest) => Promise<HttpResponse>;
 
@@ -125,6 +127,18 @@ export default defineModule(
 				unavailable: { response: unavailable },
 				handle: await c.get(ending),
 			})),
+		),
+		// Its build takes only its stores, collecting no probes: the erasure gate collects erasers.
+		m.contribute(erasers).by(async (c) =>
+			noticesEraser(
+				{
+					bodies: await c.get(noticeBodies),
+					queue: await c.get(noticeQueue),
+					pending: await c.get(pendingNotices),
+				},
+				c.log,
+				c.clock,
+			),
 		),
 		m.contribute(metadata).by(async (c) => {
 			const origin = endpointOrigin(await c.get(issuer));
