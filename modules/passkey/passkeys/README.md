@@ -21,6 +21,7 @@
   - Passkeys: credentials and subjects, each by a key passkeys makes, saved once for a subject, read, changed from what they hold, kept without end; records of both spaces and the ones a change watches from them changed as one (`updateAsOne`; `updateTogether` deprecated). Its ports: the internal module `ports`' card. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
   - Challenges: opened for a lifetime, taken by putting a mark in place. Needs: survives a crash, never rolled back by failover, names derived from the challenge.
   - Registration challenges, optional until 0.22 (left out, they stay in the challenge store): opened for a lifetime and a subject (`erased` where fenced), changed from what they hold; `erase` and `migrate` both or neither. Needs: the challenge store's.
+- An eraser, `passkeys`, on `erasure-extensions`' `erasers`: the internal module `erasure`'s card.
 - Operator section: `user-verification` (default `preferred`; `discouraged` is warned of at every start, `passkeys.user_unverified`), `max-credentials` (per subject, default 10).
 - `./testing`: the section's test configuration builder, the contract tests of the store interfaces, and `updatingAsOne` (the passkey store's `updateAsOne` over an `updateTogether`, records kept raw, for test doubles).
 
@@ -35,7 +36,7 @@
 - Passkeys and subjects through the passkey store; registration challenges through their store where composed, other challenges through the challenge store. Their keys are the ones `webauthn` made before this package, so the records kept stay readable.
 
 ## Depends on
-- `kernel`, `webauthn` (the ceremonies, the credential's form), `passkey-witness` (whether a witness is composed), `erasure-extensions` (the store's erase and migrate reports)
+- `kernel`, `webauthn` (the ceremonies, the credential's form), `passkey-witness` (whether a witness is composed), `erasure-extensions` (the eraser, the stores' erase and migrate reports)
 
 ## Vocabulary
 - holder: a subject's user handle, the ids of its passkeys, and its fence, which each write that empties the list moves on, never back. passkey: a credential this package keeps for a subject.

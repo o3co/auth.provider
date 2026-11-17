@@ -277,6 +277,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/passkey-witnessing` (feature, `modules/passkey/passkey-witnessing`): Keeps the passkey witness's mark in line with what `passkeys` holds, so losing the passkey store never reads as holding none, but for a passkey lost between its write and its mark. Bridges `passkeys` and the witness composed (`passkey-witness`'s `passkeyWitnesses`).
 - `@mod/passkeys` (feature, `modules/passkey/passkeys`): Keeps passkeys: each subject's user handle, and the credentials registered for it; its internal module `registration` registers them, `records` reads and writes them in the shape written, `joint` changes a list and its records as one, and `ports` uses the store's ports.
   - `challenges` (`src/challenges`): the challenges that registrations and assertions answer.
+  - `erasure` (`src/erasure`): erasing a subject's credentials and holder, fencing its registration challenges, and migrating their spaces, through the stores' ports.
   - `holders` (`src/holders`): whether subjects hold passkeys, and the settle that asks the witnessing where `passkeys` settles.
   - `joint` (`src/joint`): the writes that change a holder's list, each with the records it names in one change, and what a write that emptied a list leaves.
   - `ports` (`src/ports`): the passkey store's ports, as passkeys uses them.

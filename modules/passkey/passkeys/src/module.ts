@@ -1,3 +1,4 @@
+import { erasers } from "@mod/erasure-extensions";
 import { type BuildContext, contract, defineModule, optional } from "@mod/kernel";
 import { passkeyWitnesses } from "@mod/passkey-witness";
 import { ceremonies, freshHandle } from "@mod/webauthn";
@@ -15,6 +16,7 @@ import {
 	registrationChallengeStore,
 	registrations,
 } from "./contract.ts";
+import { passkeysEraser } from "./erasure/eraser.ts";
 import { holdersOver } from "./holders/holders.ts";
 import { passkeysOver } from "./passkeys.ts";
 import { portsRefused, registrationPortsRefused } from "./ports/ports.ts";
@@ -120,6 +122,12 @@ export default defineModule(
 			const records = await passkeysOf(c);
 			return { writtenHolding: (subject) => records.writtenHolding(subject) };
 		}),
+		// Its build takes only the stores, collecting no probes: the erasure gate collects erasers.
+		m
+			.contribute(erasers)
+			.by(async (c) =>
+				passkeysEraser(await c.get(passkeyStore), await c.getOptional(registrationChallengeStore)),
+			),
 		m.provide(made).by(async (c) => {
 			const held = await holdingOf(c);
 			if ("refused" in held) return c.refuse("passkeys", held.refused);
