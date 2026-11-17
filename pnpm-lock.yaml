@@ -4631,6 +4631,12 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
+      '@mod/webauthn':
+        specifier: workspace:*
+        version: link:../../passkey/webauthn
 
   modules/tooling/api-docs:
     dependencies:

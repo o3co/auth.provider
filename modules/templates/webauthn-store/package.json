@@ -12,6 +12,8 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/passkeys": "workspace:*",
 		"@mod/records": "workspace:*",
-		"@mod/store": "workspace:*"
+		"@mod/store": "workspace:*",
+		"@mod/subject-records": "workspace:*",
+		"@mod/webauthn": "workspace:*"
 	}
 }
