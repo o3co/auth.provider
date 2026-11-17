@@ -8,7 +8,6 @@ import type {
 	PasskeyStore,
 	StoredPasskey,
 } from "@mod/passkeys";
-import { updatingAsOne } from "@mod/passkeys/testing";
 
 type Space = keyof PasskeyKeys;
 const hashOf = (value: string) => createHash("sha256").update(value).digest("base64url");
@@ -66,10 +65,8 @@ export function lossy(inner: PasskeyStore) {
 			return { before, after: next.value };
 		},
 	});
-	// The inner store's change as one; over its `updateTogether` where it offers no `updateAsOne` yet.
-	const asOne =
-		inner.updateAsOne?.bind(inner) ??
-		(inner.updateTogether ? updatingAsOne(inner.updateTogether.bind(inner)) : undefined);
+	// Read whether the inner store's port requires it or offers it optionally.
+	const asOne = inner.updateAsOne?.bind(inner);
 	type AsOne = Parameters<NonNullable<PasskeyStore["updateAsOne"]>>[0];
 	const subjectIn = (value: StoredPasskey) => (value as { readonly subject?: unknown }).subject;
 	/**
