@@ -40,15 +40,11 @@ function watchingOps() {
 	return { stores, ops, records: keptPasskeys(store, writeToken) };
 }
 
-it("states the ports a passkey store must offer: exactly one change as one, erase and migrate in both spaces or none", () => {
+it("states the ports a passkey store must offer: erase and migrate in both spaces or none", () => {
 	const { passkeys } = memoryStores();
-	const { updateAsOne, ...withoutAsOne } = passkeys;
-	const updateTogether = (async () => ({ credentials: [], subjects: [] })) as never;
+	const { updateAsOne } = passkeys;
 	const erasing = { erase: async () => ({}) as never, migrate: async () => ({}) as never };
 	expect(portsRefused(passkeys)).toBeUndefined();
-	expect(portsRefused(withoutAsOne)).toMatch(/exactly one of/);
-	expect(portsRefused({ ...passkeys, updateTogether })).toMatch(/exactly one of/);
-	expect(portsRefused({ ...withoutAsOne, updateTogether })).toBeUndefined();
 	const both = {
 		credentials: { ...passkeys.credentials, ...erasing },
 		subjects: { ...passkeys.subjects, ...erasing },

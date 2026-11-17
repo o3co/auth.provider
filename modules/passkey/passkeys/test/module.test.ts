@@ -33,7 +33,6 @@ import {
 	registrations,
 } from "../src/contract.ts";
 import passkeysModule from "../src/module.ts";
-import type { PasskeyStore } from "../src/store.ts";
 import { passkeysConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
@@ -107,28 +106,6 @@ it("takes all it names, with a witnessing and without", async () => {
 	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
 	expect((await takesUnused(composition([]))).passkeys).toBeUndefined();
 	expect((await takesUnused(composition([scriptedWitnessing()]))).passkeys).toBeUndefined();
-});
-
-it("refuses to boot a passkey store that cannot change both its spaces as one", async () => {
-	const stores = memoryStores();
-	// Neither `updateAsOne` nor `updateTogether`: the types cannot require one of two, so boot does.
-	const lacking = {
-		credentials: stores.passkeys.credentials,
-		subjects: stores.passkeys.subjects,
-	} as unknown as PasskeyStore;
-	const apart = defineModule({ name: "stores-apart", replicaSafe: false, takes: [] }, (m) => [
-		m.provide(passkeyStore).by(() => lacking),
-		m.provide(challengeStore).by(() => stores.challenges),
-	]);
-	const refused = await assemble({
-		modules: [apart, auditStandIn().module, webauthn, passkeysModule],
-		config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
-		runtime: quietRuntime(),
-	}).catch((error: unknown) => error);
-	expect(refused).toBeInstanceOf(BootRefused);
-	expect((refused as BootRefused).refusals).toEqual([
-		expect.objectContaining({ where: "passkeys", reason: expect.stringMatching(/as one/) }),
-	]);
 });
 
 it("refuses to boot a registration challenge store offering one of erase and migrate", async () => {

@@ -1,6 +1,6 @@
-import { togetherOf } from "../ports/ports.ts";
+import { type ChangedPasskey, togetherOf } from "../ports/ports.ts";
 import { holderOf, type KeptRecords, stored } from "../records/records.ts";
-import type { ChangedPasskey, PasskeyStore, StoredPasskey } from "../store.ts";
+import type { PasskeyStore, StoredPasskey } from "../store.ts";
 import { registeringWith } from "./registering.ts";
 import { removingWith } from "./removing.ts";
 

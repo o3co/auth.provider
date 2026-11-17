@@ -9,15 +9,10 @@ import type {
 } from "../store.ts";
 
 /**
- * Why the passkey store's ports cannot be used, or none, the one statement of them: exactly one of
- * `updateAsOne` and `updateTogether`, to change both spaces as one; each space's `erase` and
- * `migrate` all four, or none.
+ * Why the passkey store's ports cannot be used, or none, the one statement of them: each space's
+ * `erase` and `migrate` all four, or none.
  */
 export function portsRefused(store: PasskeyStore): string | undefined {
-	const asOne = [store.updateAsOne, store.updateTogether].filter((f) => typeof f === "function");
-	if (asOne.length !== 1) {
-		return "its passkey store offers exactly one of updateAsOne and updateTogether, to change both its spaces as one";
-	}
 	const { credentials: c, subjects: s } = store;
 	const erasing = [c.erase, c.migrate, s.erase, s.migrate].filter((f) => f !== undefined);
 	if (erasing.length % 4 !== 0) {
@@ -32,7 +27,39 @@ export function registrationPortsRefused(store: RegistrationChallengeStore): str
 	return "its registration challenge store offers one of erase and migrate: both, or neither";
 }
 
-type Together = NonNullable<PasskeyStore["updateTogether"]>;
+/** What records of both spaces changed as one held, by space: the keys named, then the watched ones, in order. */
+export interface PasskeysRead {
+	readonly credentials: readonly (StoredPasskey | undefined)[];
+	readonly subjects: readonly (StoredPasskey | undefined)[];
+}
+
+/** The next of each record read, by space in the order read; none keeps it. */
+export interface PasskeysNext {
+	readonly credentials?: readonly ({ readonly value: StoredPasskey } | undefined)[];
+	readonly subjects?: readonly ({ readonly value: StoredPasskey } | undefined)[];
+}
+
+/** One record of a change as one: what it held, and holds after. */
+export interface ChangedPasskey {
+	readonly before: StoredPasskey | undefined;
+	readonly after: StoredPasskey | undefined;
+}
+
+/**
+ * A change of both spaces as one, in the words the writes that change a list use: the keys named
+ * by space, and those `watch` names from what they hold; `change` answers the next of each, by
+ * space in the order read, and runs again on a race; a record it leaves out is kept.
+ */
+type Together = (
+	keys: PasskeyKeys,
+	p: {
+		readonly watch: (read: PasskeysRead) => Partial<PasskeyKeys>;
+		readonly change: (read: PasskeysRead) => PasskeysNext;
+	},
+) => Promise<{
+	readonly credentials: readonly ChangedPasskey[];
+	readonly subjects: readonly ChangedPasskey[];
+}>;
 
 /** The subject a record is written for: the one a passkey's record names, a holder's own. */
 function subjectOf(place: keyof PasskeyKeys, value: StoredPasskey) {
@@ -42,15 +69,11 @@ function subjectOf(place: keyof PasskeyKeys, value: StoredPasskey) {
 }
 
 /**
- * The store's change of both spaces as one, as the writes that change a list ask it: `updateAsOne`
- * where the store offers it, each next a record is given an op, `create` where none is held, else
- * `move` to the subject it is written for (a change where it is that subject's already); a refusal
- * is unavailable. `updateTogether` where offered instead. TODO(0.20, the remove step): `updateAsOne` only.
+ * The store's change of both spaces as one, as the writes that change a list ask it, through
+ * `updateAsOne`: each next a record is given an op, `create` where none is held, else `move` to the
+ * subject it is written for (a change where it is that subject's already); a refusal is unavailable.
  */
 export function togetherOf(store: PasskeyStore): Together {
-	const { updateAsOne, updateTogether } = store;
-	if (updateTogether) return updateTogether.bind(store);
-	if (!updateAsOne) throw broken();
 	return async (keys, p) => {
 		const named = (k: Partial<PasskeyKeys>): PasskeyKey[] => [
 			...(k.credentials ?? []).map((key) => ({ place: "credentials" as const, key })),
@@ -62,7 +85,7 @@ export function togetherOf(store: PasskeyStore): Together {
 		});
 		const targets = named(keys);
 		let watched: readonly PasskeyKey[] = [];
-		const answer = await updateAsOne.call(store, {
+		const answer = await store.updateAsOne({
 			targets,
 			watch: (read) => {
 				watched = named(

@@ -13,14 +13,13 @@ export type StoredChallenge = { readonly [storedChallenge]: true };
 export interface PasskeyRecords {
 	/**
 	 * Keeps a key's first record for its subject, unless the key holds one (`exists`) or, where the
-	 * Store fences saves past a subject's erasure, the subject is erased there (`erased`). passkeys
-	 * always gives the subject. TODO(0.20, the remove step): `subject` required.
+	 * Store fences saves past a subject's erasure, the subject is erased there (`erased`).
 	 */
 	save(
 		key: string,
 		record: StoredPasskey,
 		lifetimeMs: "endless",
-		subject?: string,
+		subject: string,
 	): Promise<"created" | "exists" | "erased">;
 	read(key: string): Promise<StoredPasskey | undefined>;
 	/**
@@ -87,46 +86,10 @@ export interface PasskeyKeys {
 	readonly subjects: readonly string[];
 }
 
-/** What records of both spaces changed as one held, by space: the keys named, then the watched ones, in order. */
-export interface PasskeysRead {
-	readonly credentials: readonly (StoredPasskey | undefined)[];
-	readonly subjects: readonly (StoredPasskey | undefined)[];
-}
-
-/** The next of each record read, by space in the order read; none keeps it. */
-export interface PasskeysNext {
-	readonly credentials?: readonly ({ readonly value: StoredPasskey } | undefined)[];
-	readonly subjects?: readonly ({ readonly value: StoredPasskey } | undefined)[];
-}
-
-/** One record of a change as one: what it held, and holds after. */
-export interface ChangedPasskey {
-	readonly before: StoredPasskey | undefined;
-	readonly after: StoredPasskey | undefined;
-}
-
 /** Passkeys by credential, and each subject's handle and credentials, apart. Every call throws Unavailable when the place cannot tell. */
 export interface PasskeyStore {
 	readonly credentials: PasskeyRecords;
 	readonly subjects: PasskeyRecords;
-	/**
-	 * Changes records of both spaces as one: those `keys` names, and those `watch` names (in either
-	 * space) from what they hold. `change` answers the next of each, by space in the order read; it
-	 * runs again on a race, so it is pure, and a record it leaves out is kept. Every record read is
-	 * held to what was read; a record named twice is read once and written from one naming at most.
-	 * Exactly one of this and `updateAsOne` is offered.
-	 * @deprecated `updateAsOne`; removed in this release, once every Store offers it.
-	 */
-	updateTogether?(
-		keys: PasskeyKeys,
-		p: {
-			readonly watch: (read: PasskeysRead) => Partial<PasskeyKeys>;
-			readonly change: (read: PasskeysRead) => PasskeysNext;
-		},
-	): Promise<{
-		readonly credentials: readonly ChangedPasskey[];
-		readonly subjects: readonly ChangedPasskey[];
-	}>;
 	/**
 	 * Changes records of both spaces as one: those `targets` names, and those `watch` names from what
 	 * they hold, each by the op `decide` gives it, written as one, or refused at one record, nothing
@@ -134,7 +97,7 @@ export interface PasskeyStore {
 	 * change's. Where the Store fences saves past a subject's erasure, a move from a subject whose
 	 * tombstone alone stands is Unavailable.
 	 */
-	updateAsOne?(p: {
+	updateAsOne(p: {
 		readonly targets: readonly PasskeyKey[];
 		readonly watch?: (read: readonly PasskeyRead[]) => readonly PasskeyKey[];
 		readonly decide: (

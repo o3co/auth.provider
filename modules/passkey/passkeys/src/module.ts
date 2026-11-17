@@ -70,8 +70,7 @@ export default defineModule(
 		],
 	},
 	(m) => [
-		// Over a store that changes both its spaces as one, its ports whole: checked here, as the
-		// types cannot say exactly one, nor all or none.
+		// Over a passkey store, its ports whole: checked here, as the types cannot say all or none.
 		// A challenge lives as long as the relying party lets one be answered; over a registration
 		// challenge store, where composed, its ports whole.
 		m.provide(challengesKept).by(async (c) => {

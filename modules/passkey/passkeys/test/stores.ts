@@ -3,6 +3,7 @@ import { defineModule, Unavailable } from "@mod/kernel";
 import { unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import type { Credential } from "@mod/webauthn";
+import type { togetherOf } from "../src/ports/ports.ts";
 import { keptPasskeys } from "../src/records.ts";
 import {
 	type ChallengeStore,
@@ -10,17 +11,18 @@ import {
 	type PasskeyKeys,
 	type PasskeyRecords,
 	type PasskeyStore,
+	type PasskeysAnswer,
 	passkeyStore,
 	type RegistrationChallengeStore,
 	registrationChallengeStore,
 	type StoredChallenge,
 	type StoredPasskey,
 } from "../src/store.ts";
-import { updatingAsOne } from "../src/testing.ts";
 
 type Space = keyof PasskeyKeys;
 type Race = (record: StoredPasskey) => StoredPasskey;
-type Together = Required<Pick<PasskeyStore, "updateTogether">>;
+/** The stand-in's change of both spaces as one, by space, in the words passkeys' writes use. */
+type Together = { readonly updateTogether: ReturnType<typeof togetherOf> };
 type AsOne = Required<Pick<PasskeyStore, "updateAsOne">>;
 
 /**
@@ -251,7 +253,7 @@ export function jointOver(store: PasskeyStore, now: () => number = () => 1_000) 
 			return records.update(...args);
 		},
 	});
-	const asOne = (store.updateAsOne as AsOne["updateAsOne"]).bind(store);
+	const asOne = store.updateAsOne.bind(store);
 	const counting: PasskeyStore = {
 		credentials: one(store.credentials),
 		subjects: one(store.subjects),
@@ -286,13 +288,15 @@ export function jointOver(store: PasskeyStore, now: () => number = () => 1_000) 
 		/** Keeps `record` for `id` as given, whatever it holds: as 0.18 left one, or a test needs. */
 		keepAs: async (id: string, record: object) => {
 			const key = keys.credential(id);
-			if ((await store.credentials.save(key, stored(record), "endless")) === "exists") {
+			// The stand-in keeps no subject: the record's own, if any, is given.
+			const subject = String((record as { subject?: unknown }).subject ?? "");
+			if ((await store.credentials.save(key, stored(record), "endless", subject)) === "exists") {
 				await store.credentials.update(key, () => ({ value: stored(record) }));
 			}
 		},
 		/** Keeps a live record of `subject`'s for `id` as 0.18 left one a registration failed between its writes: on no list. */
 		orphanAs18: (id: string, subject: string) =>
-			store.credentials.save(keys.credential(id), live18(subject), "endless"),
+			store.credentials.save(keys.credential(id), live18(subject), "endless", subject),
 		/** Lists `ids` on the subject's holder as 0.18 left them, whatever their records hold. */
 		listAs18: async (subject: string, ids: readonly string[]) => {
 			await records.handleFor(subject, freshKey());
@@ -316,4 +320,74 @@ export function jointOver(store: PasskeyStore, now: () => number = () => 1_000) 
 export function jointStores(now: () => number = () => 1_000) {
 	const stores = memoryStores(now);
 	return { stores, ...jointOver(stores.passkeys, now) };
+}
+
+/**
+ * The passkey store's `updateAsOne` over an `updateTogether`, as a Store keeping records raw does
+ * it: no subject read or kept, no tombstone; each op refused as subject-records' would refuse it
+ * raw (`create` where held, `exists`; `change` or `move` where gone, `missing`), nothing written.
+ * No op removes a record: passkeys gives none, and `updateTogether` has no word for one.
+ */
+function updatingAsOne(together: Together["updateTogether"]): PasskeyStore["updateAsOne"] {
+	type Name = Parameters<PasskeyStore["updateAsOne"]>[0]["targets"][number];
+	type Next = { readonly value: StoredPasskey } | undefined;
+	const named = (names: readonly Name[]): PasskeyKeys => ({
+		credentials: names.filter((k) => k.place === "credentials").map((k) => k.key),
+		subjects: names.filter((k) => k.place === "subjects").map((k) => k.key),
+	});
+	/** Each name's record as `updateTogether` reads it: by its space, the targets first. */
+	const readOf = <V>(
+		names: readonly Name[],
+		read: { readonly [S in keyof PasskeyKeys]: readonly V[] },
+	) =>
+		names.map(
+			({ place }, n) => read[place][names.slice(0, n).filter((k) => k.place === place).length],
+		);
+	const raw = (held: StoredPasskey | undefined) =>
+		held === undefined ? undefined : { value: held };
+	return async (p) => {
+		let names: readonly Name[] = p.targets;
+		let refused: Extract<PasskeysAnswer, { kind: "refused" }> | undefined;
+		const changed = await together(named(p.targets), {
+			watch: (read) => {
+				const watched = p.watch?.(readOf(p.targets, read).map(raw)) ?? [];
+				names = [...p.targets, ...watched];
+				return named(watched);
+			},
+			change: (read) => {
+				refused = undefined;
+				const held = readOf(names, read);
+				const count = p.targets.length;
+				const ops = p.decide(held.slice(0, count).map(raw), held.slice(count).map(raw));
+				const next = names.map((_, n): Next => {
+					const op = n < count ? ops.targets?.[n] : ops.watched?.[n - count];
+					if (op === undefined) return undefined;
+					if (op.kind === "remove") throw new TypeError("updatingAsOne: no op removes a record");
+					const gone = held[n] === undefined;
+					const why =
+						op.kind === "create" ? (gone ? undefined : "exists") : gone ? "missing" : undefined;
+					const at =
+						n < count
+							? { in: "targets" as const, nth: n }
+							: { in: "watched" as const, nth: n - count };
+					if (why !== undefined) refused ??= { kind: "refused", at, why };
+					return { value: op.value };
+				});
+				if (refused) return {};
+				const bySpace = (place: keyof PasskeyKeys) =>
+					next.filter((_, n) => names[n]?.place === place);
+				return { credentials: bySpace("credentials"), subjects: bySpace("subjects") };
+			},
+		});
+		if (refused) return refused;
+		const shown = readOf(names, changed).map((c) => ({
+			before: raw(c?.before),
+			after: raw(c?.after),
+		}));
+		return {
+			kind: "written",
+			targets: shown.slice(0, p.targets.length),
+			watched: shown.slice(p.targets.length),
+		};
+	};
 }

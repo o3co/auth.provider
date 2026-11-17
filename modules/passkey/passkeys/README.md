@@ -18,12 +18,12 @@
 - Extension point `passkeyWitnessing` (at most one, two refusing boot), for `passkey-witnessing`: `settle` and `emptied`, asked as the internal module `holders`' card says; `emptied` takes the mark off only on `none`.
 - `passkeyReading`, taken only by `passkey-witnessing` (its backfill): `writtenHolding` (what the subject's list names as written, read anew: `passkey`, only `pending` ones, or `none`). Its `takenBy`, like `passkeyClearing`'s, is a composition rule (the kernel at assembly, the guard on shipped imports: imported only by the packages named), not a runtime defence: a module trusting a read the witness is not asked about would pass what the witness disputes.
 - Store interfaces, which the assembly wires. The store never sees what a record holds.
-  - Passkeys: credentials and subjects, each by a key passkeys makes, saved once for a subject, read, changed from what they hold, kept without end; records of both spaces and the ones a change watches from them changed as one (`updateAsOne`; `updateTogether` deprecated). Its ports: the internal module `ports`' card. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
+  - Passkeys: credentials and subjects, each by a key passkeys makes, saved once for a subject, read, changed from what they hold, kept without end; records of both spaces and the ones a change watches from them changed as one (`updateAsOne`). Its ports: the internal module `ports`' card. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
   - Challenges: opened for a lifetime, taken by putting a mark in place. Needs: survives a crash, never rolled back by failover, names derived from the challenge.
   - Registration challenges, optional until 0.22 (left out, they stay in the challenge store): opened for a lifetime and a subject (`erased` where fenced), changed from what they hold; `erase` and `migrate` both or neither. Needs: the challenge store's.
 - An eraser, `passkeys`, on `erasure-extensions`' `erasers`: the internal module `erasure`'s card.
 - Operator section: `user-verification` (default `preferred`; `discouraged` is warned of at every start, `passkeys.user_unverified`), `max-credentials` (per subject, default 10).
-- `./testing`: the section's test configuration builder, the contract tests of the store interfaces, and `updatingAsOne` (the passkey store's `updateAsOne` over an `updateTogether`, records kept raw, for test doubles).
+- `./testing`: the section's test configuration builder, and the contract tests of the store interfaces.
 
 ## Invariants
 - `registrations`' creation options require a discoverable credential, as `passkeys` lists none to ask for. `passkeys` refuses an assertion without a user handle before any store is read; the handle must be its holder's, judged after the signature.

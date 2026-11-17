@@ -49,8 +49,8 @@ it("runs a change the stand-in races on what it read, then again on the other wr
 		inputs.push(record);
 		return { value: asStored((record as unknown as { n: number }).n + 1) };
 	};
-	await stand.passkeys.subjects.save("k", asStored(1), "endless");
-	await stand.passkeys.credentials.save("k", asStored(1), "endless");
+	await stand.passkeys.subjects.save("k", asStored(1), "endless", "alice");
+	await stand.passkeys.credentials.save("k", asStored(1), "endless", "alice");
 	stand.raceSubjects(() => asStored(10));
 	expect((await stand.passkeys.subjects.update("k", plusOne))?.after).toEqual(asStored(11));
 	stand.raceCredentials(() => asStored(20));
@@ -66,8 +66,8 @@ it("keeps a race for its own space waiting while the record it would change is m
 		inputs.push(record);
 		return { value: asStored((record as unknown as { n: number }).n + 1) };
 	};
-	await stand.passkeys.credentials.save("c", asStored(1), "endless");
-	await stand.passkeys.subjects.save("s", asStored(5), "endless");
+	await stand.passkeys.credentials.save("c", asStored(1), "endless", "alice");
+	await stand.passkeys.subjects.save("s", asStored(5), "endless", "alice");
 	stand.raceSubjects(() => asStored(50));
 	// No such subject: nothing changes, and the race waits for the subjects' next update.
 	expect(await stand.passkeys.subjects.update("missing", plusOne)).toBeUndefined();
@@ -83,8 +83,8 @@ it("keeps a race for its own space waiting where the change throws, never leakin
 	const plusOne = (record: StoredPasskey) => ({
 		value: asStored((record as unknown as { n: number }).n + 1),
 	});
-	await stand.passkeys.credentials.save("c", asStored(1), "endless");
-	await stand.passkeys.subjects.save("s", asStored(5), "endless");
+	await stand.passkeys.credentials.save("c", asStored(1), "endless", "alice");
+	await stand.passkeys.subjects.save("s", asStored(5), "endless", "alice");
 	stand.raceSubjects(() => asStored(50));
 	await expect(
 		stand.passkeys.subjects.update("s", () => {
