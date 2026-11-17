@@ -6,7 +6,7 @@ import { memoryStores, writeToken } from "../../../test/stores.ts";
 import { holderOf, stored } from "../../records/records.ts";
 import { keptPasskeys } from "../../records.ts";
 import type { PasskeyOp, PasskeyStore } from "../../store.ts";
-import { portsRefused } from "../ports.ts";
+import { portsRefused, registrationPortsRefused } from "../ports.ts";
 
 const fresh = () => randomBytes(32).toString("base64url");
 const credential = (id: string, userHandle: string) => ({
@@ -120,4 +120,16 @@ it("writes a holder a 0.19.1 node reads and rewrites keeping its subject; one th
 	expect(holderOf(stored(stores.holderCopy("ann") as object)).subject).toBeUndefined();
 	await records.joined("ann", credential(fresh(), handle), 10, undefined, "w");
 	expect(holderOf(stored(stores.holderCopy("ann") as object)).subject).toBe("ann");
+});
+
+it("states the registration challenge store's ports: erase and migrate both, or neither", () => {
+	const { registrations } = memoryStores();
+	const erase = async () => ({}) as never;
+	const migrate = async () => ({}) as never;
+	expect(registrationPortsRefused(registrations)).toBeUndefined();
+	expect(registrationPortsRefused({ ...registrations, erase, migrate })).toBeUndefined();
+	expect(registrationPortsRefused({ ...registrations, erase })).toMatch(/one of erase and migrate/);
+	expect(registrationPortsRefused({ ...registrations, migrate })).toMatch(
+		/one of erase and migrate/,
+	);
 });

@@ -174,10 +174,56 @@ export interface ChallengeStore {
 
 export const challengeStore = contract<ChallengeStore>("passkeys.challenge-store");
 
-/** A challenge taken that came back could be answered twice; one lost to memory only fails its ceremony. */
+/**
+ * A challenge taken that came back could be answered twice; one lost to memory only fails its
+ * ceremony. The registration challenge store's needs too.
+ */
 export const challengeStoreNeeds = {
 	survivesCrash: true,
 	survivesFailover: true,
 	/** Names derive from the challenge, so the place never keeps it in clear. */
 	namesFromSecret: true,
 } as const;
+
+/**
+ * Registration challenges by the challenge, never kept in clear, each for its subject and its
+ * lifetime, at most webauthn's `challengeLifetimeMaxMs`. Every call throws Unavailable when the
+ * place cannot tell. Optional in 0.20: a composition without it keeps registration challenges in
+ * the challenge store, and passkeys reads a registration's challenge there where this one holds
+ * none. TODO(0.22): required.
+ */
+export interface RegistrationChallengeStore {
+	/**
+	 * Keeps a new challenge's record for its lifetime and its subject, unless the challenge holds one
+	 * (`exists`) or, where the Store fences saves past a subject's erasure, the subject is erased.
+	 */
+	open(
+		challenge: string,
+		record: StoredChallenge,
+		lifetimeMs: number,
+		subject: string,
+	): Promise<"created" | "exists" | "erased">;
+	/**
+	 * Changes the challenge's record from what it holds, for the rest of its lifetime; `change` runs
+	 * again on a race, so it is pure. Nothing when gone. A subject's erasure fences opening only: a
+	 * challenge opened before it is changed until its end, and what it is answered with is written
+	 * through the passkey store, which fences that subject.
+	 */
+	update(
+		challenge: string,
+		change: (record: StoredChallenge) => { readonly value: StoredChallenge } | undefined,
+	): Promise<{ readonly before: StoredChallenge; readonly after: StoredChallenge } | undefined>;
+	/**
+	 * Fences a subject's registration challenges, where the Store can: optional in 0.20, required in
+	 * 0.22. `erase` and `migrate` come together or none; one alone refuses the boot.
+	 */
+	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
+	/** Once, under the maintenance key; a bounded space indexes none. */
+	migrate?(walk: Walk, reading: SubjectReading, signal: AbortSignal): Promise<MigrationReport>;
+}
+
+/** Left unprovided, registration challenges stay in the challenge store. TODO(0.22): required, and the fallback read goes. */
+export const registrationChallengeStore = contract<RegistrationChallengeStore>(
+	"passkeys.registration-challenge-store",
+	{ optional: true },
+);

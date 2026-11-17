@@ -29,6 +29,7 @@ import {
 	passkeyStore,
 	passkeys,
 	passkeyWitnessing,
+	registrationChallengeStore,
 	registrations,
 } from "../src/contract.ts";
 import passkeysModule from "../src/module.ts";
@@ -127,6 +128,28 @@ it("refuses to boot a passkey store that cannot change both its spaces as one", 
 	expect(refused).toBeInstanceOf(BootRefused);
 	expect((refused as BootRefused).refusals).toEqual([
 		expect.objectContaining({ where: "passkeys", reason: expect.stringMatching(/as one/) }),
+	]);
+});
+
+it("refuses to boot a registration challenge store offering one of erase and migrate", async () => {
+	const stores = memoryStores();
+	const erase = async () => ({}) as never;
+	const parted = defineModule({ name: "stores-parted", replicaSafe: false, takes: [] }, (m) => [
+		m.provide(passkeyStore).by(() => stores.passkeys),
+		m.provide(challengeStore).by(() => stores.challenges),
+		m.provide(registrationChallengeStore).by(() => ({ ...stores.registrations, erase })),
+	]);
+	const refused = await assemble({
+		modules: [parted, auditStandIn().module, webauthn, passkeysModule],
+		config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
+		runtime: quietRuntime(),
+	}).catch((error: unknown) => error);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals).toEqual([
+		expect.objectContaining({
+			where: "passkeys",
+			reason: expect.stringMatching(/erase and migrate/),
+		}),
 	]);
 });
 

@@ -89,7 +89,7 @@ export function registrationsOver(p: RegistrationParts): Registrations {
 		register: async (subject, response, nickname, admitted = async () => true) => {
 			const challenge = challengeOf(response);
 			if (challenge === undefined) return refused("unreadable");
-			const opened = await p.challenges.take(challenge);
+			const opened = await p.challenges.take(challenge, "registration");
 			const holder = await p.records.holder(subject);
 			if (opened?.kind !== "registration" || opened.subject !== subject || !holder) {
 				return refused("no-challenge");

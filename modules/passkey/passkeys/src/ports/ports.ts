@@ -1,5 +1,12 @@
 import { broken, holderOf, keptOf } from "../records/records.ts";
-import type { PasskeyKey, PasskeyKeys, PasskeyOp, PasskeyStore, StoredPasskey } from "../store.ts";
+import type {
+	PasskeyKey,
+	PasskeyKeys,
+	PasskeyOp,
+	PasskeyStore,
+	RegistrationChallengeStore,
+	StoredPasskey,
+} from "../store.ts";
 
 /**
  * Why the passkey store's ports cannot be used, or none, the one statement of them: exactly one of
@@ -17,6 +24,12 @@ export function portsRefused(store: PasskeyStore): string | undefined {
 		return "its passkey store offers part of erase and migrate: both, in both spaces, or none";
 	}
 	return undefined;
+}
+
+/** Why the registration challenge store's ports cannot be used, or none: `erase` and `migrate` both, or neither. */
+export function registrationPortsRefused(store: RegistrationChallengeStore): string | undefined {
+	if ((store.erase === undefined) === (store.migrate === undefined)) return undefined;
+	return "its registration challenge store offers one of erase and migrate: both, or neither";
 }
 
 type Together = NonNullable<PasskeyStore["updateTogether"]>;

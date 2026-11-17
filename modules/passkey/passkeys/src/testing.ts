@@ -11,6 +11,7 @@ import type {
 	PasskeyRecords,
 	PasskeyStore,
 	PasskeysAnswer,
+	RegistrationChallengeStore,
 	StoredChallenge,
 	StoredPasskey,
 } from "./store.ts";
@@ -449,6 +450,86 @@ export function challengeStoreContract(name: string, open: () => Promise<Challen
 			await restart();
 			await failover();
 			expect((await place.challenges.take(challenge, mark))?.before).toEqual(mark);
+		});
+	});
+}
+
+/** A place that keeps passkeys' registration challenges, as one implementation of its store interface offers it. */
+export interface RegistrationChallengePlace extends Omit<ChallengePlace, "challenges"> {
+	readonly registrations: RegistrationChallengeStore;
+}
+
+/**
+ * What passkeys needs from any implementation of the registration challenge store: a challenge
+ * kept once for its subject and its lifetime, marked once, never in clear; where it erases, none
+ * opened for an erased subject.
+ */
+export function registrationChallengeStoreContract(
+	name: string,
+	open: () => Promise<RegistrationChallengePlace>,
+): void {
+	const fresh = () => randomBytes(32).toString("base64url");
+	const held = (value: object) => value as unknown as StoredChallenge;
+	const mark = held({ taken: true });
+	const marked = () => ({ value: mark });
+
+	describe(`passkeys' registration challenge store interface: ${name}`, () => {
+		it("keeps a challenge once for its subject, and puts the mark in its place for the rest of its lifetime", async () => {
+			const place = await open();
+			const { registrations } = place;
+			const challenge = fresh();
+			const record = held({ kind: "registration", nested: [1, "two"] });
+			expect(await registrations.open(challenge, record, 1000, "alice")).toBe("created");
+			expect(await registrations.open(challenge, held({ n: 1 }), 1000, "alice")).toBe("exists");
+			place.advance(500);
+			expect(await registrations.update(challenge, marked)).toEqual({
+				before: record,
+				after: mark,
+			});
+			expect(await registrations.update(challenge, marked)).toEqual({ before: mark, after: mark });
+			place.advance(500);
+			expect(await registrations.update(challenge, marked)).toBeUndefined();
+			expect(await registrations.update(fresh(), marked)).toBeUndefined();
+		});
+
+		it("never gives a challenge to what the place holds, in clear", async (context) => {
+			const place = await open();
+			const { holds } = place;
+			if (!holds) return context.skip();
+			const [challenge, kept] = [fresh(), fresh()];
+			await place.registrations.open(challenge, held({ kept }), 60_000, "alice");
+			await place.registrations.update(challenge, marked);
+			expect([holds(kept), holds(challenge)]).toEqual([true, false]);
+		});
+
+		it("keeps a mark through a restart, a lost answer and a failover", async (context) => {
+			const place = await open();
+			const { restart, loseNextAnswer: lose, failover } = place;
+			if (!restart || !lose || !failover) return context.skip();
+			const challenge = fresh();
+			await place.registrations.open(challenge, held({ n: 1 }), 60_000, "alice");
+			lose();
+			expect((await place.registrations.update(challenge, marked))?.before).toEqual(held({ n: 1 }));
+			await restart();
+			await failover();
+			expect((await place.registrations.update(challenge, marked))?.before).toEqual(mark);
+		});
+
+		it("opens none for a subject it erased, where it erases, and only for that subject", async (context) => {
+			const { registrations } = await open();
+			const { erase } = registrations;
+			if (!erase) return context.skip();
+			const [before, theirs] = [fresh(), fresh()];
+			await registrations.open(before, held({ n: 1 }), 60_000, "erin");
+			await registrations.open(theirs, held({ n: 2 }), 60_000, "finn");
+			const report = await erase.call(registrations, "erin", new AbortController().signal);
+			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+			if (report.kind === "stopped") return context.skip();
+			expect(await registrations.open(fresh(), held({ n: 3 }), 60_000, "erin")).toBe("erased");
+			// Fenced at opening only: one opened before is marked until its end.
+			expect((await registrations.update(before, marked))?.before).toEqual(held({ n: 1 }));
+			expect((await registrations.update(theirs, marked))?.before).toEqual(held({ n: 2 }));
+			expect(await registrations.open(fresh(), held({ n: 4 }), 60_000, "finn")).toBe("created");
 		});
 	});
 }

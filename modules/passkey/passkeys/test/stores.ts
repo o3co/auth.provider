@@ -11,6 +11,8 @@ import {
 	type PasskeyRecords,
 	type PasskeyStore,
 	passkeyStore,
+	type RegistrationChallengeStore,
+	registrationChallengeStore,
 	type StoredChallenge,
 	type StoredPasskey,
 } from "../src/store.ts";
@@ -24,9 +26,14 @@ type AsOne = Required<Pick<PasskeyStore, "updateAsOne">>;
 /**
  * passkeys' stores on the records stand-in, on the given clock, each behind a switch: credentials
  * and subjects in one stand-in, apart by their keys, changed one at a time or both spaces as one;
- * `loseNextTogether` lets the next change of both take effect, its answer lost.
+ * `loseNextTogether` lets the next change of both take effect, its answer lost. Registration
+ * challenges in a store of their own, which refuses to open one for a subject `fence` names,
+ * unless `registrations` is false: then in the challenge store, as before it.
  */
-export function memoryStores(now: () => number = () => 0) {
+export function memoryStores(
+	now: () => number = () => 0,
+	{ registrations: ownRegistrations = true }: { readonly registrations?: boolean } = {},
+) {
 	const size = { shards: 1, perShard: 1 };
 	const stand = memoryRecords<StoredPasskey>(now, size);
 	const at = (space: Space, key: string) => `${space}/${key}`;
@@ -121,6 +128,7 @@ export function memoryStores(now: () => number = () => 0) {
 		subjects: unavailableSwitch<PasskeyRecords>("subjects"),
 		together: unavailableSwitch<AsOne>("passkeys"),
 		challenges: unavailableSwitch<ChallengeStore>("challenges"),
+		registrations: unavailableSwitch<RegistrationChallengeStore>("registrations"),
 	};
 	const passkeys: PasskeyStore & AsOne = {
 		credentials: down.credentials.wrap(keyed("credentials")),
@@ -131,14 +139,27 @@ export function memoryStores(now: () => number = () => 0) {
 		open: challengesStand.records.create,
 		take: (challenge, mark) => challengesStand.records.change(challenge, () => ({ value: mark })),
 	});
+	const registrationsStand = memoryRecords<StoredChallenge>(now, size);
+	const fenced = new Set<string>();
+	const registrations = down.registrations.wrap({
+		open: async (challenge, record, lifetimeMs, subject) =>
+			fenced.has(subject)
+				? "erased"
+				: registrationsStand.records.create(challenge, record, lifetimeMs),
+		update: registrationsStand.records.change,
+	});
 	const module = defineModule({ name: "webauthn-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(passkeyStore).by(() => passkeys),
 		m.provide(challengeStore).by(() => challenges),
+		...(ownRegistrations ? [m.provide(registrationChallengeStore).by(() => registrations)] : []),
 	]);
 	return {
 		module,
 		passkeys,
 		challenges,
+		registrations,
+		/** The registration challenge store opens none for `subject` from now on, as erasing it would. */
+		fence: (subject: string) => void fenced.add(subject),
 		down,
 		raceSubjects: (race: Race) => {
 			races.subjects = race;

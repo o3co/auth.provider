@@ -3,17 +3,18 @@
 Internal module of `passkeys`: the challenges that registrations and assertions answer.
 
 ## Responsibilities
-- Keeps each challenge made for a registration or an assertion, with when it was made, until it is taken or its lifetime ends.
+- Keeps each challenge made for a registration or an assertion, with when it was made, until it is taken or its lifetime ends: a registration's in the registration challenge store where composed, for its subject; every other in the challenge store.
 
 ## Not here
-- Making a challenge (`webauthn`'s ceremonies). The requester's digest, and whether it matches (the package's assertion). Where challenges are kept (the challenge store).
+- Making a challenge (`webauthn`'s ceremonies). The requester's digest, and whether it matches (the package's assertion). Where challenges are kept (the challenge stores).
 
 ## Offers
-- `keptChallenges` (the challenge store, `kernel`'s clock, the lifetime) → `open` (a challenge and its purpose) and `take` (a challenge → its purpose and when it was made, or none).
+- `keptChallenges` (the challenge store, `kernel`'s clock, the lifetime, the registration challenge store where composed) → `open` (a challenge and its purpose) and `take` (a challenge and the kind its caller answers → its purpose and when it was made, or none).
 
 ## Invariants
 - A challenge is 32 bytes in canonical form; any other is taken as none, the store unasked.
-- Opening a challenge already kept is unavailable: 32 random bytes meeting another cannot be told from a broken place.
+- Opening a challenge already kept is unavailable: 32 random bytes meeting another cannot be told from a broken place. So is opening a registration's for a subject its store fences.
+- A registration's challenge is taken from the registration challenge store, and from the challenge store only where that one holds none, as a 0.19 node opened it there; a taken mark is an answer. Until 0.22.
 - Taking puts a mark in its place, which stays for the rest of its lifetime, so a challenge is taken once.
 - A challenge ends on `kernel`'s clock, whatever the store's expiry, as a late write gives it the store's full lifetime again.
 - The purpose is kept as given: an assertion's asker (`by`) and its id's digest, which the package's assertion makes and compares apart. A format 1 assertion names no asker; a format 1 registration reads as one of format 2.
@@ -21,7 +22,7 @@ Internal module of `passkeys`: the challenges that registrations and assertions 
 - A challenge is taken once, within `webauthn`'s `lifetimeMs` on `kernel`'s clock, whatever the store's expiry. An assertion's challenge is made for a requester: who asks, by its own name, and an id of its own; redeemed by the same alone, another module's with the same id is `challenge`, after it is taken. An assertion challenge is kept as format 2: who asked (`by`) and the id's SHA-256. A format 1 one, as 0.18 opened them, is read, taken and refused as `challenge`, since it names no asker.
 
 ## Data
-- A challenge's record (`v` 2, its kind, the subject or the asker and its id's digest, and when it was made; `v` 1, the format before, read), then the taken mark in its place, through the challenge store.
+- A challenge's record (`v` 2, its kind, the subject or the asker and its id's digest, and when it was made; `v` 1, the format before, read), then the taken mark in its place, through the store it is kept in.
 
 ## Depends on
-- `kernel` (`Unavailable`), `webauthn` (the canonical form); the package's store interface
+- `kernel` (`Unavailable`), `webauthn` (the canonical form); the package's store interfaces
