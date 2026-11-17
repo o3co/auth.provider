@@ -1,0 +1,45 @@
+import { legacyVariablesCheck, loadConfig } from "{{configFiles}}";
+import { assemble, BootRefused } from "{{kernel}}";
+import { {{contract}} } from "{{entry}}";
+{{imports}}
+
+{{refused}}
+
+// The app as `start` builds it, never started: no route is served while the member runs.
+const files = (process.env.APP_CONFIG ?? "config/application.conf").split(",");
+const source = { files, env: process.env };
+const app = await loadConfig(source)
+	.then(async (config) => {
+		// A variable 0.17 read, left in the environment, is named once, or refuses boot, as config-files says.
+		const told = await legacyVariablesCheck(source);
+		if (told !== undefined) await written(process.stderr, `warn config-files: ${told}\n`);
+		return assemble({ modules: [{{modules}}], config });
+	})
+	.catch(refused);
+/** Not finished, look and run again: a fixed line, never a value or an error's words, then 1. */
+const failed = async (line: string): Promise<never> => {
+	await written(process.stderr, `failed: ${line}\n`).catch(() => undefined);
+	// Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
+	await app.stop().catch(() => undefined);
+	process.exit(1);
+};
+// The arguments go to the member unread; it parses them, and answers a usage error itself.
+let answer: { readonly lines: readonly string[]; readonly code: number };
+try {
+	answer = await app.get({{contract}}).{{member}}(process.argv.slice(2));
+} catch {
+	answer = await failed("the run stopped on an unexpected error");
+}
+const { lines, code } = answer;
+if (!Array.isArray(lines) || !lines.every((line) => typeof line === "string")) {
+	await failed("the run's answer could not be read");
+}
+// 78 is a refused boot's alone, and nothing past it is passed on.
+if (!Number.isInteger(code) || code < 0 || code > 77) {
+	await failed("the run answered a code this script does not pass on");
+}
+// The member's own lines, written whole once it answered: a run that is killed writes none.
+if (lines.length > 0) await written(process.stdout, `${lines.join("\n")}\n`);
+// Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
+await app.stop().catch(() => undefined);
+process.exit(code);

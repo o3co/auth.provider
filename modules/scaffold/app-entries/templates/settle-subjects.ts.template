@@ -1,8 +1,8 @@
 {{subjects}}
-const backfill = app.get({{contract}});
+const settling = app.get({{contract}});
 // The answers counted by name, in the order the line tells them; one this script does not know (a
 // later release's) is counted as unknown.
-const answers: readonly string[] = [{{answers}}];
+const answers: readonly string[] = {{answers}};
 const counts = new Map([...answers, "unknown", "failed"].map((name) => [name, 0]));
 const count = (name: string) => counts.set(name, (counts.get(name) ?? 0) + 1);
 // One subject a line, used as sent; only an empty line is skipped. No subject is ever written out.
@@ -13,7 +13,7 @@ for await (const subject of lines(process.stdin)) {
 		continue;
 	}
 	try {
-		const answer: string = await backfill.settle(subject);
+		const answer: string = await settling.{{member}}(subject);
 		count(answers.includes(answer) ? answer : "unknown");
 	} catch (error) {
 		count("failed");
