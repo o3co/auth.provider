@@ -33,6 +33,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 
 ## erasure
 
+- `@mod/account-erasure` (feature, `modules/erasure/account-erasure`): The feature account erasure runs as. Its module takes and offers nothing yet.
 - `@mod/erasure-journal-file` (adapter, `modules/erasure/erasure-journal-file`): Implements the `erasureJournal` contract with one file on the one node that runs erasure.
   - `files` (`src/files`): the journal's and its lock's files on the node's file system.
 
