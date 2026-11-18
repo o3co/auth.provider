@@ -328,3 +328,31 @@ it("fails a take that finds no free name for its file as unavailable, never as b
 	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
 	expect(await readdir(dirname(path))).toHaveLength(8);
 });
+
+it("answers a release made while another is under way with that one, removing the lock once", async () => {
+	const path = await fresh();
+	let removals = 0;
+	const files: JournalFiles = {
+		...nodeFiles,
+		lock: async (p, holder) => {
+			const release = await nodeFiles.lock(p, holder);
+			return async () => {
+				removals += 1;
+				return release();
+			};
+		},
+	};
+	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
+	const held = await journal.hold();
+	if (held.kind !== "held") throw new Error("not held");
+	const [first, second] = [held.release(), held.release()];
+	expect(second).toBe(first);
+	await Promise.all([first, second]);
+	expect(removals).toBe(1);
+	const next = await at(path).hold();
+	expect(next.kind).toBe("held");
+	await held.release();
+	expect(removals).toBe(1);
+	expect((await at(path).hold()).kind).toBe("busy");
+	if (next.kind === "held") await next.release();
+});

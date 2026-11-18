@@ -183,20 +183,27 @@ export function journalFileWith(parts: {
 			const mine = { queue: Promise.resolve() as Promise<unknown>, closing: false };
 			holding = mine;
 			let released = false;
+			let releasing: Promise<void> | undefined;
+			const releaseOnce = async () => {
+				// At once, before any wait: no append joins the hold from here, so the queue is final.
+				mine.closing = true;
+				await mine.queue;
+				if (holding === mine) holding = undefined;
+				try {
+					await release();
+				} catch {
+					throw new Unavailable(`erasure-journal (its lock ${path}.lock was not released)`);
+				}
+				released = true;
+			};
 			return {
 				kind: "held",
-				release: async () => {
-					if (released) return;
-					// At once, before any wait: no append joins the hold from here, so the queue is final.
-					mine.closing = true;
-					await mine.queue;
-					if (holding === mine) holding = undefined;
-					try {
-						await release();
-					} catch {
-						throw new Unavailable(`erasure-journal (its lock ${path}.lock was not released)`);
-					}
-					released = true;
+				release: () => {
+					if (released) return Promise.resolve();
+					releasing ??= releaseOnce().finally(() => {
+						releasing = undefined;
+					});
+					return releasing;
 				},
 			};
 		},
