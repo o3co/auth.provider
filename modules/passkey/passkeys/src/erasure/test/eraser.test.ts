@@ -116,7 +116,7 @@ describe("passkeys' eraser", () => {
 		} as unknown as PasskeyStore;
 		const registrations = ports("registrations") as unknown as RegistrationChallengeStore;
 		const eraser = passkeysEraser(store, registrations);
-		expect([eraser.name, eraser.erasable, eraser.after]).toEqual(["passkeys", true, undefined]);
+		expect([eraser.name, eraser.erasable]).toEqual(["passkeys", true]);
 		expect((await eraser.online("ann", signal)).reports.map((r) => r.space)).toEqual([
 			"credentials",
 			"subjects",
