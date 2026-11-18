@@ -18,16 +18,17 @@ import { branchesOf, clockReads, commentsOf, randomReads } from "./source.ts";
 import { budgetsAsTest, type Scope } from "./units.ts";
 import type { Doc } from "./workspace.ts";
 
-const allowedExports = new Set([".", "./testing", "./module", "./audit-events"]);
+/** The entries every package may have (G5); guard-imports reads them as `Rules.standardEntries`. */
+export const standardEntries = [".", "./testing", "./module", "./audit-events"];
 /** The words a plan or a move in progress is written with; those go to the scope's list of plans. */
 /** A card holds the current contract: a plan, a move or a removal under way belongs to TODO. Matched as written, so a value that moved is no move. */
 /** G5, and what each source file reads: G11, G13, G15, G23; what it imports is guard-imports'. */
 function sourceRules(s: Scope, p: Pkg) {
 	const { budget, kindOf, report } = s;
 	// A further entry is the package's only where its own `takenBy` keeps it for named takers.
-	const kept = s.keptEntries(p);
+	const { kept } = s.takenEntries(p);
 	for (const key of Object.keys(p.manifest.exports ?? {})) {
-		if (!allowedExports.has(key) && !kept.includes(key)) {
+		if (!standardEntries.includes(key) && !kept.includes(key)) {
 			report("G5 shape of the public interface", p.name, key);
 		}
 	}

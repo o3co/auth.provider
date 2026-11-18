@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readWorkspace } from "@mod/guard-imports";
 import { branchingImports, heavyDependencyCards } from "./budget/budget.ts";
-import { check } from "./check.ts";
+import { check, standardEntries } from "./check.ts";
 import type { Budget } from "./contract.ts";
 import { kindRules } from "./kinds.ts";
 import { unlistedExports } from "./offers/offers.ts";
@@ -12,6 +12,7 @@ const root = process.env.INIT_CWD ?? process.cwd();
 const budget = {
 	...JSON.parse(readFileSync(join(import.meta.dirname, "..", "budget.json"), "utf8")),
 	...kindRules,
+	standardEntries,
 } as Budget;
 const packages = readWorkspace(root);
 const violations = check(packages, budget, readDocuments(root));

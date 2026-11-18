@@ -46,6 +46,7 @@ export const budget: Budget = {
 	capabilityBlind: ["feature"],
 	adapterKind: "adapter",
 	featureKind: "feature",
+	standardEntries: [".", "./testing", "./module", "./audit-events"],
 };
 
 /** Where the tests' packages are written. */

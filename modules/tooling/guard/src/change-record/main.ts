@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { readWorkspace } from "@mod/guard-imports";
+import { standardEntries } from "../check.ts";
 import type { Budget } from "../contract.ts";
 import { kindRules } from "../kinds.ts";
 import { changeRecordOf, type Reading, readingOf } from "./record.ts";
@@ -35,7 +36,7 @@ function read(revision: string): Reading {
 		});
 		const own = join(dir, budgetPath);
 		const numbers = JSON.parse(readFileSync(existsSync(own) ? own : ownBudget, "utf8"));
-		const budget = { ...numbers, ...kindRules } as Budget;
+		const budget = { ...numbers, ...kindRules, standardEntries } as Budget;
 		return readingOf(readWorkspace(dir), budget, { commit, tree });
 	} finally {
 		git(["worktree", "remove", "--force", dir]);
