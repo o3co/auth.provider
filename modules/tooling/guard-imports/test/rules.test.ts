@@ -834,6 +834,24 @@ describe("guard-imports", () => {
 		]);
 	});
 
+	it("reads the owner an adapter serves only of the adapter kind, declaring exactly one of adapts and replaces", () => {
+		const of = (name: string, manifest: Record<string, unknown>, kind: string) =>
+			pkg(name, { "src/contract.ts": "export {};\n" }, manifest, kind);
+		const adapter = of("@os/adapter", { adapts: "@os/owner" }, budget.adapterKind);
+		const replacing = of("@os/replacing", { replaces: "@os/owner" }, budget.adapterKind);
+		const both = of("@os/both", { adapts: "@os/owner", replaces: "@os/owner" }, budget.adapterKind);
+		const neither = of("@os/neither", {}, budget.adapterKind);
+		const feature = of("@os/feature", { adapts: "@os/owner" }, budget.featureKind);
+		const scope = scopeOf([adapter, replacing, both, neither, feature], budget, () => {});
+		expect([adapter, replacing, both, neither, feature].map((p) => scope.ownerServed(p))).toEqual([
+			"@os/owner",
+			"@os/owner",
+			undefined,
+			undefined,
+			undefined,
+		]);
+	});
+
 	it("G31 keeps an entry only where its key is one plain segment, not reserved, names a taker, is exported, and exports values alone", () => {
 		const files = {
 			"src/contract.ts": "export type Token = { readonly token: true };\n",

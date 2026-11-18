@@ -42,6 +42,11 @@ export interface Scope<B extends Rules = Rules> {
 	/** A package's kind, as its manifest names it. */
 	readonly kindOf: (p: Pkg) => string;
 	/**
+	 * The owner an adapter serves: its one `adapts` or `replaces`, read of the adapter kind alone;
+	 * none for a package of another kind, or one declaring both or neither.
+	 */
+	readonly ownerServed: (p: Pkg) => string | undefined;
+	/**
 	 * The entries a package keeps for named takers: each `./name` key of its manifest's `takenBy`
 	 * that is one plain segment, none of `.`, `./testing`, `./module` and `./audit-events`, and names at
 	 * least one taker. Any other key is left out, unreported, for the rule reading it to refuse.
@@ -87,6 +92,12 @@ export function scopeOf<B extends Rules>(
 		byName,
 		report,
 		kindOf,
+		ownerServed: (p) => {
+			if (kindOf(p) !== budget.adapterKind) return undefined;
+			const { adapts, replaces } = p.manifest;
+			if ((adapts === undefined) === (replaces === undefined)) return undefined;
+			return String(replaces ?? adapts);
+		},
 		keptEntries: (p) => {
 			const declared = p.manifest.takenBy;
 			if (typeof declared !== "object" || declared === null || Array.isArray(declared)) return [];
