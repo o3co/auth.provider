@@ -266,7 +266,7 @@ export function bridgeRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
 }
 
 /** G22, G24: which packages wire a feature's store interface, and how. */
-export function wiringRules(s: Scope) {
+export function wiringRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
 	const { kindOf, report } = s;
 	const g22 = "G22 only wiring wires, and a feature that declares storeWiring has one";
 	const isWiring = (p: Pkg) => kindOf(p) === s.budget.wiringKind;
@@ -276,17 +276,31 @@ export function wiringRules(s: Scope) {
 			report(g22, p.name, `kind ${kindOf(p) || "none"}`);
 		if (p.manifest.storeWiring && !wired.has(p.name)) report(g22, p.name, "no package wires it");
 	}
-	// G24: a wiring keys its guarantees by the needs its feature declares, so the feature declares them.
+	// G24: a wiring that declares spaces keys their guarantees by the needs its feature declares. It
+	// declares spaces where its shipped code takes a point of a package made for wirings.
+	const forWiring = s.packages.filter((p) => p.manifest.forWiring === true);
+	const declaresSpaces = (w: Pkg) =>
+		s
+			.sources(w)
+			.filter((file) => !s.isTest(file))
+			.some((file) =>
+				forWiring.some((q) => {
+					const points = surfaces.get(q.name)?.points ?? new Set<string>();
+					return valuesTaken(s.factsOf(w, file), q.name).some(
+						(name) => points.has(name) || (name === "*" && points.size > 0),
+					);
+				}),
+			);
 	for (const w of s.packages.filter(isWiring)) {
 		const feature = w.manifest.wires;
-		if (feature === undefined) continue;
+		if (feature === undefined || !declaresSpaces(w)) continue;
 		const keyed = s
 			.sources(w)
 			.filter((file) => !s.isTest(file))
 			.some((file) => keyedBy(s.factsOf(w, file), feature).length > 0);
 		if (!keyed) {
 			report(
-				"G24 a wired feature declares its store's needs",
+				"G24 a wiring that declares spaces keys their guarantees by the needs its feature declares",
 				feature,
 				`${w.name} keys no guarantee by them`,
 			);

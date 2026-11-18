@@ -597,14 +597,24 @@ describe("guard-imports", () => {
 		]);
 	});
 
-	it("G24 refuses a wiring that keys no guarantee by the needs its feature declares", () => {
-		// Without exports, so no contract surface is built: this rule reads the wiring's source alone.
+	it("G24 refuses a wiring that declares spaces and keys no guarantee by the needs its feature declares", () => {
+		// A package made for wirings, whose `spaces` point a wiring takes to declare a space.
+		const store = pkg(
+			"@t/store",
+			{
+				"src/contract.ts": `import { extensionPoint } from "@t/kernel";\nexport const spaces = extensionPoint<string>("store.spaces", { multiplicity: "many" });\n`,
+			},
+			{ exports: { ".": "./src/contract.ts" }, forWiring: true },
+			"foundation",
+		);
+		const declares = `import { spaces } from "@t/store";\nexport const declared = spaces;\n`;
+		// The features without exports, so no contract surface is built for them: the rule reads the wirings' sources.
 		const needs = "export const fNeeds = { neverEvicted: true } as const;\n";
 		const feature = pkg("@t/f", { "src/store.ts": needs }, { storeWiring: true });
 		const keyed = pkg(
 			"@t/f-store",
 			{
-				"src/module.ts": `import { type fNeeds } from "@t/f";\nexport const g: Record<keyof typeof fNeeds, string> = { neverEvicted: "no-eviction" };\n`,
+				"src/module.ts": `${declares}import { type fNeeds } from "@t/f";\nexport const g: Record<keyof typeof fNeeds, string> = { neverEvicted: "no-eviction" };\n`,
 			},
 			{ wires: "@t/f" },
 			"wiring",
@@ -614,7 +624,7 @@ describe("guard-imports", () => {
 			"@t/g-store",
 			{
 				// Each falls short: no keyof, a name from elsewhere, and a test file.
-				"src/module.ts": `import { type gNeeds } from "@t/g";\nimport { type other } from "@t/f";\nexport const a: typeof gNeeds = { n: 1 };\nexport const b: Record<keyof typeof other, 1> = {};\n`,
+				"src/module.ts": `${declares}import { type gNeeds } from "@t/g";\nimport { type other } from "@t/f";\nexport const a: typeof gNeeds = { n: 1 };\nexport const b: Record<keyof typeof other, 1> = {};\n`,
 				"src/module.test.ts": `import { type gNeeds } from "@t/g";\nexport const c: Record<keyof typeof gNeeds, 1> = {};\n`,
 			},
 			{ wires: "@t/g" },
@@ -625,7 +635,7 @@ describe("guard-imports", () => {
 			"@t/h-store",
 			{
 				// The default taken by name keys as any name does.
-				"src/module.ts": `import { default as hNeeds } from "@t/h";\nexport const g: Record<keyof typeof hNeeds, string> = {};\n`,
+				"src/module.ts": `${declares}import { default as hNeeds } from "@t/h";\nexport const g: Record<keyof typeof hNeeds, string> = {};\n`,
 			},
 			{ wires: "@t/h" },
 			"wiring",
@@ -635,18 +645,45 @@ describe("guard-imports", () => {
 			"@t/k-store",
 			{
 				// An import inside a declared module keys nothing the wiring runs.
-				"src/module.ts": `declare module "other" {\n\timport { kNeeds } from "@t/k";\n\ttype A = keyof typeof kNeeds;\n}\nexport {};\n`,
+				"src/module.ts": `${declares}declare module "other" {\n\timport { kNeeds } from "@t/k";\n\ttype A = keyof typeof kNeeds;\n}\n`,
 			},
 			{ wires: "@t/k" },
 			"wiring",
 		);
+		// A wiring declaring no space keys nothing and is not asked to.
+		const plainFeature = pkg("@t/m", { "src/store.ts": needs }, { storeWiring: true });
+		const plain = pkg(
+			"@t/m-store",
+			{ "src/module.ts": "export const wired = 1;\n" },
+			{ wires: "@t/m" },
+			"wiring",
+		);
+		// A namespace import and a re-export take the point as a named import does.
+		const nsFeature = pkg("@t/n", { "src/store.ts": needs }, { storeWiring: true });
+		const throughNamespace = pkg(
+			"@t/n-store",
+			{ "src/module.ts": `import * as s from "@t/store";\nexport const declared = s.spaces;\n` },
+			{ wires: "@t/n" },
+			"wiring",
+		);
+		const reFeature = pkg("@t/r", { "src/store.ts": needs }, { storeWiring: true });
+		const throughReExport = pkg(
+			"@t/r-store",
+			{ "src/module.ts": `export { spaces } from "@t/store";\n` },
+			{ wires: "@t/r" },
+			"wiring",
+		);
+		const all = [store, feature, keyed, bare, unkeyed, named, byDefault, ambientFeature, ambient];
+		const added = [plainFeature, plain, nsFeature, throughNamespace, reFeature, throughReExport];
 		expect(
-			check([feature, keyed, bare, unkeyed, named, byDefault, ambientFeature, ambient], budget)
+			check([...all, ...added], budget)
 				.filter((v) => v.rule.startsWith("G24"))
 				.map((v) => `${v.where} ${v.detail}`),
 		).toEqual([
 			"@t/g @t/g-store keys no guarantee by them",
 			"@t/k @t/k-store keys no guarantee by them",
+			"@t/n @t/n-store keys no guarantee by them",
+			"@t/r @t/r-store keys no guarantee by them",
 		]);
 	});
 
