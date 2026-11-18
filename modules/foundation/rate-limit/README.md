@@ -8,7 +8,7 @@
 
 ## Offers
 - `rateLimit` and `attemptLimit`: count a name and key in a window, answering allowed or limited with a wait; attempts at credentials are counted apart.
-- `windowCeilingMs` (86 400 000, a day): the longest window counted, rate-limit's own: how long a count is kept, and so both window spaces' bound. Not raised for a caller; a longer window is the owner's question. A caller bounds its setting by it.
+- `windowCeilingMs` (86 400 000, a day): the longest window counted, rate-limit's own: how long a count is kept, and so both window spaces' bound. Not raised for a caller; a longer window is the project owner's decision. A caller bounds its setting by it.
 - `attemptsPerSource` for routes: by IPv4 address or IPv6 /64; over the limit `429` `too_many_attempts` with `retry-after`; uncounted `503` `service_unavailable`.
 - `requestsPerSource` for routes: keyed alike; over the limit `429` `rate_limited`; uncounted, `503` `service_unavailable`, or let through where the section's `fail-mode` is `open` (default `closed`, so a store outage never lifts a limit), which every start warns of (`rate-limit.fail_open`).
 - Both are marked `per-source` for every method at `http`'s `marks`; the stand-in marks them too.
