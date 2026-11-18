@@ -60,10 +60,10 @@ export interface ErasureJournal {
 	 * This journal holds its place until released, whatever the place holds (it holds before
 	 * `create`); any other journal over the same place, in this process or another, answers `busy`,
 	 * an answer and never Unavailable. A command opens one journal. While held, this journal's
-	 * appends are made under the hold; another's throw Unavailable, and a caller appends only under
-	 * a hold it took. With no hold anywhere, an append is still made, under a lock of its own. A hold
-	 * is never broken on a guess (a pid, a time): one whose holder died stays until the medium or the
-	 * operator releases it.
+	 * appends are made under the hold; one made outside it (another journal's, or this one's once
+	 * its release began) throws Unavailable, and a caller appends only under a hold it took. With no
+	 * hold anywhere, an append is still made. A hold is never broken on a guess (a pid, a time): one
+	 * whose holder died stays until the medium or the operator releases it.
 	 */
 	hold(): Promise<JournalHold>;
 }
