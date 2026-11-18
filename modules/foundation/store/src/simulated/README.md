@@ -13,5 +13,8 @@ Internal module of `store`: a simulated replicated store, for tests, offered thr
 ## Offers
 - `simulatedStore()` → `SimulatedStore`: its module, the faults a test asks for, its marks, and the declared spaces.
 
+## Invariants
+- Inputs are checked once, at the facade; the primary, the replica and every replay run on memory's unchecked ports.
+
 ## Depends on
 - `store`'s contract and its memory store.
