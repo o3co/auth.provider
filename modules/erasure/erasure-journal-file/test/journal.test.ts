@@ -1,4 +1,5 @@
-import { mkdtemp, stat, truncate, unlink, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, stat, truncate, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ErasureJournal } from "@mod/erasure-journal";
@@ -94,4 +95,62 @@ it("names the lock path and its holder where a lock a crash left behind holds ev
 	expect(String((held as Error).message)).toContain('"pid":4242');
 	await unlink(`${path}.lock`);
 	expect(await journal.begun("s", "o")).toEqual({ number: 1 });
+});
+
+const fresh = async () => join(await mkdtemp(join(tmpdir(), "erasure-journal-")), "journal");
+
+it("answers busy, naming the holder, to every hold after its holder was killed, and holds once the operator removes the lock", async () => {
+	const path = await fresh();
+	const child = spawn(
+		process.execPath,
+		[join(import.meta.dirname, "fixtures", "holding.ts"), path],
+		{
+			stdio: ["ignore", "pipe", "inherit"],
+		},
+	);
+	const said = await new Promise<string>((resolve) =>
+		child.stdout.once("data", (d) => resolve(String(d))),
+	);
+	expect(said.trim()).toBe("held");
+	const ended = new Promise((resolve) => child.once("exit", resolve));
+	child.kill("SIGKILL");
+	await ended;
+	// A crash leaves the hold: nothing breaks it on a guess.
+	for (let i = 0; i < 2; i++) {
+		const busy = await at(path).hold?.();
+		expect(busy).toMatchObject({
+			kind: "busy",
+			holder: expect.stringContaining(`"pid":${child.pid}`),
+		});
+	}
+	await unlink(`${path}.lock`);
+	const held = await at(path).hold?.();
+	expect(held?.kind).toBe("held");
+	if (held?.kind === "held") await held.release();
+});
+
+it("queues the holder's appends one after another under its hold, taking no lock for each", async () => {
+	const path = await fresh();
+	const journal = at(path);
+	const held = await journal.hold?.();
+	await journal.create();
+	const lockedBefore = await readFile(`${path}.lock`, "utf8");
+	const numbers = await Promise.all(["a", "b", "c"].map((s) => journal.begun(s, "o")));
+	expect(numbers).toEqual([{ number: 1 }, { number: 2 }, { number: 3 }]);
+	expect(await readFile(`${path}.lock`, "utf8")).toBe(lockedBefore);
+	if (held?.kind === "held") await held.release();
+	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("leaves another holder's lock in place where a holder whose lock the operator removed releases late", async () => {
+	const path = await fresh();
+	const first = await at(path).hold?.();
+	await unlink(`${path}.lock`);
+	const second = await at(path).hold?.();
+	expect([first?.kind, second?.kind]).toEqual(["held", "held"]);
+	if (first?.kind === "held") await first.release();
+	const third = await at(path).hold?.();
+	expect(third?.kind).toBe("busy");
+	if (second?.kind === "held") await second.release();
+	expect((await at(path).hold?.())?.kind).toBe("held");
 });

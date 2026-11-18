@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { hostname } from "node:os";
-import type { ErasureJournal, JournalEntry, JournalHeader, Unusable } from "@mod/erasure-journal";
+import type {
+	ErasureJournal,
+	JournalEntry,
+	JournalHeader,
+	JournalHold,
+	Unusable,
+} from "@mod/erasure-journal";
 import { type Clock, type Random, Unavailable } from "@mod/kernel";
 import type { JournalFiles } from "./files.ts";
 
@@ -85,32 +91,54 @@ export function journalFileWith(parts: {
 		}
 		return readRecords(bytes);
 	};
-	/** Under the lock: what the file holds, then one record appended, numbered next. */
-	const appended = async (record: (n: number) => Entry) => {
-		let release: () => Promise<void>;
+	/** Who takes the lock, as it records it: the process, its node, when, and a token of this take. */
+	const holderNow = () =>
+		JSON.stringify({
+			pid: process.pid,
+			host: hostname(),
+			at: parts.clock.now(),
+			take: Buffer.from(parts.random.bytes(8)).toString("hex"),
+		});
+	/** Takes the lock, or answers who holds it; any other failure of the medium is unavailable. */
+	const locked = async () => {
 		try {
-			const holder = JSON.stringify({ pid: process.pid, host: hostname(), at: parts.clock.now() });
-			release = await files.lock(path, holder);
+			return { release: await files.lock(path, holderNow()) };
 		} catch (error) {
 			const { code, holder } = error as { code?: unknown; holder?: unknown };
-			// Named, so an operator finds a lock a crash left behind, and whose it was.
-			if (code === "EEXIST") {
-				throw new Unavailable(`erasure-journal (its lock ${path}.lock is held: ${String(holder)})`);
-			}
+			if (code === "EEXIST") return { holder: String(holder) };
 			throw new Unavailable("erasure-journal");
 		}
+	};
+	/** The hold this journal has taken, if any, and its appends queued one after another under it. */
+	let holding: { queue: Promise<unknown> } | undefined;
+	/** What the file holds, then one record appended, numbered next. */
+	const append = async (record: (n: number) => Entry) => {
+		const held = await records();
+		if ("kind" in held) return held;
+		const n = held.entries.length + 1;
 		try {
-			const held = await records();
-			if ("kind" in held) return held;
-			const n = held.entries.length + 1;
-			try {
-				await files.append(path, framed(record(n)));
-			} catch {
-				throw new Unavailable("erasure-journal");
-			}
-			return { number: n };
+			await files.append(path, framed(record(n)));
+		} catch {
+			throw new Unavailable("erasure-journal");
+		}
+		return { number: n };
+	};
+	/** Under this journal's hold, one at a time; outside it, under the lock taken for this append. */
+	const appended = async (record: (n: number) => Entry) => {
+		if (holding) {
+			const turn = holding.queue.then(() => append(record));
+			holding.queue = turn.catch(() => {});
+			return turn;
+		}
+		const lock = await locked();
+		// Named, so an operator finds a lock a crash left behind, and whose it was.
+		if (!("release" in lock)) {
+			throw new Unavailable(`erasure-journal (its lock ${path}.lock is held: ${lock.holder})`);
+		}
+		try {
+			return await append(record);
 		} finally {
-			await release().catch(() => {});
+			await lock.release().catch(() => {});
 		}
 	};
 	return {
@@ -131,6 +159,22 @@ export function journalFileWith(parts: {
 		begun: (subject, requestedBy) =>
 			appended((n) => ({ type: "begun", n, subject, requestedBy, at: parts.clock.now() })),
 		finished: (subject) => appended((n) => ({ type: "finished", n, subject })),
+		hold: async (): Promise<JournalHold> => {
+			const lock = await locked();
+			if (!("release" in lock)) return { kind: "busy", holder: lock.holder };
+			const { release } = lock;
+			const mine = { queue: Promise.resolve() as Promise<unknown> };
+			holding = mine;
+			return {
+				kind: "held",
+				release: async () => {
+					if (holding !== mine) return;
+					await mine.queue;
+					holding = undefined;
+					await release();
+				},
+			};
+		},
 		list: async (): Promise<readonly JournalEntry[] | Unusable> => {
 			const held = await records();
 			if ("kind" in held) return held;

@@ -12,7 +12,8 @@ export interface JournalFiles {
 	append(path: string, bytes: Buffer): Promise<void>;
 	/**
 	 * Takes the file's lock, a file beside it holding `holder`; one held refuses with `code` `EEXIST`
-	 * and the holder it records. Answers its release.
+	 * and the holder it records. Answers its release, which removes the lock only while it still
+	 * records `holder`: a read, then a removal, not one atomic step.
 	 */
 	lock(path: string, holder: string): Promise<() => Promise<void>>;
 }
@@ -72,6 +73,10 @@ export const nodeFiles: JournalFiles = {
 		} finally {
 			await held.close();
 		}
-		return () => unlink(lockPath);
+		return async () => {
+			// Not this holder's any more (the operator removed it and another took it): left in place.
+			const recorded = await readFile(lockPath, "utf8").catch(() => undefined);
+			if (recorded === holder) await unlink(lockPath);
+		};
 	},
 };
