@@ -216,7 +216,7 @@ it("is unavailable, recording nothing, where a store hands a write no deadline",
 	}
 });
 
-it("is unavailable rather than valid or recorded when the store cannot tell", async () => {
+it("is unavailable rather than valid or recorded when the store cannot answer", async () => {
 	const { down, revocation } = await boot();
 	down.failNext("read");
 	await expect(revocation.check("alice", now)).rejects.toSatisfy(isUnavailable);
