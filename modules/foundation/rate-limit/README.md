@@ -4,10 +4,11 @@
 - Counts uses in windows on `store`, and locks keys out after failures (backoff, a budget in a window, a hard limit, forgetting a quiet run).
 
 ## Not here
-- Window numbers, lockout policies and key names: the caller's.
+- Window numbers within the ceiling, lockout policies and key names: the caller's.
 
 ## Offers
 - `rateLimit` and `attemptLimit`: count a name and key in a window, answering allowed or limited with a wait; attempts at credentials are counted apart.
+- `windowCeilingMs` (86 400 000, a day): the longest window counted, rate-limit's own: how long a count is kept, and so both window spaces' bound. Not raised for a caller; a longer window is the owner's question. A caller bounds its setting by it.
 - `attemptsPerSource` for routes: by IPv4 address or IPv6 /64; over the limit `429` `too_many_attempts` with `retry-after`; uncounted `503` `service_unavailable`.
 - `requestsPerSource` for routes: keyed alike; over the limit `429` `rate_limited`; uncounted, `503` `service_unavailable`, or let through where the section's `fail-mode` is `open` (default `closed`, so a store outage never lifts a limit), which every start warns of (`rate-limit.fail_open`).
 - Both are marked `per-source` for every method at `http`'s `marks`; the stand-in marks them too.
@@ -23,6 +24,7 @@
 
 ## Invariants
 - A count that cannot be made is unavailable; only the requests policy set `open` then lets a request through. Any other failure is thrown.
+- A window longer than `windowCeilingMs` is refused with a TypeError before anything is counted, by `hit`, the policies through it and the stand-in alike: a rejected promise, never unavailable, so a policy answers 500 whatever its `fail-mode`, and nothing is told as uncounted.
 - Keys of any length are taken; a name keeps its windows apart, where names hold no line feed (a name and a key are joined by one).
 - A wait is a hint: at least a second, or the whole window where it is shorter, and never longer than the window, which the store's clock judges.
 - How a lockout holds, counts, hands back and releases, and how its state is kept: internal module `lockout`.
@@ -31,7 +33,7 @@
 ## Data
 - Limit windows: no eviction, so a flood cannot reset a count; not replicated, as no credential depends on them.
 - Attempt windows: no eviction and replicated, so a failover cannot lift a limit on guesses.
-- Both window spaces are `pseudonymous`, as a key may be derived from a subject, and declare neither an eraser nor a bound, so they do not yet say how long a count is kept: incomplete for erasure (`manifest-incomplete`).
+- Both window spaces are `pseudonymous`, as a key may be derived from a subject, and bounded at `windowCeilingMs`: a window's record lives within `window.ms` of its first hit, as later hits never extend it.
 - Lockouts: one state per name and key, `pseudonymous`, erased by `rate-limit` (internal module `lockout`). A state expires unless its hold is fixed or it counted a release; a dropped key never does.
 
 ## Depends on

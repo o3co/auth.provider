@@ -11,8 +11,18 @@ export type Counted =
 	/** `retryAfterMs` is a hint: the store judges the window by its own clock. */
 	| { readonly kind: "limited"; readonly retryAfterMs: number };
 
+/**
+ * The longest window `hit` counts, one day: a count is kept at most this long, so it is what both
+ * window spaces declare as their bound. rate-limit's own, not raised for a caller; a longer window
+ * is a question for the owner. A caller bounds its setting by it.
+ */
+export const windowCeilingMs = 86_400_000;
+
 export interface RateLimit {
-	/** Counts one use of `key` in the window `name`; throws Unavailable when it cannot count. */
+	/**
+	 * Counts one use of `key` in the window `name`; throws Unavailable when it cannot count. A window
+	 * longer than `windowCeilingMs` is refused with a TypeError, nothing counted.
+	 */
 	hit(name: string, key: string, window: Window): Promise<Counted>;
 }
 

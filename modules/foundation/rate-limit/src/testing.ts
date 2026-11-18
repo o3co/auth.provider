@@ -7,6 +7,7 @@ import { lockoutEraser } from "./drop/drop.ts";
 import { type LockoutStates, lockoutCounter } from "./lockout/lockout.ts";
 import { retryAfterMs } from "./partition.ts";
 import { limitingAttempts, limitingRequests, perSourceMark } from "./per-source.ts";
+import { withinCeiling } from "./window.ts";
 
 const idOf = (name: string, key: string) => `${name}\n${key}`;
 
@@ -15,6 +16,7 @@ function memoryCounter(now: () => number): RateLimit {
 	const counts = new Map<string, { n: number; resetAt: number }>();
 	return {
 		hit: async (name, key, window) => {
+			withinCeiling(window);
 			const at = now();
 			const id = idOf(name, key);
 			const held = counts.get(id);
