@@ -2,18 +2,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readWorkspace } from "@mod/guard-imports";
 import { branchingImports, heavyDependencyCards } from "./budget/budget.ts";
-import { check, standardEntries } from "./check.ts";
-import type { Budget } from "./contract.ts";
-import { kindRules } from "./kinds.ts";
+import { budgetOf, check } from "./check.ts";
 import { unlistedExports } from "./offers/offers.ts";
 import { readDocuments } from "./workspace.ts";
 
 const root = process.env.INIT_CWD ?? process.cwd();
-const budget = {
-	...JSON.parse(readFileSync(join(import.meta.dirname, "..", "budget.json"), "utf8")),
-	...kindRules,
-	standardEntries,
-} as Budget;
+const budget = budgetOf(
+	JSON.parse(readFileSync(join(import.meta.dirname, "..", "budget.json"), "utf8")),
+);
 const packages = readWorkspace(root);
 const violations = check(packages, budget, readDocuments(root));
 // Reported, not refused: an internal module pulling in what the rest of its package does not.

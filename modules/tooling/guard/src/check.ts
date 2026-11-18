@@ -11,6 +11,7 @@ import {
 import { budgetRules } from "./budget/budget.ts";
 import type { Budget } from "./contract.ts";
 import { laidOut } from "./documents.ts";
+import { kindRules } from "./kinds.ts";
 import { helpersOf, networkRules } from "./network/network.ts";
 import { protocolRules } from "./protocol/protocol.ts";
 import { foreignFiles, namesLine } from "./references.ts";
@@ -20,6 +21,12 @@ import type { Doc } from "./workspace.ts";
 
 /** The entries every package may have (G5); guard-imports reads them as `Rules.standardEntries`. */
 export const standardEntries = [".", "./testing", "./module", "./audit-events"];
+const codeRules = { ...kindRules, standardEntries } satisfies Partial<Budget>;
+/** A budget from its numbers (budget.json's), with the rules given in code: the kinds' order and roles, and the standard entries. */
+export const budgetOf = (numbers: Omit<Budget, keyof typeof codeRules>): Budget => ({
+	...numbers,
+	...codeRules,
+});
 /** The words a plan or a move in progress is written with; those go to the scope's list of plans. */
 /** A card holds the current contract: a plan, a move or a removal under way belongs to TODO. Matched as written, so a value that moved is no move. */
 /** G5, and what each source file reads: G11, G13, G15, G23; what it imports is guard-imports'. */
