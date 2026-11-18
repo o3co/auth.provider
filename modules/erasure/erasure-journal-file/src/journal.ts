@@ -189,6 +189,7 @@ export function journalFileWith(parts: {
 						begunAt: e.at,
 						finished: false,
 						number: e.n,
+						begunNumber: e.n,
 					});
 				} else if (before) {
 					bySubject.set(e.subject, { ...before, finished: true, number: e.n });
