@@ -66,6 +66,11 @@ export interface SimulatedStore {
 	 * a record of its own beside the data, no epoch and no maintenance key, unavailable while unreachable.
 	 */
 	mark(name: string, value: Json): void;
+	/**
+	 * The space named, exactly as the composition declared it, for a test that reads or walks it by
+	 * name. Throws where no composed module declares it, or before the store is built.
+	 */
+	declaredSpace(name: string): Space;
 }
 
 function spaceOf(name: string, args: readonly unknown[]): Space | undefined {
@@ -110,6 +115,8 @@ export function simulatedStore(): SimulatedStore {
 		const at = hooks.findIndex((h) => h.operation === name && h.space === space?.name);
 		if (at >= 0) await hooks.splice(at, 1)[0]?.run();
 	};
+	/** The spaces the composition declared, once the store is built. */
+	let composed: readonly Space[] | undefined;
 	const state: {
 		primary?: Store;
 		replica?: Store;
@@ -238,6 +245,7 @@ export function simulatedStore(): SimulatedStore {
 		module: defineModule({ name: "store", replicaSafe: false, takes: [spaces] }, (m) => [
 			m.provide(store).by(async (c) => {
 				const declared = await c.collect(spaces);
+				composed = declared;
 				storeNow = () => c.clock.now() + shift;
 				state.open = () => memoryStore(clock, declared, nextVersion);
 				state.primary = state.open();
@@ -257,6 +265,12 @@ export function simulatedStore(): SimulatedStore {
 				},
 			})),
 		]),
+		declaredSpace: (name) => {
+			if (composed === undefined) throw new Error("the simulated store is not built yet");
+			const found = composed.find((space) => space.name === name);
+			if (found === undefined) throw new Error(`no composed module declares the space ${name}`);
+			return found;
+		},
 		mark: (name, value) => {
 			marks.set(name, { value, epoch: null });
 		},
