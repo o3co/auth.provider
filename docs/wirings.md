@@ -6,6 +6,7 @@ A module that keeps records takes its store through a wiring, which ties the mod
 
 | Module refused | Wiring to compose |
 |---|---|
+| `account-erasure` | `@mod/account-erasure-store` |
 | `claims-selection` | `@mod/claims-selection-store` |
 | `client-assertion` | `@mod/client-assertion-store` |
 | `code-grant` | `@mod/code-grant-store` |
