@@ -261,5 +261,8 @@ it("refuses to build without a batch across, over an index not the space's, or a
 	expect(at(indexedSpace, { ...indexSpaceOf(indexedSpace), name: "other.index" })).toThrow(/index/);
 	expect(at(indexedSpace, { ...indexSpaceOf(indexedSpace), guarantees: [] })).toThrow(/index/);
 	expect(at({ ...indexedSpace, subjectData: "none" })).toThrow(/category/);
-	expect(at({ name: indexedSpace.name, guarantees: indexedSpace.guarantees })).toThrow(/category/);
+	// A declaration with no category, as an untyped wiring may still hand one over.
+	expect(at({ name: indexedSpace.name, guarantees: indexedSpace.guarantees } as Space)).toThrow(
+		/category/,
+	);
 });
