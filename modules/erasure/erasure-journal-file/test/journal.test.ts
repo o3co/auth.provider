@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import {
 	mkdir,
 	mkdtemp,
+	readdir,
 	readFile,
 	rmdir,
 	stat,
@@ -10,7 +11,7 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ErasureJournal } from "@mod/erasure-journal";
 import { journalContract } from "@mod/erasure-journal/testing";
 import { quietRuntime } from "@mod/kernel/testing";
@@ -231,4 +232,23 @@ it("finds a lock already gone done, and throws where the lock cannot be read", a
 	await mkdir(`${path}.lock`);
 	await expect(unread()).rejects.toMatchObject({ code: "EISDIR" });
 	await rmdir(`${path}.lock`);
+});
+
+it("never shows a lock without its holder: one take of many holds, every other answers busy naming it, and no take leaves a file", async () => {
+	const path = await fresh();
+	const answers = await Promise.all(Array.from({ length: 20 }, () => at(path).hold()));
+	const held = answers.filter((a) => a.kind === "held");
+	expect(held).toHaveLength(1);
+	const recorded = await readFile(`${path}.lock`, "utf8");
+	expect(recorded).not.toBe("");
+	for (const answer of answers) {
+		if (answer.kind === "busy") expect(answer.holder).toBe(recorded);
+	}
+	expect(await readdir(dirname(path))).toEqual(["journal.lock"]);
+});
+
+it("names an empty lock, as an earlier version could leave one, with a fixed word", async () => {
+	const path = await fresh();
+	await writeFile(`${path}.lock`, "");
+	expect(await at(path).hold()).toEqual({ kind: "busy", holder: "unnamed" });
 });

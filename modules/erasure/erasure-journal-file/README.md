@@ -13,7 +13,9 @@
 ## Invariants
 - A record is its body's length in bytes, the body (JSON), its SHA-256 in hex and a line feed. The first is the header (format 1, the random id), the rest are numbered from 1.
 - Creating writes the file only where none is, then syncs the file and its directory.
-- The lock is a file created only where none is, holding its holder (pid, host, time, a token of the take). `hold` takes it for the whole command, and the holder's appends take none, one after another; a lock held elsewhere answers `busy`, naming the holder as recorded. An append outside a hold takes it for itself and removes it after; held elsewhere, it is unavailable, naming the lock's path and its holder. The file is read and checked first, the record appended, then synced before the answer.
+- The lock is a file holding its holder (pid, host, time, a token of the take), written whole and synced in a file of its own first, then linked as the lock only where none is: a lock never stands without its holder, and a failed take leaves no file.
+- A lock found empty, as an earlier version could leave one, is named `unnamed`.
+- `hold` takes it for the whole command, and the holder's appends take none, one after another; a lock held elsewhere answers `busy`, naming the holder as recorded. An append outside a hold takes it for itself and removes it after; held elsewhere, it is unavailable, naming the lock's path and its holder. The file is read and checked first, the record appended, then synced before the answer.
 - A release removes the lock only while it still records this holder: a read, then a removal, not one atomic step. The window between them opens only after an operator removed a live holder's lock.
 - Each append reads and checksums the whole file first, so a record costs the file's length: fine for the few records erasure writes.
 - An append the medium fails is cut back to the file's length before it, so nothing half written stays, and is unavailable.
@@ -21,7 +23,7 @@
 - A normal end, or a stop through the tool's stop path, releases the hold. A crash (SIGKILL, OOM) leaves the lock: every later hold answers `busy` and every append is unavailable, naming it and its holder, until the operator removes it, having made sure the holder's process is gone (`docs/runbook.md` gives the step with erasure's). Nothing removes it on a guess.
 
 ## Deployment
-- A durable directory on the one node that runs erasure, backed up apart from the store. Back up the journal's file, not its `.lock`: a restored lock answers `busy` for a holder that never ran there.
+- A durable directory on the one node that runs erasure, on a file system that takes hard links, backed up apart from the store. Back up the journal's file, not its `.lock`: a restored lock answers `busy` for a holder that never ran there.
 
 ## Depends on
 - `kernel`, `erasure-journal`; Node's file system

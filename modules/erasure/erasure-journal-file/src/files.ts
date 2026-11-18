@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { open, readFile, unlink } from "node:fs/promises";
+import { link, open, readFile, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
 /** The file operations the journal is kept by; each durable before it answers. */
@@ -60,20 +61,33 @@ export const nodeFiles: JournalFiles = {
 	},
 	lock: async (path, holder) => {
 		const lockPath = `${path}.lock`;
-		let held: Awaited<ReturnType<typeof open>>;
+		// The holder is written whole and synced in a file of its own first, then published as the
+		// lock in one step: a lock never stands without its holder, whatever stops the take.
+		// Named by the holder, which is this take's alone.
+		const written = `${lockPath}.${createHash("sha256").update(holder).digest("hex").slice(0, 16)}.tmp`;
 		try {
-			held = await open(lockPath, "wx");
-		} catch (error) {
-			if ((error as { code?: unknown }).code !== "EEXIST") throw error;
-			const recorded = await readFile(lockPath, "utf8").catch(() => "unread");
-			throw Object.assign(new Error("held"), { code: "EEXIST", holder: recorded.trim() });
-		}
-		try {
-			await held.writeFile(holder);
-			await held.sync();
+			const file = await open(written, "wx");
+			try {
+				await file.writeFile(holder);
+				await file.sync();
+			} finally {
+				await file.close();
+			}
+			try {
+				await link(written, lockPath);
+			} catch (error) {
+				if ((error as { code?: unknown }).code !== "EEXIST") throw error;
+				const recorded = await readFile(lockPath, "utf8").catch(() => "unread");
+				// Empty only where an earlier version or a hand left it so.
+				throw Object.assign(new Error("held"), {
+					code: "EEXIST",
+					holder: recorded.trim() || "unnamed",
+				});
+			}
 		} finally {
-			await held.close();
+			await unlink(written).catch(() => {});
 		}
+		await syncDirectory(lockPath);
 		const gone = (error: unknown) => (error as { code?: unknown }).code === "ENOENT";
 		return async () => {
 			let recorded: string;
