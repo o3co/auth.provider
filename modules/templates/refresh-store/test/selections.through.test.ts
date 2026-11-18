@@ -22,7 +22,7 @@ import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
 import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionParticipants from "@mod/session-participants/module";
-import { type Space, store, storeControl } from "@mod/store";
+import { store, storeControl } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import tokenControl from "@mod/token-control/module";
@@ -154,7 +154,7 @@ async function boot() {
 		if (!eraser) throw new Error("no eraser claims-selection");
 		const walk: Walk = {
 			sweep: async (space, cursor) => {
-				const page = await inner.scan({ name: space, guarantees: [] } as Space, cursor);
+				const page = await inner.scan(simulated.declaredSpace(space), cursor);
 				return page.cursor === undefined
 					? { keys: page.keys, server: "one" }
 					: { keys: page.keys, cursor: page.cursor, server: "one" };
