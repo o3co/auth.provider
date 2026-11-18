@@ -20,6 +20,7 @@ import {
 	type Reserved,
 	rateLimit,
 	requestsPerSource,
+	windowCeilingMs,
 } from "../src/contract.ts";
 import { lockoutSpace } from "../src/lockout/lockout.ts";
 import rateLimitModule from "../src/module.ts";
@@ -556,7 +557,9 @@ describe("releasing a lockout under terms", () => {
 });
 
 const window = { limit: 2, ms: 60_000 };
-/** Routes counted by each policy under the name `test`, two to a window. */
+/** A window one ms longer than the ceiling. */
+const tooLong = { limit: 1, ms: windowCeilingMs + 1 };
+/** Routes counted by each policy under the name `test`, two to a window, and under `long`, over the ceiling. */
 const routed = defineModule({ name: "routed", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(routes).by(() => ({
 		method: "GET",
@@ -570,6 +573,21 @@ const routed = defineModule({ name: "routed", replicaSafe: false, takes: [] }, (
 		path: "/requests",
 		changesState: false,
 		uses: [use(requestsPerSource, { name: "test", window })],
+		handle: () => ({ status: 204 }),
+	})),
+	// A window one ms over the ceiling, through each policy.
+	m.contribute(routes).by(() => ({
+		method: "GET",
+		path: "/attempts-too-long",
+		changesState: false,
+		uses: [use(attemptsPerSource, { name: "long", window: tooLong })],
+		handle: () => ({ status: 204 }),
+	})),
+	m.contribute(routes).by(() => ({
+		method: "GET",
+		path: "/requests-too-long",
+		changesState: false,
+		uses: [use(requestsPerSource, { name: "long", window: tooLong })],
 		handle: () => ({ status: 204 }),
 	})),
 ]);
@@ -709,6 +727,19 @@ describe("the policies for routes", () => {
 			{ labels: { limit: "requests" }, value: 1 },
 			{ labels: { limit: "attempts" }, value: 1 },
 		]);
+	});
+
+	it("answers 500 for a window over the ceiling through each policy, open or closed, telling nothing as uncounted", async () => {
+		for (const section of [undefined, { "fail-mode": "open" }]) {
+			const { from, events, uncounted } = await serving(section);
+			for (const path of ["/attempts-too-long", "/requests-too-long"]) {
+				expect((await from(path, "198.51.100.9")).status, path).toBe(500);
+			}
+			expect(events).toEqual([]);
+			expect(uncounted()).toEqual([]);
+			await stop();
+			stop = async () => {};
+		}
 	});
 
 	it("lets a request by when it cannot count where the section says open, never an attempt", async () => {
