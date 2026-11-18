@@ -16,14 +16,14 @@
 - Expiry after a duration, at a time, none, keep, or extend only; counting in a fixed window.
 - `codePointOrder`: the order of members and of ties, by code point, which is also the order of their UTF-8 bytes, the same for every store.
 - The space declaration extension point, and the composition definition with `accept-volatile` (default false), which lets spaces needing durable or replicated boot on memory; every start that boots such spaces so warns `store.volatile_accepted`, naming them.
-- `./testing`: the contract test (`storeContract`, in the internal modules `contract-harness`, `contract-keys`, `contract-marks`, `contract-batches`, `contract-walking` and `contract-faults`), test configuration builders, a simulated replicated store (internal module `simulated`), and a value written carrying the subject writer (`plantValue`, internal module `planting`).
+- `./testing`: the contract test (`storeContract`, in the internal modules `contract-harness`, `contract-keys`, `contract-marks`, `contract-batches`, `contract-walking`, `contract-writer` and `contract-faults`), test configuration builders, a simulated replicated store (internal module `simulated`), and a value written carrying the subject writer (`plantValue`, internal module `planting`).
 
 ## Invariants
 - Declared `forWiring`: a feature's storage is built on this by its wiring, so no feature depends on it; a feature's tests take it through `./testing` alone.
 - Versions are opaque, compared only for equality, and never repeat for a key, even after a delete or a failure (for memory, within the process).
 - A value lives only while the store clock is before its expiry; at the expiry, reads and writes both see it expired.
 - Failures are unavailable, apart from absent and conflict; only declared spaces are accepted, with the guarantees they declare.
-- Every implementation is held to the contract by `checkedStore` (internal module `checks`): its input copied once and checked whole.
+- Every implementation is held to the contract by `checkedStore` (internal module `checks`): its input copied once and checked whole, and a change to a space of subjects' data refused as a `TypeError` unless it carries `subject-records`' writer.
 - An idempotency mark binds the partition and the request: a resend gets the first answer, refusals included, and another request is refused as reused. Every implementation keeps a mark for `idempotencyWindows` and forgets it then: until a second past its deadline, or five minutes and a second after the write without one, fixed as the contract every store keeps alike.
   - A batch across keeps its mark, with one answer and one end, in every partition it touches, those it only reads included, and looks for it in all of them first: a resend meets it in any, another request meeting it in any is reused (its keys' order is part of the request), and a late answer is not kept.
 - In a replicated space, a written answer confirms every state the store held before it; exists, conflict, missing, limited, `mutate`'s keep and a later unavailable write confirm nothing.

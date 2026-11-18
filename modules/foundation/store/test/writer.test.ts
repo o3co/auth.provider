@@ -75,3 +75,42 @@ it("keeps a batch carrying the writer through the simulated store's one check, a
 		expect((await s.get(k)).entry?.value, k.name).toBe(value);
 	}
 });
+
+it("asks the writer of a change to a space of each category of subjects' data it holds, and of no other", async () => {
+	const categories = [
+		["online-indexed", true],
+		["online-keyed", true],
+		["bounded", true],
+		["internal", true],
+		["window", false],
+		["none", false],
+		["pseudonymous", false],
+		["retained", false],
+		[undefined, false],
+	] as const;
+	const declared: Space[] = categories.map(([subjectData]) => ({
+		name: `of-${subjectData ?? "undeclared"}`,
+		guarantees: [],
+		...(subjectData === undefined ? {} : { subjectData }),
+	}));
+	const answered = async () => ({ kind: "written" as const, version: "v" });
+	const batch = async () => ({ kind: "committed" as const, versions: [] });
+	const inner = { putIfAbsent: answered, batch } as unknown as Store;
+	const s = checkedStore(inner, declared);
+	for (const [i, [subjectData, held]] of categories.entries()) {
+		const at = { space: declared[i] as Space, partition: "p", name: "k" };
+		const single = s.putIfAbsent(at, 1, { expiry: never });
+		const unmarked = s.batch([], [{ key: at, put: 1, expiry: never }]);
+		if (held) {
+			await expect(single, subjectData).rejects.toThrow(TypeError);
+			await expect(unmarked, subjectData).rejects.toThrow(TypeError);
+		} else {
+			await expect(single, subjectData).resolves.toMatchObject({ kind: "written" });
+			await expect(unmarked, subjectData).resolves.toMatchObject({ kind: "committed" });
+		}
+		const marked = await s.batch([], [{ key: at, put: 1, expiry: never }], {
+			writer: subjectWriter,
+		});
+		expect(marked.kind, subjectData).toBe("committed");
+	}
+});

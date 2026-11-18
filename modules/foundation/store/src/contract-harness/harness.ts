@@ -25,6 +25,8 @@ export const contractSpaces: readonly Space[] = Object.freeze([
 	{ name: "contract-confirmed", guarantees: ["replicated", "confirmed-reads"] },
 	// The guarantees of the first, so a batch across spaces can join the two.
 	{ name: "contract-twin", guarantees: [] },
+	// Of subjects' data, the guarantees of the first: a change to it carries the subject writer.
+	{ name: "contract-subjects", guarantees: [], subjectData: "online-indexed" },
 ]);
 
 export interface StoreHarness {
@@ -92,7 +94,13 @@ export const versionOf = (answer: { kind: string; version?: Version }): Version 
 
 /** What one run of the contract shares across its parts: the spaces, fresh keys, and two connections. */
 export function contractKit(harness: StoreHarness) {
-	const [space, replicated, confirmed, twin] = contractSpaces as [Space, Space, Space, Space];
+	const [space, replicated, confirmed, twin, subjects] = contractSpaces as [
+		Space,
+		Space,
+		Space,
+		Space,
+		Space,
+	];
 	let n = 0;
 	/** A partition no other test uses. */
 	const partition = () => `p${++n}`;
@@ -105,7 +113,7 @@ export function contractKit(harness: StoreHarness) {
 		const s = await harness.open();
 		return [s, await harness.peer(s)] as const;
 	};
-	return { space, replicated, confirmed, twin, partition, fresh, never, both };
+	return { space, replicated, confirmed, twin, subjects, partition, fresh, never, both };
 }
 
 export type ContractKit = ReturnType<typeof contractKit>;

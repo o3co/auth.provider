@@ -120,15 +120,39 @@ function readLimits(value: unknown): { deadline?: number; idempotency?: string }
 	};
 }
 
+/** The categories of subjects' data a change reaches only carrying the subject writer. */
+const writerHeld: readonly SubjectData[] = [
+	"online-indexed",
+	"online-keyed",
+	"bounded",
+	"internal",
+];
+/** Whether a key's declared space is one a change reaches only carrying the subject writer. */
+const heldByWriter = (k: Key) =>
+	k.space.subjectData !== undefined && writerHeld.includes(k.space.subjectData);
+
+/** A key a single-key change port takes: none in a space held by the writer, which no such port carries. */
+function unheld(k: Key): Key {
+	if (heldByWriter(k)) fail(`a change to ${k.space.name} carries the subject writer, in a batch`);
+	return k;
+}
+
 /**
  * A batch's options: checked whole as plain data first, the writer allowed among them; then the
- * subject writer checked by its identity; then taken off, so the store below never sees it.
+ * subject writer checked by its identity, and asked for where any key read or written (`keys`) is in
+ * a space held by it; then taken off, so the store below never sees it.
  */
-function readBatchOptions(value: unknown): { deadline?: number; idempotency?: string } {
-	if (value === undefined) return {};
-	const read = fields("options", value, ["deadline", "idempotency", "writer"]);
+function readBatchOptions(
+	value: unknown,
+	keys: readonly Key[],
+): { deadline?: number; idempotency?: string } {
+	const read =
+		value === undefined ? {} : fields("options", value, ["deadline", "idempotency", "writer"]);
 	if (read.writer !== undefined && read.writer !== subjectWriter)
 		fail("a batch's writer is not the subject writer");
+	const held = keys.find(heldByWriter);
+	if (read.writer === undefined && held !== undefined)
+		fail(`a change to ${held.space.name} carries the subject writer`);
 	return readLimits({ deadline: read.deadline, idempotency: read.idempotency });
 }
 
@@ -289,25 +313,26 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 					batchAcross: async (conditions, writes, o) => {
 						const checkedConditions = [...conditions].map((c) => readCondition(c, key));
 						const checkedWrites = batchWrites(writes);
-						oneGuarantee([...checkedConditions, ...checkedWrites].map((x) => x.key));
-						return batchAcross(checkedConditions, checkedWrites, readBatchOptions(o));
+						const keys = [...checkedConditions, ...checkedWrites].map((x) => x.key);
+						oneGuarantee(keys);
+						return batchAcross(checkedConditions, checkedWrites, readBatchOptions(o, keys));
 					},
 				}
 			: {}),
 		get: async (k) => inner.get(key(k)),
-		putIfAbsent: async (k, v, o) => inner.putIfAbsent(key(k), json(v), readWriteOptions(o)),
+		putIfAbsent: async (k, v, o) => inner.putIfAbsent(unheld(key(k)), json(v), readWriteOptions(o)),
 		replaceIf: async (k, version, v, o) =>
-			inner.replaceIf(key(k), text("version", version), json(v), readWriteOptions(o)),
+			inner.replaceIf(unheld(key(k)), text("version", version), json(v), readWriteOptions(o)),
 		removeIf: async (k, expected, o) =>
-			inner.removeIf(key(k), readExpected(expected), readLimits(o)),
-		take: async (k, o) => inner.take(key(k), readLimits(o)),
-		batch: async (conditions, writes, o) =>
-			inner.batch(
-				[...conditions].map((c) => readCondition(c, key)),
-				batchWrites(writes),
-				readBatchOptions(o),
-			),
-		count: async (k, window, o) => inner.count(key(k), readWindow(window), readLimits(o)),
+			inner.removeIf(unheld(key(k)), readExpected(expected), readLimits(o)),
+		take: async (k, o) => inner.take(unheld(key(k)), readLimits(o)),
+		batch: async (conditions, writes, o) => {
+			const checkedConditions = [...conditions].map((c) => readCondition(c, key));
+			const checkedWrites = batchWrites(writes);
+			const keys = [...checkedConditions, ...checkedWrites].map((x) => x.key);
+			return inner.batch(checkedConditions, checkedWrites, readBatchOptions(o, keys));
+		},
+		count: async (k, window, o) => inner.count(unheld(key(k)), readWindow(window), readLimits(o)),
 		...(getMany ? { getMany: async (keys) => getMany([...keys].map(key)) } : {}),
 		scan: async (target, cursor) =>
 			inner.scan(
