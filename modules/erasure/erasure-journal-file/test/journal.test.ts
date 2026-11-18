@@ -258,7 +258,7 @@ it("names an empty lock, as an earlier version could leave one, with a fixed wor
 });
 
 /** The node's files, the next `syncs` directory syncs and the next `unlinks` removals failing as an I/O error. */
-const failing = (counts: { syncs: number; unlinks: number }) => {
+const failing = (counts: { syncs: number; unlinks: number }, removed: string[] = []) => {
 	const eio = () => Object.assign(new Error("i/o error"), { code: "EIO" });
 	return nodeFilesWith({
 		syncDirectory: async (p) => {
@@ -271,6 +271,7 @@ const failing = (counts: { syncs: number; unlinks: number }) => {
 			}
 		},
 		unlink: async (p) => {
+			removed.push(p);
 			if (counts.unlinks-- > 0) throw eio();
 			await unlink(p);
 		},
@@ -355,4 +356,21 @@ it("answers a release made while another is under way with that one, removing th
 	expect(removals).toBe(1);
 	expect((await at(path).hold()).kind).toBe("busy");
 	if (next.kind === "held") await next.release();
+});
+
+it("removes a lock a failed take left once, for two takes made at once, of which one holds and its lock stands", async () => {
+	const path = await fresh();
+	const removed: string[] = [];
+	const files = failing({ syncs: 1, unlinks: 1 }, removed);
+	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
+	await expect(journal.hold()).rejects.toMatchObject({ name: "Unavailable" });
+	removed.length = 0;
+	const answers = await Promise.all([journal.hold(), journal.hold()]);
+	expect(answers.map((a) => a.kind).sort()).toEqual(["busy", "held"]);
+	expect(removed).toEqual([`${path}.lock`]);
+	const recorded = await readFile(`${path}.lock`, "utf8");
+	expect(answers.find((a) => a.kind === "busy")).toEqual({ kind: "busy", holder: recorded });
+	expect((await at(path).hold()).kind).toBe("busy");
+	const held = answers.find((a) => a.kind === "held");
+	if (held?.kind === "held") await held.release();
 });

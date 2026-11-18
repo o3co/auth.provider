@@ -98,17 +98,30 @@ export function journalFileWith(parts: {
 			at: parts.clock.now(),
 			take: Buffer.from(parts.random.bytes(8)).toString("hex"),
 		});
-	/** A lock this journal's failed take could not remove, removed before its next take. */
-	let stranded: (() => Promise<void>) | undefined;
+	/** A lock this journal's failed take could not remove, removed once before its next takes. */
+	let stranded:
+		| { readonly release: () => Promise<void>; removing?: Promise<void> | undefined }
+		| undefined;
+	const removeStranded = (left: NonNullable<typeof stranded>) => {
+		left.removing ??= left.release().then(
+			() => {
+				if (stranded === left) stranded = undefined;
+			},
+			(error: unknown) => {
+				left.removing = undefined;
+				throw error;
+			},
+		);
+		return left.removing;
+	};
 	/** Takes the lock, or answers who holds it; any other failure of the medium is unavailable. */
 	const locked = async () => {
 		if (stranded) {
 			try {
-				await stranded();
+				await removeStranded(stranded);
 			} catch {
 				throw new Unavailable(`erasure-journal (its lock ${path}.lock was not removed)`);
 			}
-			stranded = undefined;
 		}
 		try {
 			return { release: await files.lock(path, holderNow()) };
@@ -119,7 +132,7 @@ export function journalFileWith(parts: {
 				release?: unknown;
 			};
 			if (code === "EEXIST" && typeof holder === "string") return { holder };
-			if (typeof release === "function") stranded = release as () => Promise<void>;
+			if (typeof release === "function") stranded = { release: release as () => Promise<void> };
 			throw new Unavailable(
 				`erasure-journal (its lock ${path}.lock could not be taken: ${String(code ?? "failed")}; its directory must be writable and take hard links)`,
 			);
