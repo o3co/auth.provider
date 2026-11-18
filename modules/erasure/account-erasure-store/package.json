@@ -1,0 +1,15 @@
+{
+	"name": "@mod/account-erasure-store",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "wiring",
+	"wires": "@mod/account-erasure",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/account-erasure": "workspace:*",
+		"@mod/kernel": "workspace:*"
+	}
+}

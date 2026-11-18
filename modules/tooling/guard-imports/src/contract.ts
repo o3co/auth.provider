@@ -75,7 +75,7 @@ export function importRules(s: Scope, surfaces: ReadonlyMap<string, Surface>): v
 		}
 		helperRules(s, p, surfaces);
 	}
-	wiringRules(s);
+	wiringRules(s, surfaces);
 	axisRules(s);
 	bridgeRules(s, surfaces);
 	declaredRecordRules(s);

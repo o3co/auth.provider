@@ -95,6 +95,8 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
+| `@mod/account-erasure` | feature | `@mod/kernel` |
+| `@mod/account-erasure-store` | wiring | `@mod/account-erasure`, `@mod/kernel` |
 | `@mod/erasure-journal-file` | adapter | `@mod/erasure-journal`, `@mod/kernel` |
 
 ### foundation
