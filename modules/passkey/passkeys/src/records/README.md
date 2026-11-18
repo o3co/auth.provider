@@ -10,7 +10,7 @@ Internal module of `passkeys`: the passkey records, read in the shape written, a
 
 ## Offers
 - `recordsOver` (the passkey store) → `holder`, `handleFor`, `passkey`, `activated`, `count`, `listed`, `renamed`, `writtenHolding`.
-- For the package's writes that change a list: the shapes read (`holderOf`, `keptOf`), the keys (`subjectKey`, `credentialKey`), a pending record by its write's token (`pendingOf`), the removed form (`removedOf`), `heldBy`, `stored` and `broken`.
+- For the package's writes that change a list: the shapes read (`holderOf`, `keptOf`; `holderRead`, none for another shape, for the eraser's reading), the keys (`subjectKey`, `credentialKey`), a pending record by its write's token (`pendingOf`), the removed form (`removedOf`), `heldBy`, `stored` and `broken`.
 
 ## Invariants
 - Handles and credential ids are written and compared only in `webauthn`'s canonical form. A record read in another shape is unavailable: a broken record decides nothing.

@@ -55,12 +55,19 @@ const pendingShape = passkeyShape
 /** What a removed passkey leaves: its holder, and that it was removed; no key, count or name. */
 const removedShape = z.object({ v: z.literal(1), subject: z.string(), removed: z.literal(true) });
 
-/** A kept holder in the one shape written, or unavailable: a broken record decides nothing. */
-export function holderOf(record: StoredPasskey): Holder {
+/** A kept holder in the one shape written, or none for any other shape. */
+export function holderRead(record: unknown): Holder | undefined {
 	const parsed = holderShape.safeParse(record);
-	if (!parsed.success) throw broken();
+	if (!parsed.success) return undefined;
 	const { handle, credentials, fence = 0, subject } = parsed.data;
 	return { handle, credentials, fence, ...(subject === undefined ? {} : { subject }) };
+}
+
+/** A kept holder in the one shape written, or unavailable: a broken record decides nothing. */
+export function holderOf(record: StoredPasskey): Holder {
+	const held = holderRead(record);
+	if (!held) throw broken();
+	return held;
 }
 
 /** A kept passkey, or the subject a removed one was held by; unavailable for any other shape. */

@@ -17,9 +17,10 @@ Internal module of `passkeys`: erasing a subject's credentials and holder, fenci
 - A holder is its subject's where the subject it holds names its key (`s-` and the base64url SHA-256 of the subject); one whose subject names another key is unreadable.
 - A holder holding no subject, as a node before 0.20 made it, is read by its credentials: one of them whose subject names its key gives it, a confirmed absent one passed over. Acceptance needs that key, so a wrong subject is a SHA-256 collision.
 - A holder holding no subject none of whose credentials names its key reads as empty, and an empty holder is an orphan, removed: its key is a hash of a subject no field holds, so it holds no subject's data a reading can recover.
-- A credential it lists that fails to read, or has another shape, makes the holder unreadable, never empty; so does a holder of another shape.
+- A credential it lists that fails to read, or has another shape, makes the holder unreadable, never empty; so does a holder of another shape, read in `records`' shape.
+- A registration challenge is never read: the migration answers a bounded space before any read, so a read asked of one is a defect, thrown.
 - Where a subject's holder lists a 0.18 entry whose record is now another subject's, erasing that one makes it read absent; the holder's next emptying write answers `unsure`, which `passkey-witnessing` throws as inconsistent.
 - `erasable` only where the passkey store offers `erase` and `migrate` in both spaces and a registration challenge store is composed offering both: without one, registration challenges, each holding its subject, stay in the challenge store, which cannot erase. Otherwise empty reports.
 
 ## Depends on
-- `erasure-extensions` (the eraser and its readings), `zod`; internal module `records` (`keptOf`, `stored`, `subjectKey`, `credentialKey`); the package's store interface.
+- `erasure-extensions` (the eraser and its readings); internal module `records` (`holderRead`, `keptOf`, `stored`, `subjectKey`, `credentialKey`); the package's store interface.

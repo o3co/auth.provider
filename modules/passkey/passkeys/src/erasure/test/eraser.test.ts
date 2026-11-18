@@ -105,7 +105,7 @@ describe("passkeys' eraser", () => {
 			migrate: async (_walk: Walk, reading: SubjectReading) => {
 				asked.push(`migrate ${space}`);
 				if (space === "registrations") {
-					expect((await reading("k", {})).kind).toBe("unreadable");
+					await expect(reading("k", {})).rejects.toThrow(/bounded, so no migration reads one/);
 				}
 				return migrated(space);
 			},

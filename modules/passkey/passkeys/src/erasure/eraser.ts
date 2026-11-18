@@ -1,6 +1,5 @@
 import type { Eraser, SubjectOf, SubjectReading } from "@mod/erasure-extensions";
-import { z } from "zod";
-import { credentialKey, keptOf, stored, subjectKey } from "../records/records.ts";
+import { credentialKey, holderRead, keptOf, stored, subjectKey } from "../records/records.ts";
 import type { PasskeyStore, RegistrationChallengeStore } from "../store.ts";
 
 /** Why a read failed, by the error's name. */
@@ -20,16 +19,6 @@ const credentialSubject = (value: unknown): SubjectOf => {
 export const credentialSubjectOf: SubjectReading = async (_key, value) => credentialSubject(value);
 
 /**
- * A holder as the migration reads it: the fields every version wrote, its subject where 0.20 wrote
- * it. Not `holderOf`'s shape, which throws: a holder of another shape is unreadable here.
- */
-const holderShape = z.object({
-	v: z.literal(1),
-	credentials: z.array(z.string()),
-	subject: z.string().optional(),
-});
-
-/**
  * Whose a holder of the passkey store is, as the migration reads it. The subject it holds, where its
  * key is that subject's; else one of its credentials' subjects, where the key is that one's. A holder
  * none of whose credentials is its key's subject's reads as empty; an empty holder, which a node
@@ -40,9 +29,9 @@ const holderShape = z.object({
 export const holderSubjectOf =
 	(store: Pick<PasskeyStore, "credentials">): SubjectReading =>
 	async (key, value) => {
-		const holder = holderShape.safeParse(value);
-		if (!holder.success) return { kind: "unreadable", reason: "a holder of another shape" };
-		const { subject, credentials } = holder.data;
+		const holder = holderRead(value);
+		if (!holder) return { kind: "unreadable", reason: "a holder of another shape" };
+		const { subject, credentials } = holder;
 		if (subject !== undefined) {
 			return subjectKey(subject) === key
 				? { kind: "subject", subject }
@@ -64,11 +53,13 @@ export const holderSubjectOf =
 		return { kind: "orphan" };
 	};
 
-/** A registration challenge's space is bounded: nothing in it is indexed, so none is read. */
-const boundedReading: SubjectReading = async () => ({
-	kind: "unreadable",
-	reason: "a registration challenge is never indexed: its space is bounded",
-});
+/**
+ * Registration challenges are bounded: a migration indexes none, and reads none (subject-records'
+ * `migrateRecords` answers a bounded space before any read); one asked to read is a defect.
+ */
+const boundedReading: SubjectReading = async () => {
+	throw new Error("passkeys: a registration challenge is bounded, so no migration reads one");
+};
 
 /**
  * passkeys' eraser, `passkeys`, as its spaces' `erasedBy` names it: a subject's credentials and
