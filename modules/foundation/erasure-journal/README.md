@@ -7,7 +7,7 @@
 - Where and how it is kept: its adapter (`erasure-journal-file`). When it is written and read, what a restored record means, and what the operator declares of it: `account-erasure`.
 
 ## Offers
-- The `erasureJournal` contract: `create` (once, with a new random id), `header` (the id and the last record's number), `begun` (a subject, who asked), `finished` (a subject), `list` (each subject begun, once, in the order begun: who asked, when, whether it finished since, its last number), `hold` (the journal for one process until released, or `busy` naming its holder).
+- The `erasureJournal` contract: `create` (once, with a new random id), `header` (the id and the last record's number), `begun` (a subject, who asked), `finished` (a subject), `list` (each subject begun, once, in the order begun: who asked, when, whether it finished since, its last number, the number of its last `begun` record), `hold` (the journal for one process until released, or `busy` naming its holder).
 - `Unusable`: the content cannot be relied on, `missing` (no header), `torn` (the last record does not match its length or checksum) or `corrupt`.
 - `./testing`: the contract test, `journalContract`, run on a harness that opens, reopens, tears the last record, and fails the next write, and its hold.
 

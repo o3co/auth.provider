@@ -16,13 +16,18 @@ export interface JournalHeader {
 	readonly number: number;
 }
 
-/** A subject whose erasure began, with who asked and when, whether it finished, and its last number. */
+/**
+ * A subject whose erasure began, with who asked and when, whether it finished, its last number,
+ * and the number of its last `begun` record: the later run's, where it was begun more than once.
+ */
 export interface JournalEntry {
 	readonly subject: string;
 	readonly requestedBy: string;
 	readonly begunAt: number;
 	readonly finished: boolean;
 	readonly number: number;
+	/** Optional in this release, then required. */
+	readonly begunNumber?: number;
 }
 
 /**
