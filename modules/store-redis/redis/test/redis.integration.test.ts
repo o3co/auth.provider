@@ -191,7 +191,12 @@ afterAll(() => {
 });
 
 const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
-	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable", "no-eviction"] })),
+	// A space that may hold a subject's data, so the shared ledger records it.
+	m.contribute(spaces).by(() => ({
+		name: "kept",
+		guarantees: ["durable", "no-eviction"],
+		subjectData: "online-indexed",
+	})),
 	...contractSpaces.map((space) => m.contribute(spaces).by(() => space)),
 ]);
 
@@ -807,7 +812,13 @@ describe("one server alone, as configured with replication none", () => {
 	});
 	const replicatedOnly = defineModule(
 		{ name: "replicated-owner", replicaSafe: true, takes: [] },
-		(m) => [m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] }))],
+		(m) => [
+			m.contribute(spaces).by(() => ({
+				name: "replicated",
+				guarantees: ["replicated"],
+				subjectData: "none",
+			})),
+		],
 	);
 
 	it("boots on Redis 7.4 and 7.0 alike: one server, its run id the same to both connections, and the store's scripts run, warning at each boot of the spaces it leaves unreplicated", async () => {
@@ -875,7 +886,11 @@ describe("settings the server will not show", () => {
 		if (blocked) docker("rm", "-f", "-v", blocked);
 	});
 	const kept = defineModule({ name: "kept-owner", replicaSafe: true, takes: [] }, (m) => [
-		m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable", "no-eviction"] })),
+		m.contribute(spaces).by(() => ({
+			name: "kept",
+			guarantees: ["durable", "no-eviction"],
+			subjectData: "none",
+		})),
 	]);
 	const boot = (redis: object, through = blockedUrl, recorded = recordingLog()) =>
 		assemble({

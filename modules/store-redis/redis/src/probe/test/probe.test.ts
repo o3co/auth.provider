@@ -31,7 +31,9 @@ afterEach(async () => {
 
 /** A space that must never be evicted, so boot checks the eviction policy. */
 const kept = defineModule({ name: "kept-owner", replicaSafe: true, takes: [] }, (m) => [
-	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["no-eviction"] })),
+	m
+		.contribute(spaces)
+		.by(() => ({ name: "kept", guarantees: ["no-eviction"], subjectData: "none" })),
 ]);
 
 async function boot(port: number, extra: readonly Module[] = []) {
