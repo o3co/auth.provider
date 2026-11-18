@@ -79,6 +79,36 @@ describe("guard-imports", () => {
 		expect(rules([m, o]).sort()).toEqual(["G3", "G4"]);
 	});
 
+	it("G4 lets test code only its package's `./testing` reaches use another package's, and refuses shipped code", () => {
+		const o = pkg(
+			"@t4/o",
+			{ "src/contract.ts": "export const o = 1;\n", "src/testing.ts": "export const suite = 1;\n" },
+			{
+				exports: { ".": "./src/contract.ts", "./testing": "./src/testing.ts" },
+			},
+		);
+		const helper = 'import { suite } from "@t4/o/testing";\nexport const planted = suite;\n';
+		const m = pkg(
+			"@t4/m",
+			{
+				"src/contract.ts": "export const m = 1;\n",
+				"src/testing.ts": 'export { planted } from "./planting/planting.ts";\n',
+				"src/planting/planting.ts": helper,
+				"src/shipped.ts": helper,
+			},
+			{
+				exports: {
+					".": "./src/contract.ts",
+					"./testing": "./src/testing.ts",
+					"./shipped": "./src/shipped.ts",
+				},
+				dependencies: { "@t4/o": "*" },
+			},
+		);
+		const g4 = check([m, o], budget).filter((v) => v.rule.startsWith("G4"));
+		expect(g4.map((v) => v.where)).toEqual(["@t4/m/src/shipped.ts"]);
+	});
+
 	it("checks a published contract test suite's imports as shipped code", () => {
 		const p = pkg(
 			"@t/suite",

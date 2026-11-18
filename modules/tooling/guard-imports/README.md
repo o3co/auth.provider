@@ -5,7 +5,7 @@
 - Checks how packages depend on one another and what they import, each reported by its id, place and what went over:
   - G1, G2: no cycles, and the bottom level of the kinds' order depends on nothing in the workspace.
   - G3: a package exporting `./module` imports no workspace package's `./module` in shipped code (tests may).
-  - G4: contract tests (`./testing`) are used only from tests.
+  - G4: contract tests (`./testing`) are used only from test code, read as the budgets read it (`budgetsAsTest`): a file named as a test, or one only its package's `./testing` reaches.
   - G8: shipped code imports at run time only what the manifest declares.
   - G34: each file a source names, tests' too, by an import, a re-export, a dynamic import, an import type, `import … = require(…)` or `require`, is a file of its own package, as `facts` resolve it (links followed) and as the scope's owner of the path tells; one reaching another package is a dependency no manifest states. A relative specifier named at run time (a template with a substitution) is refused, being unknowable; a resolve names a file and takes no dependency.
   - G10: kind direction: a lower kind never depends on a higher one, by each manifest's kind; a test dependency may point up to the wiring kind only. No kind, or one `kinds` does not know, is refused.

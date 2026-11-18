@@ -249,8 +249,8 @@ function testOnlyOf(s: Scope, p: Pkg): ReadonlySet<string> {
 }
 
 /**
- * Test code for the budgets and for the rules on the clock, randomness, network, audit recording and
- * owned properties: a file named as a test, or one its package's `./testing` reaches by an import that
+ * Test code for the budgets, for the rules on the clock, randomness, network, audit recording and
+ * owned properties, and for G4 (importing another package's `./testing`): a file named as a test, or one its package's `./testing` reaches by an import that
  * loads or takes types and nothing else in the package does (a published contract test suite, its
  * internal modules among it).
  * Every other file is shipped, as is every file of a package whose shipped files hold an import the

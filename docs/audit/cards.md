@@ -96,6 +96,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `lockout` (`src/lockout`): the lockout counter, over the states one store space keeps.
 - `@mod/records` (capability, `modules/foundation/records`): Provides records that know no feature: keyed records, records under a secret, deferred work, and keyed sets.
   - `keyed-sets` (`src/keyed-sets`): sets of members by key, at most a cap to a key, ending on `kernel`'s clock.
+  - `planting` (`src/planting`): a record written in records' key layout as an earlier version left it, for tests.
   - `together` (`src/together`): records of several partitions and spaces changed as one.
   - `walk` (`src/walk`): a walk of a space's records over the walk a maintenance tool hands in.
   - `writing` (`src/writing`): how a record is written, the same for every kind of place.
@@ -110,6 +111,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `contract-marks` (`src/contract-marks`): the contract test's deadlines and idempotency marks, and concurrent connections.
   - `contract-walking` (`src/contract-walking`): the contract test's scanning of a space, and the checks on every input.
   - `memory` (`src/memory`): the store kept in memory, in one process.
+  - `planting` (`src/planting`): a value written at a key as an earlier version, or another writer, left it, for tests.
   - `simulated` (`src/simulated`): a simulated replicated store, for tests, offered through `./testing`.
   - `upkeep` (`src/upkeep`): keeping a store's data whole, apart from reading and writing its keys.
   - `writer` (`src/writer`): the subject writer, the one value a change to subjects' data carries.
