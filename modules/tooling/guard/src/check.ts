@@ -24,8 +24,12 @@ const allowedExports = new Set([".", "./testing", "./module", "./audit-events"])
 /** G5, and what each source file reads: G11, G13, G15, G23; what it imports is guard-imports'. */
 function sourceRules(s: Scope, p: Pkg) {
 	const { budget, kindOf, report } = s;
+	// A further entry is the package's only where its own `takenBy` keeps it for named takers.
+	const kept = s.keptEntries(p);
 	for (const key of Object.keys(p.manifest.exports ?? {})) {
-		if (!allowedExports.has(key)) report("G5 shape of the public interface", p.name, key);
+		if (!allowedExports.has(key) && !kept.includes(key)) {
+			report("G5 shape of the public interface", p.name, key);
+		}
 	}
 	const fromKernel = budget.runtimeFromKernel.includes(kindOf(p));
 	for (const file of s.sources(p)) {
