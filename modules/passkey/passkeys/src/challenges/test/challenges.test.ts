@@ -70,3 +70,14 @@ it("keeps every challenge in the challenge store where no registration challenge
 	expect(await stores.registrations.update(challenge, () => undefined)).toBeUndefined();
 	expect(await challenges.take(challenge, "registration")).toEqual({ ...registering, at: 0 });
 });
+
+it("answers none for a challenge made for another kind, which is taken all the same", async () => {
+	const { challenges } = routed();
+	const [assertion, registration] = [fresh(), fresh()];
+	await challenges.open(assertion, asserting);
+	expect(await challenges.take(assertion, "registration")).toBeUndefined();
+	expect(await challenges.take(assertion, "assertion")).toBeUndefined();
+	await challenges.open(registration, registering);
+	expect(await challenges.take(registration, "assertion")).toBeUndefined();
+	expect(await challenges.take(registration, "registration")).toEqual({ ...registering, at: 0 });
+});
