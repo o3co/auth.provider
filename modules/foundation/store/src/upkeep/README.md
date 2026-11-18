@@ -25,7 +25,7 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
 - `sweep` removes for good each expired key it meets, its answer confirmed as a write, and names the server each page ran on.
 
 ## Depends on
-- `kernel` (contracts)
+- `kernel` (contracts); the internal module `planting`, for its contract test to plant values in a space of subjects' data
 
 ## Vocabulary
 - epoch: the control record's mark, new on each entry to maintenance; a process's changes count only under the epoch it took. maintenance key: the record's flag that upkeep holds the data under. ledger: the spaces ever declared to the data.

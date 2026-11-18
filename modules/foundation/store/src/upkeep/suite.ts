@@ -1,6 +1,7 @@
 import { Unavailable } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import type { Key, Space, Store } from "../contract.ts";
+import { plantValue } from "../planting/planting.ts";
 import type { StoreControl, StoreUpkeep } from "./upkeep.ts";
 
 /** One process over a store's data: the store and its upkeep, sharing the epoch it took. */
@@ -166,7 +167,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 			it("keeps a space a process no longer declares, while its data stays, outside maintenance", async () => {
 				const p = await harness.start(upkeepSpaces);
 				const k = fresh(held);
-				await p.store.putIfAbsent(k, 1, never);
+				await plantValue(p.store, k, 1, never.expiry);
 				const fewer = await harness.another(p, [none]);
 				expect(await fewer.upkeep.retire(held.name)).toEqual({ kind: "not-in-maintenance" });
 				expect((await p.upkeep.kept()).map((s) => s.name)).toContain(held.name);
@@ -208,7 +209,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 					name: `k${i}`,
 				}));
 				n++;
-				for (const k of keys) await p.store.putIfAbsent(k, 1, never);
+				for (const k of keys) await plantValue(p.store, k, 1, never.expiry);
 				const seen = new Set<string>();
 				const servers = new Set<string>();
 				let cursor: string | undefined;
@@ -226,10 +227,11 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				const p = await harness.start(upkeepSpaces);
 				const partition = `sweep${++n}`.padEnd(512, "p");
 				for (let i = 0; i < 101; i++) {
-					await p.store.putIfAbsent(
+					await plantValue(
+						p.store,
 						{ space: held, partition, name: `${i}`.padEnd(512, "k") },
 						i,
-						never,
+						never.expiry,
 					);
 				}
 				let seen = 0;
