@@ -135,10 +135,78 @@ export function scopeOf<B extends Rules>(
 	};
 }
 
+/** Every file an export names, each by its path in the package: a string, or each string target of a conditional export. */
+function exportFiles(value: unknown): string[] {
+	if (typeof value === "string") return [value.replace(/^\.\//, "")];
+	if (typeof value !== "object" || value === null) return [];
+	return Object.values(value).flatMap(exportFiles);
+}
+
 /**
- * A published contract test suite is test code for the budget and for the rules that pass tests by,
- * though it lives outside the test place; the other rules check it as shipped code.
+ * The package's own sources its imports reach from `roots` by any edge (a value, a type, a dynamic
+ * import, a re-export), each by its path in the package; and whether any of them holds an import
+ * the graph cannot resolve (`facts`' resolve tells why).
+ */
+function reached(
+	s: Scope,
+	p: Pkg,
+	roots: readonly string[],
+): { files: Set<string>; unresolved: boolean } {
+	const byReal = new Map(s.sources(p).map((file) => [realOf(join(p.dir, file)), file]));
+	const known = new Set(byReal.values());
+	const files = new Set<string>();
+	let unresolved = false;
+	const next = roots.filter((root) => known.has(root));
+	for (let file = next.pop(); file !== undefined; file = next.pop()) {
+		if (files.has(file)) continue;
+		files.add(file);
+		for (const edge of s.factsOf(p, file).edges) {
+			if (edge.target.kind === "unresolved") unresolved = true;
+			const to = edge.target.kind === "file" ? byReal.get(edge.target.path) : undefined;
+			if (to !== undefined && !files.has(to)) next.push(to);
+		}
+	}
+	return { files, unresolved };
+}
+
+const testOnlyBy = new WeakMap<Scope, Map<string, ReadonlySet<string>>>();
+
+/**
+ * The files a package's `./testing` reaches and nothing else in it does, by any edge: no other
+ * export, and no file not named a test that `./testing` does not reach. None where the shipped files
+ * hold an import the graph cannot resolve, or `./testing` is conditional, failing closed. Read once a
+ * scope, from the import graph alone: no path or name decides it.
+ */
+function testOnlyOf(s: Scope, p: Pkg): ReadonlySet<string> {
+	const byPackage = testOnlyBy.get(s) ?? new Map<string, ReadonlySet<string>>();
+	testOnlyBy.set(s, byPackage);
+	const known = byPackage.get(p.name);
+	if (known !== undefined) return known;
+	const exports = (p.manifest.exports ?? {}) as Record<string, unknown>;
+	const testingRoot = exports["./testing"];
+	// A conditional `./testing` names no one root: the package has no test root, failing closed.
+	const testing =
+		typeof testingRoot === "string"
+			? reached(s, p, exportFiles(testingRoot)).files
+			: new Set<string>();
+	// Shipped: every other export, and every file not named a test that `./testing` does not reach.
+	const others = Object.entries(exports).filter(([key]) => key !== "./testing");
+	const loose = s.sources(p).filter((file) => !s.isTest(file) && !testing.has(file));
+	const shipped = reached(s, p, [...others.flatMap(([, value]) => exportFiles(value)), ...loose]);
+	const testOnly = shipped.unresolved
+		? new Set<string>()
+		: new Set([...testing].filter((file) => !shipped.files.has(file)));
+	byPackage.set(p.name, testOnly);
+	return testOnly;
+}
+
+/**
+ * Test code for the budgets and for the rules on the clock, randomness, network, audit recording and
+ * owned properties: a file named as a test, or one its package's `./testing` reaches by any import and
+ * nothing else in the package does (a published contract test suite, its internal modules among it).
+ * Every other file is shipped, as is every file of a package whose shipped files hold an import the
+ * graph cannot resolve. A file outside the graph (a template, a bundle) is read by its name alone.
  */
 export function budgetsAsTest(s: Scope, p: Pkg, file: string) {
-	return s.isTest(file) || file === p.manifest.exports?.["./testing"]?.replace(/^\.\//, "");
+	return s.isTest(file) || testOnlyOf(s, p).has(file);
 }

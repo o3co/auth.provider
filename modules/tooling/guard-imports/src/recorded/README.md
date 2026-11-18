@@ -12,7 +12,7 @@ Internal module of `guard-imports`: G30, that an audit event is recorded only th
 - `declaredRecordRules` (G30).
 
 ## Invariants
-- The package the `./audit-events` exports declare through is read from their imports, never named here; a package depending on it is read, the package itself, its `./testing` and tests are not.
+- The package the `./audit-events` exports declare through is read from their imports, never named here; a package depending on it is read, the package itself and its test code (`budgetsAsTest`: its tests, and what its `./testing` alone reaches) are not.
 - Each `record` call is resolved by type: one resolving to a `record` declared on an interface of that package counts, through a `Pick` too; a value of no known type (`any`) resolves to nothing and is missed, not reported.
 
 ## Depends on
