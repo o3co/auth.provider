@@ -13,7 +13,7 @@ Internal module of `store`: the checks every implementation's ports go through.
 - `checkedStore(inner, declared)` and `checkedUpkeep(inner, declared)`, on `.`.
 
 ## Invariants
-- A malformed declaration refuses the boot as kernel's `BuildRefused`: its `where` the space's name, or `store.declaration` where kernel's bounds on a `where` refuse the name; its reason store's fixed text, never what the declaration holds. Input to the ports is refused as a `TypeError`.
+- A malformed declaration refuses the boot as kernel's `BuildRefused`: its `where` the space's name, or `store.declaration` where it has none to give: no name, one not a string, one a getter holds, or one kernel's bounds on a `where` refuse; its reason store's fixed text, never what the declaration holds. Input to the ports is refused as a `TypeError`.
 - Input is copied once at the boundary and checked: plain JSON only (no accessors, classes, `__proto__` or hidden properties; -0 is 0), well-formed strings, integers in range.
 - A batch is checked whole before anything is written, never writes a key twice, and never reaches outside its partition. A batch across is checked the same, and refuses spaces of other guarantees, so a fault keeps or drops it whole.
 - A change through the store's ports to a space of `online-indexed`, `online-keyed`, `bounded` or `internal` data carries the subject writer (upkeep's `sweep` and `retire` are no such change and carry none):

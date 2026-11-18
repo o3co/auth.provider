@@ -1,4 +1,5 @@
 import { contract, defineModule } from "@mod/kernel";
+import { declaredSpaces } from "./checks/checks.ts";
 import { spaces, store, storeControl, storeUpkeep } from "./contract.ts";
 import { memoryData, memoryProcess } from "./memory/memory.ts";
 import { section } from "./section.ts";
@@ -11,6 +12,8 @@ export default defineModule(
 	(m) => [
 		m.provide(opened).by(async (c) => {
 			const declared = await c.collect(spaces);
+			// A malformed declaration refuses the boot (`BuildRefused`) before anything here reads it.
+			declaredSpaces(declared);
 			const kept = declared.filter(
 				(s) => s.guarantees.includes("durable") || s.guarantees.includes("replicated"),
 			);
@@ -24,7 +27,8 @@ export default defineModule(
 				// Accepted, yet said at every start: a restart forgets what these spaces keep.
 				c.log.warn("store.volatile_accepted", { spaces: kept.map((s) => s.name).join(", ") });
 			}
-			return memoryProcess(memoryData(c.clock), declared);
+			// Only `true` is never started: a hand-built context may leave it unset.
+			return memoryProcess(memoryData(c.clock), declared, c.neverStarted === true);
 		}),
 		m.provide(store).by(async (c) => (await c.get(opened)).store),
 		m.provide(storeControl).by(async (c) => (await c.get(opened)).control),

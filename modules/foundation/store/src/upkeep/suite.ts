@@ -18,6 +18,11 @@ export interface UpkeepHarness {
 	another(process: UpkeepProcess, declared: readonly Space[]): Promise<UpkeepProcess>;
 	/** For a store that holds expired keys until removed: whether the data still holds `key` at all. */
 	holds?(process: UpkeepProcess, key: Key): Promise<boolean>;
+	/**
+	 * Another process over the same data as `process`, as an assembly that is never started (a
+	 * tool's) builds it. An implementation offering it is held to the refusals of a start.
+	 */
+	anotherNeverStarted?(process: UpkeepProcess, declared: readonly Space[]): Promise<UpkeepProcess>;
 }
 
 /** The spaces the upkeep contract test declares: holding no subject's data, holding some the subject writer guards, and holding some it does not. */
@@ -28,6 +33,23 @@ export const upkeepSpaces: readonly Space[] = Object.freeze([
 ]);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** What a refused start says: a library's refusal as thrown, or the boot's refusals an assembly gives. */
+function said(error: unknown): string {
+	const refusals = (error as { refusals?: readonly { where: string; reason: string }[] }).refusals;
+	if (refusals) return refusals.map((r) => `${r.where}: ${r.reason}`).join("\n");
+	return error instanceof Error ? error.message : String(error);
+}
+
+/** That `start` is refused, saying `words`. */
+async function refusedSaying(start: Promise<unknown>, words: RegExp): Promise<void> {
+	const refused = await start.then(
+		() => undefined,
+		(error: unknown) => error,
+	);
+	expect(refused, "the start was not refused").toBeDefined();
+	expect(said(refused)).toMatch(words);
+}
 const never = { expiry: { kind: "never" } } as const;
 
 /** The upkeep contract, run against any implementation offering it. */
@@ -139,9 +161,55 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 			it("is followed by processes that start under the new epoch and change as before", async () => {
 				const [p] = await pair();
 				await p.upkeep.enterMaintenance();
-				const next = await harness.another(p, upkeepSpaces);
+				// Under the key, only an assembly that is never started builds, where the harness says how.
+				const next = await (harness.anotherNeverStarted ?? harness.another)(p, upkeepSpaces);
 				expect((await next.store.putIfAbsent(fresh(), 1, never)).kind).toBe("written");
 				expect(await next.upkeep.mark("test.next", 1)).toEqual({ kind: "marked" });
+			});
+		});
+
+		describe.runIf(harness.anotherNeverStarted)("starting", () => {
+			const tool = (p: UpkeepProcess, declared: readonly Space[]) =>
+				(harness.anotherNeverStarted as NonNullable<UpkeepHarness["anotherNeverStarted"]>)(
+					p,
+					declared,
+				);
+
+			it("refuses a process that serves under the maintenance key, and starts one never started there", async () => {
+				const p = await harness.start(upkeepSpaces);
+				await p.upkeep.enterMaintenance();
+				await refusedSaying(harness.another(p, upkeepSpaces), /maintenance key/);
+				const t = await tool(p, upkeepSpaces);
+				expect(await t.upkeep.mark("test.tool", 1)).toEqual({ kind: "marked" });
+			});
+
+			it("refuses a process lacking a required space, one never started outside maintenance too, and starts one never started lacking it under the key", async () => {
+				const p = await harness.start(upkeepSpaces);
+				await p.upkeep.enterMaintenance();
+				await p.upkeep.require([held.name]);
+				await p.upkeep.leaveMaintenance();
+				await refusedSaying(harness.another(p, [none]), /requires/);
+				await refusedSaying(tool(p, [none]), /requires/);
+				expect((await harness.another(p, upkeepSpaces)).upkeep).toBeDefined();
+				await p.upkeep.enterMaintenance();
+				const t = await tool(p, [none]);
+				expect(await t.upkeep.mark("test.replacing", 1)).toEqual({ kind: "marked" });
+			});
+
+			it("refuses a declaration that is no object at all before reading it, naming store.declaration", async () => {
+				const p = await harness.start(upkeepSpaces);
+				const nothing = null as unknown as Space;
+				await refusedSaying(harness.another(p, [none, nothing]), /store\.declaration/);
+			});
+
+			it("writes nothing when it refuses a start: the ledger keeps no space the refused process declared", async () => {
+				const p = await harness.start(upkeepSpaces);
+				await p.upkeep.enterMaintenance();
+				await p.upkeep.require([held.name]);
+				await p.upkeep.leaveMaintenance();
+				const only: Space = { name: "upkeep-refused", guarantees: [], subjectData: "none" };
+				await refusedSaying(harness.another(p, [none, only]), /requires/);
+				expect((await p.upkeep.kept()).map((s) => s.name)).not.toContain(only.name);
 			});
 		});
 
@@ -153,6 +221,13 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 					{ name: held.name, subjectDataEver: true },
 					{ name: plain.name, subjectDataEver: true },
 				]);
+			});
+
+			it("checks a process's declarations before it writes the ledger: a malformed one marks no space", async () => {
+				const p = await harness.start(upkeepSpaces);
+				const bare = { name: "upkeep-bare", guarantees: [] } as unknown as Space;
+				await refusedSaying(harness.another(p, [none, bare]), /declares no subjectData/);
+				expect((await p.upkeep.kept()).map((s) => s.name)).not.toContain(bare.name);
 			});
 
 			it("never turns a space back to holding no subject's data", async () => {

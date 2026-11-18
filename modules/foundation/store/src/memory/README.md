@@ -15,5 +15,11 @@ Internal module of `store`: the store kept in memory, in one process.
 ## Offers
 - `memoryData`, `MemoryData`, `memoryStore`, `memoryCore`, `memoryProcess`, `resolveExpiry`: to the package alone.
 
+## Invariants
+- A process starts in this order, so a refused one writes nothing:
+  - its declarations are checked;
+  - it is refused (kernel's `BuildRefused`) under the maintenance key unless its assembly is never started (`neverStarted`, `true` alone), and without a space the data `requires` unless it is never started and under the key;
+  - only then does it take the record's epoch and add its spaces to the ledger.
+
 ## Depends on
 - `kernel`; `store`'s contract.

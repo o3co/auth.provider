@@ -1,5 +1,5 @@
-import { deepFreeze, type Runtime, Unavailable } from "@mod/kernel";
-import { checkedStore, checkedUpkeep } from "../checks/checks.ts";
+import { BuildRefused, deepFreeze, type Runtime, Unavailable } from "@mod/kernel";
+import { checkedStore, checkedUpkeep, declaredSpaces } from "../checks/checks.ts";
 import {
 	type BatchWrite,
 	type Condition,
@@ -132,13 +132,49 @@ export function memoryCore(
 	return memoryProcess(memoryData(clock, nextVersion), declared).unchecked;
 }
 
+/** The names a refusal lists, at most this many, then how many more. */
+const namesListed = 5;
+
 /**
- * A process over `data`: it takes the control record's epoch and adds its spaces to the ledger as
- * it starts; each change it makes once the record's epoch is another is unavailable.
+ * Refuses a start the control record forbids, as a boot refusal, before anything is written: under
+ * the maintenance key unless the assembly is never started; without a space `requires` names
+ * unless it is never started and under the key (a tool replacing `requires` may not compose one).
+ */
+function refusedStart(
+	record: MemoryData["control"],
+	declared: readonly Space[],
+	neverStarted: boolean,
+): void {
+	if (record.maintenance && !neverStarted) {
+		throw new BuildRefused(
+			"store",
+			"the store is under the maintenance key: only an assembly that is never started builds there",
+		);
+	}
+	const names = new Set(declared.map((space) => space.name));
+	const missing = record.requires.filter((name) => !names.has(name));
+	if (missing.length > 0 && !(neverStarted && record.maintenance)) {
+		const more = missing.length > namesListed ? ` and ${missing.length - namesListed} more` : "";
+		const named = `the data requires spaces this process does not declare: ${missing.slice(0, namesListed).join(", ")}${more}`;
+		// A refusal's reason is one line of at most 500 characters: long names leave the count alone.
+		const reason =
+			named.length <= 500
+				? named
+				: `the data requires ${missing.length} spaces this process does not declare`;
+		throw new BuildRefused("store", reason);
+	}
+}
+
+/**
+ * A process over `data`: as it starts it checks its declarations, refuses to start where the
+ * control record says it may not, takes the record's epoch and adds its spaces to the ledger; each
+ * change it makes once the record's epoch is another is unavailable.
  */
 export function memoryProcess(
 	data: MemoryData,
 	declared: readonly Space[],
+	/** Whether the assembly is never started (a tool's): only `true` lets it build under the maintenance key. */
+	neverStarted = false,
 ): {
 	readonly store: Store;
 	readonly unchecked: Store;
@@ -151,6 +187,9 @@ export function memoryProcess(
 	const refuseStale = () => {
 		if (record.epoch !== taken) throw new Unavailable("store");
 	};
+	// Refused before anything is written: a malformed declaration, then the control record's two.
+	declaredSpaces(declared);
+	refusedStart(record, declared, neverStarted);
 	for (const space of declared) {
 		ledger.set(
 			space.name,
