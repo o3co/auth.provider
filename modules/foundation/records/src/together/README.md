@@ -10,8 +10,8 @@ Internal module of `records`: records of several partitions and spaces changed a
 - How one write is sent, resent and tried again: the internal module `writing`. What is decided: the caller's.
 
 ## Offers
-- Records changed together, as the package offers them:
-  - `changeRecords`: records of spaces of the same guarantees on one store, each by key, by the secret it is kept under or as a keyed set (a space named plainly or by secret in a call), and the records the decision watches from them, any of them written, as one, handing the decision its attempt's deadline, and sending the subject writer with the write where the caller gives it (store's `SubjectWriter`, which subject-records passes);
+- Records changed together:
+  - `changeRecords`: records of spaces of the same guarantees on one store, each by key, by the secret it is kept under or as a keyed set (a space named plainly or by secret in a call), and the records the decision watches from them, any of them written, as one, handing the decision its attempt's deadline, and sending the subject writer with the write where the caller gives it (store's `SubjectWriter`);
   - `changeRecords.keyOf`, a target's store key; `changeTogether`, two of them, only the two written; `changesTogether`: whether a store can across partitions.
 - `pairedRecordsIn`, `pairedRecordsAcross`, and `Target`, `Next`, `ChangedRecord`: as the package offers them.
 

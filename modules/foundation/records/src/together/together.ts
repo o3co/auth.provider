@@ -138,7 +138,7 @@ function writtenBy(target: Store, conditions: readonly Condition[], writes: read
 export async function changeRecords(p: {
 	readonly targets: readonly Target[];
 	readonly watch?: (read: readonly (Json | undefined)[]) => readonly Target[];
-	/** The subject writer, sent with the one write: `subject-records` passes it, for spaces of subjects' data. */
+	/** The subject writer, sent with the one write where the caller gives it (store's `SubjectWriter`). */
 	readonly writer?: SubjectWriter;
 	/** Handed, as a change is, the deadline its attempt is written with; a retry its own. */
 	readonly decide: (

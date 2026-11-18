@@ -9,7 +9,7 @@
 
 ## Offers
 - Keyed records: create if absent, read while it lives, change from what it holds, remove, a scan of the keys of those living, by pages, as `store` walks (a scanned space holds records by key alone), and a walk handing each value to a visitor (internal module `walk`); a lifetime is ms from the write, or endless. A change is handed, and a create's value may be made from, the deadline its attempt is written with, a retry its own; `writeDeadline` (a store-clock time) is that deadline.
-- Records changed together: `changeRecords` (with `keyOf`), `changeTogether`, `changesTogether` (internal module `together`).
+- Records changed together: `changeRecords` (with `keyOf`), `changeTogether`, `changesTogether`.
 - `pairedRecordsIn` pairs a place's records so, and `pairedRecordsAcross` the records of two places, each refusing through the builder's `refuse` where its store cannot; `pairedRecordsAcross` also where its places are on two stores or their spaces declare other guarantees. (Both this and the item above: internal module `together`.)
 - Records under a secret: the same but the scan (which their `named` records, reached by name, keep), kept under a name made from the secret, reached by secret or by name. They hold short-lived values only, so a rotation waits them out and they need no scan.
 - Deferred work: add, done, and each, which hands the work over; work that fails stays and is counted.
