@@ -120,7 +120,9 @@ export function journalFileWith(parts: {
 			};
 			if (code === "EEXIST" && typeof holder === "string") return { holder };
 			if (typeof release === "function") stranded = release as () => Promise<void>;
-			throw new Unavailable("erasure-journal");
+			throw new Unavailable(
+				`erasure-journal (its lock ${path}.lock could not be taken: ${String(code ?? "failed")}; its directory must be writable and take hard links)`,
+			);
 		}
 	};
 	/**
