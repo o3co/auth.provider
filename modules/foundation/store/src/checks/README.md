@@ -11,6 +11,7 @@ Internal module of `store`: the checks every implementation's ports go through.
 
 ## Offers
 - `checkedStore(inner, declared)` and `checkedUpkeep(inner, declared)`, on `.`.
+- `declaredSpaces(declared)`: the declarations checked, a malformed one refusing the boot, to the package alone.
 
 ## Invariants
 - A malformed declaration refuses the boot as kernel's `BuildRefused`: its `where` the space's name, or `store.declaration` where it has none to give: no name, one not a string, one a getter holds, or one kernel's bounds on a `where` refuse; its reason store's fixed text, never what the declaration holds. Input to the ports is refused as a `TypeError`.

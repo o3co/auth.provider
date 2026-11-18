@@ -19,4 +19,4 @@ Internal module of `store`: the store kept in memory, in one process.
 - A process starts in this order, so a refused one writes nothing: its declarations are checked; then it reads the record once, judging `upkeep`'s refusals of a start on that read (`mayBuildUnderKey`, granted by the composition from kernel's `neverStarted`, `true` alone) and taking its epoch from it; only then does it add its spaces to the ledger.
 
 ## Depends on
-- `kernel`; `store`'s contract.
+- `kernel`; `store`'s contract; the internal module `checks` (`checkedStore`, `checkedUpkeep`, `declaredSpaces`).

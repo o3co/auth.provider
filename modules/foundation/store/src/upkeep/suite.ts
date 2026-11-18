@@ -296,7 +296,17 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				expect(await q.upkeep.mark("test.after", 1)).toEqual({ kind: "marked" });
 			});
 
-			it("fences a tool lacking a required space once it grows requires and lifts the key", async () => {
+			it("fences a tool another process lifts the key under, judged on the record at each change", async () => {
+				const p = await harness.start(upkeepSpaces);
+				await p.upkeep.enterMaintenance();
+				const t = await tool(p, [none]);
+				await p.upkeep.require([held.name]);
+				await p.upkeep.leaveMaintenance();
+				for (const change of changes(t)) await expect(change()).rejects.toBeInstanceOf(Unavailable);
+				expect((await t.control.control()).marks["test.fenced"]).toBeUndefined();
+			});
+
+			it("fences an exempt tool that grows requires itself once it lifts the key", async () => {
 				const p = await harness.start(upkeepSpaces);
 				await p.upkeep.enterMaintenance();
 				await p.upkeep.require([held.name]);
