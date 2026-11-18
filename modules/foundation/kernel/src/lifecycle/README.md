@@ -14,6 +14,7 @@ Internal module of `kernel`: what runs once the assembly starts, and how it stop
 - `stopWithin` (deadline, the periodic tasks, the stop hooks, log, `during`?) and `StopHook`; `during: "refusal"` for a refused assembly's rollback.
 
 ## Invariants
+- A module serves and runs background work only from start hooks and periodics. An assembly made with `neverStarted` (a tool's, set by code at `assemble` alone) never starts: `start` rejects with a TypeError before any start hook or periodic runs, and `stop` still runs the stop hooks.
 - A periodic task's first run comes one interval after start; its timer, and readiness's deadline timer, leave the process free to end.
 - A run still going takes the next tick too; a failed run is one warn line with the error's type, and the next follows.
 - A check still running is joined, and aborted once no caller waits; once stop begins, every probe answers down, in a report asked before it too.
