@@ -1,6 +1,6 @@
 import { defineModule, type Module, Unavailable } from "@mod/kernel";
+import { checkedStore } from "../checks/checks.ts";
 import {
-	checkedStore,
 	type Guarantee,
 	type Json,
 	type Key,

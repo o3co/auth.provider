@@ -6,6 +6,7 @@ import { contractKit, type StoreHarness } from "./contract-harness/harness.ts";
 import { keysContract } from "./contract-keys/keys.ts";
 import { marksContract } from "./contract-marks/marks.ts";
 import { walkingContract } from "./contract-walking/walking.ts";
+import { writerContract } from "./contract-writer/writer.ts";
 import type { section } from "./section.ts";
 
 export {
@@ -30,6 +31,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 		marksContract(harness, kit);
 		batchesContract(harness, kit);
 		walkingContract(harness, kit);
+		writerContract(harness, kit);
 		faultsContract(harness, kit);
 	});
 }

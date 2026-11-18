@@ -4,7 +4,7 @@ import type { Walk } from "@mod/erasure-extensions";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { type Json, type Key, type Space, type Store, spaces, store } from "@mod/store";
-import { simulatedStore } from "@mod/store/testing";
+import { plantValue, simulatedStore } from "@mod/store/testing";
 import { indexSpaceOf } from "../src/subject-records.ts";
 
 const held = contract<Store>("test.placed-store");
@@ -60,9 +60,12 @@ export async function placed(given: readonly Space[], now?: number) {
 	});
 	/** A raw value written before indexing, as a record (the default) or a set, endless unless `ms`. */
 	const put = (space: Space, partition: string, value: Json, ms?: number, name = "record") =>
-		s.putIfAbsent({ space, partition, name }, value, {
-			expiry: ms === undefined ? { kind: "never" } : { kind: "after", ms },
-		});
+		plantValue(
+			s,
+			{ space, partition, name },
+			value,
+			ms === undefined ? { kind: "never" } : { kind: "after", ms },
+		);
 	const raw = async (space: Space, partition: string, name = "record") =>
 		(await s.get({ space, partition, name })).entry;
 	/** An entry of a subject's index: a bucket by its name, or its witness. */

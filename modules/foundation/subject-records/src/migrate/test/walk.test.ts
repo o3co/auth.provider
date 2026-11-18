@@ -1,5 +1,6 @@
 import type { SetReading, SubjectReading, Walk } from "@mod/erasure-extensions";
 import type { Key, Space } from "@mod/store";
+import { plantValue } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import { placed } from "../../../test/placed.ts";
 import { eraseSubject, migrateRecords, migrateSets } from "../../subject-records.ts";
@@ -58,19 +59,17 @@ async function opened() {
 		return left;
 	};
 	for (const subject of subjects) {
-		await s.putIfAbsent(
+		await plantValue(
+			s,
 			{ space: records, partition: subject, name: "record" },
 			{ owner: subject },
-			{
-				expiry: { kind: "never" },
-			},
+			{ kind: "never" },
 		);
-		await s.putIfAbsent(
+		await plantValue(
+			s,
 			{ space: sets, partition: `login:${subject}`, name: "set" },
 			[["m", 9e15]],
-			{
-				expiry: { kind: "never" },
-			},
+			{ kind: "never" },
 		);
 	}
 	return { at, walk, rawLeft };
