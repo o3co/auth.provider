@@ -2951,6 +2951,9 @@ importers:
 
   modules/passkey/passkeys:
     dependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -4628,6 +4631,16 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/subject-records':
+        specifier: workspace:*
+        version: link:../../foundation/subject-records
+    devDependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
+      '@mod/webauthn':
+        specifier: workspace:*
+        version: link:../../passkey/webauthn
 
   modules/tooling/api-docs:
     dependencies:

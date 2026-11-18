@@ -1,5 +1,6 @@
+import { type ChangedPasskey, togetherOf } from "../ports/ports.ts";
 import { holderOf, type KeptRecords, stored } from "../records/records.ts";
-import type { ChangedPasskey, PasskeyStore, StoredPasskey } from "../store.ts";
+import type { PasskeyStore, StoredPasskey } from "../store.ts";
 import { registeringWith } from "./registering.ts";
 import { removingWith } from "./removing.ts";
 
@@ -27,12 +28,12 @@ export function listsOf(store: PasskeyStore) {
 		return { removed, empty: after?.length === 0, ...(emptied && { emptied }) };
 	};
 	/** The subject's holder listing `list`, its fence moved on where `list` empties it. */
-	const listing = (ours: StoredPasskey, list: readonly string[]) => {
+	const listing = (ours: StoredPasskey, list: readonly string[], subject: string) => {
 		const held = holderOf(ours);
 		const fence = list.length === 0 && held.credentials.length > 0 ? held.fence + 1 : held.fence;
-		return stored({ ...ours, credentials: list, fence });
+		return stored({ ...ours, credentials: list, fence, subject });
 	};
-	return { together: store.updateTogether.bind(store), emptiedBy, delistedBy, listing };
+	return { together: togetherOf(store), emptiedBy, delistedBy, listing };
 }
 
 export type Lists = ReturnType<typeof listsOf>;

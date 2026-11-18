@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import type {
+	PasskeyKey,
 	PasskeyKeys,
+	PasskeyOp,
+	PasskeyRead,
 	PasskeyRecords,
 	PasskeyStore,
-	PasskeysNext,
-	PasskeysRead,
 	StoredPasskey,
 } from "@mod/passkeys";
 
@@ -29,17 +30,27 @@ export function lossy(inner: PasskeyStore) {
 	};
 	const view = (space: Space, key: string | undefined, raw: StoredPasskey | undefined) =>
 		key !== undefined && shown[space].has(key) ? shown[space].get(key) : raw;
+	type Saved = Parameters<PasskeyRecords["save"]>;
+	/** The arguments each key was last saved with, so a save `put` makes again takes them whole. */
+	const savedWith: Record<Space, Map<string, Saved>> = {
+		credentials: new Map(),
+		subjects: new Map(),
+	};
 	/** Writes `record` under `key` in `inner`, whatever it holds, and shows `inner` again. */
 	const put = async (space: Space, key: string, record: StoredPasskey) => {
 		shown[space].delete(key);
 		if ((await inner[space].update(key, () => ({ value: record }))) === undefined) {
-			await inner[space].save(key, record, "endless");
+			const [, , ...rest] = savedWith[space].get(key) ?? [key, record, "endless"];
+			await inner[space].save(...([key, record, ...rest] as Saved));
 		}
 	};
 	const records = (space: Space): PasskeyRecords => ({
 		read: async (key) => view(space, key, await inner[space].read(key)),
-		save: async (key, record, lifetimeMs) => {
-			if (!shown[space].has(key)) return inner[space].save(key, record, lifetimeMs);
+		// Its arguments forwarded whole, whatever the store's `save` takes.
+		save: async (...given) => {
+			const [key, record] = given;
+			savedWith[space].set(key, given);
+			if (!shown[space].has(key)) return inner[space].save(...given);
 			if (shown[space].get(key) !== undefined) return "exists";
 			await put(space, key, record);
 			return "created";
@@ -54,39 +65,87 @@ export function lossy(inner: PasskeyStore) {
 			return { before, after: next.value };
 		},
 	});
+	// Read whether the inner store's port requires it or offers it optionally.
+	const asOne = inner.updateAsOne?.bind(inner);
+	type AsOne = Parameters<NonNullable<PasskeyStore["updateAsOne"]>>[0];
+	const subjectIn = (value: StoredPasskey) => (value as { readonly subject?: unknown }).subject;
+	/**
+	 * An op passkeys decided on what this store shows, given to what `inner` holds, so it writes
+	 * the value whatever `inner` keeps, as a store that broke its promises would be written over.
+	 */
+	const opOn = (op: PasskeyOp | undefined, actual: PasskeyRead): PasskeyOp | undefined => {
+		if (op === undefined || op.kind === "remove") return op;
+		const to = op.kind === "create" ? op.subject : op.kind === "move" ? op.to : undefined;
+		if (actual === undefined) {
+			const subject = to ?? subjectIn(op.value);
+			return typeof subject === "string"
+				? { kind: "create", value: op.value, lifetimeMs: "endless", subject }
+				: op;
+		}
+		if (to === undefined || actual.subject === undefined || actual.subject === to) {
+			return { kind: "change", value: op.value };
+		}
+		return { kind: "move", value: op.value, to };
+	};
 	const store: PasskeyStore = {
 		credentials: records("credentials"),
 		subjects: records("subjects"),
-		updateTogether: async (keys, p) => {
-			let watched: Partial<PasskeyKeys> = {};
-			let seen: PasskeysRead = { credentials: [], subjects: [] };
-			let wrote: PasskeysNext = {};
-			const all = (space: Space) => [...keys[space], ...(watched[space] ?? [])];
-			const viewed = (read: PasskeysRead): PasskeysRead => ({
-				credentials: read.credentials.map((r, i) => view("credentials", all("credentials")[i], r)),
-				subjects: read.subjects.map((r, i) => view("subjects", all("subjects")[i], r)),
-			});
-			const changed = await inner.updateTogether(keys, {
-				watch: (read) => {
-					watched = {};
-					watched = p.watch(viewed(read));
-					return watched;
-				},
-				change: (read) => {
-					seen = viewed(read);
-					wrote = p.change(seen);
-					return wrote;
-				},
-			});
-			const remapped = (space: Space) =>
-				changed[space].map((c, i) => {
-					const before = seen[space][i];
-					if (wrote[space]?.[i] === undefined) return { before, after: before };
-					const key = all(space)[i];
-					if (key !== undefined) shown[space].delete(key);
-					return { before, after: c.after };
+		updateAsOne: async (p) => {
+			if (asOne === undefined) throw new Error("the inner store offers no change as one");
+			let watchedKeys: readonly PasskeyKey[] = [];
+			let seen: { targets: readonly PasskeyRead[]; watched: readonly PasskeyRead[] } = {
+				targets: [],
+				watched: [],
+			};
+			let given: { targets: readonly unknown[]; watched: readonly unknown[] } = {
+				targets: [],
+				watched: [],
+			};
+			const viewOf = (names: readonly PasskeyKey[], read: readonly PasskeyRead[]) =>
+				read.map((actual, n): PasskeyRead => {
+					const name = names[n];
+					if (!name || !shown[name.place].has(name.key)) return actual;
+					const value = shown[name.place].get(name.key);
+					return value === undefined
+						? undefined
+						: { value, ...(actual?.subject === undefined ? {} : { subject: actual.subject }) };
 				});
-			return { credentials: remapped("credentials"), subjects: remapped("subjects") };
+			const decided: AsOne = {
+				targets: p.targets,
+				...(p.watch
+					? {
+							watch: (read) => {
+								watchedKeys = p.watch?.(viewOf(p.targets, read)) ?? [];
+								return watchedKeys;
+							},
+						}
+					: {}),
+				decide: (read, watched) => {
+					seen = { targets: viewOf(p.targets, read), watched: viewOf(watchedKeys, watched) };
+					const next = p.decide(seen.targets, seen.watched);
+					given = { targets: next.targets ?? [], watched: next.watched ?? [] };
+					return {
+						targets: read.map((actual, n) => opOn(next.targets?.[n], actual)),
+						watched: watched.map((actual, n) => opOn(next.watched?.[n], actual)),
+					};
+				},
+			};
+			const answer = await asOne(decided);
+			if (answer.kind !== "written") return answer;
+			// What was given an op is `inner`'s again; the rest shows as it did.
+			const remapped = (names: readonly PasskeyKey[], at: "targets" | "watched") =>
+				answer[at].map((changed, n) => {
+					const before = seen[at][n];
+					const name = names[n];
+					if (given[at][n] === undefined) return { before, after: before };
+					if (name) shown[name.place].delete(name.key);
+					return { before, after: changed.after };
+				});
+			return {
+				kind: "written",
+				targets: remapped(p.targets, "targets"),
+				watched: remapped(watchedKeys, "watched"),
+			};
 		},
 	};
 	return {

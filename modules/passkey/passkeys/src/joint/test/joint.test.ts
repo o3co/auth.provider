@@ -132,7 +132,7 @@ it("leaves everything as it was where a clear fails", async () => {
 	const t = jointStores();
 	const [a, b] = [await t.credentialFor("sam"), await t.credentialFor("sam")];
 	for (const c of [a, b]) expect(await t.records.register("sam", c, 10)).toBe("registered");
-	t.stores.down.together.failNext("updateTogether");
+	t.stores.down.together.failNext("updateAsOne");
 	await expect(t.records.cleared("sam", fresh())).rejects.toSatisfy(isUnavailable);
 	expect(await t.listOf("sam")).toEqual([a.id, b.id]);
 	for (const c of [a, b]) expect((await t.records.passkey(c.id))?.subject).toBe("sam");

@@ -37,8 +37,9 @@ export const forgottenIn = (space: string, removed: number): ForgottenReport => 
 
 /**
  * What putting one space's records or keyed sets written before indexing into the index did:
- * indexed, or removed as holding no subject's data (`removed`: orphans proven to have no owner,
- * those the owner kept elsewhere first among them); or not finished, with why.
+ * indexed, or removed as holding no subject's data that a reading can recover (`removed`: orphans
+ * proven to have no owner, those the owner kept elsewhere first among them, and records whose
+ * subject is unrecoverable by construction, never by a failed read); or not finished, with why.
  */
 export type MigrationReport = ReportMade &
 	(

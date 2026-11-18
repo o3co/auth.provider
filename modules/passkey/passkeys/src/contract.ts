@@ -3,7 +3,8 @@ import type { CeremonyRefusal, Credential } from "@mod/webauthn";
 
 /**
  * Who asks for a challenge and redeems it: the calling module, by its own name, and an id of its own
- * (a client's, a browser's mark). Two modules' ids never stand for each other.
+ * (a client's, a browser's mark), never a subject's id: an assertion's challenge is kept where no
+ * subject's data is. Two modules' ids never stand for each other.
  */
 export interface Requester {
 	readonly by: string;

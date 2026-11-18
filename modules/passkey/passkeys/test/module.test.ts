@@ -29,10 +29,10 @@ import {
 	passkeyStore,
 	passkeys,
 	passkeyWitnessing,
+	registrationChallengeStore,
 	registrations,
 } from "../src/contract.ts";
 import passkeysModule from "../src/module.ts";
-import type { PasskeyStore } from "../src/store.ts";
 import { passkeysConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
@@ -108,25 +108,25 @@ it("takes all it names, with a witnessing and without", async () => {
 	expect((await takesUnused(composition([scriptedWitnessing()]))).passkeys).toBeUndefined();
 });
 
-it("refuses to boot a passkey store that cannot change both its spaces as one", async () => {
+it("refuses to boot a registration challenge store offering one of erase and migrate", async () => {
 	const stores = memoryStores();
-	// Built where no type is checked: the type requires `updateTogether`, so boot checks it too.
-	const lacking = {
-		credentials: stores.passkeys.credentials,
-		subjects: stores.passkeys.subjects,
-	} as unknown as PasskeyStore;
-	const apart = defineModule({ name: "stores-apart", replicaSafe: false, takes: [] }, (m) => [
-		m.provide(passkeyStore).by(() => lacking),
+	const erase = async () => ({}) as never;
+	const parted = defineModule({ name: "stores-parted", replicaSafe: false, takes: [] }, (m) => [
+		m.provide(passkeyStore).by(() => stores.passkeys),
 		m.provide(challengeStore).by(() => stores.challenges),
+		m.provide(registrationChallengeStore).by(() => ({ ...stores.registrations, erase })),
 	]);
 	const refused = await assemble({
-		modules: [apart, auditStandIn().module, webauthn, passkeysModule],
+		modules: [parted, auditStandIn().module, webauthn, passkeysModule],
 		config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
 		runtime: quietRuntime(),
 	}).catch((error: unknown) => error);
 	expect(refused).toBeInstanceOf(BootRefused);
 	expect((refused as BootRefused).refusals).toEqual([
-		expect.objectContaining({ where: "passkeys", reason: expect.stringMatching(/as one/) }),
+		expect.objectContaining({
+			where: "passkeys",
+			reason: expect.stringMatching(/erase and migrate/),
+		}),
 	]);
 });
 
@@ -259,8 +259,8 @@ it("ends a passkey whose write may have landed though its answer was lost", asyn
 	const lossy = defineModule({ name: "lossy-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(passkeyStore).by(() => ({
 			...stores.passkeys,
-			updateTogether: async (keys, p) => {
-				const done = await stores.passkeys.updateTogether(keys, p);
+			updateAsOne: async (p) => {
+				const done = await stores.passkeys.updateAsOne(p);
 				if (lose) {
 					lose = false;
 					throw new Unavailable("passkey-store");
@@ -334,9 +334,9 @@ it("leaves no usable passkey where the registration is stopped and its end canno
 		m.provide(passkeyStore).by(() => ({
 			credentials: failing(stores.passkeys.credentials),
 			subjects: failing(stores.passkeys.subjects),
-			updateTogether: async (keys, p) => {
+			updateAsOne: async (p) => {
 				if (fails.down) throw new Unavailable("passkey-store");
-				const done = await stores.passkeys.updateTogether(keys, p);
+				const done = await stores.passkeys.updateAsOne(p);
 				if (fails.lose) {
 					fails.lose = false;
 					fails.down = true;

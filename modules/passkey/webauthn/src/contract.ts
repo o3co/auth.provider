@@ -69,5 +69,8 @@ export interface Ceremonies {
 
 export const ceremonies = contract<Ceremonies>("webauthn.ceremonies");
 
+/** The longest a challenge can be answered: `challenge-lifetime`'s ceiling. */
+export const challengeLifetimeMaxMs = 600_000;
+
 export { challengeOf } from "./ceremony/ceremony.ts";
 export { credentialLimits, credentialOf, freshHandle, isCanonical } from "./records.ts";
