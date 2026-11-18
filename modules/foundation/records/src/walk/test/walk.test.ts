@@ -9,8 +9,12 @@ import { recordsIn, type Walk } from "../../records.ts";
 import { memoryRecords } from "../../testing.ts";
 
 const runtime = quietRuntime({ clock: { now: () => 1_800_000_000_000 } });
-const space: Space = { name: "walk-test", guarantees: ["no-eviction", "durable", "replicated"] };
-const other: Space = { name: "walk-test-other", guarantees: space.guarantees };
+const space: Space = {
+	name: "walk-test",
+	guarantees: ["no-eviction", "durable", "replicated"],
+	subjectData: "none",
+};
+const other: Space = { name: "walk-test-other", guarantees: space.guarantees, subjectData: "none" };
 const opened = contract<Store>("walk-test.store");
 type Counted = { readonly n: number };
 

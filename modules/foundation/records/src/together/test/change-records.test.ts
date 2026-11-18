@@ -19,8 +19,8 @@ const runtime = quietRuntime({
 	random: { bytes: (n) => new Uint8Array(n) },
 });
 const guarantees = ["no-eviction", "durable", "replicated"] as const;
-const lists: Space = { name: "many-lists", guarantees: [...guarantees] };
-const items: Space = { name: "many-items", guarantees: [...guarantees] };
+const lists: Space = { name: "many-lists", guarantees: [...guarantees], subjectData: "none" };
+const items: Space = { name: "many-items", guarantees: [...guarantees], subjectData: "none" };
 const opened = contract<Store>("test.store");
 
 type List = { readonly ids: readonly string[] };
@@ -357,7 +357,7 @@ it("pairs records of two places to change as one, apart by place, and refuses th
 	expect(() =>
 		pairedRecordsAcross(listPlace, { ...itemPlace, store: another }, "user", refuse),
 	).toThrow();
-	const loose: Space = { name: "many-items", guarantees: ["no-eviction"] };
+	const loose: Space = { name: "many-items", guarantees: ["no-eviction"], subjectData: "none" };
 	expect(() =>
 		pairedRecordsAcross(listPlace, { ...itemPlace, space: loose }, "user", refuse),
 	).toThrow();
@@ -420,7 +420,7 @@ it("gives a record the stand-in changes a lifetime of 1 ms at least, as records 
 });
 
 it("reads and writes a record under a secret with a plain one as one, and refuses a space named both ways", async () => {
-	const secrets: Space = { name: "many-secrets", guarantees: [...guarantees] };
+	const secrets: Space = { name: "many-secrets", guarantees: [...guarantees], subjectData: "none" };
 	const app = await assemble({
 		modules: [
 			simulatedStore().module,
