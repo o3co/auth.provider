@@ -253,7 +253,7 @@ function refusedDeclaration(space: unknown, reason: string): never {
 	throw refused;
 }
 
-/** Whether `check` takes `value`, its `TypeError` read as no. */
+/** Whether `check` runs without throwing: any throw, a `TypeError` or a proxy trap's, reads as no. */
 const takes = (check: () => unknown) => {
 	try {
 		check();
@@ -264,7 +264,7 @@ const takes = (check: () => unknown) => {
 };
 
 /** The declared spaces by name, each declaration's own fields checked for their shape alone; a malformed one refuses the boot. */
-function declaredSpaces(declared: readonly Space[]): ReadonlyMap<string, Space> {
+export function declaredSpaces(declared: readonly Space[]): ReadonlyMap<string, Space> {
 	for (const space of declared) {
 		let read: Record<string, unknown> = {};
 		const plain = takes(() => {

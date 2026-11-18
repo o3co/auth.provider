@@ -1,5 +1,5 @@
-import { deepFreeze, type Runtime, Unavailable } from "@mod/kernel";
-import { checkedStore, checkedUpkeep } from "../checks/checks.ts";
+import { BuildRefused, deepFreeze, type Runtime, Unavailable } from "@mod/kernel";
+import { checkedStore, checkedUpkeep, declaredSpaces } from "../checks/checks.ts";
 import {
 	type BatchWrite,
 	type Condition,
@@ -133,12 +133,39 @@ export function memoryCore(
 }
 
 /**
- * A process over `data`: it takes the control record's epoch and adds its spaces to the ledger as
- * it starts; each change it makes once the record's epoch is another is unavailable.
+ * Refuses a start the control record forbids, as a boot refusal, before anything is written: under
+ * the maintenance key unless the process may build under it; without a space `requires` names
+ * unless it may build under the key and is under it (a tool replacing `requires` may not compose one).
+ */
+function refusedStart(
+	record: MemoryData["control"],
+	declared: readonly Space[],
+	mayBuildUnderKey: boolean,
+): void {
+	if (record.maintenance && !mayBuildUnderKey) {
+		throw new BuildRefused(
+			"store",
+			"only a tool may start while the store is under the maintenance key",
+		);
+	}
+	const names = new Set(declared.map((space) => space.name));
+	const missing = record.requires.filter((name) => !names.has(name));
+	if (missing.length > 0 && !(mayBuildUnderKey && record.maintenance)) {
+		// Store's own fixed text: a required name is the data's, and no refusal carries it.
+		throw new BuildRefused("store", "the data requires a space this process does not declare");
+	}
+}
+
+/**
+ * A process over `data`: as it starts it checks its declarations, reads the control record once,
+ * refusing a start that read forbids and taking its epoch from it, and only then adds its spaces to
+ * the ledger; each change it makes once the record's epoch is another is unavailable.
  */
 export function memoryProcess(
 	data: MemoryData,
 	declared: readonly Space[],
+	/** Whether the process may build under the maintenance key, as its composition grants (a tool's). */
+	mayBuildUnderKey = false,
 ): {
 	readonly store: Store;
 	readonly unchecked: Store;
@@ -147,10 +174,16 @@ export function memoryProcess(
 } {
 	const { clock, nextVersion, values, counters, answers, ledger, control: record } = data;
 	let taken = record.epoch;
-	/** Refuses a change once the record's epoch is not the one this process took. */
+	/** Whether this process took its epoch under the maintenance key: it changes only while the key is held. */
+	let keyed = record.maintenance;
+	/** Refuses a change once the record's epoch is not the one this process took, or its key has lifted. */
 	const refuseStale = () => {
 		if (record.epoch !== taken) throw new Unavailable("store");
+		if (keyed && !record.maintenance) throw new Unavailable("store");
 	};
+	// Refused before anything is written: a malformed declaration, then the control record's two.
+	declaredSpaces(declared);
+	refusedStart(record, declared, mayBuildUnderKey);
 	for (const space of declared) {
 		ledger.set(
 			space.name,
@@ -165,11 +198,17 @@ export function memoryProcess(
 		for (const [k, v] of answers) if (v.until <= now) answers.delete(k);
 		for (const [k, v] of counters) if (v.resetAt <= now) counters.delete(k);
 	};
+	/** The value held at `key` while it lives, removing it once expired: for a change, which is fenced. */
 	const current = (key: Key, now: number) => {
 		const held = values.get(id(key));
 		if (live(held, now)) return held;
 		values.delete(id(key));
 		return undefined;
+	};
+	/** The value held at `key` while it lives, for a read: a read changes nothing, an expired value left held. */
+	const seen = (key: Key, now: number) => {
+		const held = values.get(id(key));
+		return live(held, now) ? held : undefined;
 	};
 	/**
 	 * A batch at `now`, as one: every condition checked first, the first not met answered by its
@@ -311,6 +350,7 @@ export function memoryProcess(
 			record.epoch = epoch;
 			record.maintenance = true;
 			taken = epoch;
+			keyed = true;
 			return { kind: "entered", epoch };
 		},
 		leaveMaintenance: async () => {
@@ -348,14 +388,14 @@ export function memoryProcess(
 	const unchecked: Store = {
 		get: async (key) => {
 			const now = clock.now();
-			const held = current(key, now);
+			const held = seen(key, now);
 			return { entry: held ? entryOf(held) : null, now };
 		},
 		getMany: async (keys) => {
 			const now = clock.now();
 			return deepFreeze(
 				keys.map((key) => {
-					const held = current(key, now);
+					const held = seen(key, now);
 					return { entry: held ? entryOf(held) : null, now };
 				}),
 			);
