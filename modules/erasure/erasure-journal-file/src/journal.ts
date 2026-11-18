@@ -219,6 +219,7 @@ export function journalFileWith(parts: {
 			};
 			return {
 				kind: "held",
+				// A release the medium failed is made again: the lock stays until one removes it.
 				release: () => {
 					if (released) return Promise.resolve();
 					releasing ??= releaseOnce().finally(() => {
