@@ -38,7 +38,7 @@ export interface Rules extends Kinds {
 	/** How many packages must state a property they hold to declaration (G32); none where unset. */
 	readonly declaredProperties?: number;
 	/** The entries every package may have, which none keeps for named takers (G5's). */
-	readonly standardEntries?: readonly string[];
+	readonly standardEntries: readonly string[];
 }
 
 /** The keys naming an entry in a package's `takenBy`: those it keeps for named takers, and each other with why it is not. */
@@ -66,8 +66,6 @@ export interface Scope<B extends Rules = Rules> {
 	 * exported as one file; any other key with why not, unreported, for the rule reading it to refuse.
 	 */
 	readonly takenEntries: (p: Pkg) => TakenEntries;
-	/** The kept entries of `takenEntries`. */
-	readonly keptEntries: (p: Pkg) => readonly string[];
 	/** A kind's place in the kind order; -1 for none or an unknown one. */
 	readonly level: (p: Pkg) => number;
 	readonly isCommon: (p: Pkg) => boolean;
@@ -81,8 +79,6 @@ export interface Scope<B extends Rules = Rules> {
 	readonly ownerOf: (path: string) => Pkg | undefined;
 }
 
-/** The entries every package may have, where the caller gives none (`Rules.standardEntries`). */
-export const reservedEntries = [".", "./testing", "./module", "./audit-events"];
 const keptKey = /^\.\/[a-z][a-z0-9-]*$/;
 
 export function scopeOf<B extends Rules>(
@@ -114,8 +110,7 @@ export function scopeOf<B extends Rules>(
 			if ((adapts === undefined) === (replaces === undefined)) return undefined;
 			return String(replaces ?? adapts);
 		},
-		takenEntries: (p) => takenEntriesOf(p, budget.standardEntries ?? reservedEntries),
-		keptEntries: (p) => takenEntriesOf(p, budget.standardEntries ?? reservedEntries).kept,
+		takenEntries: (p) => takenEntriesOf(p, budget.standardEntries),
 		level: (p) => budget.kindOrder.findIndex((kinds) => kinds.includes(kindOf(p))),
 		isCommon: (p) => kindOf(p) === budget.commonKind,
 		isTest: (file) => conventional.test(file),

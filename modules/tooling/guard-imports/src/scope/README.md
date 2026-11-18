@@ -11,7 +11,7 @@ Internal module of `guard-imports`: the scope every rule reads, and whether a fi
   - every file of a package is shipped, failing closed, where its shipped files hold an import the graph cannot resolve (for the reasons `facts`' resolve gives) or reach a script of the package that is no source (a `.config.ts`, a `.js`, a shipped root among them), or where its `./testing` is a conditional export; each string target of a conditional export is a shipped root;
   - a file outside the graph (a template, a bundle) is read by its name alone, and never throws;
   - the budgets and the rules on the clock, randomness, network, audit recording and owned properties read `budgetsAsTest`; the rules on imports between packages (G3, G4, G8, G31) read a file named as a test alone (`isTest`).
-- Reads the entries a package's `takenBy` names (`takenEntries`), from the manifest alone: kept where one plain segment (`./name`), none of the standard entries the caller gives (`Rules.standardEntries`, G5's), naming its takers as a non-empty list of names, and exported as one file; each other key with why not. `keptEntries` is the kept ones.
+- Reads the entries a package's `takenBy` names (`takenEntries`), from the manifest alone: kept where one plain segment (`./name`), none of the standard entries the caller gives (`Rules.standardEntries`, G5's), naming its takers as a non-empty list of names, and exported as one file; each other key with why not.
 
 ## Not here
 - What each rule holds: the rules, the internal modules `recorded`, `taken` and `owned-property`.
