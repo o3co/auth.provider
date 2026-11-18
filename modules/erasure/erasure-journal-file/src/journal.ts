@@ -8,7 +8,7 @@ import type {
 	Unusable,
 } from "@mod/erasure-journal";
 import { type Clock, type Random, Unavailable } from "@mod/kernel";
-import type { JournalFiles } from "./files.ts";
+import type { JournalFiles } from "./files/files.ts";
 
 type Header = { readonly type: "header"; readonly format: 1; readonly id: string };
 type Begun = {

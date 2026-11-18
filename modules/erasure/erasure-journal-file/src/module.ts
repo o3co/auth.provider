@@ -1,7 +1,7 @@
 import { erasureJournal } from "@mod/erasure-journal";
 import { defineModule } from "@mod/kernel";
 import { z } from "zod";
-import { nodeFiles } from "./files.ts";
+import { nodeFiles } from "./files/files.ts";
 import { journalFileWith } from "./journal.ts";
 
 const section = z.strictObject({

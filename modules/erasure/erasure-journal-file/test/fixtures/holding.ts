@@ -1,6 +1,6 @@
 // A process that holds the journal at the path given and waits, until it is killed.
 import { randomBytes } from "node:crypto";
-import { nodeFiles } from "../../src/files.ts";
+import { nodeFiles } from "../../src/files/files.ts";
 import { journalFileWith } from "../../src/journal.ts";
 
 const [path = ""] = process.argv.slice(2);

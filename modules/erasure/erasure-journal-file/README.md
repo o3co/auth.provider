@@ -11,6 +11,7 @@
 - Operator section: `path`, the journal's file, an absolute path; its lock is the same path with `.lock` added.
 
 ## Invariants
+- The journal's and its lock's files are the internal module `files`' (its card).
 - A record is its body's length in bytes, the body (JSON), its SHA-256 in hex and a line feed. The first is the header (format 1, the random id), the rest are numbered from 1.
 - Creating writes the file only where none is, then syncs the file and its directory.
 - The lock is a file holding its holder (pid, host, time, a token of the take), written whole and synced in a file of its own first, then linked as the lock only where none is: a lock never stands without its holder, and a failed take removes its lock. One whose removal fails too leaves it, naming this process: the same journal removes it before its next take; otherwise it is removed as a crashed holder's.

@@ -18,7 +18,7 @@ import type { ErasureJournal } from "@mod/erasure-journal";
 import { journalContract } from "@mod/erasure-journal/testing";
 import { quietRuntime } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { type JournalFiles, nodeFiles, nodeFilesWith } from "../src/files.ts";
+import { type JournalFiles, nodeFiles, nodeFilesWith } from "../src/files/files.ts";
 import { framed, journalFileWith, readRecords } from "../src/journal.ts";
 
 /** Each journal the harness opened, with its path and its files, so the harness reaches them again. */
