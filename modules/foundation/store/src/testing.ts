@@ -13,6 +13,7 @@ export {
 	overwrite,
 	type StoreHarness,
 } from "./contract-harness/harness.ts";
+export { plantValue } from "./planting/planting.ts";
 export { type SimulatedStore, simulatedStore } from "./simulated/simulated.ts";
 export {
 	type UpkeepHarness,

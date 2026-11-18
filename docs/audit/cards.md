@@ -110,6 +110,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `contract-marks` (`src/contract-marks`): the contract test's deadlines and idempotency marks, and concurrent connections.
   - `contract-walking` (`src/contract-walking`): the contract test's scanning of a space, and the checks on every input.
   - `memory` (`src/memory`): the store kept in memory, in one process.
+  - `planting` (`src/planting`): a value written as an earlier version, or another writer, left it (a record as 0.19 wrote it, say), for tests.
   - `simulated` (`src/simulated`): a simulated replicated store, for tests, offered through `./testing`.
   - `upkeep` (`src/upkeep`): keeping a store's data whole, apart from reading and writing its keys.
   - `writer` (`src/writer`): the subject writer, the one value a change to subjects' data carries.
