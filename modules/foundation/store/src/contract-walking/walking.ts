@@ -6,6 +6,7 @@ import {
 	type StoreHarness,
 	sleep,
 } from "../contract-harness/harness.ts";
+import { subjectWriter } from "../writer/subject-writer.ts";
 
 /** The store contract's scanning a space, and the checks on every input. */
 export function walkingContract(harness: StoreHarness, kit: ContractKit): void {
@@ -140,6 +141,29 @@ export function walkingContract(harness: StoreHarness, kit: ContractKit): void {
 			await expect(s.count(k, { ms: 1000, limit: 1, extra: 1 } as never)).rejects.toThrow(
 				TypeError,
 			);
+		});
+
+		it("refuses batch options with an accessor, a hidden or an unknown property, a writer among them or not", async () => {
+			const s = await harness.open();
+			const k = fresh()("a");
+			const writes = [{ key: k, put: 1, ...never }];
+			const deadline = [
+				{ get: () => Date.now() + 60_000, enumerable: true },
+				{ value: Date.now() + 60_000, enumerable: false },
+			];
+			for (const writer of [undefined, subjectWriter]) {
+				const bad = [
+					...deadline.map((d) => Object.defineProperty({ writer }, "deadline", d)),
+					{ writer, extra: 1 },
+				] as never[];
+				for (const options of bad) {
+					await expect(s.batch([], writes, options)).rejects.toThrow(TypeError);
+					if (s.batchAcross) {
+						await expect(s.batchAcross([], writes, options)).rejects.toThrow(TypeError);
+					}
+				}
+			}
+			expect((await s.get(k)).entry).toBeNull();
 		});
 
 		it("takes only well-formed strings and keeps non-ASCII keys and members apart, in code point order", async () => {

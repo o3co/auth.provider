@@ -12,4 +12,4 @@ Internal module of `store`: the contract test's scanning of a space, and the che
 - `walkingContract(harness, kit)`, run by `storeContract`.
 
 ## Depends on
-- `contract-harness`; `store`'s contract.
+- `contract-harness`, `writer` (the subject writer, for the batch options' case); `store`'s contract.

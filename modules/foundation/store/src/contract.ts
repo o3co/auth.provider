@@ -425,15 +425,16 @@ function readLimits(value: unknown): { deadline?: number; idempotency?: string }
 	};
 }
 
-/** A batch's options as `readLimits` reads them, the subject writer checked by its identity and taken off: the store below never sees it. */
+/**
+ * A batch's options: checked whole as plain data first, the writer allowed among them; then the
+ * subject writer checked by its identity; then taken off, so the store below never sees it.
+ */
 function readBatchOptions(value: unknown): { deadline?: number; idempotency?: string } {
-	if (value === null || typeof value !== "object" || !Object.hasOwn(value, "writer")) {
-		return readLimits(value);
-	}
-	const { writer, ...limits } = value as Record<string, unknown>;
-	if (writer !== undefined && writer !== subjectWriter)
+	if (value === undefined) return {};
+	const read = fields("options", value, ["deadline", "idempotency", "writer"]);
+	if (read.writer !== undefined && read.writer !== subjectWriter)
 		fail("a batch's writer is not the subject writer");
-	return readLimits(limits);
+	return readLimits({ deadline: read.deadline, idempotency: read.idempotency });
 }
 
 function readWriteOptions(value: unknown): WriteOptions {
