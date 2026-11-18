@@ -9,7 +9,7 @@ import {
 	type Module,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { spaces } from "@mod/store";
+import { type Space, spaces } from "@mod/store";
 import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
@@ -114,6 +114,20 @@ async function refusal(
 }
 
 describe("the commands the store needs", () => {
+	it("refuse boot over a space declaring no subjectData, naming it", async () => {
+		const redis = primary();
+		const bare = defineModule({ name: "bare", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(spaces).by(() => ({ name: "bare", guarantees: [] }) as unknown as Space),
+		]);
+		const error = await boot(await redis.listen(), undefined, undefined, [bare]).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		const reasons = (error as BootRefused).refusals.map((r) => r.reason).join("\n");
+		expect(reasons).toMatch(/space bare declares no subjectData/);
+		redis.down();
+	});
+
 	it("refuse boot where the server refuses one of a confirmation round's, naming it", async () => {
 		for (const command of ["WAIT", "ROLE", "SET", "INFO"]) {
 			const redis = primary();
