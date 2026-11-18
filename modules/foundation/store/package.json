@@ -8,10 +8,16 @@
 	"asks": [
 		"Store in memory: one instance only, the memory store accepted (`store.accept-volatile = true`)."
 	],
+	"takenBy": {
+		"./subject-writer": [
+			"@mod/subject-records"
+		]
+	},
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
-		"./module": "./src/module.ts"
+		"./module": "./src/module.ts",
+		"./subject-writer": "./src/writer/subject-writer.ts"
 	},
 	"dependencies": {
 		"@mod/kernel": "workspace:*",

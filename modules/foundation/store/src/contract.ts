@@ -1,5 +1,6 @@
 import { contract, extensionPoint } from "@mod/kernel";
 import type { Honours, KeptSpace, StoreUpkeep } from "./upkeep/upkeep.ts";
+import { subjectWriter } from "./writer/subject-writer.ts";
 
 export {
 	type Control,
@@ -94,6 +95,18 @@ export interface WriteOptions {
 	readonly idempotency?: string;
 }
 
+declare const subjectWriterBrand: unique symbol;
+/**
+ * What a change to a space holding subjects' data carries, so a store tells `subject-records`, which
+ * alone writes there, from anything else. Its one value is `@mod/store/subject-writer`'s, which the
+ * manifest's `takenBy` binds to `subject-records`. It stops a wiring, or a plain records port, of this
+ * workspace from writing there, and stops an accident; it is no boundary against a deployment's own code.
+ */
+export type SubjectWriter = { readonly [subjectWriterBrand]: true };
+
+/** A batch's options: its deadline and mark, and the subject writer where it changes subjects' data. */
+export type BatchOptions = Omit<WriteOptions, "expiry"> & { readonly writer?: SubjectWriter };
+
 /** How long every store keeps an idempotency mark, in ms: past its deadline, or from now without one; then past that too. */
 export const idempotencyWindows = Object.freeze({
 	withoutDeadlineMs: 300_000,
@@ -184,7 +197,7 @@ export interface Store {
 	batch(
 		conditions: readonly Condition[],
 		writes: readonly BatchWrite[],
-		options?: Omit<WriteOptions, "expiry">,
+		options?: BatchOptions,
 	): Promise<Committed | Late | Reused | { readonly kind: "conflict"; readonly index: number }>;
 	/**
 	 * As `batch`, over keys of any partition, and of any spaces declaring the same guarantees. Its
@@ -196,7 +209,7 @@ export interface Store {
 	batchAcross?(
 		conditions: readonly Condition[],
 		writes: readonly BatchWrite[],
-		options?: Omit<WriteOptions, "expiry">,
+		options?: BatchOptions,
 	): Promise<Committed | Late | Reused | { readonly kind: "conflict"; readonly index: number }>;
 	/** A fixed window counted on the store clock; at the limit nothing is written. */
 	count(
@@ -412,6 +425,17 @@ function readLimits(value: unknown): { deadline?: number; idempotency?: string }
 	};
 }
 
+/** A batch's options as `readLimits` reads them, the subject writer checked by its identity and taken off: the store below never sees it. */
+function readBatchOptions(value: unknown): { deadline?: number; idempotency?: string } {
+	if (value === null || typeof value !== "object" || !Object.hasOwn(value, "writer")) {
+		return readLimits(value);
+	}
+	const { writer, ...limits } = value as Record<string, unknown>;
+	if (writer !== undefined && writer !== subjectWriter)
+		fail("a batch's writer is not the subject writer");
+	return readLimits(limits);
+}
+
 function readWriteOptions(value: unknown): WriteOptions {
 	const read = fields("options", value, ["expiry", "deadline", "idempotency"]);
 	return {
@@ -570,7 +594,7 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 						const checkedConditions = [...conditions].map((c) => readCondition(c, key));
 						const checkedWrites = batchWrites(writes);
 						oneGuarantee([...checkedConditions, ...checkedWrites].map((x) => x.key));
-						return batchAcross(checkedConditions, checkedWrites, readLimits(o));
+						return batchAcross(checkedConditions, checkedWrites, readBatchOptions(o));
 					},
 				}
 			: {}),
@@ -585,7 +609,7 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 			inner.batch(
 				[...conditions].map((c) => readCondition(c, key)),
 				batchWrites(writes),
-				readLimits(o),
+				readBatchOptions(o),
 			),
 		count: async (k, window, o) => inner.count(key(k), readWindow(window), readLimits(o)),
 		...(getMany ? { getMany: async (keys) => getMany([...keys].map(key)) } : {}),

@@ -11,7 +11,7 @@ import {
 	store,
 	storeControl,
 } from "../contract.ts";
-import { memoryStore } from "../memory.ts";
+import { memoryCore } from "../memory.ts";
 
 const writes = new Set<string>([
 	"putIfAbsent",
@@ -247,7 +247,8 @@ export function simulatedStore(): SimulatedStore {
 				const declared = await c.collect(spaces);
 				composed = declared;
 				storeNow = () => c.clock.now() + shift;
-				state.open = () => memoryStore(clock, declared, nextVersion);
+				// Below the one check: the facade checks every input once, and its replays need none.
+				state.open = () => memoryCore(clock, declared, nextVersion);
 				state.primary = state.open();
 				state.replica = state.open();
 				// Inputs are read once into copies whose keys carry the declared space, for replays too.

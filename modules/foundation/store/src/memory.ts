@@ -124,6 +124,15 @@ export function memoryStore(
 	return memoryProcess(memoryData(clock, nextVersion), declared).store;
 }
 
+/** A store in memory, over data of its own, whose ports check nothing: for a store a caller checks itself. */
+export function memoryCore(
+	clock: Runtime["clock"],
+	declared: readonly Space[],
+	nextVersion: () => string = counting(),
+): Store {
+	return memoryProcess(memoryData(clock, nextVersion), declared).unchecked;
+}
+
 /**
  * A process over `data`: it takes the control record's epoch and adds its spaces to the ledger as
  * it starts; each change it makes once the record's epoch is another is unavailable.
@@ -131,7 +140,12 @@ export function memoryStore(
 export function memoryProcess(
 	data: MemoryData,
 	declared: readonly Space[],
-): { readonly store: Store; readonly control: StoreControl; readonly upkeep: StoreUpkeep } {
+): {
+	readonly store: Store;
+	readonly unchecked: Store;
+	readonly control: StoreControl;
+	readonly upkeep: StoreUpkeep;
+} {
 	const { clock, nextVersion, values, counters, answers, ledger, control: record } = data;
 	let taken = record.epoch;
 	/** Refuses a change once the record's epoch is not the one this process took. */
@@ -331,118 +345,117 @@ export function memoryProcess(
 		},
 	};
 
-	const store = checkedStore(
-		{
-			get: async (key) => {
-				const now = clock.now();
-				const held = current(key, now);
-				return { entry: held ? entryOf(held) : null, now };
-			},
-			getMany: async (keys) => {
-				const now = clock.now();
-				return deepFreeze(
-					keys.map((key) => {
-						const held = current(key, now);
-						return { entry: held ? entryOf(held) : null, now };
-					}),
-				);
-			},
-			putIfAbsent: (key, value, options) =>
-				guarded(
-					partitionOf(key),
-					idempotencyRequest("putIfAbsent", [key], [value, options.expiry]),
-					options,
-					(now) => {
-						const held = current(key, now);
-						if (held) {
-							return {
-								kind: "exists" as const,
-								remainingMs: held.expiresAt === null ? null : held.expiresAt - now,
-							};
-						}
-						return { kind: "written" as const, version: write(key, value, options.expiry, now) };
-					},
-				),
-			replaceIf: (key, version, value, options) =>
-				guarded(
-					partitionOf(key),
-					idempotencyRequest("replaceIf", [key], [version, value, options.expiry]),
-					options,
-					(now) => {
-						const held = current(key, now);
-						if (!held) return { kind: "missing" as const };
-						if (held.version !== version) return { kind: "conflict" as const };
-						return { kind: "written" as const, version: write(key, value, options.expiry, now) };
-					},
-				),
-			removeIf: (key, expected, options) =>
-				guarded(
-					partitionOf(key),
-					idempotencyRequest("removeIf", [key], [expected]),
-					options,
-					(now) => {
-						const held = current(key, now);
-						if (!held) return { kind: "missing" as const };
-						const matches =
-							"version" in expected
-								? held.version === expected.version
-								: canonicalJson(held.value) === canonicalJson(expected.value);
-						if (!matches) return { kind: "conflict" as const };
-						values.delete(id(key));
-						return { kind: "removed" as const, old: entryOf(held) };
-					},
-				),
-			take: (key, options) =>
-				guarded(partitionOf(key), idempotencyRequest("take", [key], []), options, (now) => {
+	/** Its ports with no check of their own: `checkedStore` checks every input once, as below, or over a store a caller checks itself (`simulated`). */
+	const unchecked: Store = {
+		get: async (key) => {
+			const now = clock.now();
+			const held = current(key, now);
+			return { entry: held ? entryOf(held) : null, now };
+		},
+		getMany: async (keys) => {
+			const now = clock.now();
+			return deepFreeze(
+				keys.map((key) => {
+					const held = current(key, now);
+					return { entry: held ? entryOf(held) : null, now };
+				}),
+			);
+		},
+		putIfAbsent: (key, value, options) =>
+			guarded(
+				partitionOf(key),
+				idempotencyRequest("putIfAbsent", [key], [value, options.expiry]),
+				options,
+				(now) => {
+					const held = current(key, now);
+					if (held) {
+						return {
+							kind: "exists" as const,
+							remainingMs: held.expiresAt === null ? null : held.expiresAt - now,
+						};
+					}
+					return { kind: "written" as const, version: write(key, value, options.expiry, now) };
+				},
+			),
+		replaceIf: (key, version, value, options) =>
+			guarded(
+				partitionOf(key),
+				idempotencyRequest("replaceIf", [key], [version, value, options.expiry]),
+				options,
+				(now) => {
 					const held = current(key, now);
 					if (!held) return { kind: "missing" as const };
+					if (held.version !== version) return { kind: "conflict" as const };
+					return { kind: "written" as const, version: write(key, value, options.expiry, now) };
+				},
+			),
+		removeIf: (key, expected, options) =>
+			guarded(
+				partitionOf(key),
+				idempotencyRequest("removeIf", [key], [expected]),
+				options,
+				(now) => {
+					const held = current(key, now);
+					if (!held) return { kind: "missing" as const };
+					const matches =
+						"version" in expected
+							? held.version === expected.version
+							: canonicalJson(held.value) === canonicalJson(expected.value);
+					if (!matches) return { kind: "conflict" as const };
 					values.delete(id(key));
-					return { kind: "taken" as const, entry: entryOf(held) };
-				}),
-			batchAcross: async (conditions, writes, options) => {
-				const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
-				const request = idempotencyRequest("batchAcross", keys, [
-					conditions.map((c) => ("absent" in c ? { absent: true } : { version: c.version })),
-					writes.map((w) => ("remove" in w ? null : [w.put, w.expiry])),
-				]);
-				const partitions = [...new Set(keys.map(partitionOf))];
-				return guardedAcross(partitions, request, options, (now) =>
-					applyBatch(conditions, writes, now),
-				);
-			},
-			batch: async (conditions, writes, options) => {
-				const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
-				samePartition(keys);
-				const request = idempotencyRequest("batch", keys, [
-					conditions.map((c) => ("absent" in c ? { absent: true } : { version: c.version })),
-					writes.map((w) => ("remove" in w ? null : [w.put, w.expiry])),
-				]);
-				return guarded(keys[0] && partitionOf(keys[0]), request, options, (now) =>
-					applyBatch(conditions, writes, now),
-				);
-			},
-			count: (key, window, options) =>
-				guarded(
-					partitionOf(key),
-					idempotencyRequest("count", [key], [window.ms, window.limit]),
-					options,
-					(now) => {
-						const held = counters.get(id(key));
-						if (!held || held.resetAt <= now) {
-							if (window.limit < 1) return { kind: "limited" as const, resetAt: now + window.ms };
-							counters.set(id(key), { count: 1, resetAt: now + window.ms });
-							return { kind: "counted" as const, count: 1, resetAt: now + window.ms };
-						}
-						if (held.count >= window.limit)
-							return { kind: "limited" as const, resetAt: held.resetAt };
-						held.count += 1;
-						return { kind: "counted" as const, count: held.count, resetAt: held.resetAt };
-					},
-				),
-			now: async () => clock.now(),
-			scan: async (space, cursor) => deepFreeze(pageOf(space, cursor, clock.now())),
+					return { kind: "removed" as const, old: entryOf(held) };
+				},
+			),
+		take: (key, options) =>
+			guarded(partitionOf(key), idempotencyRequest("take", [key], []), options, (now) => {
+				const held = current(key, now);
+				if (!held) return { kind: "missing" as const };
+				values.delete(id(key));
+				return { kind: "taken" as const, entry: entryOf(held) };
+			}),
+		batchAcross: async (conditions, writes, options) => {
+			const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
+			const request = idempotencyRequest("batchAcross", keys, [
+				conditions.map((c) => ("absent" in c ? { absent: true } : { version: c.version })),
+				writes.map((w) => ("remove" in w ? null : [w.put, w.expiry])),
+			]);
+			const partitions = [...new Set(keys.map(partitionOf))];
+			return guardedAcross(partitions, request, options, (now) =>
+				applyBatch(conditions, writes, now),
+			);
 		},
-		declared,
-	);
-	return { store, control: readControl, upkeep: checkedUpkeep(upkeep, declared) };
+		batch: async (conditions, writes, options) => {
+			const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
+			samePartition(keys);
+			const request = idempotencyRequest("batch", keys, [
+				conditions.map((c) => ("absent" in c ? { absent: true } : { version: c.version })),
+				writes.map((w) => ("remove" in w ? null : [w.put, w.expiry])),
+			]);
+			return guarded(keys[0] && partitionOf(keys[0]), request, options, (now) =>
+				applyBatch(conditions, writes, now),
+			);
+		},
+		count: (key, window, options) =>
+			guarded(
+				partitionOf(key),
+				idempotencyRequest("count", [key], [window.ms, window.limit]),
+				options,
+				(now) => {
+					const held = counters.get(id(key));
+					if (!held || held.resetAt <= now) {
+						if (window.limit < 1) return { kind: "limited" as const, resetAt: now + window.ms };
+						counters.set(id(key), { count: 1, resetAt: now + window.ms });
+						return { kind: "counted" as const, count: 1, resetAt: now + window.ms };
+					}
+					if (held.count >= window.limit)
+						return { kind: "limited" as const, resetAt: held.resetAt };
+					held.count += 1;
+					return { kind: "counted" as const, count: held.count, resetAt: held.resetAt };
+				},
+			),
+		now: async () => clock.now(),
+		scan: async (space, cursor) => deepFreeze(pageOf(space, cursor, clock.now())),
+	};
+	const store = checkedStore(unchecked, declared);
+	return { store, unchecked, control: readControl, upkeep: checkedUpkeep(upkeep, declared) };
 }

@@ -110,6 +110,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `contract-walking` (`src/contract-walking`): the contract test's scanning of a space, and the checks on every input.
   - `simulated` (`src/simulated`): a simulated replicated store, for tests, offered through `./testing`.
   - `upkeep` (`src/upkeep`): keeping a store's data whole, apart from reading and writing its keys.
+  - `writer` (`src/writer`): the subject writer, the one value a change to subjects' data carries.
 - `@mod/subject-records` (capability, `modules/foundation/subject-records`): Provides records of spaces that hold a subject's data, written so that erasing a subject finds them and nothing is written past its tombstone; a capability like `records`, built by a feature's wiring, never used by a feature.
   - `envelope` (`src/envelope`): the envelope a subject's record is kept in, its subject beside its value.
   - `erase` (`src/erase`): erasing a subject from one space, and sweeping a space's index.
