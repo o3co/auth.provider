@@ -16,7 +16,7 @@ Internal module of `mfa-flows`: fencing a subject's transactions and permits and
 ## Invariants
 - `erasable` only where both stores offer both ports; otherwise empty reports. `logoutGaps` is 0: it removes no session.
 - Where `session` offers no `subjectOf`, the listings' migration answers `owner-stopped`, and the transactions' still runs.
-- No `after`: whichever of it and `rate-limit`'s eraser runs first, a dropped lockout key holds (`rate-limit`'s card).
+- Whichever of it and `rate-limit`'s eraser runs first, a dropped lockout key holds (`rate-limit`'s card).
 - 0.19's raw transactions and permits stay raw: the space is bounded (0/0), and its bound, an hour, covers the longest a 0.19 instance writes.
 
 ## Depends on

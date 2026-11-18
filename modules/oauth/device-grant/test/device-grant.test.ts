@@ -1369,7 +1369,7 @@ it("contributes its eraser, `device-grant`, not erasable over stores without era
 	const { input } = assembly({}, [finder]);
 	const app = await assemble(input);
 	const eraser = app.get(found).find((e) => e.name === "device-grant");
-	expect([eraser?.erasable, eraser?.after]).toEqual([false, undefined]);
+	expect(eraser?.erasable).toBe(false);
 });
 
 it("takes all its module names, with a public origin and without", async () => {

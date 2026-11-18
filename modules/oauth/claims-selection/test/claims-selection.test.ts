@@ -524,11 +524,7 @@ it("contributes its eraser, `claims-selection`, not erasable over a store withou
 	]);
 	const s = await serve([finder]);
 	const [eraser] = s.app.get(found);
-	expect([eraser?.name, eraser?.erasable, eraser?.after]).toEqual([
-		"claims-selection",
-		false,
-		undefined,
-	]);
+	expect([eraser?.name, eraser?.erasable]).toEqual(["claims-selection", false]);
 });
 
 it("offers the bounds check a selection is held to", () => {

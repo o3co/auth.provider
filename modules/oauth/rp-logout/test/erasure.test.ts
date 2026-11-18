@@ -24,7 +24,7 @@ it("contributes its eraser, `rp-logout`, erasable over bodies offering both port
 	const h = await harness({ extra: [finder] });
 	try {
 		const eraser = h.app.get(found).find((e) => e.name === "rp-logout");
-		expect([eraser?.erasable, eraser?.after]).toEqual([true, undefined]);
+		expect(eraser?.erasable).toBe(true);
 	} finally {
 		await h.stop();
 	}

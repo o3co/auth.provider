@@ -36,7 +36,7 @@ describe("mfa-flows' eraser", () => {
 		const part = { ...plainStore, erase: async () => report("fenced", "t") } as TransactionStore;
 		expect(portsRefused(part, plainListings)).toMatch(/part of erase and migrate/);
 		const eraser = flowsEraser(plainStore, plainListings, () => ({}));
-		expect([eraser.name, eraser.erasable, eraser.after]).toEqual(["mfa-flows", false, undefined]);
+		expect([eraser.name, eraser.erasable]).toEqual(["mfa-flows", false]);
 		expect(await eraser.online("alice", signal)).toEqual({ reports: [], logoutGaps: 0 });
 		expect(await eraser.migrate(walk, signal)).toEqual([]);
 	});

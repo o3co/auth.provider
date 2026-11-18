@@ -19,7 +19,7 @@
 - Extension points, two of any refusing boot: the judge of consent, `consented(client, subject, scope)`; the table of claim scopes, `scopeOf(claim)`, from the module releasing claims; whose a family is, `subjectOf(familyId)` (`familySubjects`), from the module keeping families: the subject, or ended (no token of the family refreshed again, its id never issued again) only on an answer its store confirmed, throwing when it cannot tell.
 - Contribution to `code-grant`'s redemption hooks: the pin, for the code's subject, and a redeemed code's token kept the pinned userinfo target, for the pin's subject: a pin without one is a defect, unavailable, as is a redemption told another subject or none.
 - Contribution to `grants`' token ties: a token with constraints ties a token exchanged from it, which keeps those constraints and none of its names.
-- Contribution to `erasure-extensions`' erasers: `claims-selection` (internal module `erasure`), its migration reading whose each record is, after no other eraser.
+- Contribution to `erasure-extensions`' erasers: `claims-selection` (internal module `erasure`), its migration reading whose each record is.
 - Store interface, wired by the assembly: records by name, each created once for its lifetime and its subject (`create`, `erased` past the subject's erasure); `erase` and `migrate` together or neither, optional until 0.22; a part refuses the boot. `./testing` holds its contract test for every implementation (`selectionRecordsContract`, through faults), and claims-selection composed over records in memory (`claimsSelectionInMemory`), which a test may wrap.
 
 ## Invariants

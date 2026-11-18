@@ -50,11 +50,7 @@ const erasing = (held: StoredDevice[], asked: string[], answer?: DevicesWalked) 
 describe("device-grant's eraser", () => {
 	it("states that it cannot erase where the stores lack the ports, answering empty reports", async () => {
 		const eraser = deviceGrantEraser({ devices, approvals });
-		expect([eraser.name, eraser.erasable, eraser.after]).toEqual([
-			"device-grant",
-			false,
-			undefined,
-		]);
+		expect([eraser.name, eraser.erasable]).toEqual(["device-grant", false]);
 		expect(await eraser.online("alice", signal)).toEqual({ reports: [], logoutGaps: 0 });
 		expect(await eraser.window(["alice"], walk, signal)).toEqual({ reports: [], logoutGaps: 0 });
 		expect(await eraser.migrate(walk, signal)).toEqual([]);

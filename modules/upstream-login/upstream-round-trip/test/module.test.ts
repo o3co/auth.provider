@@ -67,6 +67,6 @@ it("contributes its eraser, `upstream-round-trip`, erasable only over a store th
 			runtime: quietRuntime({ clock: { now: () => 0 } }),
 		});
 		const eraser = app.get(found).find((e) => e.name === "upstream-round-trip");
-		expect([eraser?.erasable, eraser?.after], String(walks)).toEqual([walks, undefined]);
+		expect(eraser?.erasable, String(walks)).toBe(walks);
 	}
 });
