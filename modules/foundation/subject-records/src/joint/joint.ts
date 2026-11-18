@@ -9,6 +9,7 @@ import {
 } from "@mod/records";
 import type { Json } from "@mod/store";
 import { checkedSubjectPlace, type SubjectPlace } from "../index/index.ts";
+import { changeWritten } from "../writer.ts";
 import { type Rule, rulesOf } from "../writes/rules.ts";
 
 /** A record of the joint's places: the place's name in `places`, and its key. */
@@ -190,7 +191,7 @@ export function jointRecordsIn<P extends string, T extends Json = Json>(
 				| { readonly kind: "written" }
 				| undefined;
 			const reading = needed;
-			const result = await changeRecords({
+			const result = await changeWritten({
 				targets: p.targets.map(targetOf),
 				watch: (raw) => {
 					const read = raw.map((held, at) => opened((p.targets[at] as JointKey<P>).place, held));

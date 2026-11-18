@@ -13,6 +13,7 @@ import {
 	targetOf,
 	UnreadableIndex,
 } from "../index/index.ts";
+import { changeWritten } from "../writer.ts";
 
 /** Entries settled in one write: their records and sets, and the bucket listing them. */
 const perBatch = 32;
@@ -50,7 +51,7 @@ async function settled(
 		removed: [],
 		left: 0,
 	};
-	await changeRecords({
+	await changeWritten({
 		targets: [...(bucket ? [bucket] : []), ...entries.map((e) => targetOf(place, e))],
 		decide: (read) => {
 			const [listed, ...held] = bucket ? read : [undefined, ...read];
@@ -124,7 +125,7 @@ export async function eraseSubject(
 		if (options.signal?.aborted) return stopped("aborted");
 		// The tombstone's deadline bounds its commit on the store clock, as a write commits by its deadline.
 		let at: number | undefined;
-		await changeRecords({
+		await changeWritten({
 			targets: [tombOf(subject)],
 			decide: ([tomb], _, attempt) => {
 				if (tomb !== undefined) {
@@ -152,7 +153,7 @@ export async function eraseSubject(
 				witnessOf(subject, "set"),
 			];
 			let removed: readonly Json[] = [];
-			await changeRecords({
+			await changeWritten({
 				targets: under,
 				decide: (read) => {
 					removed = read.slice(0, 2).filter((held): held is Json => held !== undefined);

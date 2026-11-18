@@ -19,6 +19,7 @@ import {
 	UnreadableIndex,
 	witnessed,
 } from "../index/index.ts";
+import { changeWritten } from "../writer.ts";
 
 /** Where a migration makes its report; only this package makes one, here and in internal module `erase`. */
 const report = (made: { kind: string; space: string } & Record<string, unknown>) =>
@@ -156,7 +157,7 @@ async function migrating(
 		const target = targetOf(key);
 		const named = [...new Set(subjects.filter((one): one is string => one !== undefined))];
 		let answer: Done | "todo" | "changed" = "changed";
-		await changeRecords({
+		await changeWritten({
 			targets: [target, ...named.map((one) => provenanceOf(one, key))],
 			decide: ([held, ...read]) => {
 				if (

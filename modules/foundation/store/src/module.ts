@@ -1,6 +1,6 @@
 import { contract, defineModule } from "@mod/kernel";
 import { spaces, store, storeControl, storeUpkeep } from "./contract.ts";
-import { memoryData, memoryProcess } from "./memory.ts";
+import { memoryData, memoryProcess } from "./memory/memory.ts";
 import { section } from "./section.ts";
 
 /** The one process over the data, whose epoch the store and its upkeep share. */

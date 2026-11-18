@@ -26,4 +26,4 @@ Internal module of `subject-records`: erasing a subject from one space, and swee
 - Erasing's reports are made here, by one cast; this package makes reports nowhere else but internal module `migrate`.
 
 ## Depends on
-- `erasure-extensions` (the report), `kernel` (Unavailable), `records` (`changeRecords`), `store`
+- `erasure-extensions` (the report), `kernel` (Unavailable), `records` (`changeRecords`), `store`; the package's `changeWritten`

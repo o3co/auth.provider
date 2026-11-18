@@ -11,7 +11,7 @@ import {
 	store,
 	storeControl,
 } from "../contract.ts";
-import { memoryCore } from "../memory.ts";
+import { memoryCore } from "../memory/memory.ts";
 
 const writes = new Set<string>([
 	"putIfAbsent",

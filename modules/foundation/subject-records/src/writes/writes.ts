@@ -1,6 +1,7 @@
 import { type Attempt, type Changed, changeRecords, type Place, type Target } from "@mod/records";
 import type { Json } from "@mod/store";
 import { checkedSubjectPlace, type SubjectPlace } from "../index/index.ts";
+import { changeWritten } from "../writer.ts";
 import { type Rule, rulesOf } from "./rules.ts";
 
 /**
@@ -25,7 +26,7 @@ export const recordTargetsIn = (place: Place, options: { readonly secret?: true 
  * each gone by its fixed end, at most the space's `boundedMs`); kept in an envelope with the subject
  * once records are indexed, `bounded` aside, and none created past the subject's tombstone. `secret`
  * keys a `bounded` space's records by secrets, as records under a secret are. Every write goes
- * through records' `changeRecords`; reads go to the store, writing nothing. Where, once indexed, the
+ * through records' `changeRecords` with the subject writer (`changeWritten`); reads go to the store, writing nothing. Where, once indexed, the
  * store writes no records of two partitions as one, or where `index` is not the space's index space
  * or the space declares no such category, `refuse` (the builder's) is told.
  */
@@ -48,7 +49,7 @@ export function subjectRecordsIn<T extends Json>(
 	/** Runs one rule on one record, as one change: its needs read beside it, its writes in one write. */
 	const ruledAt = async <A>(target: Target, rule: Rule<A>): Promise<A> => {
 		let answer: A | undefined;
-		await changeRecords({
+		await changeWritten({
 			targets: [target],
 			watch: ([held]) => rule.needs(held),
 			decide: ([held], needed, attempt) => {
@@ -103,7 +104,7 @@ export function subjectRecordsIn<T extends Json>(
 			if (bounded) throw new TypeError("subject-records: a bounded space keeps no unowned record");
 			if (rules.indexed) return "closed";
 			let answer: "created" | "exists" | "closed" = "created";
-			await changeRecords({
+			await changeWritten({
 				targets: [recordOf(key)],
 				decide: ([held]) => {
 					answer = held === undefined ? "created" : "exists";
