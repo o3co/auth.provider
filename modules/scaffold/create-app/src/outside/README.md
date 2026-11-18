@@ -10,7 +10,10 @@
 - Writing the app: `app-output`.
 
 ## Offers
-- `readOutside` (project, names, release, how pnpm is asked: its command and time, and the names let through though fresh): each package read (`Outside`: its declaration, its record, and its fragment, card and section defaults where it ships them), the registries the project installs from, and each fresh name not among the names, recorded as a dependency (`freshDependencies`). It refuses, naming each, every reason at once.
+- `readOutside` (project, names, release, how pnpm is asked: its command and time, and the names let through though fresh). It refuses, naming each, every reason at once. It answers:
+  - each package read (`Outside`): its declaration, its record, its fragment, card and section defaults where it ships them, and which of `asks`, `appEntries`, `takesSamples` and `sampleOf` its manifest carries, read of the release's packages alone;
+  - the registries the project installs from, and each fresh name not among the names, recorded as a dependency (`freshDependencies`).
+- `unreadWarnings` (the packages read): a line for each that carries any of those, naming it and them; the app is generated all the same.
 - `declaredRanges` (a record, a name): every registry range the record declares the name by itself, as a dependency, an optional one or a peer; none where any declaration of it is an alias of another package.
 - `Release`: the release's version, the app's zod, and the bundle a module of the release ships in.
 - `bundlesIn` (the index's members): each bundle's dependencies on other bundles, from where its members' runtime dependencies lie.

@@ -11,7 +11,7 @@ import {
 	needed,
 	optIns,
 } from "@mod/combinations";
-import { readOutside } from "./outside/contract.ts";
+import { readOutside, unreadWarnings } from "./outside/contract.ts";
 import { bundleIndex, type Indexed, packagesFor, publishedIn } from "./packages.ts";
 
 /** The packages outside the release a plan composes: where pnpm installed them, and those let through though fresh. */
@@ -25,6 +25,8 @@ export interface OutsidePlan {
 export interface Assembly {
 	readonly packages: Packages;
 	readonly combinations: Combinations;
+	/** Lines for the operator, the project still written: what a package outside the release declares that is not read. */
+	readonly warnings: readonly string[];
 }
 
 const release: Combinations = { completed, composed, full, optIns, addable, needed };
@@ -59,7 +61,7 @@ export function assemblyFor(
 	index = bundleIndex,
 ): Assembly {
 	if (plan.outside === undefined)
-		return { packages: packagesFor(plan, index), combinations: release };
+		return { packages: packagesFor(plan, index), combinations: release, warnings: [] };
 	if (plan.workspace !== undefined) {
 		throw new Error(
 			"a linked workspace composes no package outside the release: its packages are not the published ones",
@@ -93,5 +95,6 @@ export function assemblyFor(
 			...(plan.outside.fresh ? { fresh: plan.outside.fresh } : {}),
 		}),
 		combinations: combinationsWith(read.outside.map((o) => o.declaration)),
+		warnings: unreadWarnings(read.outside),
 	};
 }

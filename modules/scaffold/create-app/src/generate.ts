@@ -34,7 +34,8 @@ export type Plan = ModulesPlan | FullPlan | PatternPlan;
 
 const defaultSink = "@mod/log-stdout";
 
-export async function generate(given: Plan): Promise<void> {
+/** Writes the plan's project, answering the lines the operator is warned with: the project is written all the same. */
+export async function generate(given: Plan): Promise<readonly string[]> {
 	// One path, resolved once, is both checked and written to: `missing/..` must not pass as empty.
 	const plan = { ...given, target: resolve(given.target) };
 	if ("template" in plan) {

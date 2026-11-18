@@ -30,7 +30,12 @@ export interface Outside {
 	readonly fragment?: string;
 	readonly card?: string;
 	readonly references?: string;
+	/** The declarations a package of the release makes that its manifest carries too, which create-app reads of no package outside it. */
+	readonly unread: readonly string[];
 }
+
+/** What a package of the release declares for the generated app, which no package outside it is read for. */
+const releaseOnly = ["asks", "appEntries", "takesSamples", "sampleOf"] as const;
 
 /** What was read from a project: the packages, the registries it installs from, and the dependencies of those let through though fresh. */
 export interface Read {
@@ -335,10 +340,21 @@ function outsideOf(
 	return {
 		declaration,
 		record,
+		unread: releaseOnly.filter((field) => manifest[field] !== undefined),
 		...(fragment?.text !== undefined ? { fragment: fragment.text } : {}),
 		...(card?.text !== undefined ? { card: card.text } : {}),
 		...(references?.text !== undefined ? { references: references.text } : {}),
 	};
+}
+
+/** A line for the operator about each package carrying what is read of the release's packages alone; the app is generated all the same. */
+export function unreadWarnings(read: readonly Outside[]): string[] {
+	return read
+		.filter((o) => o.unread.length > 0)
+		.map(
+			(o) =>
+				`warn ${o.declaration.name}: a package outside the release declares ${o.unread.join(", ")}, which is read of the release's packages alone; the app is generated without it`,
+		);
 }
 
 /**
