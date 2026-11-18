@@ -6,8 +6,8 @@ import { keysUnder } from "../../keys.ts";
 import { redisStore, scriptsOn, serverOf } from "../../redis-store.ts";
 import { redisUpkeepWith } from "../upkeep.ts";
 
-// A space that may hold a subject's data, so the shared ledger records it.
-const space: Space = { name: "kept", guarantees: [], subjectData: "online-indexed" };
+// A space holding a subject's data, written plainly through the store's ports, so the shared ledger records it.
+const space: Space = { name: "kept", guarantees: [], subjectData: "retained" };
 const key = { space, partition: "p", name: "k" };
 const never = { expiry: { kind: "never" } } as const;
 

@@ -191,11 +191,11 @@ afterAll(() => {
 });
 
 const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
-	// A space that may hold a subject's data, so the shared ledger records it.
+	// A space holding a subject's data, written plainly through the store's ports, so the shared ledger records it.
 	m.contribute(spaces).by(() => ({
 		name: "kept",
 		guarantees: ["durable", "no-eviction"],
-		subjectData: "online-indexed",
+		subjectData: "retained",
 	})),
 	...contractSpaces.map((space) => m.contribute(spaces).by(() => space)),
 ]);
