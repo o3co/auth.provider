@@ -28,6 +28,7 @@
 - A script reading subjects holds the process's streams (`write` and `end`), the console, warnings and errors no one catches to those lines, reading the app and its modules only after. Code writing to a descriptor itself (`fs.writeSync(1, …)` or `(2, …)`) is code the process trusts, outside it.
 - In a script reading subjects, a failure other than unavailable is counted and stops the run there: the subjects after it are not read.
 - Each entry checks the variables 0.17 read as the app's entry does, by `legacyVariablesCheck`, its refusal refusing the entry's boot: a `call` writes the warning as `warn config-files:`, a script reading subjects the fixed line above, naming none.
+- Every declared entry, whatever its shape, assembles the app never to start (the kernel's `neverStarted`): it builds and stops, and serves nothing. The app's entry starts.
 - What an entry writes is handed on before it exits: a slow pipe holds the script, never drops a line.
 - The entries that read subjects read them one way: a line longer than a subject may be (255 bytes) is counted failed, and no more of it is held.
 

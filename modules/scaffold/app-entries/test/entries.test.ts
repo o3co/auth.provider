@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { type Declaring, entriesOf } from "../src/contract.ts";
+import type { Shape } from "../src/declared.ts";
 import { configFiles, kernel, mainSource } from "../src/start.ts";
 
 /** Stand-ins for the kernel (with config-files' `loadConfig`) and a declaring package, as packages the written script imports. */
@@ -746,3 +747,23 @@ it("takes the declared contract under a name of its own, so one named as a scrip
 	expect(found.stdout).toBe("flagged-1\n");
 	expect(found.status).toBe(0);
 }, 60_000);
+
+it("assembles every tool shape never to start, and the app's entry to start", async () => {
+	// Each shape, so a shape added later fails to compile here until it is pinned too.
+	const fields = {
+		call: {},
+		"settle-subjects": { answers: ["marked"] },
+		"name-subjects": {},
+	} satisfies Record<Shape, Record<string, unknown>>;
+	for (const [shape, extra] of Object.entries(fields)) {
+		const { files } = await entriesOf(
+			["@mod/tool"],
+			(name) => name,
+			ignored,
+			undefined,
+			declaring({ shape, ...extra }),
+		);
+		expect(files["src/tool.ts"], shape).toMatch(/assemble\(\{[^}]*neverStarted: true[^}]*\}\)/);
+	}
+	expect(await mainSource(["@mod/tool"])).not.toContain("neverStarted");
+});

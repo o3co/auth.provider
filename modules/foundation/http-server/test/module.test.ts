@@ -1,3 +1,4 @@
+import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
@@ -24,4 +25,16 @@ it("is the one server http's httpServers takes", async () => {
 		runtime: quietRuntime({ clock: { now: () => 0 }, random: { bytes: (n) => new Uint8Array(n) } }),
 	});
 	expect(app.get(counted)).toBe(1);
+});
+
+it("opens no listener in an assembly that is never started", async () => {
+	const app = await assemble({
+		modules: [http, server],
+		config,
+		runtime: quietRuntime(),
+		neverStarted: true,
+	});
+	await expect(app.start()).rejects.toThrow(TypeError);
+	expect(() => app.get(listening).port()).toThrow("http is not listening yet");
+	await app.stop(1000);
 });
