@@ -166,9 +166,9 @@ function refusedStart(
 }
 
 /**
- * A process over `data`: as it starts it checks its declarations, refuses to start where the
- * control record says it may not, takes the record's epoch and adds its spaces to the ledger; each
- * change it makes once the record's epoch is another is unavailable.
+ * A process over `data`: as it starts it checks its declarations, reads the control record once,
+ * refusing a start that read forbids and taking its epoch from it, and only then adds its spaces to
+ * the ledger; each change it makes once the record's epoch is another is unavailable.
  */
 export function memoryProcess(
 	data: MemoryData,

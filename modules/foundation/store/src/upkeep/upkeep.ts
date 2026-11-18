@@ -12,6 +12,12 @@ export interface Mark {
  * each entry to maintenance and never one the data had, null where none ever was. `requires` names
  * the spaces every process must declare to start. `marks` are values their owners name, prefixed
  * with the owner's name as space names are; store keeps them and never reads them.
+ *
+ * A process is refused at start (kernel's `BuildRefused`), judged on the same read of the record it
+ * takes the epoch from: under the maintenance key, unless its assembly is never started (this one
+ * first, where both apply); without a space `requires` names, unless it is never started and under
+ * the key. A refused process writes
+ * nothing: it takes no epoch and adds nothing to the ledger.
  */
 export interface Control {
 	readonly epoch: string | null;
