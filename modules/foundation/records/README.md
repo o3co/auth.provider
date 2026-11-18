@@ -15,7 +15,7 @@
 - Deferred work: add, done, and each, which hands the work over; work that fails stays and is counted.
 - Keyed sets: add a member for a lifetime (answering those pushed out over the cap), the members with their time left, remove a member; the members pushed out and awaiting, and settling one. `keyedSetsIn.codec` (a cap and a clock) is the set's format at rest, its only definition: `keyedSetsIn` writes with it, and subject-records composes it inside `changeRecords`; `keyedSetsIn.strict` reads a stored set strictly, for subject-records' migration. (Internal module `keyed-sets`.)
 - No contract of its own: the wiring builds each over a place, with the cap and `kernel`'s clock for keyed sets.
-- Test stand-ins (`./testing`): records (several of them changed together too), deferred work and keyed sets in memory, a race on demand, and jobs that crowd one shard.
+- Test stand-ins (`./testing`): records (several of them changed together too), deferred work and keyed sets in memory, a race on demand, jobs that crowd one shard, and a record planted as an earlier version wrote it (`plantRecord`, internal module `planting`).
 
 ## Deprecated
 - `overCap` and `checkedCap`: exported, unused outside records; the set's format is `keyedSetsIn.codec`. A later release (0.22) removes them.
