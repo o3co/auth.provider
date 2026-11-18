@@ -10,7 +10,7 @@ Internal module of `device-grant`: erasing a subject's approvals, and checking t
 - What the stores keep and how they fence (the Store). When erasure runs (`account-erasure`). The walk of the devices (the Store, through `walk`).
 
 ## Offers
-- `deviceGrantEraser` (the device store, the approvals) → the eraser: a subject's approvals fenced through `erase`, a window doing the same for each subject, and `migrate`: the approvals' own, reading none (they are bounded), then the devices checked through `walk`. It runs after no other eraser. `erasable` only where the stores offer the set whole, empty reports where not.
+- `deviceGrantEraser` (the device store, the approvals) → the eraser: a subject's approvals fenced through `erase`, a window doing the same for each subject, and `migrate`: the approvals' own, reading none (they are bounded), then the devices checked through `walk`. `erasable` only where the stores offer the set whole, empty reports where not.
 - `portsRefused` (the device store, the approvals) → why their ports cannot be used, or none: the approvals' `erase` and `migrate` and the devices' `walk` come all three or none, a part refused at build by the package's module, which requires the approvals; `portsOf` → the set, whole, or none.
 
 ## Invariants
