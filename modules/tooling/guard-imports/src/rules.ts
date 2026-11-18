@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { type Edge, type FileFacts, type Reference, realOf } from "./facts/facts.ts";
-import type { Scope } from "./scope.ts";
+import type { Scope } from "./scope/scope.ts";
 import type { Surface } from "./surface/surface.ts";
 import type { Pkg } from "./workspace.ts";
 

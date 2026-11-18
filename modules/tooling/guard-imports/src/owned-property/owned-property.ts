@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
-import { budgetsAsTest, type Scope } from "../scope.ts";
+import { budgetsAsTest, type Scope } from "../scope/scope.ts";
 import type { Pkg } from "../workspace.ts";
 import { byNameReading, isTemplate, typedReading, writesIn } from "./writes/writes.ts";
 

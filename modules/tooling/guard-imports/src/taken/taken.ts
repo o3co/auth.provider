@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import ts from "typescript";
 import { valuesTaken } from "../rules.ts";
-import { reservedEntries, type Scope } from "../scope.ts";
+import { reservedEntries, type Scope } from "../scope/scope.ts";
 import { parse } from "../source.ts";
 import type { Pkg } from "../workspace.ts";
 

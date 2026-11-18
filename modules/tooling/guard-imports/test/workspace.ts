@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Rules } from "../src/scope.ts";
+import type { Rules } from "../src/scope/scope.ts";
 import type { Pkg } from "../src/workspace.ts";
 
 /** The rules the tests' workspaces are read under, as the repository's. */

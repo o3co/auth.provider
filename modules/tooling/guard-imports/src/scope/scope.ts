@@ -1,6 +1,6 @@
 import { join, relative, sep } from "node:path";
-import { type FileFacts, type LexicalAnalysis, lexicalAnalysis, realOf } from "./facts/facts.ts";
-import type { Pkg } from "./workspace.ts";
+import { type FileFacts, type LexicalAnalysis, lexicalAnalysis, realOf } from "../facts/facts.ts";
+import type { Pkg } from "../workspace.ts";
 
 /** The kinds' order and roles, in the words the caller gives them. */
 export interface Kinds {

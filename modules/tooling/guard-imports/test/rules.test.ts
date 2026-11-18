@@ -2,7 +2,7 @@ import { mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { importViolations, propertyDeclarations, type Rules } from "../src/contract.ts";
-import { scopeOf } from "../src/scope.ts";
+import { scopeOf } from "../src/scope/scope.ts";
 import type { Pkg } from "../src/workspace.ts";
 import { budget, pkg } from "./workspace.ts";
 
