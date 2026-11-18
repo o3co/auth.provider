@@ -1,6 +1,6 @@
 import { assemble, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { type Space, store } from "@mod/store";
+import { store } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import { type RoundTripStore, roundTripStore } from "@mod/upstream-round-trip";
 import { roundTripStoreContract } from "@mod/upstream-round-trip/testing";
@@ -24,7 +24,7 @@ roundTripStoreContract(
 		// The walk a maintenance tool hands in: the store's own scan, on one server.
 		const walk: Walk = {
 			sweep: async (space, cursor) => {
-				const page = await inner.scan({ name: space, guarantees: [] } as Space, cursor);
+				const page = await inner.scan(simulated.declaredSpace(space), cursor);
 				return page.cursor === undefined
 					? { keys: page.keys, server: "one" }
 					: { keys: page.keys, cursor: page.cursor, server: "one" };

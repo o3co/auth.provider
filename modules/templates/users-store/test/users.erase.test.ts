@@ -2,7 +2,7 @@ import { type Eraser, erasers, type Walk } from "@mod/erasure-extensions";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import { type Space, store, storeControl } from "@mod/store";
+import { store, storeControl } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import { contactStore, linkStore, type StoredName } from "@mod/users";
 import usersModule from "@mod/users/module";
@@ -54,7 +54,7 @@ it("migrates what 0.19 and the reader phase wrote, keeping a name's record in th
 	const inner = base.get(store);
 	const walk: Walk = {
 		sweep: async (space, cursor) => {
-			const page = await inner.scan({ name: space, guarantees: [] } as Space, cursor);
+			const page = await inner.scan(simulated.declaredSpace(space), cursor);
 			return page.cursor === undefined
 				? { keys: page.keys, server: "one" }
 				: { keys: page.keys, cursor: page.cursor, server: "one" };

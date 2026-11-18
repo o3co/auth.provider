@@ -11,8 +11,8 @@ import { type Next, type Place, pairedRecordsAcross, recordsIn } from "../../rec
 // plain hook for both (after G); then they move there and the version reading goes.
 
 const guarantees = ["no-eviction", "durable", "replicated"] as const;
-const left: Space = { name: "ledger-left", guarantees: [...guarantees] };
-const right: Space = { name: "ledger-right", guarantees: [...guarantees] };
+const left: Space = { name: "ledger-left", guarantees: [...guarantees], subjectData: "none" };
+const right: Space = { name: "ledger-right", guarantees: [...guarantees], subjectData: "none" };
 const opened = contract<Store>("test.store");
 const accounts = [
 	{ space: left, key: "a1" },

@@ -18,8 +18,8 @@ const runtime = quietRuntime({
 	random: { bytes: (n) => new Uint8Array(n) },
 });
 const guarantees = ["no-eviction", "durable", "replicated"] as const;
-const lists: Space = { name: "together-lists", guarantees: [...guarantees] };
-const claims: Space = { name: "together-claims", guarantees: [...guarantees] };
+const lists: Space = { name: "together-lists", guarantees: [...guarantees], subjectData: "none" };
+const claims: Space = { name: "together-claims", guarantees: [...guarantees], subjectData: "none" };
 const opened = contract<Store>("test.store");
 
 /** A simulated store over two spaces of one guarantee, a place in each, and their records. */
