@@ -30,7 +30,7 @@
 - A conditional removal is a change: where the record holds what the caller expects, it changes it to a 1 ms lifetime, and from a millisecond later it is read no more.
 - Deferred work is split over shards of a size the wiring decides; a full shard refuses an add as unavailable and logs it with the space, and nothing kept is pushed out.
 - Work stays until done; adding listed work writes again, as the listing may be another request's not yet confirmed.
-- A space holds records or records under a secret, never both: opening it for the other kind on the same store refuses the boot (`kernel`'s `BuildRefused`: `<space>`, `a space holds records or secret records, not both`), as the records' scan would list the names kept under secrets. A space declared to hold a subject's data (`online-indexed`, `online-keyed`, `bounded`) opens through no builder but `changeRecords`, refusing the boot the same way: subject-records writes it.
+- A space holds records or records under a secret, never both: opening it for the other kind on the same store refuses the boot (`kernel`'s `BuildRefused`: `<space>`, `a space holds records or secret records, not both`), as the records' scan would list the names kept under secrets. A space of a category store's `WriterHeld` names (subjects' data, or an index of it) opens through no builder but `changeRecords`, refusing the boot the same way (internal module `writing`): subject-records writes it.
 - A name never changes within its version (a new way raises it, and the old is read for the records' lifetime); short codes a person types never go through it.
 - Changing the interface shape changes every wired feature's contract, so it goes through a human gate.
 
