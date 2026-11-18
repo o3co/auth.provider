@@ -4634,6 +4634,13 @@ importers:
       '@mod/subject-records':
         specifier: workspace:*
         version: link:../../foundation/subject-records
+    devDependencies:
+      '@mod/erasure-extensions':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-extensions
+      '@mod/webauthn':
+        specifier: workspace:*
+        version: link:../../passkey/webauthn
 
   modules/tooling/api-docs:
     dependencies:
