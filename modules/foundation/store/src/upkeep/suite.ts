@@ -44,8 +44,8 @@ function said(error: unknown): string | undefined {
 	return undefined;
 }
 
-/** That `start` is refused by kernel's refusal, saying `words`. */
-async function refusedSaying(start: Promise<unknown>, words: RegExp): Promise<void> {
+/** That `start` is refused by kernel's refusal, saying `words`; what it says. */
+async function refusedSaying(start: Promise<unknown>, words: RegExp): Promise<string> {
 	const refused = await start.then(
 		() => undefined,
 		(error: unknown) => error,
@@ -53,6 +53,7 @@ async function refusedSaying(start: Promise<unknown>, words: RegExp): Promise<vo
 	const says = said(refused);
 	expect(says, `not refused as kernel refuses: ${String(refused)}`).toBeDefined();
 	expect(says).toMatch(words);
+	return says as string;
 }
 
 const never = { expiry: { kind: "never" } } as const;
@@ -199,6 +200,20 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				await p.upkeep.enterMaintenance();
 				const t = await tool(p, [none]);
 				expect(await t.upkeep.mark("test.replacing", 1)).toEqual({ kind: "marked" });
+			});
+
+			it("refuses for a required space with store's fixed reason, naming no space, however the names are written", async () => {
+				const p = await harness.start(upkeepSpaces);
+				const names = ["line\nbreak", "zero\u200bwidth", "store: refused for good"];
+				await p.upkeep.enterMaintenance();
+				await p.upkeep.require(names);
+				await p.upkeep.leaveMaintenance();
+				const says = await refusedSaying(
+					harness.another(p, [none]),
+					/the data requires a space this process does not declare/,
+				);
+				for (const name of names) expect(says).not.toContain(name);
+				expect(says).not.toMatch(/break|width|for good/);
 			});
 
 			it("refuses on the maintenance key first, where both refusals apply", async () => {

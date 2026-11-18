@@ -132,9 +132,6 @@ export function memoryCore(
 	return memoryProcess(memoryData(clock, nextVersion), declared).unchecked;
 }
 
-/** The names a refusal lists, at most this many, then how many more. */
-const namesListed = 5;
-
 /**
  * Refuses a start the control record forbids, as a boot refusal, before anything is written: under
  * the maintenance key unless the assembly is never started; without a space `requires` names
@@ -154,14 +151,8 @@ function refusedStart(
 	const names = new Set(declared.map((space) => space.name));
 	const missing = record.requires.filter((name) => !names.has(name));
 	if (missing.length > 0 && !(neverStarted && record.maintenance)) {
-		const more = missing.length > namesListed ? ` and ${missing.length - namesListed} more` : "";
-		const named = `the data requires spaces this process does not declare: ${missing.slice(0, namesListed).join(", ")}${more}`;
-		// A refusal's reason is one line of at most 500 characters: long names leave the count alone.
-		const reason =
-			named.length <= 500
-				? named
-				: `the data requires ${missing.length} spaces this process does not declare`;
-		throw new BuildRefused("store", reason);
+		// Store's own fixed text: a required name is the data's, and no refusal carries it.
+		throw new BuildRefused("store", "the data requires a space this process does not declare");
 	}
 }
 
