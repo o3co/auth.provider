@@ -85,7 +85,8 @@ export function keptChallenges(
 					: undefined;
 			const held = own ?? (await store.take(challenge, taken));
 			const parsed = openedShape.safeParse(held?.before);
-			// Made for another kind: taken all the same, so it is answered once, and none to this caller.
+			// Found where this kind is looked up but made for another: taken there all the same, so it is
+			// answered once, and none to this caller.
 			if (!parsed.success || parsed.data.kind !== kind) return undefined;
 			// Ended on kernel's clock, as a late write gives it the store's full lifetime again.
 			if (now() - parsed.data.at >= lifetimeMs) return undefined;

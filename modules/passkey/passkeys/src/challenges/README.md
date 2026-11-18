@@ -13,7 +13,7 @@ Internal module of `passkeys`: the challenges that registrations and assertions 
 
 ## Invariants
 - A challenge is 32 bytes in canonical form; any other is taken as none, the store unasked.
-- A challenge made for another kind than its caller answers is taken all the same, so it is answered once, and answers none.
+- A challenge found where its caller's kind is looked up, but made for another kind, is taken there all the same, so it is answered once, and answers none. A registration's kept in the registration challenge store is not looked up for an assertion, so it is not taken.
 - Opening a challenge already kept is unavailable: 32 random bytes meeting another cannot be told from a broken place. So is opening a registration's for a subject its store fences.
 - A registration's challenge is taken from the registration challenge store, and from the challenge store only where that one holds none, as a 0.19 node opened it there; a taken mark is an answer.
 - Taking puts a mark in its place, which stays for the rest of its lifetime, so a challenge is taken once.
