@@ -118,9 +118,11 @@ it("answers busy, naming the holder, to every hold after its holder was killed, 
 			stdio: ["ignore", "pipe", "inherit"],
 		},
 	);
-	const said = await new Promise<string>((resolve) =>
-		child.stdout.once("data", (d) => resolve(String(d))),
-	);
+	// A child that ends without a word fails the test, never leaves it waiting.
+	const said = await new Promise<string>((resolve) => {
+		child.stdout.once("data", (d) => resolve(String(d)));
+		child.once("exit", (code) => resolve(`ended (${code})`));
+	});
 	expect(said.trim()).toBe("held");
 	const ended = new Promise((resolve) => child.once("exit", resolve));
 	child.kill("SIGKILL");

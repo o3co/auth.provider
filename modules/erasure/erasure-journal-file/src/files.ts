@@ -12,8 +12,8 @@ export interface JournalFiles {
 	/** Appends and syncs; where the write fails, cuts the file back to its length before. */
 	append(path: string, bytes: Buffer): Promise<void>;
 	/**
-	 * Takes the file's lock, a file beside it holding `holder`; one held refuses with `code` `EEXIST`
-	 * and the holder it records. Answers its release, which removes the lock only while it still
+	 * Takes the file's lock, a file beside it holding `holder`, which is this take's alone (a release
+	 * tells its own lock by it); one held refuses with `code` `EEXIST` and the holder it records. Answers its release, which removes the lock only while it still
 	 * records `holder`: a read, then a removal, not one atomic step. A release finding no lock is
 	 * done; one the medium fails throws, and can be made again.
 	 */

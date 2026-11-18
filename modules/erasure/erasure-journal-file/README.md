@@ -17,6 +17,7 @@
 - A lock found empty, as an earlier version could leave one, is named `unnamed`.
 - `hold` takes it for the whole command, and the holder's appends take none, one after another; a lock held elsewhere answers `busy`, naming the holder as recorded. An append outside a hold takes it for itself and removes it after; held elsewhere, it is unavailable, naming the lock's path and its holder. The file is read and checked first, the record appended, then synced before the answer.
 - A release removes the lock only while it still records this holder: a read, then a removal, not one atomic step. The window between them opens only after an operator removed a live holder's lock.
+- A holder whose lock the operator removed keeps appending under its hold, beside the next holder: two commands append, and the journal can then read corrupt. That is why the lock is removed only once its holder's process is gone.
 - Each append reads and checksums the whole file first, so a record costs the file's length: fine for the few records erasure writes.
 - An append the medium fails is cut back to the file's length before it, so nothing half written stays, and is unavailable.
 - A last record that does not match its length or checksum reads as torn; an earlier one, or records out of their numbering, as corrupt; no file, as missing.
