@@ -1,10 +1,13 @@
 import { Unavailable } from "@mod/kernel";
 
-/** A batch's answer as committed: the versions, and the store time it committed at where it holds one. */
-export const committedOf = (answer: { at?: unknown }, versions: (string | null)[]) =>
-	typeof answer.at === "number"
-		? { kind: "committed" as const, versions, at: answer.at }
-		: { kind: "committed" as const, versions };
+/**
+ * A batch's answer as committed: the versions, and the store time it committed at. One holding no
+ * time, as a script from before it kept under a mark, is unavailable: no time is made up for it.
+ */
+export const committedOf = (answer: { at?: unknown }, versions: (string | null)[]) => {
+	if (typeof answer.at !== "number") throw new Unavailable("store");
+	return { kind: "committed" as const, versions, at: answer.at };
+};
 
 /** cjson turns empty or sparse Lua arrays into objects; rebuild them by count. */
 export function list<T>(value: unknown, n: number): T[] {
