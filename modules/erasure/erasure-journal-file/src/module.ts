@@ -1,7 +1,7 @@
 import { erasureJournal } from "@mod/erasure-journal";
 import { defineModule } from "@mod/kernel";
 import { z } from "zod";
-import { nodeFiles } from "./files.ts";
+import { nodeFiles } from "./files/files.ts";
 import { journalFileWith } from "./journal.ts";
 
 const section = z.strictObject({
@@ -10,7 +10,7 @@ const section = z.strictObject({
 		.min(1)
 		.refine((path) => path.startsWith("/"), "an absolute path")
 		.describe(
-			"The journal's file, an absolute path on the one node that runs erasure, kept apart from the store's backups. Its lock is the same path with `.lock` added.",
+			"The journal's file, an absolute path on the one node that runs erasure, kept apart from the store's backups, in a directory on a file system that takes hard links (the lock is linked in place). Its lock is the same path with `.lock` added.",
 		),
 });
 
