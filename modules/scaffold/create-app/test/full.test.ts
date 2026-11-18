@@ -342,3 +342,21 @@ it("tells in the full template's README the command's name, how to try it over p
 		/A first login, step by step: https:\/\/github\.com\/o3co\/auth\.provider\/blob\/v[^/]+\/docs\/recipe-first-login\.md/,
 	);
 });
+
+it("typechecks the entries of an app composing every package that declares one", async () => {
+	// Each declaration names a contract and a member its shape calls: the app's types hold them to it.
+	const declaring = manifests.filter((m) => m.appEntries !== undefined).map((m) => m.name);
+	const target = await linked(await generated(declaring.filter((name) => !full().includes(name))));
+	await writeFile(
+		join(target, "tsconfig.json"),
+		JSON.stringify({
+			extends: join(root, "tsconfig.json"),
+			compilerOptions: { typeRoots: [join(root, "node_modules", "@types")] },
+			include: ["src/**/*.ts"],
+		}),
+	);
+	const tsc = join(root, "node_modules", "typescript", "bin", "tsc");
+	const checked = spawnSync(process.execPath, [tsc, "-p", target], { encoding: "utf8" });
+	expect(checked.stdout, checked.stderr).toBe("");
+	expect(checked.status).toBe(0);
+}, 300_000);

@@ -1,4 +1,5 @@
 /** What a package's manifest declares for the generated project, read into what app-output takes. */
+import type { Declaring } from "@mod/app-entries";
 import type { Ask, Asked, Sampled } from "@mod/app-output";
 
 /** What a manifest declares for the guide: its lines, the owner it adapts, and the name it registers under it. */
@@ -25,3 +26,10 @@ export const sampledIn = (
 	...(typeof manifest?.sampleOf === "string" ? { sampleOf: manifest.sampleOf } : {}),
 	...(sample ? { sample } : {}),
 });
+
+/** What a manifest declares of the app's entries, as written: app-entries reads and refuses it. */
+export const entriesIn = (
+	name: string,
+	manifest: Readonly<Record<string, unknown>> | undefined,
+): readonly Declaring[] =>
+	manifest?.appEntries === undefined ? [] : [{ name, appEntries: manifest.appEntries }];

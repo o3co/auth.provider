@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { type Card, fragmentsIn, fragmentsOf, type Packages, sampleFile } from "@mod/app-output";
-import { askedIn, sampledIn } from "./declared/declared.ts";
+import { askedIn, entriesIn, sampledIn } from "./declared/declared.ts";
 import { bundlesIn, declaredRanges, type Outside, type Read } from "./outside/contract.ts";
 import { dependenciesOf, packageDirsIn } from "./project.ts";
 
@@ -93,6 +93,13 @@ export function packagesFor(plan: { readonly workspace?: string }, index = bundl
 					? []
 					: [askedIn(name, JSON.parse(readFileSync(join(dir, "package.json"), "utf8")))];
 			}),
+		appEntries: (names) =>
+			names.flatMap((name) => {
+				const dir = dirs().get(name);
+				return dir === undefined
+					? []
+					: entriesIn(name, JSON.parse(readFileSync(join(dir, "package.json"), "utf8")));
+			}),
 		samples: (names) =>
 			names.flatMap((name) => {
 				const dir = dirs().get(name);
@@ -166,6 +173,11 @@ export function publishedIn(index: Indexed, beside?: Beside): Packages {
 		asks: (names) =>
 			names.flatMap((name) =>
 				outside.has(name) || !byName.has(name) ? [] : [askedIn(name, byName.get(name)?.manifest)],
+			),
+		// Nor of the app's entries.
+		appEntries: (names) =>
+			names.flatMap((name) =>
+				outside.has(name) || !byName.has(name) ? [] : entriesIn(name, byName.get(name)?.manifest),
 			),
 		// Nor of entry samples.
 		samples: (names) =>

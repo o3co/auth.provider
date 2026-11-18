@@ -21,6 +21,7 @@ export interface Manifest {
 	joins?: string[];
 	exports?: Record<string, string>;
 	takesSamples?: { map: string; of: string }[];
+	appEntries?: unknown[];
 }
 export const manifest = (name: string): Manifest =>
 	JSON.parse(readFileSync(join(dirs.get(name) ?? "", "package.json"), "utf8"));
