@@ -12,7 +12,7 @@ import {
 	type Store,
 } from "@mod/store";
 import { type Redis, ReplyError } from "ioredis";
-import { answerOf, list } from "./answer/answer.ts";
+import { answerOf, committedOf, list } from "./answer/answer.ts";
 import { keysUnder, literal } from "./keys.ts";
 import { confirmationPipeline, confirmationRounds } from "./round/round.ts";
 import * as scripts from "./scripts.ts";
@@ -254,10 +254,6 @@ export function redisStore(
 					expiresAt: raw.expiresAt === null ? null : Number(raw.expiresAt),
 				})
 			: null;
-	const committed = (answer: { at?: unknown }, versions: (string | null)[]) =>
-		typeof answer.at === "number"
-			? { kind: "committed" as const, versions, at: answer.at }
-			: { kind: "committed" as const, versions };
 	const samePartition = (keys: readonly Key[]) => {
 		if (new Set(keys.map(slot)).size > 1) throw new Error("keys span more than one partition");
 	};
@@ -346,7 +342,7 @@ export function redisStore(
 				if (!first) {
 					// The script answers its own shape; an empty batch committed names no versions.
 					const empty = await change(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
-					return empty.kind === "committed" ? committed(empty, []) : empty;
+					return empty.kind === "committed" ? committedOf(empty, []) : empty;
 				}
 				const names = [...new Set(keys.map(valueKey))];
 				const index = (key: Key) => names.indexOf(valueKey(key)) + 1;
@@ -373,7 +369,7 @@ export function redisStore(
 				);
 				await confirm(first, answer);
 				return answer.kind === "committed"
-					? committed(answer, list<string | null>(answer.versions, answer.n))
+					? committedOf(answer, list<string | null>(answer.versions, answer.n))
 					: answer;
 			},
 			batchAcross: async (conditions, writes, options) => {
@@ -381,7 +377,7 @@ export function redisStore(
 				const [first] = keys;
 				if (!first) {
 					const empty = await change(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
-					return empty.kind === "committed" ? committed(empty, []) : empty;
+					return empty.kind === "committed" ? committedOf(empty, []) : empty;
 				}
 				const names = [...new Set(keys.map(valueKey))];
 				const index = (key: Key) => names.indexOf(valueKey(key)) + 1;
@@ -414,7 +410,7 @@ export function redisStore(
 				// The spaces share their guarantees, so the first key's tells how to confirm.
 				await confirm(first, answer);
 				return answer.kind === "committed"
-					? committed(answer, list<string | null>(answer.versions, answer.n))
+					? committedOf(answer, list<string | null>(answer.versions, answer.n))
 					: answer;
 			},
 			count: async (key, window, options) => {
