@@ -56,9 +56,9 @@ export interface ErasureJournal {
 	 * `create`). While held, this journal's appends are made under the hold; an append made outside
 	 * it throws Unavailable. A held journal answers `busy`, an answer and never Unavailable. A hold is
 	 * never broken on a guess (a pid, a time): one whose holder died stays until the medium or the
-	 * operator releases it. Optional in this release, then required.
+	 * operator releases it.
 	 */
-	hold?(): Promise<JournalHold>;
+	hold(): Promise<JournalHold>;
 }
 
 export const erasureJournal = contract<ErasureJournal>("erasure-journal");
