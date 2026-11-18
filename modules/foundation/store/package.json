@@ -11,7 +11,8 @@
 	"takenBy": {
 		"./subject-writer": [
 			"@mod/subject-records"
-		]
+		],
+		"storeUpkeep": []
 	},
 	"exports": {
 		".": "./src/contract.ts",

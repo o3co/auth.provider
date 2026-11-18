@@ -88,4 +88,5 @@ export interface StoreUpkeep {
  * closed, as long as store adapters of 0.19 provide none.
  */
 export const storeControl = contract<StoreControl>("store.control", { optional: true });
-export const storeUpkeep = contract<StoreUpkeep>("store.upkeep");
+/** Taken by no module until account erasure's wiring, which alone keeps the store's data whole, is named. */
+export const storeUpkeep = contract<StoreUpkeep>("store.upkeep", { takenBy: [] });
