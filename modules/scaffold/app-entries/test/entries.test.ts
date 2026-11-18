@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { entriesOf } from "../src/contract.ts";
+import { type Declaring, entriesOf } from "../src/contract.ts";
 import { configFiles, kernel, mainSource } from "../src/start.ts";
 
-/** Stand-ins for the kernel (with config-files' `loadConfig`) and mfa-witnessing, as packages the written script imports. */
+/** Stand-ins for the kernel (with config-files' `loadConfig`) and a declaring package, as packages the written script imports. */
 const fakes: Record<string, Record<string, string>> = {
 	"fake-kernel": {
 		"index.js": `
@@ -41,9 +41,10 @@ export async function assemble({ runtime }) {
 	if (process.env.REFUSE_MANY) throw new BootRefused(Array.from({ length: Number(process.env.REFUSE_MANY) }, (_, i) => ({ where: \`at.\${i}\`, reason: "r".repeat(100) })));
 	// Without the script's own runtime, the composed sink would write this line.
 	(runtime?.log ?? { warn: (event) => process.stdout.write(\`LOG \${event}\\n\`) }).warn("fake.assembled");
-	const { backfill, candidates } = await import("fake-witnessing");
-	const resealer = { reseal: async () => Array.from({ length: Number(process.env.HOLDERS ?? 1) }, (_, i) => ({ name: \`holder-\${i}-\${"h".repeat(100)}\`, resealed: 0, left: 0 })) };
-	const asked = { resetCandidates: candidates, resealing: resealer };
+	const { settler, namer, tool } = await import("fake-package");
+	const many = Array.from({ length: Number(process.env.LINES ?? 1) }, (_, i) => \`line-\${i}-\${"h".repeat(100)}\`);
+	const caller = { run: async () => ({ lines: [...many, "all done"], code: 0 }) };
+	const asked = { naming: namer, callRun: caller, toolRun: tool, lines: tool, tell: tool };
 	// Where a test signals the app: kept alive once started, each stop told and slow.
 	const signalled = process.env.SIGNALLED !== undefined;
 	let alive;
@@ -59,7 +60,7 @@ export async function assemble({ runtime }) {
 		clearInterval(alive);
 		process.stdout.write("stopped\\n");
 	};
-	return { get: (what) => asked[what] ?? backfill, start, stop };
+	return { get: (what) => asked[what] ?? settler, start, stop };
 }`,
 	},
 	"fake-kernel-copy": {
@@ -69,22 +70,42 @@ export class BootRefused extends Error {
 	constructor(refusals) { super("refused"); this.refusals = refusals; this[mark] = true; }
 }`,
 	},
-	"fake-witnessing": {
+	"fake-package": {
 		"index.js": `
 import { appendFileSync } from "node:fs";
-export const witnessBackfill = "witnessBackfill";
-export const passkeyBackfill = "passkeyBackfill";
-export const resetCandidates = "resetCandidates";
-export const resealing = "resealing";
-export const candidates = {
-	unclaimed: async (subject) => {
+export const settling = "settling";
+export const resettling = "resettling";
+export const naming = "naming";
+export const callRun = "callRun";
+export const toolRun = "toolRun";
+// Contracts named as the scripts' own names are: each script takes its contract under a name of its own.
+export const lines = "lines";
+export const end = "end";
+export const tell = "tell";
+/** A tool's call: its answer as the test asks for it, each holding what the script must never tell. */
+export const tool = {
+	run: async (args) => {
+		if (process.env.TOOL_THROWS) throw new Error("secret of alice tool");
+		if (process.env.TOOL_CODE !== undefined) return { lines: ["told"], code: JSON.parse(process.env.TOOL_CODE) };
+		if (process.env.TOOL_MISSHAPED) return { lines: "secret of alice", code: 0 };
+		if (process.env.TOOL_ANSWER !== undefined) return JSON.parse(process.env.TOOL_ANSWER);
+		if (process.env.TOOL_SILENT) return { lines: [], code: 0 };
+		return { lines: [\`args \${JSON.stringify(args)}\`, "done"], code: 0 };
+	},
+	check: async (subject) => {
+		appendFileSync(process.env.SEEN, \`\${JSON.stringify(subject)}\\n\`);
+		return subject.startsWith("flagged") ? 1 : 0;
+	},
+};
+export const namer = {
+	found: async (subject) => {
 		appendFileSync(process.env.SEEN, \`\${JSON.stringify(subject)}\\n\`);
 		if (subject === "down") throw Object.assign(new Error("down for alice"), { name: "Unavailable" });
 		if (subject === "boom") throw new Error("secret of alice");
 		return subject.startsWith("claimless") ? 2 : 0;
 	},
 };
-export const backfill = {
+export const settler = {
 	settle: async (subject) => {
 		appendFileSync(process.env.SEEN, \`\${JSON.stringify(subject)}\\n\`);
 		if (subject === "down") throw Object.assign(new Error("down for alice"), { name: "Unavailable" });
@@ -117,8 +138,55 @@ export default {};`,
 	},
 };
 
+/** What the packages the fakes stand for declare of the app's entries, as their manifests do. */
+const declaredByFakes: readonly Declaring[] = [
+	{
+		name: "@mod/caller",
+		appEntries: [{ script: "called", shape: "call", contract: "callRun", member: "run" }],
+	},
+	{
+		name: "@mod/settler",
+		appEntries: [
+			{
+				script: "settled",
+				shape: "settle-subjects",
+				contract: "settling",
+				member: "settle",
+				answers: ["marked", "held", "none", "unclaimed", "inconsistent"],
+			},
+		],
+	},
+	{
+		name: "@mod/resettler",
+		appEntries: [
+			{
+				script: "resettled",
+				shape: "settle-subjects",
+				contract: "resettling",
+				member: "settle",
+				answers: ["marked", "held", "none", "pending", "inconsistent"],
+			},
+		],
+	},
+	{
+		name: "@mod/namer",
+		appEntries: [
+			{
+				script: "named",
+				shape: "name-subjects",
+				contract: "naming",
+				member: "found",
+			},
+		],
+	},
+];
+
 /** The entry `runs` calls for, written over the fakes; a run of it on an input. */
-async function script(runs = "@mod/mfa-witnessing", file = "src/witness-backfill.ts") {
+async function script(
+	runs = "@mod/settler",
+	file = "src/settled.ts",
+	declaring: readonly Declaring[] = declaredByFakes,
+) {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	for (const [name, files] of Object.entries(fakes)) {
 		const dir = join(target, "node_modules", name);
@@ -128,8 +196,14 @@ async function script(runs = "@mod/mfa-witnessing", file = "src/witness-backfill
 		for (const [file, text] of Object.entries(files)) await writeFile(join(dir, file), text);
 	}
 	const importOf = (name: string) =>
-		name === kernel || name === configFiles ? "fake-kernel" : "fake-witnessing";
-	const { files } = await entriesOf([runs], importOf, (path) => `node ${path}`);
+		name === kernel || name === configFiles ? "fake-kernel" : "fake-package";
+	const { files } = await entriesOf(
+		[runs],
+		importOf,
+		(path) => `node ${path}`,
+		undefined,
+		declaring,
+	);
 	await mkdir(join(target, "src"));
 	// The app's own entry, as `start` runs it, beside the one asked for.
 	await writeFile(join(target, "src", "main.ts"), await mainSource([], importOf));
@@ -162,9 +236,9 @@ async function script(runs = "@mod/mfa-witnessing", file = "src/witness-backfill
 			child[held].on("end", () => child.on("close", () => resolve({ stdout, stderr, status })));
 			child.stdin.end(input);
 		});
-	const run = (input: string, env: Record<string, string> = {}) => {
+	const run = (input: string, env: Record<string, string> = {}, args: readonly string[] = []) => {
 		const seen = join(target, `seen-${Math.random()}`);
-		const run = spawnSync(process.execPath, [file], {
+		const run = spawnSync(process.execPath, [file, ...args], {
 			cwd: target,
 			env: { ...process.env, ...env, SEEN: seen },
 			input,
@@ -246,7 +320,7 @@ it("warns once of the 0.17 variables its configuration never reads, naming none,
 	expect((await run("first\n")).stderr).toBe("");
 });
 
-it("counts a subject whose factor is written and not claimed, and an answer it does not know, which fails the run", async () => {
+it("counts each answer it knows, and an answer it does not know, which fails the run", async () => {
 	const run = await script();
 	const claimless = await run("claimless\nfirst\n");
 	expect(claimless.stdout).toBe(
@@ -293,8 +367,8 @@ it("tells nothing of a boot that fails as no refusal, nor of a failure after its
 
 it("tells nothing a dependency writes, warns, throws or rejects while it is read or as it exits, nor a refusal it cannot count", async () => {
 	for (const [runs, file] of [
-		["@mod/mfa-witnessing", "src/witness-backfill.ts"],
-		["@mod/mfa-reset", "src/unclaimed-factors.ts"],
+		["@mod/settler", "src/settled.ts"],
+		["@mod/namer", "src/named.ts"],
 	] as const) {
 		const run = await script(runs, file);
 		const told = async (env: Record<string, string>) => {
@@ -345,8 +419,8 @@ it("tells nothing a dependency writes, warns, throws or rejects while it is read
 	}
 }, 60_000);
 
-it("writes the passkey backfill alike: its own answers counted in its order, pending among them", async () => {
-	const run = await script("@mod/passkey-witnessing", "src/passkey-backfill.ts");
+it("writes a second settling script alike: its own answers counted in its order, pending among them", async () => {
+	const run = await script("@mod/resettler", "src/resettled.ts");
 	const done = await run("registering\nfirst\nodd\n");
 	expect(done.seen).toEqual(["registering", "first", "odd"]);
 	expect(done.stdout).toBe("marked 1 held 0 none 0 pending 1 inconsistent 0 unknown 1 failed 0\n");
@@ -355,8 +429,8 @@ it("writes the passkey backfill alike: its own answers counted in its order, pen
 	expect(settled.status).toBe(0);
 });
 
-it("names, one a line on standard output, only the subjects given whose factor stands for nothing, and counts on standard error", async () => {
-	const run = await script("@mod/mfa-reset", "src/unclaimed-factors.ts");
+it("names, one a line on standard output, only the subjects given the member answers above 0 for, and counts on standard error", async () => {
+	const run = await script("@mod/namer", "src/named.ts");
 	const done = await run("claimless-1\nfirst\n\nclaimless 2\ndown\nlast\n");
 	expect(done.seen).toEqual(["claimless-1", "first", "claimless 2", "down", "last"]);
 	expect(done.stdout).toBe("claimless-1\nclaimless 2\n");
@@ -381,7 +455,7 @@ it("names, one a line on standard output, only the subjects given whose factor s
 });
 
 it("hands on every subject it names before it exits, though the pipe it writes to is read slowly", async () => {
-	const run = await script("@mod/mfa-reset", "src/unclaimed-factors.ts");
+	const run = await script("@mod/namer", "src/named.ts");
 	const subjects = Array.from({ length: 10_000 }, (_, i) => `claimless-${i}-${"x".repeat(100)}`);
 	const done = await run.slowly(`${subjects.join("\n")}\n`);
 	expect(done.stdout.split("\n").filter((line) => line !== "")).toEqual(subjects);
@@ -389,12 +463,12 @@ it("hands on every subject it names before it exits, though the pipe it writes t
 }, 60_000);
 
 it("fails a run whose standard output was closed, counting no subject it could not hand on as named, and ends with its code where standard error was", async () => {
-	const naming = await script("@mod/mfa-reset", "src/unclaimed-factors.ts");
+	const naming = await script("@mod/namer", "src/named.ts");
 	expect(await naming.shut("claimless\nfirst\n")).toEqual({
 		stderr: "named 0 clear 0 failed 1\n",
 		status: 1,
 	});
-	const counting = await script("@mod/mfa-witnessing", "src/witness-backfill.ts");
+	const counting = await script("@mod/settler", "src/settled.ts");
 	expect(await counting.shut("first\n")).toEqual({
 		stderr: "failed: the run stopped on an unexpected error\n",
 		status: 1,
@@ -406,15 +480,12 @@ it("fails a run whose standard output was closed, counting no subject it could n
 
 it("hands on every refusal of a refused boot before it exits 78, from the app's entry and the others, though standard error is read slowly", async () => {
 	const lines = Array.from({ length: 5000 }, (_, i) => `refused at.${i}: ${"r".repeat(100)}`);
-	for (const file of ["src/main.ts", "src/reseal.ts", "src/witness-backfill.ts"]) {
-		const run = await script(
-			file === "src/witness-backfill.ts" ? "@mod/mfa-witnessing" : "@mod/seal",
-			file,
-		);
+	for (const file of ["src/main.ts", "src/called.ts", "src/settled.ts"]) {
+		const run = await script(file === "src/settled.ts" ? "@mod/settler" : "@mod/caller", file);
 		const done = await run.slowly("", { REFUSE_MANY: "5000" }, "stderr");
-		// A script reading subjects tells how many alone; the app's entry and reseal tell each.
+		// A script reading subjects tells how many alone; the app's entry and a call tell each.
 		const told =
-			file === "src/witness-backfill.ts"
+			file === "src/settled.ts"
 				? ["refused 5000: start the app with this configuration to read why"]
 				: lines;
 		expect(
@@ -425,12 +496,12 @@ it("hands on every refusal of a refused boot before it exits 78, from the app's 
 	}
 }, 120_000);
 
-it("hands on every holder reseal tells before it exits, though standard output is read slowly", async () => {
-	const run = await script("@mod/seal", "src/reseal.ts");
-	const done = await run.slowly("", { HOLDERS: "5000" });
+it("hands on every line a call answers before it exits, though standard output is read slowly", async () => {
+	const run = await script("@mod/caller", "src/called.ts");
+	const done = await run.slowly("", { LINES: "5000" });
 	const told = done.stdout.split("\n").filter((l) => l !== "" && !l.startsWith("LOG "));
 	expect(told).toHaveLength(5001);
-	expect(told.at(-1)).toBe("previous keys may be retired");
+	expect(told.at(-1)).toBe("all done");
 	expect(done.status).toBe(0);
 }, 60_000);
 
@@ -441,7 +512,7 @@ it.each([
 ] as const)(
 	"stops the app once on a second signal that comes while it stops, waiting for the first stop (%s, then %s)",
 	async (first, second) => {
-		const { target } = await script("@mod/seal", "src/main.ts");
+		const { target } = await script("@mod/caller", "src/main.ts");
 		const child = spawn(process.execPath, ["src/main.ts"], {
 			cwd: target,
 			env: { ...process.env, SIGNALLED: "1" },
@@ -466,3 +537,212 @@ it.each([
 		]);
 	},
 );
+
+/** What a package of the fakes declares: one entry, of the tool's contract unless said. */
+const declaring = (entry: Record<string, unknown>, name = "@mod/tool"): Declaring[] => [
+	{
+		name,
+		appEntries: [{ script: "tool", shape: "call", contract: "toolRun", member: "run", ...entry }],
+	},
+];
+const ignored = (path: string) => `node ${path}`;
+const refusal = (entries: readonly Declaring[], modules = ["@mod/tool", "@mod/other"]) =>
+	entriesOf(modules, (name) => name, ignored, undefined, entries);
+
+it.each([
+	["a list", [{ name: "@mod/tool", appEntries: { script: "tool" } }], "appEntries is not a list"],
+	["an object", [{ name: "@mod/tool", appEntries: ["tool"] }], "an entry is not an object"],
+	[
+		"a script's name",
+		declaring({ script: "Tool" }),
+		"a script is not a lowercase name other than start",
+	],
+	["start", declaring({ script: "start" }), "a script is not a lowercase name other than start"],
+	[
+		"a shape",
+		declaring({ shape: "stream" }),
+		"tool's shape is not one of call, settle-subjects, name-subjects",
+	],
+	["a key", declaring({ fill: {} }), "tool has keys its shape does not take: fill"],
+	[
+		"answers on a call",
+		declaring({ answers: ["done"] }),
+		"tool has keys its shape does not take: answers",
+	],
+	[
+		"answers on naming",
+		declaring({ shape: "name-subjects", answers: ["done"] }),
+		"keys its shape does not take: answers",
+	],
+	["a contract", declaring({ contract: "tool-run" }), "tool's contract is not a name"],
+	["a member", declaring({ member: "run()" }), "tool's member is not a name"],
+	[
+		"no answers",
+		declaring({ shape: "settle-subjects" }),
+		"tool's answers are not a list of at least one",
+	],
+	[
+		"empty answers",
+		declaring({ shape: "settle-subjects", answers: [] }),
+		"tool's answers are not a list of at least one",
+	],
+	[
+		"a word",
+		declaring({ shape: "settle-subjects", answers: ['marked"]'] }),
+		"tool's answers are not each a lowercase word",
+	],
+	[
+		"an answer twice",
+		declaring({ shape: "settle-subjects", answers: ["marked", "marked"] }),
+		"tool names an answer twice",
+	],
+	[
+		"the script's own count",
+		declaring({ shape: "settle-subjects", answers: ["marked", "failed"] }),
+		"names an answer the script counts itself",
+	],
+	[
+		"a script declared twice",
+		[...declaring({}), ...declaring({}, "@mod/other")],
+		"@mod/other declares appEntries that cannot be read: tool is declared by @mod/tool too",
+	],
+])("refuses a declaration that is not %s, naming its package", async (_, entries, why) => {
+	const refused = await refusal(entries).catch((error: unknown) => error);
+	expect(refused).toBeInstanceOf(TypeError);
+	expect((refused as Error).message).toContain("declares appEntries that cannot be read");
+	expect((refused as Error).message).toContain(why);
+});
+
+it("reads only what the composed packages declare, and writes each declared script from its declaration", async () => {
+	const ignoredElsewhere = await refusal([{ name: "@mod/elsewhere", appEntries: "not read" }]);
+	expect(ignoredElsewhere.scripts).toEqual({});
+	const declared = declaring(
+		{
+			script: "settled",
+			shape: "settle-subjects",
+			member: "settle",
+			answers: ["marked", "held"],
+		},
+		"@mod/settler",
+	);
+	const { scripts, files } = await entriesOf(
+		["@mod/settler"],
+		(name) => name,
+		ignored,
+		undefined,
+		declared,
+	);
+	expect(scripts).toEqual({ settled: "node src/settled.ts" });
+	expect(files["src/settled.ts"]).toContain(
+		'const answers: readonly string[] = ["marked", "held"];',
+	);
+	expect(files["src/settled.ts"]).toContain("{ toolRun: declaredContract }");
+});
+
+it("calls the declared member with the arguments unread, writes its lines whole and exits with its code", async () => {
+	const run = await script("@mod/tool", "src/tool.ts", declaring({}));
+	const done = await run("", {}, ["--flag", "value"]);
+	expect(done.stdout.split("\n").filter((l) => !l.startsWith("LOG "))).toEqual([
+		'args ["--flag","value"]',
+		"done",
+		"",
+	]);
+	expect(done.stderr).toBe("");
+	expect(done.status).toBe(0);
+	const silent = await run("", { TOOL_SILENT: "1" });
+	expect(silent.stdout.split("\n").filter((l) => l !== "" && !l.startsWith("LOG "))).toEqual([]);
+	expect(silent.status).toBe(0);
+	const passed = await run("", { TOOL_CODE: "77" });
+	expect(passed.stdout).toContain("told\n");
+	expect(passed.status).toBe(77);
+}, 60_000);
+
+it.each([
+	[
+		"78, which is a refused boot's",
+		{ TOOL_CODE: "78" },
+		"failed: the run answered a code this script does not pass on",
+	],
+	["past 78", { TOOL_CODE: "300" }, "failed: the run answered a code this script does not pass on"],
+	["below 0", { TOOL_CODE: "-1" }, "failed: the run answered a code this script does not pass on"],
+	[
+		"not whole",
+		{ TOOL_CODE: "2.5" },
+		"failed: the run answered a code this script does not pass on",
+	],
+	[
+		"not a number",
+		{ TOOL_CODE: '"2"' },
+		"failed: the run answered a code this script does not pass on",
+	],
+	[
+		"lines that are not a list",
+		{ TOOL_MISSHAPED: "1" },
+		"failed: the run's answer could not be read",
+	],
+	["a throw", { TOOL_THROWS: "1" }, "failed: the run stopped on an unexpected error"],
+	["nothing", { TOOL_ANSWER: "null" }, "failed: the run's answer could not be read"],
+	["no object", { TOOL_ANSWER: '"secret of alice"' }, "failed: the run's answer could not be read"],
+	[
+		"no code",
+		{ TOOL_ANSWER: '{"lines":[]}' },
+		"failed: the run answered a code this script does not pass on",
+	],
+])(
+	"exits 1 on a call answering %s, with a fixed line and nothing of the answer",
+	async (_, env, line) => {
+		const run = await script("@mod/tool", "src/tool.ts", declaring({}));
+		const done = await run("", env);
+		expect(done.stderr).toBe(`${line}\n`);
+		expect(done.stdout).not.toContain("told");
+		expect(`${done.stdout}${done.stderr}`).not.toContain("alice");
+		expect(done.status).toBe(1);
+	},
+	60_000,
+);
+
+it("exits 78 on a refused boot of a call, as the app's entry does", async () => {
+	const run = await script("@mod/tool", "src/tool.ts", declaring({}));
+	const done = await run("", { REFUSE: "1" });
+	expect(done.stderr).toBe("refused a.b: why\n");
+	expect(done.stdout.split("\n").filter((l) => l !== "" && !l.startsWith("LOG "))).toEqual([]);
+	expect(done.status).toBe(78);
+}, 60_000);
+
+it("names the subjects a declared member answers above 0 for, through the member the package names", async () => {
+	const declared = declaring({ script: "flagged", shape: "name-subjects", member: "check" });
+	const run = await script("@mod/tool", "src/flagged.ts", declared);
+	const done = await run("flagged-1\nclear\nflagged-2\n");
+	expect(done.stdout).toBe("flagged-1\nflagged-2\n");
+	expect(done.stderr).toBe("named 2 clear 1 failed 0\n");
+	expect(done.seen).toEqual(["flagged-1", "clear", "flagged-2"]);
+	expect(done.status).toBe(0);
+}, 60_000);
+
+it("takes the declared contract under a name of its own, so one named as a script's own name works", async () => {
+	const called = await script("@mod/tool", "src/tool.ts", declaring({ contract: "lines" }));
+	const told = await called("", {}, ["--x"]);
+	expect(told.stdout).toContain('args ["--x"]\n');
+	expect(told.status).toBe(0);
+	const settled = declaring({
+		script: "settled",
+		shape: "settle-subjects",
+		contract: "end",
+		member: "settle",
+		answers: ["marked"],
+	});
+	const settling = await script("@mod/tool", "src/settled.ts", settled);
+	const counted = await settling("first\n");
+	expect(counted.stdout).toBe("marked 1 unknown 0 failed 0\n");
+	expect(counted.status).toBe(0);
+	const named = declaring({
+		script: "named",
+		shape: "name-subjects",
+		contract: "tell",
+		member: "check",
+	});
+	const naming = await script("@mod/tool", "src/named.ts", named);
+	const found = await naming("flagged-1\nclear\n");
+	expect(found.stdout).toBe("flagged-1\n");
+	expect(found.status).toBe(0);
+}, 60_000);

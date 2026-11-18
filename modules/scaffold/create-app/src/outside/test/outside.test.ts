@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
-import { declaredRanges, readOutside } from "../contract.ts";
+import { declaredRanges, readOutside, unreadWarnings } from "../contract.ts";
 
 // The lockfile is pnpm 11.3's own, for a project that ran `pnpm add @x/grant@1.2.0` (it is the
 // fixture app-output's lockfile module is tried on).
@@ -99,6 +99,22 @@ describe("a package outside the release, read from where pnpm installed it", () 
 		expect(outside?.fragment).toBe('grant { issuer = "REPLACE-ISSUER" }\n');
 		expect(outside?.card).toBe("# grant\n");
 		expect(outside?.references).toBeUndefined();
+	});
+
+	it("notes what it carries that only the release's packages are read for, and reads none of it", () => {
+		expect(read(project())[0]?.unread).toEqual([]);
+		const carrying = {
+			...manifest,
+			asks: ["a line"],
+			takesSamples: [],
+			sampleOf: "@mod/c",
+			appEntries: [],
+		};
+		const carried = read(project({ manifest: carrying }));
+		expect(carried[0]?.unread).toEqual(["asks", "appEntries", "takesSamples", "sampleOf"]);
+		expect(unreadWarnings([...carried, ...read(project())])).toEqual([
+			"warn @x/grant: a package outside the release declares asks, appEntries, takesSamples, sampleOf, which is read of the release's packages alone; the app is generated without it",
+		]);
 	});
 
 	it("maps an adapter's and a wiring's declarations, field by field", () => {
