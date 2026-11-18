@@ -17,7 +17,7 @@
   - G28: a dependency a manifest names in `helpers` lends functions and types alone: shipped code takes from it no value the kernel's `contract` or `extensionPoint` makes.
   - G29: a test file composing every module a feature bridge `joins` and a module contributing to the bridge's points composes the bridge too, so no contribution that decides an answer is silently lost.
   - G30: outside the package each `./audit-events` declares through (`audit`), shipped code records an event only through the declared wrapper (`declaredAudit`), never on the contract's own `record`, so every event reaches the audit event reference.
-  - G31: a contract a manifest declares `takenBy` (contract name → the packages that may take it) is imported, in shipped code, by those packages alone, by name, alias, namespace or re-export; the declaration names the modules of the kernel `takenBy` the contract declares, no more and no fewer.
+  - G31: a contract, or an entry (`./name`), a manifest declares `takenBy` is imported, in shipped code, by the packages it names alone; how each is read, and what else holds it, is the internal module `taken`'s.
   - G32: the property an owner holds to declaration (the narrower's `internal`, which reaches private addresses) is written in shipped code only by the packages declaring it in their manifest and card.
 
 ## Not here
@@ -35,7 +35,7 @@
 - Checks are derived from the repository's current state. Nothing is enumerated, and there is no place to write exceptions.
 - The rules read each file's `facts`:
   - G3, G4, G8 and G16 every edge to a package but a resolve. G8 asks a declared run-time dependency of every edge that loads its module, `import { type T }` included (the hint: `import type` loads nothing).
-  - G24, G28 and G31 a file's top-level imports and re-exports (G24 the names imported by name, a default so taken too), never one inside a declared module.
+  - G24, G28 and G31's contracts a file's top-level imports and re-exports (G24 the names imported by name, a default so taken too), never one inside a declared module.
   - G29 a test's edges that load its module, a resolve or an import type composing nothing.
   - G34 every edge but a resolve, tests' too.
 - A package depends on what its manifest names in `dependencies` and `peerDependencies`, and in `devDependencies` where a rule counts tests (G1, G2, G10, G14, G16 do).

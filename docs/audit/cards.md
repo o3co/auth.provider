@@ -510,7 +510,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `writes` (`src/owned-property/writes`): where a source writes the owned property, by type in a source and by name in a template.
   - `recorded` (`src/recorded`): G30, that an audit event is recorded only through its declarations.
   - `surface` (`src/surface`): a package's public surface, read from one of its entries by a TypeScript program of its own.
-  - `taken` (`src/taken`): G31, that a contract its owner declares `takenBy` is imported by the packages it names alone.
+  - `taken` (`src/taken`): G31, that a contract or an entry its owner declares `takenBy` is imported by the packages it names alone.
 - `@mod/interop-clients` (verification, `modules/tooling/interop-clients`): Runs the provider against independent client libraries, each through an adapter of its own, and checks what each library gave back: a run per library.
   - `dialog` (`src/dialog`): one flow's exchange with an adapter.
   - `differences` (`src/differences`): the differences accepted between a library and the provider.

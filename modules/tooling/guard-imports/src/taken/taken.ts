@@ -76,10 +76,45 @@ function moduleNameOf(s: Scope, p: Pkg): string | undefined {
 	return undefined;
 }
 
+/** Whether a `takenBy` key names an entry of the owner (`./name`) rather than a contract. */
+const isEntry = (key: string) => key.startsWith("./");
+
+/**
+ * G31's branch for an entry: the owner's entry `key` is loaded, in shipped code, by the packages it
+ * names alone, by any edge (an import, a re-export, `import()`, `require`), a type alone not counted;
+ * and a package it names does not re-export it. The owner keeps the runtime half itself, so no
+ * module and no kernel `takenBy` is asked for.
+ */
+function entryTaken(s: Scope, rule: string, owner: Pkg, key: string, takers: readonly string[]) {
+	const exported = owner.manifest.exports;
+	if (typeof exported !== "object" || exported === null || !(key in exported)) {
+		s.report(rule, owner.name, `${key}: no entry of that name`);
+		return;
+	}
+	for (const taker of takers) {
+		if (!s.byName.has(taker))
+			s.report(rule, owner.name, `${key}: ${taker} is no workspace package`);
+	}
+	const specifier = `${owner.name}/${key.slice(2)}`;
+	for (const p of s.packages) {
+		if (p === owner) continue;
+		for (const path of shipped(s, p)) {
+			const file = path.slice(p.dir.length + 1);
+			const edges = s.factsOf(p, file).edges.filter((e) => e.specifier.text === specifier);
+			const where = `${p.name}/${file}`;
+			if (!takers.includes(p.name)) {
+				if (edges.some((e) => e.loads)) s.report(rule, where, `${key} of ${owner.name}`);
+			} else if (edges.some((e) => e.form === "export-from" && e.loads)) {
+				s.report(rule, where, `${key} of ${owner.name}: a taker does not hand it on`);
+			}
+		}
+	}
+}
+
 /**
  * G31: a contract its owner's manifest declares `takenBy` is imported, in shipped code, by the
  * packages it names alone; and the declaration names the modules of the kernel `takenBy` the
- * contract itself declares, no more and no fewer.
+ * contract itself declares, no more and no fewer. A key naming an entry is held by `entryTaken`.
  */
 export function takenByRules(s: Scope) {
 	const rule = "G31 a contract declared takenBy is imported by the packages it names alone";
@@ -95,6 +130,10 @@ export function takenByRules(s: Scope) {
 		for (const [name, takers] of Object.entries(declared)) {
 			if (!isStrings(takers)) {
 				s.report(rule, owner.name, `${name}: takenBy names packages as a list of names`);
+				continue;
+			}
+			if (isEntry(name)) {
+				entryTaken(s, rule, owner, name, takers);
 				continue;
 			}
 			allowed.set(name, takers);

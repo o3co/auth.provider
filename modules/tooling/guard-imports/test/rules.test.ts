@@ -786,6 +786,53 @@ describe("guard-imports", () => {
 		]);
 	});
 
+	it("G31 holds an entry its owner's manifest declares takenBy to the packages it names, by every edge, and refuses a taker handing it on", () => {
+		const owner = pkg(
+			"@g31e/store",
+			{
+				"src/contract.ts": "export type Writer = { readonly writer: true };\n",
+				"src/writer.ts": "export const writer = Object.freeze({});\n",
+			},
+			{
+				exports: { ".": "./src/contract.ts", "./writer": "./src/writer.ts" },
+				takenBy: { "./writer": ["@g31e/taker", "@g31e/passer"], "./missing": ["@g31e/taker"] },
+			},
+		);
+		const user = (name: string, files: Record<string, string>) =>
+			pkg(name, files, {
+				exports: { ".": "./src/contract.ts" },
+				dependencies: { "@g31e/store": "*" },
+			});
+		const taker = user("@g31e/taker", {
+			"src/contract.ts": `import { writer } from "@g31e/store/writer";\nexport const held = [writer];\n`,
+		});
+		const passer = user("@g31e/passer", {
+			"src/contract.ts": `export { writer } from "@g31e/store/writer";\n`,
+		});
+		const other = user("@g31e/other", {
+			"src/contract.ts": `import type { Writer } from "@g31e/store";\nexport type W = Writer;\n`,
+			"src/named.ts": `import { writer } from "@g31e/store/writer";\nexport const w = writer;\n`,
+			"src/again.ts": `export { writer } from "@g31e/store/writer";\n`,
+			"src/later.ts": `export const w = () => import("@g31e/store/writer");\n`,
+			"src/required.ts": `export const w = require("@g31e/store/writer");\n`,
+			"src/typed.ts": `import type { writer } from "@g31e/store/writer";\nexport type T = typeof writer;\n`,
+			"test/other.test.ts": `import { writer } from "@g31e/store/writer";\nexport const w = writer;\n`,
+		});
+		expect(
+			check([owner, taker, passer, other], budget)
+				.filter((v) => v.rule.startsWith("G31"))
+				.map((v) => `${v.where} ${v.detail}`)
+				.sort(),
+		).toEqual([
+			"@g31e/other/src/again.ts ./writer of @g31e/store",
+			"@g31e/other/src/later.ts ./writer of @g31e/store",
+			"@g31e/other/src/named.ts ./writer of @g31e/store",
+			"@g31e/other/src/required.ts ./writer of @g31e/store",
+			"@g31e/passer/src/contract.ts ./writer of @g31e/store: a taker does not hand it on",
+			"@g31e/store ./missing: no entry of that name",
+		]);
+	});
+
 	it("G31 refuses a takenBy declaration its contract's own takenBy does not match, or that names nothing known", () => {
 		const taker = pkg("@g31b/taker", {
 			"src/contract.ts": "export const x = 1;\n",
