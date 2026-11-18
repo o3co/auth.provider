@@ -36,3 +36,18 @@ export interface Resealing {
 }
 
 export const resealing = contract<Resealing>("seal.resealing");
+
+/**
+ * The reseal run as the app's `reseal` script calls it: each holder's line, then whether previous
+ * keys may be retired. `code`: 0 when no holder failed and none resealed or left a value; 1 when a
+ * holder failed; 2 when values no key opens remain; 3 when values were sealed again, as a walk across a
+ * failover may miss some, so run again; 64 for any argument, as it takes none. Lines carry holder
+ * names and counts alone, never an id, a value or an error's words.
+ */
+export interface ResealRun {
+	run(
+		args: readonly string[],
+	): Promise<{ readonly lines: readonly string[]; readonly code: number }>;
+}
+
+export const resealRun = contract<ResealRun>("seal.reseal-run");

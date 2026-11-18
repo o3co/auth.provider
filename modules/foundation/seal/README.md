@@ -12,6 +12,7 @@
 - Operator section: `current` (an id, an `algorithm`, `aes-256-gcm` unless set, and a base64 key of its size, 32 bytes) seals; `next` opens but never seals, so every host opens with it before it seals; `previous` keys open only.
 - Extension point `resealers`: a holder of long-lived sealed values, which walks its own and seals again what is stale, answering how many it sealed again and how many it could not open.
 - `resealing`: runs each resealer in name order and answers its counts, or that it failed (logged by name and kind); the rest still run. Counts alone, never an id or a value.
+- `resealRun`: the app's `reseal` script's run, over `resealing`: each holder's line, then whether previous keys may be retired, and its code: 0 when nothing failed, was sealed again or was left; 1 when a holder failed (not finished: look and run again); 2 when values no key opens remain; 3 when values were sealed again, so run again; 64 for an argument, as it takes none. Its lines carry holder names and counts alone, never a subject, a configured value or an error's words.
 - `./testing`: `sealConfig`, a test configuration builder, with one key per test file.
 
 ## Invariants
