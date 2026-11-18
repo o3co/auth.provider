@@ -1,7 +1,8 @@
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { checkedStore, type Space, type Store, spaces, store } from "../src/contract.ts";
+import { checkedStore } from "../src/checks/checks.ts";
+import { type Space, type Store, spaces, store } from "../src/contract.ts";
 import { simulatedStore } from "../src/testing.ts";
 import { subjectWriter } from "../src/writer/subject-writer.ts";
 

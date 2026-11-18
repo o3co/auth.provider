@@ -15,7 +15,7 @@
 		"storeUpkeep": []
 	},
 	"exports": {
-		".": "./src/contract.ts",
+		".": "./src/store.ts",
 		"./testing": "./src/testing.ts",
 		"./module": "./src/module.ts",
 		"./subject-writer": "./src/writer/subject-writer.ts"

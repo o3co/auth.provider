@@ -1,10 +1,9 @@
 import { deepFreeze, type Runtime, Unavailable } from "@mod/kernel";
+import { checkedStore, checkedUpkeep } from "../checks/checks.ts";
 import {
 	type BatchWrite,
 	type Condition,
 	canonicalJson,
-	checkedStore,
-	checkedUpkeep,
 	type Entry,
 	type Expiry,
 	idempotencyRequest,

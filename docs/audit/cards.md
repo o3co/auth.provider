@@ -104,6 +104,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/seal` (foundation, `modules/foundation/seal`): Seals and opens stored data with authenticated encryption, by each key's algorithm (AES-256-GCM), under a key ring read at boot.
 - `@mod/secret-hash` (foundation, `modules/foundation/secret-hash`): Checks a secret against a stored bcrypt or scrypt hash, with the same work whether or not there is a hash to check against; knows no feature.
 - `@mod/store` (foundation, `modules/foundation/store`): Owns the contract of feature-neutral storage operations, each atomic and judged on the store clock, collects space declarations, and holds one memory implementation (internal module `memory`).
+  - `checks` (`src/checks`): the checks every implementation's ports go through.
   - `contract-batches` (`src/contract-batches`): the contract test's batches across partitions and spaces, counting, and reads of several keys and a batch's time.
   - `contract-faults` (`src/contract-faults`): the contract test's replication faults: replicas that do not acknowledge, lost replies, restarts and failover.
   - `contract-harness` (`src/contract-harness`): the contract test's shared part: the spaces it declares, the harness an implementation gives, and what every other part uses.

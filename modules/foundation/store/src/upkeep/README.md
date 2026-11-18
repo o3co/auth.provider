@@ -6,7 +6,7 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
 - Declares the `storeControl` and `storeUpkeep` contracts, which every implementation offering them keeps alike, and their contract test.
 
 ## Not here
-- What an owner's mark means, which spaces erasure needs, and when maintenance runs: the owners' and their tools'. Checking the input: the package's `checkedUpkeep`.
+- What an owner's mark means, which spaces erasure needs, and when maintenance runs: the owners' and their tools'. Checking the input: `checkedUpkeep` (internal module `checks`).
 
 ## Offers
 - `storeControl`: `control()`, the control record (epoch, maintenance key, the spaces required, the marks), confirmed. It may go unprovided until 0.22 (`optional`): a store adapter of 0.19 offers none, and a taker reads a mark it cannot read as unknown, failing closed.
