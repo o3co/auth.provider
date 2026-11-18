@@ -38,46 +38,27 @@ const declared: readonly Asked[] = [
 	},
 ];
 
-/** What the packages with tool scripts declare of the app's entries, as their manifests would. */
+/** What packages standing for any declarer declare of the app's entries, one of each shape. */
 const entries: readonly Declaring[] = [
 	{
-		name: "@mod/seal",
-		appEntries: [{ script: "reseal", shape: "call", contract: "resealRun", member: "run" }],
+		name: "@mod/tool",
+		appEntries: [{ script: "tool", shape: "call", contract: "toolRun", member: "run" }],
 	},
 	{
-		name: "@mod/mfa-witnessing",
+		name: "@mod/settler",
 		appEntries: [
 			{
-				script: "witness-backfill",
+				script: "settled",
 				shape: "settle-subjects",
-				contract: "witnessBackfill",
+				contract: "settling",
 				member: "settle",
-				answers: ["marked", "held", "none", "unclaimed", "inconsistent"],
+				answers: ["done", "left"],
 			},
 		],
 	},
 	{
-		name: "@mod/passkey-witnessing",
-		appEntries: [
-			{
-				script: "passkey-backfill",
-				shape: "settle-subjects",
-				contract: "passkeyBackfill",
-				member: "settle",
-				answers: ["marked", "held", "none", "pending", "inconsistent"],
-			},
-		],
-	},
-	{
-		name: "@mod/mfa-reset",
-		appEntries: [
-			{
-				script: "unclaimed-factors",
-				shape: "name-subjects",
-				contract: "resetCandidates",
-				member: "unclaimed",
-			},
-		],
+		name: "@mod/namer",
+		appEntries: [{ script: "named", shape: "name-subjects", contract: "naming", member: "check" }],
 	},
 ];
 
