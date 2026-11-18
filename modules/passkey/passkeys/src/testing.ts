@@ -4,14 +4,15 @@ import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { keptPasskeys } from "./records.ts";
 import type { section } from "./section.ts";
-import type {
-	ChallengeStore,
-	PasskeyOp,
-	PasskeyRecords,
-	PasskeyStore,
-	RegistrationChallengeStore,
-	StoredChallenge,
-	StoredPasskey,
+import {
+	type ChallengeStore,
+	challengeStoreNeeds,
+	type PasskeyOp,
+	type PasskeyRecords,
+	type PasskeyStore,
+	type RegistrationChallengeStore,
+	type StoredChallenge,
+	type StoredPasskey,
 } from "./store.ts";
 
 type AsOne = Parameters<PasskeyStore["updateAsOne"]>[0];
@@ -394,8 +395,8 @@ export interface RegistrationChallengePlace extends Omit<ChallengePlace, "challe
 
 /**
  * What passkeys needs from any implementation of the registration challenge store: a challenge
- * kept once for its subject and its lifetime, marked once, never in clear; where it erases, none
- * opened for an erased subject.
+ * kept once for its subject and its lifetime, up to the longest passkeys keeps one, marked once,
+ * never in clear; where it erases, none opened for an erased subject.
  */
 export function registrationChallengeStoreContract(
 	name: string,
@@ -423,6 +424,18 @@ export function registrationChallengeStoreContract(
 			place.advance(500);
 			expect(await registrations.update(challenge, marked)).toBeUndefined();
 			expect(await registrations.update(fresh(), marked)).toBeUndefined();
+		});
+
+		it("keeps a challenge opened for the longest passkeys keeps one, until that end", async () => {
+			const place = await open();
+			const { registrations } = place;
+			const longest = challengeStoreNeeds.registrationsEndWithinMs;
+			const [challenge, record] = [fresh(), held({ kind: "registration" })];
+			expect(await registrations.open(challenge, record, longest, "alice")).toBe("created");
+			place.advance(longest - 1000);
+			expect((await registrations.update(challenge, marked))?.before).toEqual(record);
+			place.advance(1000);
+			expect(await registrations.update(challenge, marked)).toBeUndefined();
 		});
 
 		it("never gives a challenge to what the place holds, in clear", async (context) => {
