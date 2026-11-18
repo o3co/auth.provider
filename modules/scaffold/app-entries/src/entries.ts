@@ -1,12 +1,7 @@
 import { type Declared, type Declaring, declaredEntries, type Shape } from "./declared.ts";
 import { configFiles, filled, type KeysWritten, kernel, refusedPart } from "./start.ts";
 
-/**
- * The app's entries besides `start`, each for an app that composes its package: the same modules,
- * built and never started, running what that package offers. The template's mark `entry` names it.
- * `subjects` is the part shared by the entries that read subjects: the guard read first, then the app
- * read and built, never started, and the subjects read from standard input.
- */
+/** A declared entry as its shape's template fills it. */
 interface Row {
 	readonly package: string;
 	readonly script: string;
@@ -35,6 +30,11 @@ const rowOf = (entry: Declared): Row => ({
 });
 
 /**
+ * The app's entries besides `start`, each for an app that composes its package: the same modules,
+ * built and never started, running what that package offers. The template's mark `entry` names it.
+ * `subjects` is the part shared by the entries that read subjects: the guard read first, then the app
+ * read and built, never started, and the subjects read from standard input.
+ *
  * The scripts and files of the entries the composed modules call for; `run` writes the command
  * that runs a file, as the project starts its app. `declaring` is what the composed packages
  * declare in their manifests' `appEntries`; a declaration that cannot be read is refused, naming

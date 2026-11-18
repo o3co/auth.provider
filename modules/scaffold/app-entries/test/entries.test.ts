@@ -44,7 +44,7 @@ export async function assemble({ runtime }) {
 	const { backfill, candidates, tool } = await import("fake-witnessing");
 	const holders = Array.from({ length: Number(process.env.HOLDERS ?? 1) }, (_, i) => \`holder-\${i}-\${"h".repeat(100)} resealed 0 left 0\`);
 	const resealer = { run: async () => ({ lines: [...holders, "previous keys may be retired"], code: 0 }) };
-	const asked = { resetCandidates: candidates, resealRun: resealer, toolRun: tool };
+	const asked = { resetCandidates: candidates, resealRun: resealer, toolRun: tool, lines: tool, tell: tool };
 	// Where a test signals the app: kept alive once started, each stop told and slow.
 	const signalled = process.env.SIGNALLED !== undefined;
 	let alive;
@@ -78,12 +78,17 @@ export const passkeyBackfill = "passkeyBackfill";
 export const resetCandidates = "resetCandidates";
 export const resealRun = "resealRun";
 export const toolRun = "toolRun";
+// Contracts named as the scripts' own names are: each script takes its contract under a name of its own.
+export const lines = "lines";
+export const end = "end";
+export const tell = "tell";
 /** A tool's call: its answer as the test asks for it, each holding what the script must never tell. */
 export const tool = {
 	run: async (args) => {
 		if (process.env.TOOL_THROWS) throw new Error("secret of alice tool");
 		if (process.env.TOOL_CODE !== undefined) return { lines: ["told"], code: JSON.parse(process.env.TOOL_CODE) };
 		if (process.env.TOOL_MISSHAPED) return { lines: "secret of alice", code: 0 };
+		if (process.env.TOOL_ANSWER !== undefined) return JSON.parse(process.env.TOOL_ANSWER);
 		if (process.env.TOOL_SILENT) return { lines: [], code: 0 };
 		return { lines: [\`args \${JSON.stringify(args)}\`, "done"], code: 0 };
 	},
@@ -634,7 +639,7 @@ it("reads only what the composed packages declare, and writes each declared scri
 	expect(files["src/witness-backfill.ts"]).toContain(
 		'const answers: readonly string[] = ["marked", "held"];',
 	);
-	expect(files["src/witness-backfill.ts"]).toContain("app.get(toolRun)");
+	expect(files["src/witness-backfill.ts"]).toContain("{ toolRun: declaredContract }");
 });
 
 it("calls the declared member with the arguments unread, writes its lines whole and exits with its code", async () => {
@@ -679,6 +684,13 @@ it.each([
 		"failed: the run's answer could not be read",
 	],
 	["a throw", { TOOL_THROWS: "1" }, "failed: the run stopped on an unexpected error"],
+	["nothing", { TOOL_ANSWER: "null" }, "failed: the run's answer could not be read"],
+	["no object", { TOOL_ANSWER: '"secret of alice"' }, "failed: the run's answer could not be read"],
+	[
+		"no code",
+		{ TOOL_ANSWER: '{"lines":[]}' },
+		"failed: the run answered a code this script does not pass on",
+	],
 ])(
 	"exits 1 on a call answering %s, with a fixed line and nothing of the answer",
 	async (_, env, line) => {
@@ -708,4 +720,32 @@ it("names the subjects a declared member answers above 0 for, through the member
 	expect(done.stderr).toBe("named 2 clear 1 failed 0\n");
 	expect(done.seen).toEqual(["flagged-1", "clear", "flagged-2"]);
 	expect(done.status).toBe(0);
+}, 60_000);
+
+it("takes the declared contract under a name of its own, so one named as a script's own name works", async () => {
+	const called = await script("@mod/tool", "src/tool.ts", declaring({ contract: "lines" }));
+	const told = await called("", {}, ["--x"]);
+	expect(told.stdout).toContain('args ["--x"]\n');
+	expect(told.status).toBe(0);
+	const settled = declaring({
+		script: "settled",
+		shape: "settle-subjects",
+		contract: "end",
+		member: "settle",
+		answers: ["marked"],
+	});
+	const settling = await script("@mod/tool", "src/settled.ts", settled);
+	const counted = await settling("first\n");
+	expect(counted.stdout).toBe("marked 1 unknown 0 failed 0\n");
+	expect(counted.status).toBe(0);
+	const named = declaring({
+		script: "named",
+		shape: "name-subjects",
+		contract: "tell",
+		member: "check",
+	});
+	const naming = await script("@mod/tool", "src/named.ts", named);
+	const found = await naming("flagged-1\nclear\n");
+	expect(found.stdout).toBe("flagged-1\n");
+	expect(found.status).toBe(0);
 }, 60_000);

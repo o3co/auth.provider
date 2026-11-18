@@ -1,5 +1,5 @@
 {{subjects}}
-const naming = app.get({{contract}});
+const naming = app.get(declaredContract);
 const counts = { named: 0, clear: 0, failed: 0 };
 // One subject a line, used as sent; only an empty line is skipped. A subject is written out, one a
 // line on standard output, only where the member answers above 0 for it: the operator gave it, to find
