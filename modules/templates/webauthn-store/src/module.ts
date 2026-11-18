@@ -29,12 +29,17 @@ const guaranteeFor: Record<keyof typeof passkeyStoreNeeds, Guarantee> = {
 	survivesFailover: "replicated",
 	confirmedReads: "confirmed-reads",
 };
+/**
+ * The needs a feature states as `true`, each met by what a space declares; a need of another value,
+ * such as a bound, is no guarantee, and is read where the space states it.
+ */
+export type StatedNeeds<N> = { readonly [K in keyof N]: N[K] extends true ? K : never }[keyof N];
 /** Each need passkeys states for its challenges, as the guarantee a space declares for it, or records under a secret. */
 const { namesFromSecret: challengesUnder, ...challengeGuaranteeFor } = {
 	survivesCrash: "durable",
 	survivesFailover: "replicated",
 	namesFromSecret: { secret: true } as const,
-} satisfies Record<keyof typeof challengeStoreNeeds, Guarantee | { readonly secret: true }>;
+} satisfies Record<StatedNeeds<typeof challengeStoreNeeds>, Guarantee | { readonly secret: true }>;
 /** A space of a subject's passkeys or holder: kept indexed by it, erased by passkeys, at the tombstone's floor. */
 const passkeySpace = (name: string): Space => ({
 	name,
