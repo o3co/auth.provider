@@ -97,10 +97,9 @@ export interface WriteOptions {
 
 declare const subjectWriterBrand: unique symbol;
 /**
- * What a change to a space holding subjects' data carries, so a store tells `subject-records`, which
- * alone writes there, from anything else. Its one value is `@mod/store/subject-writer`'s, which the
- * manifest's `takenBy` binds to `subject-records`. It stops a wiring, or a plain records port, of this
- * workspace from writing there, and stops an accident; it is no boundary against a deployment's own code.
+ * What a change to a space holding subjects' data carries, so a store can tell a change of
+ * `subject-records` from anything else. Its one value is `@mod/store/subject-writer`'s, which the
+ * manifest's `takenBy` keeps for `subject-records`. It is no boundary against a deployment's own code.
  */
 export type SubjectWriter = { readonly [subjectWriterBrand]: true };
 
