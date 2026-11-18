@@ -63,7 +63,9 @@ export function walkingContract(harness: StoreHarness, kit: ContractKit): void {
 
 		it("refuses a space that is not declared", async () => {
 			const s = await harness.open();
-			await expect(s.scan({ name: "undeclared", guarantees: [] })).rejects.toThrow();
+			await expect(
+				s.scan({ name: "undeclared", guarantees: [], subjectData: "none" }),
+			).rejects.toThrow();
 		});
 	});
 
@@ -111,7 +113,11 @@ export function walkingContract(harness: StoreHarness, kit: ContractKit): void {
 			await expect(
 				overwrite(
 					s,
-					{ space: { name: "undeclared", guarantees: [] }, partition: "p", name: "a" },
+					{
+						space: { name: "undeclared", guarantees: [], subjectData: "none" },
+						partition: "p",
+						name: "a",
+					},
 					1,
 					never,
 				),

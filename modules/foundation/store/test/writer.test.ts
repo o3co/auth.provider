@@ -6,7 +6,11 @@ import { type Space, type Store, spaces, store } from "../src/contract.ts";
 import { simulatedStore } from "../src/testing.ts";
 import { subjectWriter } from "../src/writer/subject-writer.ts";
 
-const space: Space = { name: "kept", guarantees: ["durable", "replicated", "no-eviction"] };
+const space: Space = {
+	name: "kept",
+	guarantees: ["durable", "replicated", "no-eviction"],
+	subjectData: "none",
+};
 const key = (name: string) => ({ space, partition: "p", name });
 const never = { kind: "never" } as const;
 
@@ -86,12 +90,11 @@ it("asks the writer of a change to a space of each category of subjects' data it
 		["none", false],
 		["pseudonymous", false],
 		["retained", false],
-		[undefined, false],
 	] as const;
 	const declared: Space[] = categories.map(([subjectData]) => ({
-		name: `of-${subjectData ?? "undeclared"}`,
+		name: `of-${subjectData}`,
 		guarantees: [],
-		...(subjectData === undefined ? {} : { subjectData }),
+		subjectData,
 	}));
 	const answered = async () => ({ kind: "written" as const, version: "v" });
 	const batch = async () => ({ kind: "committed" as const, versions: [] });

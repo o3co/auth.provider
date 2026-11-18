@@ -238,10 +238,8 @@ function declaredSpaces(declared: readonly Space[]): ReadonlyMap<string, Space> 
 	for (const space of declared) {
 		const read = fields("space", space, spaceFields);
 		text("space", read.name);
-		if (
-			read.subjectData !== undefined &&
-			(typeof read.subjectData !== "string" || !Object.hasOwn(subjectDataKinds, read.subjectData))
-		)
+		if (read.subjectData === undefined) fail(`space ${read.name} declares no subjectData`);
+		if (typeof read.subjectData !== "string" || !Object.hasOwn(subjectDataKinds, read.subjectData))
 			fail(`space ${read.name} declares an unknown subjectData`);
 		if (read.erasedBy !== undefined) text("erasedBy", read.erasedBy);
 		if (read.boundedMs !== undefined) whole("boundedMs", read.boundedMs, 1);

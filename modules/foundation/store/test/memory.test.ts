@@ -11,7 +11,7 @@ import { expect, it } from "vitest";
 import { type Space, spaces, store } from "../src/contract.ts";
 import { memoryStore } from "../src/memory/memory.ts";
 import storeModule from "../src/module.ts";
-import { contractSpaces, overwrite, storeContract } from "../src/testing.ts";
+import { contractSpaces, overwrite, storeConfig, storeContract } from "../src/testing.ts";
 
 storeContract("memory", {
 	open: async () => memoryStore({ now: () => Date.now() }, contractSpaces),
@@ -25,8 +25,8 @@ it("offers a batch across partitions and spaces of one guarantee, so the contrac
 });
 
 it("judges the guarantees a batch across joins as sets, so a guarantee named twice changes nothing", async () => {
-	const once: Space = { name: "once", guarantees: ["durable"] };
-	const twice: Space = { name: "twice", guarantees: ["durable", "durable"] };
+	const once: Space = { name: "once", guarantees: ["durable"], subjectData: "none" };
+	const twice: Space = { name: "twice", guarantees: ["durable", "durable"], subjectData: "none" };
 	const s = memoryStore({ now: () => Date.now() }, [once, twice]);
 	const put = (space: Space) =>
 		({
@@ -150,10 +150,12 @@ it("starts a new window at its reset time, and refuses every hit under a limit o
 });
 
 const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
-	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable"] })),
+	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable"], subjectData: "none" })),
 ]);
 const replicated = defineModule({ name: "replicated-owner", replicaSafe: true, takes: [] }, (m) => [
-	m.contribute(spaces).by(() => ({ name: "copied", guarantees: ["replicated"] })),
+	m
+		.contribute(spaces)
+		.by(() => ({ name: "copied", guarantees: ["replicated"], subjectData: "none" })),
 ]);
 
 it("refuses durable or replicated spaces unless volatility is accepted, and is unsafe on many replicas", async () => {
@@ -188,4 +190,20 @@ it("warns at every start that boots durable or replicated spaces on memory, nami
 		{ level: "warn", event: "store.volatile_accepted", fields: { spaces: "kept, copied" } },
 	]);
 	expect(await warned()).toEqual([]);
+});
+
+it("refuses the boot over a space declaring no subjectData, naming it", async () => {
+	const owner = defineModule({ name: "owner", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(spaces).by(() => ({ name: "bare", guarantees: [] }) as unknown as Space),
+	]);
+	const refused = await assemble({
+		modules: [storeModule, owner],
+		config: { ...kernelConfig(), ...storeConfig() },
+		runtime: quietRuntime(),
+	}).then(
+		() => undefined,
+		(error: unknown) => error,
+	);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect(JSON.stringify((refused as BootRefused).refusals)).toMatch(/bare declares no subjectData/);
 });

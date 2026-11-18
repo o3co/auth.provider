@@ -24,7 +24,14 @@ export default defineModule(
 				// Accepted, yet said at every start: a restart forgets what these spaces keep.
 				c.log.warn("store.volatile_accepted", { spaces: kept.map((s) => s.name).join(", ") });
 			}
-			return memoryProcess(memoryData(c.clock), declared);
+			try {
+				return memoryProcess(memoryData(c.clock), declared);
+			} catch (error) {
+				// The checks refuse a malformed declaration (one naming no `subjectData` among them): the
+				// boot is refused naming the space, never left a failure of assembly.
+				if (error instanceof TypeError) return c.refuse("store.declaration", error.message);
+				throw error;
+			}
 		}),
 		m.provide(store).by(async (c) => (await c.get(opened)).store),
 		m.provide(storeControl).by(async (c) => (await c.get(opened)).control),
