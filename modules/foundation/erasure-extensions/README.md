@@ -8,7 +8,7 @@
 
 ## Offers
 - The extension point `erasers`, keyed by an eraser's name, which a space's `erasedBy` gives.
-- `Eraser`: `online` (one subject, while serving), `window` (subjects, under the maintenance key) and `migrate` (once, under the maintenance key), each taking an `AbortSignal`; `window` and `migrate` take a `Walk` the tool hands in. `erasable` (required in 0.20, optional and read as true in 0.22, removed after): whether it can erase every space it erases on the stores behind it; for a space `subject-records` reports, that its store has the erase ports. `after`: the erasers, by name, it follows.
+- `Eraser`: `online` (one subject, while serving), `window` (subjects, under the maintenance key) and `migrate` (once, under the maintenance key), each taking an `AbortSignal`; `window` and `migrate` take a `Walk` the tool hands in. `erasable` (required in 0.20, optional and read as true in 0.22, removed after): whether it can erase every space it erases on the stores behind it; for a space `subject-records` reports, that its store has the erase ports.
 - `SubjectOf` (`subject`, `orphan`, `unreadable` with why) and `SubjectReading`: an owner's reading of a record's subject from its key and stored value, for a migration.
 - `SetReading`: the owner's reading of a keyed set's subject from the key alone, the same three answers, an orphan set proven by its key's form, never by what it holds, and a lookup's confirmed "none" `unreadable`, never `orphan`.
 - `Elsewhere`: the owner's step for an orphan before its removal, keeping what it holds outside the space, durable and confirmed, idempotent; a throw stops the space.
@@ -21,6 +21,7 @@
 - `erasureEnabledFrom` (a control record read for its marks, or none) → `erasureEnabled`, the `enabled` mark's presence in any epoch, read when asked; nothing where no control record is offered, so a store wiring needs no branch of its own.
 
 ## Invariants
+- No order among erasers is promised: each erases its own spaces, whichever runs before it.
 - A `SpaceReport` or `MigrationReport` is made by `subject-records` alone, which erases and so can tell what it wrote; an eraser passes them on and never makes one. The types carry `ReportMade`, a brand only a visible cast gives. A `ForgottenReport` carries none: it states no tombstone; nor does an `OwnerStopped`, which states nothing written.
 - An `erased` or `fenced` report means the subject's tombstone is written in that space.
 - A run cut short answers `stopped` (`aborted`) for each space `subject-records` reports; an eraser over no such space throws the signal's reason. An eraser that throws, abort included, is not done, and running it again finishes it.
