@@ -21,6 +21,7 @@ import {
 	lockouts,
 	rateLimit,
 	requestsPerSource,
+	windowCeilingMs,
 } from "../src/contract.ts";
 import rateLimitModule from "../src/module.ts";
 import { rateLimitStandIn } from "../src/testing.ts";
@@ -61,6 +62,43 @@ it("counts rate limits and attempts as the real module does, apart from each oth
 	});
 	expect(standIn).toEqual(real);
 	expect(real?.filter((answer) => (answer as { kind: string }).kind === "limited")).toHaveLength(6);
+});
+
+it("counts a window as long as the ceiling, and refuses a longer one or one of no length with a rejected TypeError, as the real module does", async () => {
+	const [real, standIn] = await both(async (app) => {
+		const seen: unknown[] = [];
+		for (const limit of [app.get(rateLimit), app.get(attemptLimit)]) {
+			seen.push(await limit.hit("w", "a", { limit: 1, ms: windowCeilingMs }));
+			// Refused as a rejected promise, never a synchronous throw, and nothing counted.
+			const refused = limit.hit("w", "b", { limit: 1, ms: windowCeilingMs + 1 });
+			seen.push(
+				await refused.then(
+					() => "counted",
+					(error: unknown) => error instanceof TypeError,
+				),
+			);
+			const noLength = limit.hit("w", "b", { limit: 1, ms: Number.NaN });
+			seen.push(
+				await noLength.then(
+					() => "counted",
+					(error: unknown) => error instanceof TypeError,
+				),
+			);
+			seen.push(await limit.hit("w", "b", { limit: 1, ms: 60_000 }));
+		}
+		return seen;
+	});
+	expect(standIn).toEqual(real);
+	expect(real).toEqual([
+		{ kind: "allowed" },
+		true,
+		true,
+		{ kind: "allowed" },
+		{ kind: "allowed" },
+		true,
+		true,
+		{ kind: "allowed" },
+	]);
 });
 
 it("holds, reserves, hands back and releases lockouts, under terms too, as the real module does", async () => {

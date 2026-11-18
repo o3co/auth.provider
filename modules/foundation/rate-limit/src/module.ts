@@ -12,18 +12,30 @@ import {
 	rateLimit,
 	subjectLockouts,
 	type Window,
+	windowCeilingMs,
 } from "./contract.ts";
 import { lockoutEraser } from "./drop/drop.ts";
 import { lockoutCounter, lockoutSpace, storedStates } from "./lockout/lockout.ts";
 import { partitionOf, retryAfterMs } from "./partition.ts";
 import { limitingAttempts, limitingRequests, perSourceMark } from "./per-source.ts";
+import { withinCeiling } from "./window.ts";
 
-/** Kept from eviction, which a flood of requests could otherwise force to reset the count. */
-const windows: Space = { name: "rate-limit.windows", guarantees: ["no-eviction"] };
+/**
+ * Kept from eviction, which a flood of requests could otherwise force to reset the count. A key may
+ * be derived from a subject, so the space is `pseudonymous`, each count kept at most the ceiling.
+ */
+const windows: Space = {
+	name: "rate-limit.windows",
+	guarantees: ["no-eviction"],
+	subjectData: "pseudonymous",
+	boundedMs: windowCeilingMs,
+};
 /** Also replicated: losing a count over a failover would lift a limit that guards credentials. */
 const attemptWindows: Space = {
 	name: "rate-limit.attempts",
 	guarantees: ["no-eviction", "replicated"],
+	subjectData: "pseudonymous",
+	boundedMs: windowCeilingMs,
 };
 
 type Limit = "attempts" | "requests";
@@ -33,6 +45,7 @@ const uncounted = contract<Counter<"limit">>("rate-limit.uncounted");
 
 function counter(saved: Store, space: Space, limit: Limit, told: Told): RateLimit {
 	const count = async (name: string, key: string, window: Window) => {
+		withinCeiling(window);
 		const counted = await saved.count(
 			{ space, partition: partitionOf(name, key), name: "n" },
 			window,
