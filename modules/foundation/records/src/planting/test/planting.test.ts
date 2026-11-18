@@ -7,9 +7,9 @@ import { recordsIn, secretRecordsIn } from "../../records.ts";
 import { changeRecords } from "../../together/together.ts";
 import { plantRecord } from "../planting.ts";
 
-const plain: Space = { name: "plain", guarantees: [] };
-const secrets: Space = { name: "secrets", guarantees: [] };
-const subjects: Space = { name: "subjects", guarantees: [], subjectData: "internal" };
+const plain: Space = { name: "plain", guarantees: [], subjectData: "none" };
+const secrets: Space = { name: "secrets", guarantees: [], subjectData: "none" };
+const subjects: Space = { name: "subjects", guarantees: [], subjectData: "online-indexed" };
 const held = contract<Store>("test.planting-store");
 const random = { bytes: (n: number) => new Uint8Array(n).fill(3) };
 

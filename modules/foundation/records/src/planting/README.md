@@ -1,9 +1,9 @@
 # planting
 
-Internal module of `records`: a record written in records' key layout as an earlier version left it (a record as 0.19 wrote it, say), for tests.
+Internal module of `records`: a record written in records' key layout as an earlier version left it, for tests.
 
 ## Responsibilities
-- Writes a value as the record a target names (by key, or under a secret), at records' key (`changeRecords.keyOf`), ending after a lifetime or never (`plantRecord`).
+- Writes a value as the record a target names, at records' key (`changeRecords.keyOf`), ending after a lifetime as records' changes end one, or never (`plantRecord`). A target is any records takes: by key (a keyed set's too, `set: true`), under a secret, or by the name kept for a secret (`secretName`).
 
 ## Not here
 - The write itself, carrying the subject writer: `store`'s `./testing` (`plantValue`).
@@ -15,4 +15,4 @@ Internal module of `records`: a record written in records' key layout as an earl
 - Reached from `./testing` alone: shipped code changes records through `changeRecords` and the builders.
 
 ## Depends on
-- `store`'s `./testing`; the internal module `together`.
+- `store`'s `./testing`; the internal modules `together` and `writing` (`expiryOf`).

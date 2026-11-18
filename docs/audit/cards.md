@@ -96,7 +96,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `lockout` (`src/lockout`): the lockout counter, over the states one store space keeps.
 - `@mod/records` (capability, `modules/foundation/records`): Provides records that know no feature: keyed records, records under a secret, deferred work, and keyed sets.
   - `keyed-sets` (`src/keyed-sets`): sets of members by key, at most a cap to a key, ending on `kernel`'s clock.
-  - `planting` (`src/planting`): a record written in records' key layout as an earlier version left it (a record as 0.19 wrote it, say), for tests.
+  - `planting` (`src/planting`): a record written in records' key layout as an earlier version left it, for tests.
   - `together` (`src/together`): records of several partitions and spaces changed as one.
   - `walk` (`src/walk`): a walk of a space's records over the walk a maintenance tool hands in.
   - `writing` (`src/writing`): how a record is written, the same for every kind of place.
