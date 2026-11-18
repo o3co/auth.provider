@@ -10,7 +10,7 @@ import {
 } from "@mod/passkeys";
 import passkeysModule from "@mod/passkeys/module";
 import { passkeysConfig } from "@mod/passkeys/testing";
-import { type Space, store, storeControl } from "@mod/store";
+import { store, storeControl } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import webauthn from "@mod/webauthn/module";
 import { webauthnConfig } from "@mod/webauthn/testing";
@@ -67,7 +67,7 @@ it("migrates what the reader phase wrote through passkeys' eraser: a holder with
 	const inner = base.get(store);
 	const walk: Walk = {
 		sweep: async (space, cursor) => {
-			const page = await inner.scan({ name: space, guarantees: [] } as Space, cursor);
+			const page = await inner.scan(simulated.declaredSpace(space), cursor);
 			return page.cursor === undefined
 				? { keys: page.keys, server: "one" }
 				: { keys: page.keys, cursor: page.cursor, server: "one" };

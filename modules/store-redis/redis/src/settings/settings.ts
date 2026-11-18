@@ -145,7 +145,9 @@ export async function honoursOf(
 	let answer: Honours;
 	try {
 		const before = await historyOf(client);
-		const asked: Space[] = wanted.length > 0 ? [{ name: "asked", guarantees: wanted }] : [];
+		// The guarantees asked, as one space to judge the settings by; it holds nothing.
+		const asked: Space[] =
+			wanted.length > 0 ? [{ name: "asked", guarantees: wanted, subjectData: "none" }] : [];
 		const replicated = wanted.includes("replicated") || wanted.includes("confirmed-reads");
 		const reasons: string[] = [];
 		if (s.durability === "none" && wanted.includes("durable")) {

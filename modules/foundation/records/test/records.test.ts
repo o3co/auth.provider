@@ -29,7 +29,11 @@ const runtime = quietRuntime({
 	clock: { now: () => 1_800_000_000_000 },
 	random: { bytes: (n) => new Uint8Array(n) },
 });
-const space: Space = { name: "records-test", guarantees: ["no-eviction", "durable", "replicated"] };
+const space: Space = {
+	name: "records-test",
+	guarantees: ["no-eviction", "durable", "replicated"],
+	subjectData: "none",
+};
 const opened = contract<Store>("test.store");
 
 async function open() {

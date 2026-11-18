@@ -1,3 +1,4 @@
+import type { Declaring } from "@mod/app-entries";
 import {
 	type Asked,
 	type Card,
@@ -37,6 +38,30 @@ const declared: readonly Asked[] = [
 	},
 ];
 
+/** What packages standing for any declarer declare of the app's entries, one of each shape. */
+const entries: readonly Declaring[] = [
+	{
+		name: "@mod/tool",
+		appEntries: [{ script: "tool", shape: "call", contract: "toolRun", member: "run" }],
+	},
+	{
+		name: "@mod/settler",
+		appEntries: [
+			{
+				script: "settled",
+				shape: "settle-subjects",
+				contract: "settling",
+				member: "settle",
+				answers: ["done", "left"],
+			},
+		],
+	},
+	{
+		name: "@mod/namer",
+		appEntries: [{ script: "named", shape: "name-subjects", contract: "naming", member: "check" }],
+	},
+];
+
 /** Packages as a caller would give them: the fragments above, published under `@o3co/x-`. */
 export function fakePackages(
 	release: Release = { version: "1.2.3" },
@@ -67,5 +92,6 @@ export function fakePackages(
 		release: () => release,
 		...(outside ? { outside: () => outside } : {}),
 		asks: (names) => declared.filter((d) => names.includes(d.name)),
+		appEntries: (names) => entries.filter((d) => names.includes(d.name)),
 	};
 }

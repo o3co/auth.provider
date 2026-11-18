@@ -1,6 +1,14 @@
 import { createCipheriv, createDecipheriv } from "node:crypto";
 import { defineModule, Unavailable } from "@mod/kernel";
-import { type Opened, type Resealed, resealers, resealing, seal } from "./contract.ts";
+import {
+	type Opened,
+	type Resealed,
+	type Resealer,
+	resealers,
+	resealing,
+	resealRun,
+	seal,
+} from "./contract.ts";
 import { type Algorithm, algorithms, keyId, section } from "./section.ts";
 
 /** id.iv.body.tag, each part base64url; the IV's and the tag's sizes are the key's algorithm's. */
@@ -69,26 +77,54 @@ export default defineModule(
 				},
 			});
 		}),
-		m.provide(resealing).by(async (c) => {
-			const holders = [...(await c.collect(resealers))].sort((a, b) => (a.name < b.name ? -1 : 1));
+		m.provide(resealing).by(async (c) => ({ reseal: await resealAll(c) })),
+		m.provide(resealRun).by(async (c) => {
+			const reseal = await resealAll(c);
 			return {
-				reseal: async () => {
-					const told: Resealed[] = [];
-					for (const holder of holders) {
-						try {
-							const { resealed, left } = await holder.reseal();
-							told.push({ name: holder.name, resealed, left });
-						} catch (error) {
-							c.log.warn("seal.reseal_failed", {
-								holder: holder.name,
-								kind: error instanceof Error ? error.name : typeof error,
-							});
-							told.push({ name: holder.name, failed: true });
-						}
-					}
-					return told;
+				run: async (args) => {
+					if (args.length > 0) return { lines: ["usage: reseal takes no arguments"], code: 64 };
+					const told = await reseal();
+					const counted = told.flatMap((h) => ("failed" in h ? [] : [h]));
+					const code =
+						counted.length < told.length
+							? 1
+							: counted.some((h) => h.left > 0)
+								? 2
+								: counted.some((h) => h.resealed > 0)
+									? 3
+									: 0;
+					const lines = told.map((h) =>
+						"failed" in h ? `${h.name} failed` : `${h.name} resealed ${h.resealed} left ${h.left}`,
+					);
+					const last =
+						code === 0 ? "previous keys may be retired" : "run reseal again before retiring a key";
+					return { lines: [...lines, last], code };
 				},
 			};
 		}),
 	],
 );
+
+/** Runs each resealer in name order, answering its counts or that it failed (logged by name and kind). */
+async function resealAll(c: {
+	collect: (point: typeof resealers) => Promise<Iterable<Resealer>>;
+	log: { warn: (event: string, fields: Record<string, string>) => void };
+}) {
+	const holders = [...(await c.collect(resealers))].sort((a, b) => (a.name < b.name ? -1 : 1));
+	return async () => {
+		const told: Resealed[] = [];
+		for (const holder of holders) {
+			try {
+				const { resealed, left } = await holder.reseal();
+				told.push({ name: holder.name, resealed, left });
+			} catch (error) {
+				c.log.warn("seal.reseal_failed", {
+					holder: holder.name,
+					kind: error instanceof Error ? error.name : typeof error,
+				});
+				told.push({ name: holder.name, failed: true });
+			}
+		}
+		return told;
+	};
+}

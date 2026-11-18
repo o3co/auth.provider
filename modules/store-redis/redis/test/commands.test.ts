@@ -24,12 +24,16 @@ afterEach(async () => {
 
 /** A space whose writes are confirmed on every replica, so a write takes a confirmation round. */
 const replicated = defineModule({ name: "replicated-owner", replicaSafe: true, takes: [] }, (m) => [
-	m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] })),
+	m
+		.contribute(spaces)
+		.by(() => ({ name: "replicated", guarantees: ["replicated"], subjectData: "none" })),
 ]);
 
 /** A space whose writes must survive a crash, so the server's fsyncs are checked. */
 const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
-	m.contribute(spaces).by(() => ({ name: "durable", guarantees: ["durable"] })),
+	m
+		.contribute(spaces)
+		.by(() => ({ name: "durable", guarantees: ["durable"], subjectData: "none" })),
 ]);
 
 /** A primary that refuses writes without a replica, as `replicas` needs. */

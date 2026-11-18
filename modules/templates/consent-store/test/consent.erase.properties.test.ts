@@ -328,7 +328,7 @@ async function deployment(s: fc.Scheduler, from: number) {
 		}),
 	);
 	const inner = base.get(store);
-	const spaceOf = (name: string): Space => ({ name, guarantees: [] });
+	const spaceOf = (name: string): Space => simulated.declaredSpace(name);
 	const raw = async (space: string, partition: string) =>
 		(await inner.get({ space: spaceOf(space), partition, name: "record" })).entry;
 	/** Every record of a space, as the store itself holds it. */

@@ -1,9 +1,9 @@
 {{subjects}}
-const candidates = app.get({{contract}});
+const naming = app.get(declaredContract);
 const counts = { named: 0, clear: 0, failed: 0 };
 // One subject a line, used as sent; only an empty line is skipped. A subject is written out, one a
-// line on standard output, only where a counting factor of it is written and stands for nothing: the
-// operator gave it, to find whom to mend. The counts go to standard error.
+// line on standard output, only where the member answers above 0 for it: the operator gave it, to find
+// whom to look at. The counts go to standard error.
 for await (const subject of lines(process.stdin)) {
 	if (subject === "") continue;
 	if (subject === undefined) {
@@ -11,7 +11,7 @@ for await (const subject of lines(process.stdin)) {
 		continue;
 	}
 	try {
-		if ((await candidates.unclaimed(subject)) > 0) {
+		if ((await naming.{{member}}(subject)) > 0) {
 			tell(1, `${subject}\n`);
 			counts.named += 1;
 		} else counts.clear += 1;

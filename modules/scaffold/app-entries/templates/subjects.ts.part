@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 // The app and every module it composes are read only now, past the guard: one that throws as it is
 // read ends the run as a boot that failed.
 const notRead = () => end("failed: the app could not be built: start it with this configuration to read why", 1);
-const [{ legacyVariablesCheck, loadConfig }, { assemble, BootRefused, isUnavailable }, { {{contract}} }, ...composed] =
+const [{ legacyVariablesCheck, loadConfig }, { assemble, BootRefused, isUnavailable }, { {{contract}}: declaredContract }, ...composed] =
 	await Promise.all([import("{{configFiles}}"), import("{{kernel}}"), import("{{entry}}"), {{reads}}]).catch(notRead);
 /** A boot that could not be built: how many refusals, where they can be counted (exit 78), or that it failed (exit 1). */
 const notBuilt = (error: unknown): never => {

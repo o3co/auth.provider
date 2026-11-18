@@ -17,18 +17,19 @@ export async function generatePattern(
 	plan: PatternPlan,
 	pattern: Pattern = patternNamed(plan.template),
 	index?: string,
-): Promise<void> {
+): Promise<readonly string[]> {
 	const selection = selectionOf(pattern, plan);
 	namesPackages([
 		...Object.values(selection.features).flat(),
 		...Object.entries(selection.axes ?? {}).flat(),
 		...(selection.add ?? []),
 	]);
-	const { packages, combinations } = assemblyFor(plan, index);
+	const { packages, combinations, warnings } = assemblyFor(plan, index);
 	const modules = combinations.composed(selection);
 	const card = await cardOf(pattern.name);
 	await writeDeployment(plan.target, modules, packages, {
 		template: "pattern-readme.md",
 		fill: { name: pattern.name, use: pattern.use, card },
 	});
+	return warnings;
 }

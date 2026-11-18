@@ -316,7 +316,7 @@ async function deployment(s: fc.Scheduler, seed: number) {
 		}),
 	);
 	const raw = (space: string, partition: string) =>
-		base.get(store).get({ space: { name: space, guarantees: [] }, partition, name: "record" });
+		base.get(store).get({ space: simulated.declaredSpace(space), partition, name: "record" });
 	// Runs until `run` settles: a scheduled store call where one waits, else the next of records'
 	// resend pauses on the faked clock, else a turn for the calls under way.
 	const scheduled = async <T>(run: () => Promise<T>) => {
@@ -502,7 +502,7 @@ it("passes a fence only on a receipt it wrote, held by its subject's boundary an
 									version: Number(entry.version),
 									by: undefined,
 									key: {
-										space: { name: boundariesSpace, guarantees: [] },
+										space: d.simulated.declaredSpace(boundariesSpace),
 										partition: s,
 										name: "record",
 									},
