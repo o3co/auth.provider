@@ -64,7 +64,7 @@ export const noSubjectData = "none" satisfies SubjectData;
 export interface Space {
 	readonly name: string;
 	readonly guarantees: readonly Guarantee[];
-	/** What it holds of a subject's data, named by every declaration (one naming none refuses the boot). Erasure's word, carried on the declaration for erasure to read, and for store to ask the subject writer of a change. */
+	/** What it holds of a subject's data, named by every declaration (one without it refuses the boot). Erasure's word, carried on the declaration for erasure to read, and for store to ask the subject writer of a change. */
 	readonly subjectData: SubjectData;
 	/** The eraser that erases it, by its key, for erasure to find. */
 	readonly erasedBy?: string;
