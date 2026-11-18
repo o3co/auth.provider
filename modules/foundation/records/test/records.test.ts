@@ -989,7 +989,7 @@ it("refuses to open a space holding a subject's data through any plain door, and
 		(p: ReturnType<typeof at>) => pairedRecordsIn(p, "w", refuse),
 		(p: ReturnType<typeof at>) => pairedRecordsAcross(p, at("window"), "w", refuse),
 	];
-	for (const held of ["online-indexed", "online-keyed", "bounded"] as const) {
+	for (const held of ["online-indexed", "online-keyed", "bounded", "internal"] as const) {
 		for (const door of doors) {
 			expect(() => door(at(held)), held).toThrow(/written through subject-records/);
 		}
