@@ -5,7 +5,10 @@ import type { ErasureJournal } from "./contract.ts";
 export interface JournalHarness {
 	/** A journal over a fresh place: not created yet. */
 	open(): Promise<ErasureJournal>;
-	/** Another journal over the same place as `journal`, as a later process opens it. */
+	/**
+	 * Another journal over the same place as `journal`, as a later process opens it: another holder,
+	 * answered `busy` while `journal` holds.
+	 */
 	reopen(journal: ErasureJournal): Promise<ErasureJournal>;
 	/** Cuts the last record of `journal`'s place short, as a crash during its write leaves it. */
 	tear(journal: ErasureJournal): Promise<void>;
