@@ -19,10 +19,13 @@ export interface UpkeepHarness {
 	/** For a store that holds expired keys until removed: whether the data still holds `key` at all. */
 	holds?(process: UpkeepProcess, key: Key): Promise<boolean>;
 	/**
-	 * Another process over the same data as `process`, as an assembly that is never started (a
-	 * tool's) builds it. An implementation offering it is held to the refusals of a start.
+	 * Another process over the same data as `process`, granted to build under the maintenance key
+	 * (a tool's). An implementation offering it is held to the refusals of a start.
 	 */
-	anotherNeverStarted?(process: UpkeepProcess, declared: readonly Space[]): Promise<UpkeepProcess>;
+	anotherMayBuildUnderKey?(
+		process: UpkeepProcess,
+		declared: readonly Space[],
+	): Promise<UpkeepProcess>;
 }
 
 /** The spaces the upkeep contract test declares: holding no subject's data, holding some the subject writer guards, and holding some it does not. */
@@ -167,21 +170,21 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 			it("is followed by processes that start under the new epoch and change as before", async () => {
 				const [p] = await pair();
 				await p.upkeep.enterMaintenance();
-				// Under the key, only an assembly that is never started builds, where the harness says how.
-				const next = await (harness.anotherNeverStarted ?? harness.another)(p, upkeepSpaces);
+				// Under the key, only a process that may build under it starts, where the harness says how.
+				const next = await (harness.anotherMayBuildUnderKey ?? harness.another)(p, upkeepSpaces);
 				expect((await next.store.putIfAbsent(fresh(), 1, never)).kind).toBe("written");
 				expect(await next.upkeep.mark("test.next", 1)).toEqual({ kind: "marked" });
 			});
 		});
 
-		describe.runIf(harness.anotherNeverStarted)("starting", () => {
+		describe.runIf(harness.anotherMayBuildUnderKey)("starting", () => {
 			const tool = (p: UpkeepProcess, declared: readonly Space[]) =>
-				(harness.anotherNeverStarted as NonNullable<UpkeepHarness["anotherNeverStarted"]>)(
+				(harness.anotherMayBuildUnderKey as NonNullable<UpkeepHarness["anotherMayBuildUnderKey"]>)(
 					p,
 					declared,
 				);
 
-			it("refuses a process that serves under the maintenance key, and starts one never started there", async () => {
+			it("refuses a process that serves under the maintenance key, and starts one that may build under it", async () => {
 				const p = await harness.start(upkeepSpaces);
 				await p.upkeep.enterMaintenance();
 				await refusedSaying(harness.another(p, upkeepSpaces), /maintenance key/);
@@ -189,7 +192,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				expect(await t.upkeep.mark("test.tool", 1)).toEqual({ kind: "marked" });
 			});
 
-			it("refuses a process lacking a required space, one never started outside maintenance too, and starts one never started lacking it under the key", async () => {
+			it("refuses a process lacking a required space, one that may build under the key outside maintenance too, and starts that one lacking it under the key", async () => {
 				const p = await harness.start(upkeepSpaces);
 				await p.upkeep.enterMaintenance();
 				await p.upkeep.require([held.name]);

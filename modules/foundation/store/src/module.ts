@@ -27,8 +27,9 @@ export default defineModule(
 				// Accepted, yet said at every start: a restart forgets what these spaces keep.
 				c.log.warn("store.volatile_accepted", { spaces: kept.map((s) => s.name).join(", ") });
 			}
-			// Only `true` is never started: a hand-built context may leave it unset.
-			return memoryProcess(memoryData(c.clock), declared, c.neverStarted === true);
+			// Kernel's `neverStarted`, `true` alone, grants store's "may build under the maintenance key".
+			const mayBuildUnderKey = c.neverStarted === true;
+			return memoryProcess(memoryData(c.clock), declared, mayBuildUnderKey);
 		}),
 		m.provide(store).by(async (c) => (await c.get(opened)).store),
 		m.provide(storeControl).by(async (c) => (await c.get(opened)).control),

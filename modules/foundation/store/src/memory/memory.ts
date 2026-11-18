@@ -134,23 +134,23 @@ export function memoryCore(
 
 /**
  * Refuses a start the control record forbids, as a boot refusal, before anything is written: under
- * the maintenance key unless the assembly is never started; without a space `requires` names
- * unless it is never started and under the key (a tool replacing `requires` may not compose one).
+ * the maintenance key unless the process may build under it; without a space `requires` names
+ * unless it may build under the key and is under it (a tool replacing `requires` may not compose one).
  */
 function refusedStart(
 	record: MemoryData["control"],
 	declared: readonly Space[],
-	neverStarted: boolean,
+	mayBuildUnderKey: boolean,
 ): void {
-	if (record.maintenance && !neverStarted) {
+	if (record.maintenance && !mayBuildUnderKey) {
 		throw new BuildRefused(
 			"store",
-			"the store is under the maintenance key: only an assembly that is never started builds there",
+			"only a tool may start while the store is under the maintenance key",
 		);
 	}
 	const names = new Set(declared.map((space) => space.name));
 	const missing = record.requires.filter((name) => !names.has(name));
-	if (missing.length > 0 && !(neverStarted && record.maintenance)) {
+	if (missing.length > 0 && !(mayBuildUnderKey && record.maintenance)) {
 		// Store's own fixed text: a required name is the data's, and no refusal carries it.
 		throw new BuildRefused("store", "the data requires a space this process does not declare");
 	}
@@ -164,8 +164,8 @@ function refusedStart(
 export function memoryProcess(
 	data: MemoryData,
 	declared: readonly Space[],
-	/** Whether the assembly is never started (a tool's): only `true` lets it build under the maintenance key. */
-	neverStarted = false,
+	/** Whether the process may build under the maintenance key, as its composition grants (a tool's). */
+	mayBuildUnderKey = false,
 ): {
 	readonly store: Store;
 	readonly unchecked: Store;
@@ -180,7 +180,7 @@ export function memoryProcess(
 	};
 	// Refused before anything is written: a malformed declaration, then the control record's two.
 	declaredSpaces(declared);
-	refusedStart(record, declared, neverStarted);
+	refusedStart(record, declared, mayBuildUnderKey);
 	for (const space of declared) {
 		ledger.set(
 			space.name,

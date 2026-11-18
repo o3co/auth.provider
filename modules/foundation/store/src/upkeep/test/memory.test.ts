@@ -13,8 +13,8 @@ const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: 
 
 /** The data each process of the upkeep contract opened, so another opens the same. */
 const dataOf = new WeakMap<UpkeepProcess, MemoryData>();
-const opened = (data: MemoryData, declared: readonly Space[], neverStarted = false) => {
-	const process = memoryProcess(data, declared, neverStarted);
+const opened = (data: MemoryData, declared: readonly Space[], mayBuildUnderKey = false) => {
+	const process = memoryProcess(data, declared, mayBuildUnderKey);
 	dataOf.set(process, data);
 	return process;
 };
@@ -24,7 +24,7 @@ upkeepContract("memory", {
 	another: async (process, declared) => opened(dataFor(process), declared),
 	holds: async (process, key) =>
 		dataFor(process).values.has(JSON.stringify([key.space.name, key.partition, key.name])),
-	anotherNeverStarted: async (process, declared) => opened(dataFor(process), declared, true),
+	anotherMayBuildUnderKey: async (process, declared) => opened(dataFor(process), declared, true),
 });
 
 it("answers durable and replicated unmet, and the rest verified, as one process holds them", async () => {

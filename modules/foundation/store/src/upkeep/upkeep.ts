@@ -14,10 +14,9 @@ export interface Mark {
  * with the owner's name as space names are; store keeps them and never reads them.
  *
  * A process is refused at start (kernel's `BuildRefused`), judged on the same read of the record it
- * takes the epoch from: under the maintenance key, unless its assembly is never started (this one
- * first, where both apply); without a space `requires` names, unless it is never started and under
- * the key. A refused process writes
- * nothing: it takes no epoch and adds nothing to the ledger.
+ * takes the epoch from: under the maintenance key, unless it may build under it (this one first,
+ * where both apply); without a space `requires` names, unless it may build under the key and is
+ * under it. A refused process writes nothing: it takes no epoch and adds nothing to the ledger.
  */
 export interface Control {
 	readonly epoch: string | null;
