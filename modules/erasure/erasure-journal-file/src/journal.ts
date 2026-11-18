@@ -50,7 +50,6 @@ export function readRecords(bytes: Buffer): { header: Header; entries: Entry[] }
 			bytes[end + 65] === 0x0a;
 		const body = whole ? bytes.subarray(space + 1, end) : undefined;
 		if (!body || bytes.subarray(end + 1, end + 65).toString() !== digest(body)) {
-			// A record that does not match is torn where nothing follows it, and corrupt where something does.
 			const next = bytes.indexOf(0x0a, at);
 			return unusable(next < 0 || next === bytes.length - 1 ? "torn" : "corrupt");
 		}
@@ -99,13 +98,28 @@ export function journalFileWith(parts: {
 			at: parts.clock.now(),
 			take: Buffer.from(parts.random.bytes(8)).toString("hex"),
 		});
+	/** A lock this journal's failed take could not remove, removed before its next take. */
+	let stranded: (() => Promise<void>) | undefined;
 	/** Takes the lock, or answers who holds it; any other failure of the medium is unavailable. */
 	const locked = async () => {
+		if (stranded) {
+			try {
+				await stranded();
+			} catch {
+				throw new Unavailable(`erasure-journal (its lock ${path}.lock was not removed)`);
+			}
+			stranded = undefined;
+		}
 		try {
 			return { release: await files.lock(path, holderNow()) };
 		} catch (error) {
-			const { code, holder } = error as { code?: unknown; holder?: unknown };
-			if (code === "EEXIST") return { holder: String(holder) };
+			const { code, holder, release } = error as {
+				code?: unknown;
+				holder?: unknown;
+				release?: unknown;
+			};
+			if (code === "EEXIST" && typeof holder === "string") return { holder };
+			if (typeof release === "function") stranded = release as () => Promise<void>;
 			throw new Unavailable("erasure-journal");
 		}
 	};
@@ -171,7 +185,6 @@ export function journalFileWith(parts: {
 			let released = false;
 			return {
 				kind: "held",
-				// Made again where the medium failed it: the lock stays until a release removes it.
 				release: async () => {
 					if (released) return;
 					// At once, before any wait: no append joins the hold from here, so the queue is final.

@@ -12,10 +12,11 @@ export interface JournalFiles {
 	/** Appends and syncs; where the write fails, cuts the file back to its length before. */
 	append(path: string, bytes: Buffer): Promise<void>;
 	/**
-	 * Takes the file's lock, a file beside it holding `holder`, which is this take's alone (a release
-	 * tells its own lock by it); one held refuses with `code` `EEXIST` and the holder it records. Answers its release, which removes the lock only while it still
-	 * records `holder`: a read, then a removal, not one atomic step. A release finding no lock is
-	 * done; one the medium fails throws, and can be made again.
+	 * Takes the file's lock, a file beside it holding `holder`, this take's alone; one held refuses
+	 * with `code` `EEXIST` and the holder it records. Answers its release, which removes the lock
+	 * only while it still records `holder`: a read, then a removal, not one atomic step. A release
+	 * finding no lock is done; one the medium fails throws, and can be made again. A take that fails
+	 * after its lock stood removes it; where that fails too, the failure carries `release`.
 	 */
 	lock(path: string, holder: string): Promise<() => Promise<void>>;
 }
@@ -29,8 +30,31 @@ const syncDirectory = async (path: string) => {
 	}
 };
 
-/** The node's own file system. */
-export const nodeFiles: JournalFiles = {
+/** What the files sync a directory and remove a file by: the node's own, or a test's. */
+export interface FileSystem {
+	readonly syncDirectory: (path: string) => Promise<void>;
+	readonly unlink: (path: string) => Promise<void>;
+}
+
+const gone = (error: unknown) => (error as { code?: unknown }).code === "ENOENT";
+
+/** The release `lock` answers for `holder`'s lock. */
+const releaseOf = (fs: FileSystem, lockPath: string, holder: string) => async () => {
+	let recorded: string;
+	try {
+		recorded = await readFile(lockPath, "utf8");
+	} catch (error) {
+		if (gone(error)) return;
+		throw error;
+	}
+	if (recorded !== holder) return;
+	await fs.unlink(lockPath).catch((error: unknown) => {
+		if (!gone(error)) throw error;
+	});
+};
+
+/** The journal's files on a file system: the node's own unless a test gives another. */
+export const nodeFilesWith = (fs: FileSystem = { syncDirectory, unlink }): JournalFiles => ({
 	read: (path) => readFile(path),
 	create: async (path, bytes) => {
 		const file = await open(path, "wx");
@@ -40,7 +64,7 @@ export const nodeFiles: JournalFiles = {
 		} finally {
 			await file.close();
 		}
-		await syncDirectory(path);
+		await fs.syncDirectory(path);
 	},
 	append: async (path, bytes) => {
 		const file = await open(path, "r+");
@@ -63,7 +87,6 @@ export const nodeFiles: JournalFiles = {
 		const lockPath = `${path}.lock`;
 		// The holder is written whole and synced in a file of its own first, then published as the
 		// lock in one step: a lock never stands without its holder, whatever stops the take.
-		// Named by the holder, which is this take's alone.
 		const written = `${lockPath}.${createHash("sha256").update(holder).digest("hex").slice(0, 16)}.tmp`;
 		try {
 			const file = await open(written, "wx");
@@ -87,22 +110,20 @@ export const nodeFiles: JournalFiles = {
 		} finally {
 			await unlink(written).catch(() => {});
 		}
-		await syncDirectory(lockPath);
-		const gone = (error: unknown) => (error as { code?: unknown }).code === "ENOENT";
-		return async () => {
-			let recorded: string;
+		const release = releaseOf(fs, lockPath, holder);
+		try {
+			await fs.syncDirectory(lockPath);
+		} catch (error) {
+			// Not taken after all: this take's lock goes with it.
 			try {
-				recorded = await readFile(lockPath, "utf8");
-			} catch (error) {
-				// Gone already: nothing to release. Any other failure is the caller's to know.
-				if (gone(error)) return;
-				throw error;
+				await release();
+			} catch {
+				throw Object.assign(error as object, { release });
 			}
-			// Not this holder's any more (the operator removed it and another took it): left in place.
-			if (recorded !== holder) return;
-			await unlink(lockPath).catch((error: unknown) => {
-				if (!gone(error)) throw error;
-			});
-		};
+			throw error;
+		}
+		return release;
 	},
-};
+});
+
+export const nodeFiles: JournalFiles = nodeFilesWith();
