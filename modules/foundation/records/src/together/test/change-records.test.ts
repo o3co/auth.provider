@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { type Json, type Space, type Store, spaces, store } from "@mod/store";
+import { subjectWriter } from "@mod/store/subject-writer";
 import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import {
@@ -65,6 +66,38 @@ const clearing = (owner: string) => ({
 			(item as Item | undefined)?.owner === owner ? { value: { owner, gone: true } } : undefined,
 		),
 	}),
+});
+
+it("sends the subject writer given with its one write, in one partition and across two, and none where none is given", async () => {
+	const { s, listPlace, itemPlace, at } = await open();
+	const sent: unknown[] = [];
+	// The same store, keeping the options each write reached it with.
+	const spied = new Proxy(s, {
+		get: (store, name) => {
+			const port = Reflect.get(store, name);
+			if (name !== "batch" && name !== "batchAcross") return port?.bind?.(store) ?? port;
+			return (conditions: unknown, writes: unknown, options: unknown) => {
+				sent.push(options);
+				return port.call(store, conditions, writes, options);
+			};
+		},
+	}) as Store;
+	const list = { ...listPlace, store: spied };
+	const item = { ...itemPlace, store: spied };
+	const write = (targets: { place: Place; key: string }[], writer?: typeof subjectWriter) =>
+		changeRecords({
+			targets,
+			...(writer ? { writer } : {}),
+			decide: (read) => ({ targets: read.map(() => ({ value: { ids: [] } })) }),
+		});
+	await write([at(list, "one")], subjectWriter);
+	await write([at(list, "two"), at(item, "two")], subjectWriter);
+	await write([at(list, "three")]);
+	expect(sent.map((o) => (o as { writer?: unknown }).writer)).toEqual([
+		subjectWriter,
+		subjectWriter,
+		undefined,
+	]);
 });
 
 it("writes a record and the records it names, watched, as one", async () => {

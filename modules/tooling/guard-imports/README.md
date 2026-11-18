@@ -17,7 +17,7 @@
   - G28: a dependency a manifest names in `helpers` lends functions and types alone: shipped code takes from it no value the kernel's `contract` or `extensionPoint` makes.
   - G29: a test file composing every module a feature bridge `joins` and a module contributing to the bridge's points composes the bridge too, so no contribution that decides an answer is silently lost.
   - G30: outside the package each `./audit-events` declares through (`audit`), shipped code records an event only through the declared wrapper (`declaredAudit`), never on the contract's own `record`, so every event reaches the audit event reference.
-  - G31: a contract a manifest declares `takenBy` (contract name → the packages that may take it) is imported, in shipped code, by those packages alone, by name, alias, namespace or re-export; the declaration names the modules of the kernel `takenBy` the contract declares, no more and no fewer.
+  - G31: a contract, or an entry (`./name`), a manifest declares `takenBy` is imported, in shipped code, by the packages it names alone; how each is read, and what else holds it, is the internal module `taken`'s.
   - G32: the property an owner holds to declaration (the narrower's `internal`, which reaches private addresses) is written in shipped code only by the packages declaring it in their manifest and card.
 
 ## Not here
@@ -26,22 +26,25 @@
 - The kinds' order and roles: given by the caller, in the kind words it holds.
 
 ## Offers
-- `readWorkspace` (root → its packages, as `workspace-packages` lists them, minus the root), `scopeOf` (packages, rules, where findings go → the scope every rule reads: what a manifest declares apart from what a source is seen to say, each file's `facts` by one lexical program over every package's sources and the files the caller adds (a fork's helper), and the package whose directory holds a path), `surfacesOf` (packages, entry, `.` by default → each one's surface at that entry).
+- Reading the workspace:
+  - `readWorkspace` (root → its packages, as `workspace-packages` lists them, minus the root);
+  - `scopeOf` (packages, rules, where findings go → the scope every rule reads; internal module `scope`);
+  - `surfacesOf` (packages, entry, `.` by default → each one's surface at that entry).
 - `importRules` (scope, surfaces): every rule above, reported through the scope; `importViolations` (packages, rules → the findings).
-- The readers the other checks build on: `parse`, `packageOf`, `importsOf`, `importedNames`; `budgetsAsTest`, whether a file counts as a test (a published contract test suite does).
-- `lexicalAnalysis` and the facts' types (`FileFacts`, `Edge`, …): the `facts` card's; `Kinds`, `Rules`, `Scope`: `scopeOf`'s; `propertyDeclarations`: `owned-property`'s.
+- The readers the other checks build on: `parse`, `packageOf`, `importsOf`, `importedNames`; `budgetsAsTest`, whether a file counts as a test (internal module `scope`).
+- `lexicalAnalysis` and the facts' types (`FileFacts`, `Edge`, …): the `facts` card's; `Kinds`, `Rules`, `Scope`, `TakenEntries`: `scope`'s; `propertyDeclarations`: `owned-property`'s.
 
 ## Invariants
 - Checks are derived from the repository's current state. Nothing is enumerated, and there is no place to write exceptions.
 - The rules read each file's `facts`:
   - G3, G4, G8 and G16 every edge to a package but a resolve. G8 asks a declared run-time dependency of every edge that loads its module, `import { type T }` included (the hint: `import type` loads nothing).
-  - G24, G28 and G31 a file's top-level imports and re-exports (G24 the names imported by name, a default so taken too), never one inside a declared module.
+  - G24, G28 and G31's contracts a file's top-level imports and re-exports (G24 the names imported by name, a default so taken too), never one inside a declared module.
   - G29 a test's edges that load its module, a resolve or an import type composing nothing.
   - G34 every edge but a resolve, tests' too.
 - A package depends on what its manifest names in `dependencies` and `peerDependencies`, and in `devDependencies` where a rule counts tests (G1, G2, G10, G14, G16 do).
 - G29 reads a test file's imports: a `./module` (its own package's by path) is composed, a `./testing` value named `…StandIn` composes its package, and an adapter composes its owner; a stand-in named otherwise, or a composition built elsewhere or at run time, is missed, not reported. A package contributes to a bridge when its shipped code takes one of the bridge's `extensionPoint` values.
 - G29 counts feature bridges only: a foundation bridge's points collect operational counts that decide no answer a test reads.
-- Internal modules `recorded` (G30), `taken` (G31), `owned-property` (G32), `facts` and `surface`.
+- Internal modules `recorded` (G30), `taken` (G31), `owned-property` (G32), `facts`, `surface` and `scope`.
 
 ## Depends on
 - `typescript`, `workspace-packages` (the workspace's packages).

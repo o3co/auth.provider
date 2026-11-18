@@ -10,7 +10,7 @@ Internal module of `guard-imports`: G32, that the property an owner holds to dec
 - Values made to look like an operator's URL: another rule's.
 - The runtime guarantee: `outbound-policy`'s, as a private address is reached only at the origin of the `ConfiguredUrl` a caller names. G32 is the check of it in this repository: that the code it reads does not write the property undeclared.
 - A value widened before it is written, as the check goes by type: one cast or typed as `any`, `unknown` or plain `string` first (`{ internal: url as any }`; `const t: string = url`, then `{ internal: t }`). Copies from a typed object (`Object.assign`, spreading a typed value), counted where that object's own literal is written, not at the copy. Reflection (`Object.defineProperty`, `Reflect.set`).
-- What it does not read: test files (the rules' `testFile`), a package's `./testing` entry, `*.config.ts`, files and directories whose name starts with `.`, `node_modules`, and any package pnpm does not list, though shipped code may import one of them.
+- What it does not read: test code (`budgetsAsTest`: test files, and what a package's `./testing` alone reaches), `*.config.ts`, files and directories whose name starts with `.`, `node_modules`, and any package pnpm does not list, though shipped code may import one of them.
 
 ## Offers
 - `ownedPropertyRules` (G32).

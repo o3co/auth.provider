@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { type Edge, type FileFacts, type Reference, realOf } from "./facts/facts.ts";
-import type { Scope } from "./scope.ts";
+import type { Scope } from "./scope/scope.ts";
 import type { Surface } from "./surface/surface.ts";
 import type { Pkg } from "./workspace.ts";
 
@@ -19,10 +19,15 @@ function packagesUsed(facts: FileFacts) {
 const typesAloneLoaded = (edge: Edge) =>
 	edge.loads && edge.bindings.length > 0 && edge.bindings.every((b) => b.typeOnly);
 
-/** The values a file takes from the module `from` by its top-level imports and re-exports (none inside a declared module): `default`, a name, or `*`. */
-export function valuesTaken(facts: FileFacts, from: string): string[] {
+/** The values a file takes from the module `from` by its top-level imports and re-exports (none inside a declared module), or by those of `forms` alone: `default`, a name, or `*`. */
+export function valuesTaken(
+	facts: FileFacts,
+	from: string,
+	forms: readonly ("import" | "export-from")[] = ["import", "export-from"],
+): string[] {
 	return facts.edges
-		.filter((e) => (e.form === "import" || e.form === "export-from") && e.specifier.text === from)
+		.filter((e) => (e.form === "import" || e.form === "export-from") && forms.includes(e.form))
+		.filter((e) => e.specifier.text === from)
 		.filter((e) => ts.isSourceFile(e.node.parent))
 		.flatMap((e) => e.bindings.filter((b) => !b.typeOnly))
 		.map((b) => (b.form === "named" ? b.imported : b.form === "default" ? "default" : "*"));
@@ -218,8 +223,6 @@ export function bridgeRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
 			bridges.filter((b) => b !== p && takes(b)),
 		);
 	}
-	const ownerOf = ({ manifest: { replaces, adapts } }: Pkg) =>
-		typeof replaces === "string" ? replaces : typeof adapts === "string" ? adapts : undefined;
 	for (const p of s.packages) {
 		const own = p.manifest.exports?.["./module"];
 		for (const file of s.sources(p).filter((f) => s.isTest(f))) {
@@ -227,7 +230,8 @@ export function bridgeRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
 			const compose = (name: string) => {
 				composed.add(name);
 				const q = s.byName.get(name);
-				const owner = q && ownerOf(q);
+				// Only an adapter serves an owner (G25), so composing it composes its owner.
+				const owner = q && s.ownerServed(q);
 				if (owner) composed.add(owner);
 			};
 			const facts = s.factsOf(p, file);
@@ -297,8 +301,9 @@ export function axisRules(s: Scope) {
 			report(g25, p.name, "declares replaces and adapts");
 		} else if (isAdapter && replaces === undefined && adapts === undefined) {
 			report(g25, p.name, "declares neither replaces nor adapts");
-		} else if (isAdapter) {
-			const owner = String(replaces ?? adapts);
+		}
+		const owner = s.ownerServed(p);
+		if (owner !== undefined) {
 			if (!s.byName.has(owner)) report(g25, p.name, `names no workspace package: ${owner}`);
 			else axes.set(owner, [...(axes.get(owner) ?? []), p]);
 			// Wording comes with its axis as the default, so it never also joins its owner as a bridge.

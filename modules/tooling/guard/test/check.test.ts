@@ -48,6 +48,22 @@ describe("guard", () => {
 		expect(rules([a, b]).sort()).toEqual(["G1", "G5", "G8"]);
 	});
 
+	it("allows a further entry only where the package's own takenBy keeps it for named takers", () => {
+		const files = {
+			"src/contract.ts": "export const x = 1;\n",
+			"src/token.ts": "export const token = Object.freeze({});\n",
+		};
+		const exports = { ".": "./src/contract.ts", "./token": "./src/token.ts" };
+		const taker = pkg("@t/taker", { "src/contract.ts": "export const t = 1;\n" });
+		const keeping = pkg("@t/keeps", files, { exports, takenBy: { "./token": ["@t/taker"] } });
+		expect(rules([keeping, taker])).toEqual([]);
+		const open = pkg("@t/open", files, { exports });
+		expect(rules([open, taker])).toEqual(["G5"]);
+		// A key no scope keeps (no taker) opens no entry, and G31 says why.
+		const takerless = pkg("@t/takerless", files, { exports, takenBy: { "./token": [] } });
+		expect(rules([takerless, taker]).sort()).toEqual(["G31", "G5"]);
+	});
+
 	it("takes a package's audit event declarations as part of its public interface", () => {
 		const p = pkg(
 			"@t/e",

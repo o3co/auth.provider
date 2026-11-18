@@ -103,7 +103,15 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/seal` (foundation, `modules/foundation/seal`): Seals and opens stored data with authenticated encryption, by each key's algorithm (AES-256-GCM), under a key ring read at boot.
 - `@mod/secret-hash` (foundation, `modules/foundation/secret-hash`): Checks a secret against a stored bcrypt or scrypt hash, with the same work whether or not there is a hash to check against; knows no feature.
 - `@mod/store` (foundation, `modules/foundation/store`): Owns the contract of feature-neutral storage operations, each atomic and judged on the store clock, collects space declarations, and holds one memory implementation, not safe on many instances, whose `honours` answers durable and replicated unmet.
+  - `contract-batches` (`src/contract-batches`): the contract test's batches across partitions and spaces, counting, and reads of several keys and a batch's time.
+  - `contract-faults` (`src/contract-faults`): the contract test's replication faults: replicas that do not acknowledge, lost replies, restarts and failover.
+  - `contract-harness` (`src/contract-harness`): the contract test's shared part: the spaces it declares, the harness an implementation gives, and what every other part uses.
+  - `contract-keys` (`src/contract-keys`): the contract test's single keys: reads and writes, versions and expiry.
+  - `contract-marks` (`src/contract-marks`): the contract test's deadlines and idempotency marks, and concurrent connections.
+  - `contract-walking` (`src/contract-walking`): the contract test's scanning of a space, and the checks on every input.
+  - `simulated` (`src/simulated`): a simulated replicated store, for tests, offered through `./testing`.
   - `upkeep` (`src/upkeep`): keeping a store's data whole, apart from reading and writing its keys.
+  - `writer` (`src/writer`): the subject writer, the one value a change to subjects' data carries.
 - `@mod/subject-records` (capability, `modules/foundation/subject-records`): Provides records of spaces that hold a subject's data, written so that erasing a subject finds them and nothing is written past its tombstone; a capability like `records`, built by a feature's wiring, never used by a feature.
   - `envelope` (`src/envelope`): the envelope a subject's record is kept in, its subject beside its value.
   - `erase` (`src/erase`): erasing a subject from one space, and sweeping a space's index.
@@ -512,8 +520,9 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `owned-property` (`src/owned-property`): G32, that the property an owner holds to declaration (the narrower's `internal`) is written only by the packages declaring it.
   - `writes` (`src/owned-property/writes`): where a source writes the owned property, by type in a source and by name in a template.
   - `recorded` (`src/recorded`): G30, that an audit event is recorded only through its declarations.
+  - `scope` (`src/scope`): the scope every rule reads, and whether a file counts as a test.
   - `surface` (`src/surface`): a package's public surface, read from one of its entries by a TypeScript program of its own.
-  - `taken` (`src/taken`): G31, that a contract its owner declares `takenBy` is imported by the packages it names alone.
+  - `taken` (`src/taken`): G31, that a contract or an entry its owner declares `takenBy` is imported by the packages it names alone.
 - `@mod/interop-clients` (verification, `modules/tooling/interop-clients`): Runs the provider against independent client libraries, each through an adapter of its own, and checks what each library gave back: a run per library.
   - `dialog` (`src/dialog`): one flow's exchange with an adapter.
   - `differences` (`src/differences`): the differences accepted between a library and the provider.
