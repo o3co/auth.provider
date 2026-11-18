@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { type Edge, type FileFacts, type Reference, realOf } from "./facts/facts.ts";
-import type { Scope } from "./scope/scope.ts";
+import { budgetsAsTest, type Scope } from "./scope/scope.ts";
 import type { Surface } from "./surface/surface.ts";
 import type { Pkg } from "./workspace.ts";
 
@@ -62,7 +62,11 @@ function keyedBy(facts: FileFacts, from: string): string[] {
 		.map((r) => r.node.text);
 }
 
-/** G3, G4, G8: what one source file of a package may import. */
+/**
+ * G3, G4, G8: what one source file of a package may import. G4 reads test code as the budgets do
+ * (`budgetsAsTest`), so a test helper `./testing` alone reaches may use another package's; G3 and G8
+ * read only a file named as a test as one.
+ */
 export function fileImportRules(s: Scope, p: Pkg, file: string) {
 	const { byName, report } = s;
 	const runtimeDeps = new Set(
@@ -70,13 +74,14 @@ export function fileImportRules(s: Scope, p: Pkg, file: string) {
 	);
 	const exportsModule = p.manifest.exports?.["./module"] !== undefined;
 	if (s.isTest(file)) return;
+	const testCode = budgetsAsTest(s, p, file);
 	const where = `${p.name}/${file}`;
 	for (const { edge, name, subpath } of packagesUsed(s.factsOf(p, file))) {
 		const specifier = edge.specifier.text ?? "";
 		if (exportsModule && byName.has(name) && subpath === "module") {
 			report("G3 only assembly uses composition definitions", where, specifier);
 		}
-		if (byName.has(name) && subpath === "testing") {
+		if (byName.has(name) && subpath === "testing" && !testCode) {
 			report("G4 contract tests are used only from tests", where, specifier);
 		}
 		if (edge.loads && !runtimeDeps.has(name)) {
