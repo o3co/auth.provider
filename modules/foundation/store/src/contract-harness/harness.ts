@@ -20,11 +20,15 @@ export async function overwrite(s: Store, key: Key, value: Json, options: WriteO
 
 /** The spaces the contract tests use; a harness declares them when it opens a store. */
 export const contractSpaces: readonly Space[] = Object.freeze([
-	{ name: "contract", guarantees: [] },
-	{ name: "contract-replicated", guarantees: ["replicated"] },
-	{ name: "contract-confirmed", guarantees: ["replicated", "confirmed-reads"] },
+	{ name: "contract", guarantees: [], subjectData: "none" },
+	{ name: "contract-replicated", guarantees: ["replicated"], subjectData: "none" },
+	{
+		name: "contract-confirmed",
+		guarantees: ["replicated", "confirmed-reads"],
+		subjectData: "none",
+	},
 	// The guarantees of the first, so a batch across spaces can join the two.
-	{ name: "contract-twin", guarantees: [] },
+	{ name: "contract-twin", guarantees: [], subjectData: "none" },
 	// Of subjects' data, the guarantees of the first: a change to it carries the subject writer.
 	{ name: "contract-subjects", guarantees: [], subjectData: "online-indexed" },
 ]);

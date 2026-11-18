@@ -20,11 +20,11 @@ export interface UpkeepHarness {
 	holds?(process: UpkeepProcess, key: Key): Promise<boolean>;
 }
 
-/** The spaces the upkeep contract test declares: holding no subject's data, holding some, and undeclared. */
+/** The spaces the upkeep contract test declares: holding no subject's data, holding some the subject writer guards, and holding some it does not. */
 export const upkeepSpaces: readonly Space[] = Object.freeze([
 	{ name: "upkeep", guarantees: [], subjectData: "none" },
 	{ name: "upkeep-held", guarantees: [], subjectData: "online-indexed" },
-	{ name: "upkeep-plain", guarantees: [] },
+	{ name: "upkeep-plain", guarantees: [], subjectData: "pseudonymous" },
 ]);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

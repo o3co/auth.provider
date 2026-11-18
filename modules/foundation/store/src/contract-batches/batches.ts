@@ -88,7 +88,7 @@ export function batchesContract(harness: StoreHarness, kit: ContractKit): void {
 			).rejects.toThrow();
 			const k = fresh()("a");
 			await expect(batchAcross([], [put(k), put({ ...k })])).rejects.toThrow();
-			const undeclared = { name: "nowhere", guarantees: [] } as Space;
+			const undeclared: Space = { name: "nowhere", guarantees: [], subjectData: "none" };
 			await expect(
 				batchAcross([], [put(fresh()("a")), put(fresh(undeclared)("b"))]),
 			).rejects.toThrow();

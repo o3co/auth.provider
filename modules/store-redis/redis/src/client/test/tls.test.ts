@@ -5,8 +5,8 @@ import { heldToFloor, tlsOptions } from "@mod/tls-options";
 import { type Offer, peerOptions, testTlsOptions } from "@mod/tls-options/testing";
 import { Redis } from "ioredis";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
-import { clientDebugs, clientOptions, inTheClear } from "../src/client/client.ts";
-import redisModule from "../src/module.ts";
+import redisModule from "../../module.ts";
+import { clientDebugs, clientOptions, inTheClear } from "../client.ts";
 
 const offers: readonly Offer[] = ["tls1.1", "static-rsa", "cbc", "ecdhe-aead", "tls1.3"];
 const settings = (url: string) => ({

@@ -8,7 +8,7 @@ import { contractSpaces, type UpkeepProcess, upkeepContract } from "../../testin
 const clock = { now: () => Date.now() };
 const never = { expiry: { kind: "never" } } as const;
 const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
-	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable"] })),
+	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable"], subjectData: "none" })),
 ]);
 
 /** The data each process of the upkeep contract opened, so another opens the same. */
@@ -46,7 +46,7 @@ it("provides the store and its upkeep from one process, whose own maintenance le
 	const { epoch } = await app.get(storeUpkeep).enterMaintenance();
 	expect((await app.get(storeControl).control()).epoch).toBe(epoch);
 	const key = {
-		space: { name: "kept", guarantees: ["durable"] },
+		space: { name: "kept", guarantees: ["durable"], subjectData: "none" },
 		partition: "p",
 		name: "k",
 	} as const;

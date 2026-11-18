@@ -57,15 +57,15 @@ export type WriterHeld = Extract<
 	"online-indexed" | "online-keyed" | "bounded" | "internal"
 >;
 
-/** The space holds no subject's data; any other category, or none declared, may hold some. */
+/** The space holds no subject's data; any other category may hold some. */
 export const noSubjectData = "none" satisfies SubjectData;
 
 /** A namespace a module declares, with the guarantees its data needs; only declared ones are accepted. */
 export interface Space {
 	readonly name: string;
 	readonly guarantees: readonly Guarantee[];
-	/** What it holds of a subject's data. Erasure's word, carried on the declaration for erasure to read, and for store to ask the subject writer of a change. */
-	readonly subjectData?: SubjectData;
+	/** What it holds of a subject's data, named by every declaration (one without it refuses the boot). Erasure's word, carried on the declaration for erasure to read, and for store to ask the subject writer of a change. */
+	readonly subjectData: SubjectData;
 	/** The eraser that erases it, by its key, for erasure to find. */
 	readonly erasedBy?: string;
 	/** For a bounded space: the longest a record lives from its creation, in ms. */
