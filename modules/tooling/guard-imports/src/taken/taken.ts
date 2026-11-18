@@ -195,8 +195,6 @@ function handedOn(facts: FileFacts, from: string): string[] {
 	return [...new Set(exported.filter((name) => name !== undefined))];
 }
 
-/** Whether a `takenBy` key names an entry of the owner (`./name`) rather than a contract. */
-const isEntry = (key: string) => key.startsWith(".");
 /** Whether a source file exports a type: a type or an interface, a type re-exported, `export *` or `export * as`. */
 function exportsType(path: string): boolean {
 	return parse(path).statements.some((statement) => {
@@ -271,12 +269,17 @@ export function takenByRules(s: Scope) {
 		}
 		const inCode = takenInCode(s, owner);
 		const allowed = new Map<string, readonly string[]>();
+		// Which keys name an entry, and which of those the owner keeps, is the scope's reading alone.
 		const entries = s.takenEntries(owner);
+		const notKept = new Map(entries.notKept.map(({ key, why }) => [key, why]));
 		for (const [name, takers] of Object.entries(declared)) {
-			if (isEntry(name)) {
-				const why = entries.notKept.find(({ key }) => key === name)?.why;
-				if (why !== undefined) s.report(rule, owner.name, `${name}: ${why}`);
-				else if (exportsType(entryFile(owner, name))) {
+			const why = notKept.get(name);
+			if (why !== undefined) {
+				s.report(rule, owner.name, `${name}: ${why}`);
+				continue;
+			}
+			if (entries.kept.includes(name)) {
+				if (exportsType(entryFile(owner, name))) {
 					s.report(
 						rule,
 						owner.name,

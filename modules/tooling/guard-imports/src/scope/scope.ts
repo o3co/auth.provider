@@ -141,7 +141,7 @@ export function scopeOf<B extends Rules>(
 
 /** Why an entry named in `takenBy` is none the package keeps; nothing where it keeps it. */
 function whyNotKept(p: Pkg, key: string, takers: unknown, standard: readonly string[]) {
-	if (standard.includes(key)) return "a reserved entry is kept for no taker";
+	if (standard.includes(key)) return "a standard entry is kept for no taker";
 	if (!keptKey.test(key)) return "an entry kept is one plain segment, ./name";
 	const named = Array.isArray(takers) && takers.every((taker) => typeof taker === "string");
 	if (!named) return "takenBy names packages as a list of names";

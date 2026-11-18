@@ -181,8 +181,8 @@ it("G31 keeps an entry only where its key is one plain segment, not standard, na
 	const given = { ...budget, standardEntries: [".", "./ok"] };
 	const standard = scopeOf([owner, takerPkg], given, () => {}).takenEntries(owner);
 	expect(standard.notKept.slice(0, 2)).toEqual([
-		{ key: "./ok", why: "a reserved entry is kept for no taker" },
-		{ key: ".", why: "a reserved entry is kept for no taker" },
+		{ key: "./ok", why: "a standard entry is kept for no taker" },
+		{ key: ".", why: "a standard entry is kept for no taker" },
 	]);
 	expect(standard.kept).toContain("./testing");
 	// G31 reports each key not kept with the scope's reason, and refuses a kept entry exporting a type.
@@ -191,8 +191,8 @@ it("G31 keeps an entry only where its key is one plain segment, not standard, na
 		.map((v) => `${v.where} ${v.detail}`);
 	expect(reported).toEqual(
 		[
-			".: a reserved entry is kept for no taker",
-			"./testing: a reserved entry is kept for no taker",
+			".: a standard entry is kept for no taker",
+			"./testing: a standard entry is kept for no taker",
 			"./a/b: an entry kept is one plain segment, ./name",
 			"./Upper: an entry kept is one plain segment, ./name",
 			"./none: an entry kept names at least one taker",
