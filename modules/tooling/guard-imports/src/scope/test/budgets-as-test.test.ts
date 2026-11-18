@@ -90,3 +90,19 @@ it("reads a file outside the graph by its name alone, never throwing", () => {
 		testCode(p, ["templates/entry.ts.template", "dist/bundle.bundled.mjs", "missing.ts"]),
 	).toEqual([]);
 });
+
+it("follows from `./testing` the imports that load or take types, never a resolve, which leaves a file it only names shipped", () => {
+	const named = {
+		...suite,
+		"src/testing.ts": `${suite["src/testing.ts"]}export const where = import.meta.resolve("./script.ts");\nimport type { Kind } from "./kinds.ts";\nexport const k: Kind = 1;\n`,
+		"src/script.ts": "export const run = 1;\n",
+		"src/kinds.ts": "export type Kind = number;\n",
+	};
+	const p = pkg("@bt/named", named, {
+		exports: { ".": "./src/contract.ts", "./testing": "./src/testing.ts" },
+	});
+	const read = testCode(p, Object.keys(named));
+	expect(read).not.toContain("src/script.ts");
+	expect(read).toContain("src/kinds.ts");
+	expect(read).toContain("src/helper.ts");
+});

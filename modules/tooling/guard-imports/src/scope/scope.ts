@@ -1,5 +1,11 @@
 import { join, relative, sep } from "node:path";
-import { type FileFacts, type LexicalAnalysis, lexicalAnalysis, realOf } from "../facts/facts.ts";
+import {
+	type Edge,
+	type FileFacts,
+	type LexicalAnalysis,
+	lexicalAnalysis,
+	realOf,
+} from "../facts/facts.ts";
 import type { Pkg } from "../workspace.ts";
 
 /** The kinds' order and roles, in the words the caller gives them. */
@@ -142,15 +148,22 @@ function exportFiles(value: unknown): string[] {
 	return Object.values(value).flatMap(exportFiles);
 }
 
+/** Whether an edge loads its target or takes types from it: every edge but one that only names a file (a resolve). */
+const loadsOrTypes = (edge: Edge) =>
+	edge.loads ||
+	edge.form === "import-type" ||
+	(edge.bindings.length > 0 && edge.bindings.every((binding) => binding.typeOnly));
+
 /**
- * The package's own sources its imports reach from `roots` by any edge (a value, a type, a dynamic
- * import, a re-export), each by its path in the package; and whether any of them holds an import
- * the graph cannot resolve (`facts`' resolve tells why).
+ * The package's own sources its imports reach from `roots` by the edges `follows` takes, each by its
+ * path in the package; and whether any of them holds an import the graph cannot resolve (`facts`'
+ * resolve tells why).
  */
 function reached(
 	s: Scope,
 	p: Pkg,
 	roots: readonly string[],
+	follows: (edge: Edge) => boolean,
 ): { files: Set<string>; unresolved: boolean } {
 	const byReal = new Map(s.sources(p).map((file) => [realOf(join(p.dir, file)), file]));
 	const known = new Set(byReal.values());
@@ -161,6 +174,7 @@ function reached(
 		if (files.has(file)) continue;
 		files.add(file);
 		for (const edge of s.factsOf(p, file).edges) {
+			if (!follows(edge)) continue;
 			if (edge.target.kind === "unresolved") unresolved = true;
 			const to = edge.target.kind === "file" ? byReal.get(edge.target.path) : undefined;
 			if (to !== undefined && !files.has(to)) next.push(to);
@@ -172,10 +186,11 @@ function reached(
 const testOnlyBy = new WeakMap<Scope, Map<string, ReadonlySet<string>>>();
 
 /**
- * The files a package's `./testing` reaches and nothing else in it does, by any edge: no other
- * export, and no file not named a test that `./testing` does not reach. None where the shipped files
- * hold an import the graph cannot resolve, or `./testing` is conditional, failing closed. Read once a
- * scope, from the import graph alone: no path or name decides it.
+ * The files a package's `./testing` reaches and nothing else in it does: no other export, and no file
+ * not named a test that `./testing` does not reach. `./testing` is walked by the edges that load or
+ * take types, the shipped roots by every edge, a resolve too: either way a file falls to shipped.
+ * None where the shipped files hold an import the graph cannot resolve, or `./testing` is
+ * conditional, failing closed. Read once a scope; beyond a file named as a test, no path decides it.
  */
 function testOnlyOf(s: Scope, p: Pkg): ReadonlySet<string> {
 	const byPackage = testOnlyBy.get(s) ?? new Map<string, ReadonlySet<string>>();
@@ -187,12 +202,13 @@ function testOnlyOf(s: Scope, p: Pkg): ReadonlySet<string> {
 	// A conditional `./testing` names no one root: the package has no test root, failing closed.
 	const testing =
 		typeof testingRoot === "string"
-			? reached(s, p, exportFiles(testingRoot)).files
+			? reached(s, p, exportFiles(testingRoot), loadsOrTypes).files
 			: new Set<string>();
 	// Shipped: every other export, and every file not named a test that `./testing` does not reach.
 	const others = Object.entries(exports).filter(([key]) => key !== "./testing");
 	const loose = s.sources(p).filter((file) => !s.isTest(file) && !testing.has(file));
-	const shipped = reached(s, p, [...others.flatMap(([, value]) => exportFiles(value)), ...loose]);
+	const roots = [...others.flatMap(([, value]) => exportFiles(value)), ...loose];
+	const shipped = reached(s, p, roots, () => true);
 	const testOnly = shipped.unresolved
 		? new Set<string>()
 		: new Set([...testing].filter((file) => !shipped.files.has(file)));
@@ -202,8 +218,9 @@ function testOnlyOf(s: Scope, p: Pkg): ReadonlySet<string> {
 
 /**
  * Test code for the budgets and for the rules on the clock, randomness, network, audit recording and
- * owned properties: a file named as a test, or one its package's `./testing` reaches by any import and
- * nothing else in the package does (a published contract test suite, its internal modules among it).
+ * owned properties: a file named as a test, or one its package's `./testing` reaches by an import that
+ * loads or takes types and nothing else in the package does (a published contract test suite, its
+ * internal modules among it).
  * Every other file is shipped, as is every file of a package whose shipped files hold an import the
  * graph cannot resolve. A file outside the graph (a template, a bundle) is read by its name alone.
  */
