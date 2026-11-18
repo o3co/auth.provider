@@ -15,7 +15,7 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
 
 ## Invariants
 - One control record and one ledger per store's data, kept apart from every space, so no key of a space reaches them.
-- A process takes the control record's epoch as it starts. Once the record's epoch is another, each change the process makes, through `store` or here, is unavailable and writes nothing: it neither replays a kept answer nor removes what expired. Reads still answer.
+- A process takes the control record's epoch as it starts. Once the record's epoch is another, each change the process makes, through `store` or here, is unavailable and writes nothing: it neither replays a kept answer nor removes what expired. Reads still answer. A read never removes anything, for any process: what expired is removed by a change or by `sweep`, each under both fences, or by the server itself where it expires keys on its own.
 - A process is refused at start (kernel's `BuildRefused`), judged on the same read of the record it takes the epoch from:
   - under the maintenance key, unless it may build under it; this refusal first, where both apply;
   - without a space `requires` names, unless it may build under the key and is under it; the refusal names no space, and the operator reads `requires` from the control record (`storeControl`);

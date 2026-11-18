@@ -198,11 +198,17 @@ export function memoryProcess(
 		for (const [k, v] of answers) if (v.until <= now) answers.delete(k);
 		for (const [k, v] of counters) if (v.resetAt <= now) counters.delete(k);
 	};
+	/** The value held at `key` while it lives, removing it once expired: for a change, which is fenced. */
 	const current = (key: Key, now: number) => {
 		const held = values.get(id(key));
 		if (live(held, now)) return held;
 		values.delete(id(key));
 		return undefined;
+	};
+	/** The value held at `key` while it lives, for a read: a read changes nothing, an expired value left held. */
+	const seen = (key: Key, now: number) => {
+		const held = values.get(id(key));
+		return live(held, now) ? held : undefined;
 	};
 	/**
 	 * A batch at `now`, as one: every condition checked first, the first not met answered by its
@@ -382,14 +388,14 @@ export function memoryProcess(
 	const unchecked: Store = {
 		get: async (key) => {
 			const now = clock.now();
-			const held = current(key, now);
+			const held = seen(key, now);
 			return { entry: held ? entryOf(held) : null, now };
 		},
 		getMany: async (keys) => {
 			const now = clock.now();
 			return deepFreeze(
 				keys.map((key) => {
-					const held = current(key, now);
+					const held = seen(key, now);
 					return { entry: held ? entryOf(held) : null, now };
 				}),
 			);
