@@ -1,3 +1,4 @@
+import { BuildRefused } from "@mod/kernel";
 import type {
 	BatchWrite,
 	Condition,
@@ -233,18 +234,58 @@ const guarantees: readonly Guarantee[] = [
 	"confirmed-reads",
 ];
 
-/** The declared spaces by name, each declaration's own fields checked for their shape alone. */
+/**
+ * Refuses the boot over a malformed declaration (kernel's `BuildRefused`), naming its space; the
+ * reason is store's own fixed text, never what the declaration holds. Port input is a `TypeError`.
+ */
+function refusedDeclaration(space: unknown, reason: string): never {
+	const named =
+		typeof space === "object" && space !== null
+			? Object.getOwnPropertyDescriptor(space, "name")?.value
+			: undefined;
+	let refused: BuildRefused;
+	try {
+		// Kernel bounds a `where` (one printable line of 1 to 200 characters); store bounds a name otherwise.
+		refused = new BuildRefused(typeof named === "string" ? named : "store.declaration", reason);
+	} catch {
+		refused = new BuildRefused("store.declaration", reason);
+	}
+	throw refused;
+}
+
+/** Whether `check` takes `value`, its `TypeError` read as no. */
+const takes = (check: () => unknown) => {
+	try {
+		check();
+		return true;
+	} catch {
+		return false;
+	}
+};
+
+/** The declared spaces by name, each declaration's own fields checked for their shape alone; a malformed one refuses the boot. */
 function declaredSpaces(declared: readonly Space[]): ReadonlyMap<string, Space> {
 	for (const space of declared) {
-		const read = fields("space", space, spaceFields);
-		text("space", read.name);
-		if (read.subjectData === undefined) fail(`space ${read.name} declares no subjectData`);
+		let read: Record<string, unknown> = {};
+		const plain = takes(() => {
+			read = fields("space", space, spaceFields);
+			text("space", read.name);
+		});
+		if (!plain) {
+			refusedDeclaration(
+				space,
+				"a space is declared as a plain object of its known fields, named by a well-formed string of 1 to 512 characters",
+			);
+		}
+		if (read.subjectData === undefined) refusedDeclaration(space, "declares no subjectData");
 		if (typeof read.subjectData !== "string" || !Object.hasOwn(subjectDataKinds, read.subjectData))
-			fail(`space ${read.name} declares an unknown subjectData`);
-		if (read.erasedBy !== undefined) text("erasedBy", read.erasedBy);
-		if (read.boundedMs !== undefined) whole("boundedMs", read.boundedMs, 1);
+			refusedDeclaration(space, "declares an unknown subjectData");
+		if (read.erasedBy !== undefined && !takes(() => text("erasedBy", read.erasedBy)))
+			refusedDeclaration(space, "declares an erasedBy that is no well-formed name");
+		if (read.boundedMs !== undefined && !takes(() => whole("boundedMs", read.boundedMs, 1)))
+			refusedDeclaration(space, "declares a boundedMs that is no whole number of ms of 1 or more");
 		if (read.requiredOnceErasing !== undefined && typeof read.requiredOnceErasing !== "boolean")
-			fail("requiredOnceErasing must be a boolean");
+			refusedDeclaration(space, "declares a requiredOnceErasing that is no boolean");
 	}
 	return new Map(declared.map((space) => [space.name, space]));
 }

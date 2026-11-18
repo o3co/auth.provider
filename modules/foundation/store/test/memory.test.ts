@@ -192,10 +192,11 @@ it("warns at every start that boots durable or replicated spaces on memory, nami
 	expect(await warned()).toEqual([]);
 });
 
-it("refuses the boot over a space declaring no subjectData, naming it", async () => {
-	const owner = defineModule({ name: "owner", replicaSafe: true, takes: [] }, (m) => [
-		m.contribute(spaces).by(() => ({ name: "bare", guarantees: [] }) as unknown as Space),
-	]);
+/** Why the memory store refuses a boot over the declared spaces given, as kernel records it. */
+async function refusalsOver(declared: readonly unknown[]) {
+	const owner = defineModule({ name: "owner", replicaSafe: true, takes: [] }, (m) =>
+		declared.map((space) => m.contribute(spaces).by(() => space as Space)),
+	);
 	const refused = await assemble({
 		modules: [storeModule, owner],
 		config: { ...kernelConfig(), ...storeConfig() },
@@ -205,5 +206,20 @@ it("refuses the boot over a space declaring no subjectData, naming it", async ()
 		(error: unknown) => error,
 	);
 	expect(refused).toBeInstanceOf(BootRefused);
-	expect(JSON.stringify((refused as BootRefused).refusals)).toMatch(/bare declares no subjectData/);
+	return (refused as BootRefused).refusals;
+}
+
+it("refuses the boot over a malformed declaration, naming its space, with store's own reason", async () => {
+	expect(await refusalsOver([{ name: "bare", guarantees: [] }])).toEqual([
+		{ where: "bare", reason: "declares no subjectData" },
+	]);
+	expect(await refusalsOver([{ name: "odd", guarantees: [], subjectData: "someday" }])).toEqual([
+		{ where: "odd", reason: "declares an unknown subjectData" },
+	]);
+});
+
+it("names the space where kernel takes its name, and store.declaration where it does not, never the name in the reason", async () => {
+	const unprintable = "bell\u0007";
+	const [refusal] = await refusalsOver([{ name: unprintable, guarantees: [] }]);
+	expect(refusal).toEqual({ where: "store.declaration", reason: "declares no subjectData" });
 });
