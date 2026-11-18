@@ -1,5 +1,14 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, stat, truncate, unlink, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	rmdir,
+	stat,
+	truncate,
+	unlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ErasureJournal } from "@mod/erasure-journal";
@@ -188,4 +197,38 @@ it("takes no append under a hold once its release began, finishing those it took
 	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
 	expect(await journal.begun("b", "o")).toEqual({ number: 2 });
 	expect((await journal.list()) as unknown[]).toHaveLength(2);
+});
+
+it("throws unavailable where the medium fails a release, keeping the lock, and releases when made again", async () => {
+	const path = await fresh();
+	let failures = 1;
+	const files: JournalFiles = {
+		...nodeFiles,
+		lock: async (p, holder) => {
+			const release = await nodeFiles.lock(p, holder);
+			return async () => {
+				if (failures-- > 0) throw Object.assign(new Error("i/o error"), { code: "EIO" });
+				return release();
+			};
+		},
+	};
+	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
+	const held = await journal.hold();
+	if (held.kind !== "held") throw new Error("not held");
+	await expect(held.release()).rejects.toMatchObject({ name: "Unavailable" });
+	await expect(stat(`${path}.lock`)).resolves.toBeDefined();
+	await held.release();
+	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("finds a lock already gone done, and throws where the lock cannot be read", async () => {
+	const path = await fresh();
+	const gone = await nodeFiles.lock(path, "one");
+	await unlink(`${path}.lock`);
+	await gone();
+	const unread = await nodeFiles.lock(path, "two");
+	await unlink(`${path}.lock`);
+	await mkdir(`${path}.lock`);
+	await expect(unread()).rejects.toMatchObject({ code: "EISDIR" });
+	await rmdir(`${path}.lock`);
 });

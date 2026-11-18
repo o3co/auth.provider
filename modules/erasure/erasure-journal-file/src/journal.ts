@@ -168,15 +168,22 @@ export function journalFileWith(parts: {
 			const { release } = lock;
 			const mine = { queue: Promise.resolve() as Promise<unknown>, closing: false };
 			holding = mine;
+			let released = false;
 			return {
 				kind: "held",
+				// Made again where the medium failed it: the lock stays until a release removes it.
 				release: async () => {
-					if (mine.closing) return;
+					if (released) return;
 					// At once, before any wait: no append joins the hold from here, so the queue is final.
 					mine.closing = true;
 					await mine.queue;
 					if (holding === mine) holding = undefined;
-					await release();
+					try {
+						await release();
+					} catch {
+						throw new Unavailable(`erasure-journal (its lock ${path}.lock was not released)`);
+					}
+					released = true;
 				},
 			};
 		},

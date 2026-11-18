@@ -13,7 +13,8 @@ export interface JournalFiles {
 	/**
 	 * Takes the file's lock, a file beside it holding `holder`; one held refuses with `code` `EEXIST`
 	 * and the holder it records. Answers its release, which removes the lock only while it still
-	 * records `holder`: a read, then a removal, not one atomic step.
+	 * records `holder`: a read, then a removal, not one atomic step. A release finding no lock is
+	 * done; one the medium fails throws, and can be made again.
 	 */
 	lock(path: string, holder: string): Promise<() => Promise<void>>;
 }
@@ -73,10 +74,21 @@ export const nodeFiles: JournalFiles = {
 		} finally {
 			await held.close();
 		}
+		const gone = (error: unknown) => (error as { code?: unknown }).code === "ENOENT";
 		return async () => {
+			let recorded: string;
+			try {
+				recorded = await readFile(lockPath, "utf8");
+			} catch (error) {
+				// Gone already: nothing to release. Any other failure is the caller's to know.
+				if (gone(error)) return;
+				throw error;
+			}
 			// Not this holder's any more (the operator removed it and another took it): left in place.
-			const recorded = await readFile(lockPath, "utf8").catch(() => undefined);
-			if (recorded === holder) await unlink(lockPath);
+			if (recorded !== holder) return;
+			await unlink(lockPath).catch((error: unknown) => {
+				if (!gone(error)) throw error;
+			});
 		};
 	},
 };
