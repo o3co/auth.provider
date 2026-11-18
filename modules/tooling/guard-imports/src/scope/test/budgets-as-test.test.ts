@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
-import { budgetsAsTest, scopeOf } from "../src/scope/scope.ts";
-import type { Pkg } from "../src/workspace.ts";
-import { budget, pkg } from "./workspace.ts";
+import { budget, pkg } from "../../../test/workspace.ts";
+import type { Pkg } from "../../workspace.ts";
+import { budgetsAsTest, scopeOf } from "../scope.ts";
 
 /** Each of a package's files read as test code, by the scope of the packages given. */
 const testCode = (p: Pkg, files: readonly string[]) => {
