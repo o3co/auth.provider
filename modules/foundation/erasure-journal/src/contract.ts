@@ -26,10 +26,18 @@ export interface JournalEntry {
 }
 
 /**
+ * The journal held for one process, released once (`held`); or held already by another, named as
+ * the medium records its holder (`busy`): text for the operator, never parsed and never judged live.
+ */
+export type JournalHold =
+	| { readonly kind: "held"; release(): Promise<void> }
+	| { readonly kind: "busy"; readonly holder: string };
+
+/**
  * The one record of account erasures for a deployment, appended to only. Records are numbered
  * from 1, each one more than the last; an answer to `begun` or `finished` means the record is
- * durable. Every call answers `Unusable` where the content cannot be relied on, and throws
- * Unavailable where the medium fails.
+ * durable. Every call but `hold` answers `Unusable` where the content cannot be relied on; every
+ * call throws Unavailable where the medium fails.
  */
 export interface ErasureJournal {
 	/** Creates the journal once, its header holding a new random id. */
@@ -43,6 +51,14 @@ export interface ErasureJournal {
 	finished(subject: string): Promise<{ readonly number: number } | Unusable>;
 	/** Every subject whose erasure began, once each, in the order they began. */
 	list(): Promise<readonly JournalEntry[] | Unusable>;
+	/**
+	 * Holds the journal for this process until released, whatever its content (it holds before
+	 * `create`). While held, this journal's appends are made under the hold; an append made outside
+	 * it throws Unavailable. A held journal answers `busy`, an answer and never Unavailable. A hold is
+	 * never broken on a guess (a pid, a time): one whose holder died stays until the medium or the
+	 * operator releases it. Optional in this release, then required.
+	 */
+	hold?(): Promise<JournalHold>;
 }
 
 export const erasureJournal = contract<ErasureJournal>("erasure-journal");

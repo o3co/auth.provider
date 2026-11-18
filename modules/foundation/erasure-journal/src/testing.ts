@@ -1,6 +1,6 @@
 import { Unavailable } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
-import type { ErasureJournal } from "./contract.ts";
+import type { ErasureJournal, JournalHold } from "./contract.ts";
 
 export interface JournalHarness {
 	/** A journal over a fresh place: not created yet. */
@@ -86,6 +86,28 @@ export function journalContract(name: string, harness: JournalHarness): void {
 			expect(await later.header()).toEqual(torn);
 			expect(await later.list()).toEqual(torn);
 			expect(await later.begun("carol", "operator")).toEqual(torn);
+		});
+
+		it("holds for one process whatever it holds, appending under the hold, and answers busy, naming the holder, to another", async (context) => {
+			const journal = await harness.open();
+			if (!journal.hold) return context.skip();
+			// Held before it is created: the hold does not read the journal.
+			const held = await journal.hold();
+			expect(held.kind).toBe("held");
+			const other = await harness.reopen(journal);
+			const busy = (await other.hold?.()) as JournalHold;
+			expect(busy.kind).toBe("busy");
+			if (busy.kind === "busy") expect(busy.holder).not.toBe("");
+			// The holder appends under its hold; an append made outside it is unavailable.
+			expect((await journal.create()).kind).toBe("created");
+			expect(await journal.begun("alice", "operator")).toEqual({ number: 1 });
+			expect(await journal.begun("bob", "operator")).toEqual({ number: 2 });
+			await expect(other.begun("carol", "operator")).rejects.toBeInstanceOf(Unavailable);
+			if (held.kind === "held") await held.release();
+			const next = (await other.hold?.()) as JournalHold;
+			expect(next.kind).toBe("held");
+			expect(await other.begun("carol", "operator")).toEqual({ number: 3 });
+			if (next.kind === "held") await next.release();
 		});
 
 		it("throws unavailable where the medium fails a write, appending nothing", async () => {
