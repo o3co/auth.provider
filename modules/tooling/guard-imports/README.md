@@ -32,7 +32,7 @@
   - `surfacesOf` (packages, entry, `.` by default → each one's surface at that entry).
 - `importRules` (scope, surfaces): every rule above, reported through the scope; `importViolations` (packages, rules → the findings).
 - The readers the other checks build on: `parse`, `packageOf`, `importsOf`, `importedNames`; `budgetsAsTest`, whether a file counts as a test (internal module `scope`).
-- `lexicalAnalysis` and the facts' types (`FileFacts`, `Edge`, …): the `facts` card's; `Kinds`, `Rules`, `Scope`: `scope`'s; `propertyDeclarations`: `owned-property`'s.
+- `lexicalAnalysis` and the facts' types (`FileFacts`, `Edge`, …): the `facts` card's; `Kinds`, `Rules`, `Scope`, `TakenEntries`: `scope`'s; `propertyDeclarations`: `owned-property`'s.
 
 ## Invariants
 - Checks are derived from the repository's current state. Nothing is enumerated, and there is no place to write exceptions.

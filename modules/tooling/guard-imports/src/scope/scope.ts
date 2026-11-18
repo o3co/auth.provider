@@ -37,6 +37,14 @@ export interface Rules extends Kinds {
 	readonly testFile: string;
 	/** How many packages must state a property they hold to declaration (G32); none where unset. */
 	readonly declaredProperties?: number;
+	/** The entries every package may have, which none keeps for named takers (G5's). */
+	readonly standardEntries?: readonly string[];
+}
+
+/** The keys naming an entry in a package's `takenBy`: those it keeps for named takers, and each other with why it is not. */
+export interface TakenEntries {
+	readonly kept: readonly string[];
+	readonly notKept: readonly { readonly key: string; readonly why: string }[];
 }
 
 /** What every rule reads, and where it reports. */
@@ -53,11 +61,13 @@ export interface Scope<B extends Rules = Rules> {
 	 */
 	readonly ownerServed: (p: Pkg) => string | undefined;
 	/**
-	 * The entries a package keeps for named takers: each `./name` key of its manifest's `takenBy`
-	 * that is one plain segment, none of `.`, `./testing`, `./module` and `./audit-events`, and names at
-	 * least one taker. Any other key is left out, unreported, for the rule reading it to refuse.
+	 * The keys of a package's `takenBy` naming an entry (`.`, `./…`): kept where one plain segment
+	 * (`./name`), none of the standard entries, naming its takers as a non-empty list of names, and
+	 * exported as one file; any other key with why not, unreported, for the rule reading it to refuse.
 	 */
-	readonly keptEntries: (p: Pkg) => string[];
+	readonly takenEntries: (p: Pkg) => TakenEntries;
+	/** The kept entries of `takenEntries`. */
+	readonly keptEntries: (p: Pkg) => readonly string[];
 	/** A kind's place in the kind order; -1 for none or an unknown one. */
 	readonly level: (p: Pkg) => number;
 	readonly isCommon: (p: Pkg) => boolean;
@@ -71,7 +81,7 @@ export interface Scope<B extends Rules = Rules> {
 	readonly ownerOf: (path: string) => Pkg | undefined;
 }
 
-/** The entries every package may have, which none keeps for named takers. */
+/** The entries every package may have, where the caller gives none (`Rules.standardEntries`). */
 export const reservedEntries = [".", "./testing", "./module", "./audit-events"];
 const keptKey = /^\.\/[a-z][a-z0-9-]*$/;
 
@@ -104,15 +114,8 @@ export function scopeOf<B extends Rules>(
 			if ((adapts === undefined) === (replaces === undefined)) return undefined;
 			return String(replaces ?? adapts);
 		},
-		keptEntries: (p) => {
-			const declared = p.manifest.takenBy;
-			if (typeof declared !== "object" || declared === null || Array.isArray(declared)) return [];
-			return Object.entries(declared)
-				.filter(([key]) => keptKey.test(key) && !reservedEntries.includes(key))
-				.filter(([, takers]) => Array.isArray(takers) && takers.length > 0)
-				.filter(([, takers]) => (takers as unknown[]).every((t) => typeof t === "string"))
-				.map(([key]) => key);
-		},
+		takenEntries: (p) => takenEntriesOf(p, budget.standardEntries ?? reservedEntries),
+		keptEntries: (p) => takenEntriesOf(p, budget.standardEntries ?? reservedEntries).kept,
 		level: (p) => budget.kindOrder.findIndex((kinds) => kinds.includes(kindOf(p))),
 		isCommon: (p) => kindOf(p) === budget.commonKind,
 		isTest: (file) => conventional.test(file),
@@ -139,6 +142,35 @@ export function scopeOf<B extends Rules>(
 			})?.p;
 		},
 	};
+}
+
+/** Why an entry named in `takenBy` is none the package keeps; nothing where it keeps it. */
+function whyNotKept(p: Pkg, key: string, takers: unknown, standard: readonly string[]) {
+	if (standard.includes(key)) return "a reserved entry is kept for no taker";
+	if (!keptKey.test(key)) return "an entry kept is one plain segment, ./name";
+	const named = Array.isArray(takers) && takers.every((taker) => typeof taker === "string");
+	if (!named) return "takenBy names packages as a list of names";
+	if (takers.length === 0) return "an entry kept names at least one taker";
+	const file = (p.manifest.exports as Record<string, unknown> | undefined)?.[key];
+	if (file === undefined) return "no entry of that name";
+	if (typeof file !== "string") return "an entry kept is exported as one file";
+	return undefined;
+}
+
+function takenEntriesOf(p: Pkg, standard: readonly string[]): TakenEntries {
+	const declared = p.manifest.takenBy;
+	const kept: string[] = [];
+	const notKept: { key: string; why: string }[] = [];
+	if (typeof declared !== "object" || declared === null || Array.isArray(declared)) {
+		return { kept, notKept };
+	}
+	for (const [key, takers] of Object.entries(declared)) {
+		if (!key.startsWith(".")) continue;
+		const why = whyNotKept(p, key, takers, standard);
+		if (why === undefined) kept.push(key);
+		else notKept.push({ key, why });
+	}
+	return { kept, notKept };
 }
 
 /** Every file an export names, each by its path in the package: a string, or each string target of a conditional export. */

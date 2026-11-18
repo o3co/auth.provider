@@ -105,7 +105,7 @@ it("G31 holds an entry its owner's manifest declares takenBy to the packages it 
 	]);
 });
 
-it("G31 keeps an entry only where its key is one plain segment, not reserved, names a taker, is exported, and exports values alone", () => {
+it("G31 keeps an entry only where its key is one plain segment, not standard, names its takers, is exported as one file, and exports values alone", () => {
 	const files = {
 		"src/contract.ts": "export type Token = { readonly token: true };\n",
 		"src/ok.ts": "const token = Object.freeze({});\nexport { token };\nexport const other = 1;\n",
@@ -123,6 +123,8 @@ it("G31 keeps an entry only where its key is one plain segment, not reserved, na
 			`./${n}`,
 			`./src/${n === "none" || n === "Upper" ? "ok" : n}.ts`,
 		]),
+		["./odd", "./src/ok.ts"],
+		["./split", { default: "./src/ok.ts" }],
 	]);
 	const taker = ["@g31k/taker"];
 	const owner = pkg("@g31k/owner", files, {
@@ -134,6 +136,8 @@ it("G31 keeps an entry only where its key is one plain segment, not reserved, na
 			"./a/b": taker,
 			"./Upper": taker,
 			"./none": [],
+			"./odd": [1],
+			"./split": taker,
 			"./missing": taker,
 			"./typed": taker,
 			"./shaped": taker,
@@ -150,11 +154,11 @@ it("G31 keeps an entry only where its key is one plain segment, not reserved, na
 			exports: { ".": "./src/contract.ts" },
 		},
 	);
-	// The scope's reading: well-formed keys alone, nothing reported.
+	// The scope's reading, from the manifest alone, nothing reported: what is kept, and why the rest is not.
 	const said: string[] = [];
-	expect(scopeOf([owner, takerPkg], budget, (rule) => said.push(rule)).keptEntries(owner)).toEqual([
+	const read = scopeOf([owner, takerPkg], budget, (rule) => said.push(rule)).takenEntries(owner);
+	expect(read.kept).toEqual([
 		"./ok",
-		"./missing",
 		"./typed",
 		"./shaped",
 		"./again",
@@ -162,8 +166,26 @@ it("G31 keeps an entry only where its key is one plain segment, not reserved, na
 		"./star",
 		"./spaced",
 	]);
+	expect(read.notKept.map(({ key }) => key)).toEqual([
+		".",
+		"./testing",
+		"./a/b",
+		"./Upper",
+		"./none",
+		"./odd",
+		"./split",
+		"./missing",
+	]);
 	expect(said).toEqual([]);
-	// G31 refuses every other key, and each kept entry not exported or exporting a type.
+	// The standard entries are the caller's to give.
+	const given = { ...budget, standardEntries: [".", "./ok"] };
+	const standard = scopeOf([owner, takerPkg], given, () => {}).takenEntries(owner);
+	expect(standard.notKept.slice(0, 2)).toEqual([
+		{ key: "./ok", why: "a reserved entry is kept for no taker" },
+		{ key: ".", why: "a reserved entry is kept for no taker" },
+	]);
+	expect(standard.kept).toContain("./testing");
+	// G31 reports each key not kept with the scope's reason, and refuses a kept entry exporting a type.
 	const reported = check([owner, takerPkg], budget)
 		.filter((v) => v.rule.startsWith("G31"))
 		.map((v) => `${v.where} ${v.detail}`);
@@ -174,6 +196,8 @@ it("G31 keeps an entry only where its key is one plain segment, not reserved, na
 			"./a/b: an entry kept is one plain segment, ./name",
 			"./Upper: an entry kept is one plain segment, ./name",
 			"./none: an entry kept names at least one taker",
+			"./odd: takenBy names packages as a list of names",
+			"./split: an entry kept is exported as one file",
 			"./missing: no entry of that name",
 			"./typed: an entry kept exports values alone, its types on `.`",
 			"./shaped: an entry kept exports values alone, its types on `.`",

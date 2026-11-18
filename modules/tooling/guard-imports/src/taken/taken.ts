@@ -2,7 +2,7 @@ import { join } from "node:path";
 import ts from "typescript";
 import type { FileFacts } from "../facts/facts.ts";
 import { valuesTaken } from "../rules.ts";
-import { reservedEntries, type Scope } from "../scope/scope.ts";
+import type { Scope } from "../scope/scope.ts";
 import { parse } from "../source.ts";
 import type { Pkg } from "../workspace.ts";
 
@@ -175,22 +175,9 @@ function exportsType(path: string): boolean {
 	});
 }
 
-/** Why a key naming an entry is none the owner keeps, or nothing where it keeps it: the scope's reading, explained, and the entry's file. */
-function whyNotKept(s: Scope, p: Pkg, key: string): string | undefined {
-	if (!s.keptEntries(p).includes(key)) {
-		if (reservedEntries.includes(key)) return "a reserved entry is kept for no taker";
-		if (!/^\.\/[a-z][a-z0-9-]*$/.test(key)) return "an entry kept is one plain segment, ./name";
-		return "an entry kept names at least one taker";
-	}
-	const exported = p.manifest.exports;
-	const file =
-		typeof exported === "object" && exported !== null
-			? (exported as Record<string, unknown>)[key]
-			: undefined;
-	if (typeof file !== "string") return "no entry of that name";
-	if (exportsType(join(p.dir, file))) return "an entry kept exports values alone, its types on `.`";
-	return undefined;
-}
+/** The file the owner exports a kept entry from. */
+const entryFile = (p: Pkg, key: string) =>
+	join(p.dir, (p.manifest.exports as Record<string, string>)[key] as string);
 
 /**
  * G31's branch for an entry: the owner's entry `key` is loaded, in shipped code, by the packages it
@@ -239,11 +226,18 @@ export function takenByRules(s: Scope) {
 		}
 		const inCode = takenInCode(s, owner);
 		const allowed = new Map<string, readonly string[]>();
+		const entries = s.takenEntries(owner);
 		for (const [name, takers] of Object.entries(declared)) {
 			if (isEntry(name)) {
-				const why = whyNotKept(s, owner, name);
+				const why = entries.notKept.find(({ key }) => key === name)?.why;
 				if (why !== undefined) s.report(rule, owner.name, `${name}: ${why}`);
-				else entryTaken(s, rule, owner, name, takers as string[]);
+				else if (exportsType(entryFile(owner, name))) {
+					s.report(
+						rule,
+						owner.name,
+						`${name}: an entry kept exports values alone, its types on \`.\``,
+					);
+				} else entryTaken(s, rule, owner, name, takers as string[]);
 				continue;
 			}
 			if (!isStrings(takers)) {
