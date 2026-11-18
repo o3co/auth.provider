@@ -64,7 +64,7 @@ it("counts rate limits and attempts as the real module does, apart from each oth
 	expect(real?.filter((answer) => (answer as { kind: string }).kind === "limited")).toHaveLength(6);
 });
 
-it("counts a window as long as the ceiling, and refuses a longer one with a rejected TypeError, as the real module does", async () => {
+it("counts a window as long as the ceiling, and refuses a longer one or one of no length with a rejected TypeError, as the real module does", async () => {
 	const [real, standIn] = await both(async (app) => {
 		const seen: unknown[] = [];
 		for (const limit of [app.get(rateLimit), app.get(attemptLimit)]) {
@@ -77,6 +77,13 @@ it("counts a window as long as the ceiling, and refuses a longer one with a reje
 					(error: unknown) => error instanceof TypeError,
 				),
 			);
+			const noLength = limit.hit("w", "b", { limit: 1, ms: Number.NaN });
+			seen.push(
+				await noLength.then(
+					() => "counted",
+					(error: unknown) => error instanceof TypeError,
+				),
+			);
 			seen.push(await limit.hit("w", "b", { limit: 1, ms: 60_000 }));
 		}
 		return seen;
@@ -85,8 +92,10 @@ it("counts a window as long as the ceiling, and refuses a longer one with a reje
 	expect(real).toEqual([
 		{ kind: "allowed" },
 		true,
+		true,
 		{ kind: "allowed" },
 		{ kind: "allowed" },
+		true,
 		true,
 		{ kind: "allowed" },
 	]);

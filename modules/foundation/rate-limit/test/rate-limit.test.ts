@@ -557,8 +557,9 @@ describe("releasing a lockout under terms", () => {
 });
 
 const window = { limit: 2, ms: 60_000 };
-/** Routes counted by each policy under the name `test`, two to a window. */
+/** A window one ms longer than the ceiling. */
 const tooLong = { limit: 1, ms: windowCeilingMs + 1 };
+/** Routes counted by each policy under the name `test`, two to a window, and under `long`, over the ceiling. */
 const routed = defineModule({ name: "routed", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(routes).by(() => ({
 		method: "GET",
