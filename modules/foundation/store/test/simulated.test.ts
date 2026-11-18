@@ -34,6 +34,17 @@ async function open(declared: readonly Space[] = [space], clock: Runtime["clock"
 	return { simulated, s: app.get(store) };
 }
 
+it("answers a space exactly as the composition declared it, and refuses one not declared or a store not built", async () => {
+	const unbuilt = simulatedStore();
+	expect(() => unbuilt.declaredSpace("simulated")).toThrow("the simulated store is not built yet");
+	const { simulated } = await open([space, fullyConfirmed]);
+	expect(simulated.declaredSpace("confirmed")).toBe(fullyConfirmed);
+	expect(simulated.declaredSpace("simulated")).toBe(space);
+	expect(() => simulated.declaredSpace("elsewhere")).toThrow(
+		"no composed module declares the space elsewhere",
+	);
+});
+
 it("loses on failover what was applied but not confirmed, and keeps what a later write confirmed", async () => {
 	const { simulated, s } = await open();
 	simulated.loseNextReply();
