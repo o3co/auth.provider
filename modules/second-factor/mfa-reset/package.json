@@ -7,6 +7,14 @@
 	"joins": [
 		"@mod/mfa-flows"
 	],
+	"appEntries": [
+		{
+			"script": "unclaimed-factors",
+			"shape": "name-subjects",
+			"contract": "resetCandidates",
+			"member": "unclaimed"
+		}
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./module": "./src/module.ts",

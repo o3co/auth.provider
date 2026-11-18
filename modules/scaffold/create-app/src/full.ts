@@ -3,10 +3,10 @@ import { assemblyFor } from "./assembly.ts";
 import type { FullPlan } from "./contract.ts";
 
 /** Writes the full template's app; `index` is the published release's, a test's where given. */
-export async function generateFull(plan: FullPlan, index?: string): Promise<void> {
+export async function generateFull(plan: FullPlan, index?: string): Promise<readonly string[]> {
 	const add = plan.add ?? [];
 	namesPackages(add);
-	const { packages, combinations } = assemblyFor(plan, index);
+	const { packages, combinations, warnings } = assemblyFor(plan, index);
 	const modules = combinations.full(add);
 	await writeDeployment(plan.target, modules, packages, {
 		template: "full-readme.md",
@@ -18,4 +18,5 @@ export async function generateFull(plan: FullPlan, index?: string): Promise<void
 				.join("\n"),
 		},
 	});
+	return warnings;
 }

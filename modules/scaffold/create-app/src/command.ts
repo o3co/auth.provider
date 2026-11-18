@@ -153,13 +153,15 @@ export async function run(
 		};
 	}
 
+	let warnings: readonly string[];
 	try {
-		await generate(planOf(target ?? ""));
+		warnings = await generate(planOf(target ?? ""));
 	} catch (error) {
 		// A plan the workspace cannot make, told by its message alone.
 		io.err(`${(error as Error).message}\n`);
 		return 1;
 	}
+	for (const line of warnings) io.err(`${line}\n`);
 	io.out(`created ${target}\nnext: cd ${target} and follow its README.md\n`);
 	return 0;
 }

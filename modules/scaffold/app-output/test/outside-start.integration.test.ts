@@ -46,7 +46,7 @@ const published: readonly Manifest[] = [
 	{
 		name: shadow,
 		version: "1.0.0",
-		bin: { node: "./run.sh", reseal: "./run.sh" },
+		bin: { node: "./run.sh", tool: "./run.sh" },
 		peerDependencies: peers,
 	},
 	{ name: peered, version: "1.0.0", peerDependencies: { ...peers, [shadow]: "^1.0.0" } },
@@ -153,6 +153,13 @@ async function appOf(names: readonly string[]): Promise<string> {
 		}),
 		importOf: (name) => name,
 		cards: () => [],
+		// An entry the composed package declares, as any declarer's manifest makes one.
+		appEntries: () => [
+			{
+				name: "@mod/seal",
+				appEntries: [{ script: "tool", shape: "call", contract: "toolRun", member: "run" }],
+			},
+		],
 		release: () => ({
 			version: releaseVersion,
 			integrity: { [release]: servedOf(release).integrity, zod: zodIntegrity() },
@@ -174,7 +181,7 @@ async function appOf(names: readonly string[]): Promise<string> {
 		template: "pattern-readme.md",
 		fill: { name: "outside-start", use: "A test.", card: "" },
 	});
-	for (const entry of ["main", "reseal"]) {
+	for (const entry of ["main", "tool"]) {
 		expect(existsSync(join(app, "src", `${entry}.ts`))).toBe(true);
 		writeFileSync(
 			join(app, "src", `${entry}.ts`),
@@ -274,12 +281,12 @@ describe.each([
 		expect(existsSync(join(app, "node_modules", ".bin", "node"))).toBe(true);
 	});
 
-	it("has no scripts, and pnpm start and pnpm run reseal fail on it, running nothing", async () => {
+	it("has no scripts, and pnpm start and pnpm run tool fail on it, running nothing", async () => {
 		expect(JSON.parse(readFileSync(join(app, "package.json"), "utf8"))).not.toHaveProperty(
 			"scripts",
 		);
 		expect(existsSync(join(app, "server.js"))).toBe(false);
-		for (const args of [["start"], ["run", "reseal"]]) {
+		for (const args of [["start"], ["run", "tool"]]) {
 			const run = await ran(app, "pnpm", args);
 			expect(run.status, run.said).not.toBe(0);
 			expect(run.said).toContain("ERR_PNPM_NO_SCRIPT");
@@ -294,9 +301,9 @@ describe.each([
 		expect(main.said).not.toContain("SHADOW");
 		expect(main.status, main.said).toBe(0);
 		expect(main.stdout).toContain(`REAL NODE main ${appConfig}`);
-		const entry = await inShell(app, start.replace("src/main.ts", "src/reseal.ts"));
+		const entry = await inShell(app, start.replace("src/main.ts", "src/tool.ts"));
 		expect(entry.status, entry.said).toBe(0);
-		expect(entry.stdout).toContain(`REAL NODE reseal ${appConfig}`);
+		expect(entry.stdout).toContain(`REAL NODE tool ${appConfig}`);
 		expect(existsSync(markOf(app))).toBe(false);
 	});
 });
@@ -315,7 +322,7 @@ describe("the guide's commands, beside a command named node", () => {
 	it("leave what the guide says runs with .bin's command to it", async () => {
 		const app = await appOf([peered]);
 		await installedAsTheGuideSays(app);
-		for (const args of [["exec", "node", "-e", "1"], ["node", "-e", "1"], ["reseal"]]) {
+		for (const args of [["exec", "node", "-e", "1"], ["node", "-e", "1"], ["tool"]]) {
 			const run = await ran(app, "pnpm", args);
 			expect(run.stdout, args.join(" ")).toContain("SHADOW");
 		}
@@ -326,15 +333,15 @@ describe("an app beside no package outside the release", () => {
 	it("keeps its scripts, its README starts it by them, and they run", async () => {
 		const app = await appOf([]);
 		const manifest = JSON.parse(readFileSync(join(app, "package.json"), "utf8"));
-		expect(Object.keys(manifest.scripts)).toEqual(["start", "reseal"]);
+		expect(Object.keys(manifest.scripts)).toEqual(["start", "tool"]);
 		expect(stepFour(app)).toBe(`APP_CONFIG=${appConfig} pnpm start`);
 		const installed = await inShell(app, `pnpm install --no-frozen-lockfile ${own(app)}`);
 		expect(installed.status, installed.said).toBe(0);
 		const started = await inShell(app, stepFour(app));
 		expect(started.status, started.said).toBe(0);
 		expect(started.stdout).toContain(`REAL NODE main ${appConfig}`);
-		const entry = await ran(app, "pnpm", ["run", "reseal"]);
+		const entry = await ran(app, "pnpm", ["run", "tool"]);
 		expect(entry.status, entry.said).toBe(0);
-		expect(entry.stdout).toContain("REAL NODE reseal");
+		expect(entry.stdout).toContain("REAL NODE tool");
 	}, 180_000);
 });

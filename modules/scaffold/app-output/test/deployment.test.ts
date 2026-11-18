@@ -43,7 +43,7 @@ it("writes the deployment of the modules from the packages given", async () => {
 		pmOnFail: "ignore",
 	});
 	const manifest = JSON.parse(await read(target, "package.json"));
-	// The kernel and its configuration files come first, whether or not listed, and no reseal without seal.
+	// The kernel and its configuration files come first, whether or not listed, and no entry no composed package declares.
 	expect(Object.keys(manifest.dependencies)).toEqual([
 		"@mod/kernel",
 		"@mod/config-files",
@@ -123,8 +123,8 @@ it("points at the release's documents and the cards that ask of the deployment",
 
 it("checks 0.17's variables in every entry through config-files' check alone, choosing nothing itself", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
-	await writeDeployment(target, ["@mod/seal", "@mod/mfa-witnessing"], fakePackages(), readme);
-	for (const entry of ["src/main.ts", "src/reseal.ts", "src/witness-backfill.ts"]) {
+	await writeDeployment(target, ["@mod/tool", "@mod/settler"], fakePackages(), readme);
+	for (const entry of ["src/main.ts", "src/tool.ts", "src/settled.ts"]) {
 		const source = await read(target, entry);
 		expect(source, entry).toContain("await legacyVariablesCheck(source)");
 		expect(source, entry).not.toContain("unreadLegacyVariables");
@@ -134,8 +134,8 @@ it("checks 0.17's variables in every entry through config-files' check alone, ch
 
 it("tells a refused boot in its entries by the kernel's mark, never by its class", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
-	await writeDeployment(target, ["@mod/seal", "@mod/mfa-witnessing"], fakePackages(), readme);
-	for (const entry of ["src/main.ts", "src/reseal.ts", "src/witness-backfill.ts"]) {
+	await writeDeployment(target, ["@mod/tool", "@mod/settler"], fakePackages(), readme);
+	for (const entry of ["src/main.ts", "src/tool.ts", "src/settled.ts"]) {
 		const source = await read(target, entry);
 		expect(source, entry).toContain("BootRefused.is(error)");
 		expect(source, entry).not.toContain("instanceof");
@@ -158,10 +158,10 @@ function readByConf(conf: string): Record<string, string> {
 
 it("writes in each entry where its keys are written: the very keys and variables application.conf reads, a value of several lines in the local layer", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
-	await writeDeployment(target, ["@mod/http", "@mod/keys", "@mod/seal"], fakePackages(), readme);
+	await writeDeployment(target, ["@mod/http", "@mod/keys", "@mod/tool"], fakePackages(), readme);
 	const conf = readByConf(await read(target, "config/application.conf"));
 	expect(conf["keys.signing.private-key"]).toBe("KEYS_SIGNING_PRIVATE_KEY");
-	for (const entry of ["src/main.ts", "src/reseal.ts"]) {
+	for (const entry of ["src/main.ts", "src/tool.ts"]) {
 		const source = await read(target, entry);
 		const table = /const keysRead: [^=]+= (\{.*\});/.exec(source)?.[1] ?? "{}";
 		const several = /const severalLines: [^=]+= (\[.*\]);/.exec(source)?.[1] ?? "[]";
@@ -243,55 +243,48 @@ it("tells in each guide how to make a random secret, what tokens.revocation = un
 	);
 });
 
-it("adds the reseal entry when seal is composed", async () => {
+it("adds each entry a composed package declares, of each shape, and none of a package not composed", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
-	await writeDeployment(target, ["@mod/seal"], fakePackages(), readme);
-
+	await writeDeployment(
+		target,
+		["@mod/tool", "@mod/settler", "@mod/namer"],
+		fakePackages(),
+		readme,
+	);
 	const manifest = JSON.parse(await read(target, "package.json"));
-	expect(manifest.scripts.reseal).toBe("node --env-file-if-exists=.env src/reseal.ts");
-	expect(await read(target, "src/reseal.ts")).toContain('from "@o3co/x-seal"');
+	expect(manifest.scripts).toEqual({
+		start: "node --env-file-if-exists=.env src/main.ts",
+		tool: "node --env-file-if-exists=.env src/tool.ts",
+		settled: "node --env-file-if-exists=.env src/settled.ts",
+		named: "node --env-file-if-exists=.env src/named.ts",
+	});
+	expect(await read(target, "src/tool.ts")).toContain('from "@o3co/x-tool"');
+	expect(await read(target, "src/settled.ts")).toContain('import("@o3co/x-settler")');
+	expect(await read(target, "src/settled.ts")).toContain('["done", "left"]');
+	expect(await read(target, "src/named.ts")).toContain('import("@o3co/x-namer")');
+	const alone = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(alone, ["@mod/tool"], fakePackages(), readme);
+	expect(Object.keys(JSON.parse(await read(alone, "package.json")).scripts)).toEqual([
+		"start",
+		"tool",
+	]);
 });
 
-it("adds the witness-backfill entry when mfa-witnessing is composed", async () => {
+it("refuses a part's file that another writes, naming both, and writes nothing", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
-	await writeDeployment(target, ["@mod/mfa-witnessing"], fakePackages(), readme);
-
-	const manifest = JSON.parse(await read(target, "package.json"));
-	expect(manifest.scripts["witness-backfill"]).toBe(
-		"node --env-file-if-exists=.env src/witness-backfill.ts",
+	const taking = {
+		...fakePackages(),
+		appEntries: () => [
+			{
+				name: "@mod/tool",
+				appEntries: [{ script: "main", shape: "call", contract: "toolRun", member: "run" }],
+			},
+		],
+	};
+	await expect(writeDeployment(target, ["@mod/tool"], taking, readme)).rejects.toThrow(
+		"the app's entries and app-output both write src/main.ts",
 	);
-	expect(manifest.scripts.reseal).toBeUndefined();
-	expect(await read(target, "src/witness-backfill.ts")).toContain(
-		'import("@o3co/x-mfa-witnessing")',
-	);
-});
-
-it("adds the passkey-backfill entry when passkey-witnessing is composed, settling through passkeyBackfill", async () => {
-	const target = await mkdtemp(join(tmpdir(), "app-output-"));
-	await writeDeployment(target, ["@mod/passkey-witnessing"], fakePackages(), readme);
-
-	const manifest = JSON.parse(await read(target, "package.json"));
-	expect(manifest.scripts["passkey-backfill"]).toBe(
-		"node --env-file-if-exists=.env src/passkey-backfill.ts",
-	);
-	expect(manifest.scripts["witness-backfill"]).toBeUndefined();
-	const entry = await read(target, "src/passkey-backfill.ts");
-	expect(entry).toContain("{ passkeyBackfill }");
-	expect(entry).toContain('import("@o3co/x-passkey-witnessing")');
-	expect(entry).toContain('["marked", "held", "none", "pending", "inconsistent"]');
-});
-
-it("adds the unclaimed-factors entry where mfa-reset is composed, asking resetCandidates", async () => {
-	const target = await mkdtemp(join(tmpdir(), "app-output-"));
-	await writeDeployment(target, ["@mod/mfa-reset"], fakePackages(), readme);
-
-	const manifest = JSON.parse(await read(target, "package.json"));
-	expect(manifest.scripts["unclaimed-factors"]).toBe(
-		"node --env-file-if-exists=.env src/unclaimed-factors.ts",
-	);
-	const entry = await read(target, "src/unclaimed-factors.ts");
-	expect(entry).toContain("{ resetCandidates }");
-	expect(entry).toContain('import("@o3co/x-mfa-reset")');
+	expect(await readdir(target)).toEqual([]);
 });
 
 it("refuses a target that holds anything, and writes nothing", async () => {
@@ -521,26 +514,26 @@ describe.each([
 
 	it("beside a package outside, gives the command the app starts with, and writes each entry's file with no script", async () => {
 		const target = await mkdtemp(join(tmpdir(), "app-output-"));
-		await writeDeployment(target, ["@mod/seal"], fakePackages(release, [], outside), guide);
+		await writeDeployment(target, ["@mod/tool"], fakePackages(release, [], outside), guide);
 		const said = await read(target, "README.md");
 		expect(said).toContain(`4. \`${app} node --env-file-if-exists=.env src/main.ts\``);
 		expect(said).not.toContain(`${app} pnpm start`);
 		expect(said).toContain("1. Install as `## Packages outside this release` below says");
 		expect(said).not.toContain("{{");
 		expect(JSON.parse(await read(target, "package.json"))).not.toHaveProperty("scripts");
-		expect(await readdir(join(target, "src"))).toContain("reseal.ts");
+		expect(await readdir(join(target, "src"))).toContain("tool.ts");
 	});
 
 	it("beside none, keeps the app's scripts and starts it by them", async () => {
 		const target = await mkdtemp(join(tmpdir(), "app-output-"));
-		await writeDeployment(target, ["@mod/seal"], fakePackages(), guide);
+		await writeDeployment(target, ["@mod/tool"], fakePackages(), guide);
 		const said = await read(target, "README.md");
 		expect(said).toContain(`4. \`${app} pnpm start\``);
 		expect(said).toContain("1. `pnpm install`");
 		expect(said).not.toContain("{{");
 		expect(JSON.parse(await read(target, "package.json")).scripts).toEqual({
 			start: "node --env-file-if-exists=.env src/main.ts",
-			reseal: "node --env-file-if-exists=.env src/reseal.ts",
+			tool: "node --env-file-if-exists=.env src/tool.ts",
 		});
 	});
 });
@@ -615,4 +608,32 @@ it("takes a registry's credentials as a build secret, only where a scope records
 	expect(await readdir(plain)).not.toContain(".npmrc");
 	expect(await read(plain, "Dockerfile")).not.toContain("npmrc");
 	expect(await read(plain, "README.md")).not.toContain("npmrc");
+});
+
+it("writes the entries the composed packages declare, read by app-entries, and none where the caller has no declarations", async () => {
+	const tool = { script: "tool", shape: "call", contract: "toolRun", member: "run" };
+	const packages = {
+		...fakePackages(),
+		appEntries: (names: readonly string[]) =>
+			[{ name: "@mod/tool", appEntries: [tool] }].filter((d) => names.includes(d.name)),
+	};
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/tool"], packages, readme);
+	const manifest = JSON.parse(await read(target, "package.json"));
+	expect(manifest.scripts.tool).toBe("node --env-file-if-exists=.env src/tool.ts");
+	expect(await read(target, "src/tool.ts")).toContain('from "@o3co/x-tool"');
+
+	const older = await mkdtemp(join(tmpdir(), "app-output-"));
+	const { appEntries: _, ...declaringNone } = fakePackages();
+	await writeDeployment(older, ["@mod/tool"], declaringNone, readme);
+	expect(JSON.parse(await read(older, "package.json")).scripts.tool).toBeUndefined();
+
+	const misdeclared = await mkdtemp(join(tmpdir(), "app-output-"));
+	const refusing = {
+		...packages,
+		appEntries: () => [{ name: "@mod/tool", appEntries: [{ ...tool, shape: "stream" }] }],
+	};
+	await expect(writeDeployment(misdeclared, ["@mod/tool"], refusing, readme)).rejects.toThrow(
+		"@mod/tool declares appEntries that cannot be read",
+	);
 });

@@ -8,8 +8,8 @@ export async function generateListed(
 	listed: readonly string[],
 	sink: string,
 	index?: string,
-): Promise<void> {
-	const { packages, combinations } = assemblyFor(plan, index);
+): Promise<readonly string[]> {
+	const { packages, combinations, warnings } = assemblyFor(plan, index);
 	const asked = combinations.needed(listed);
 	// Without a sink, the app's log lines would go nowhere.
 	const modules = asked.includes(sink) ? asked : [...asked, sink];
@@ -17,4 +17,5 @@ export async function generateListed(
 		template: "listed-readme.md",
 		fill: { listed: listed.map((name) => `\`${name}\``).join(", ") },
 	});
+	return warnings;
 }
