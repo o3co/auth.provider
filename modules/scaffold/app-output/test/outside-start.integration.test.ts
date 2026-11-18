@@ -153,6 +153,13 @@ async function appOf(names: readonly string[]): Promise<string> {
 		}),
 		importOf: (name) => name,
 		cards: () => [],
+		// seal's own declaration of its `reseal` script, as its manifest makes it.
+		appEntries: () => [
+			{
+				name: "@mod/seal",
+				appEntries: [{ script: "reseal", shape: "call", contract: "resealRun", member: "run" }],
+			},
+		],
 		release: () => ({
 			version: releaseVersion,
 			integrity: { [release]: servedOf(release).integrity, zod: zodIntegrity() },
