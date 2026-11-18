@@ -30,7 +30,7 @@ export interface JournalEntry {
 }
 
 /**
- * The journal held by the journal `hold` was asked of, released once (`held`); or held already by
+ * The place held by the journal `hold` was asked of, released once (`held`); or held already by
  * another, named as the medium records its holder (`busy`): text for the operator, never parsed and
  * never judged live.
  */
@@ -57,11 +57,12 @@ export interface ErasureJournal {
 	/** Every subject whose erasure began, once each, in the order they began. */
 	list(): Promise<readonly JournalEntry[] | Unusable>;
 	/**
-	 * Holds the journal for this journal until released, whatever its content (it holds before
-	 * `create`); any other journal over the same place, in this process or another, answers `busy`. A
-	 * command opens one journal. While held, this journal's appends are made under the hold; an
-	 * append made outside it throws Unavailable, and a caller appends only under a hold it took. A held journal answers `busy`, an answer and never Unavailable. A hold is
-	 * never broken on a guess (a pid, a time): one whose holder died stays until the medium or the
+	 * This journal holds its place until released, whatever the place holds (it holds before
+	 * `create`); any other journal over the same place, in this process or another, answers `busy`,
+	 * an answer and never Unavailable. A command opens one journal. While held, this journal's
+	 * appends are made under the hold; another's throw Unavailable, and a caller appends only under
+	 * a hold it took. With no hold anywhere, an append is still made, under a lock of its own. A hold
+	 * is never broken on a guess (a pid, a time): one whose holder died stays until the medium or the
 	 * operator releases it.
 	 */
 	hold(): Promise<JournalHold>;

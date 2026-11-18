@@ -106,7 +106,7 @@ export function journalContract(name: string, harness: JournalHarness): void {
 			expect(await later.begun("carol", "operator")).toEqual(torn);
 		});
 
-		it("holds for one process whatever it holds, appending under the hold, and answers busy, naming the holder, to another", async () => {
+		it("holds its place for the journal it was asked of, whatever the place holds, appending under the hold, and answers busy, naming the holder, to another journal", async () => {
 			const journal = await harness.open();
 			// Held before it is created: the hold does not read the journal.
 			const held = await journal.hold();
