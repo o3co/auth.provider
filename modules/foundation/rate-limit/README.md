@@ -31,6 +31,7 @@
 ## Data
 - Limit windows: no eviction, so a flood cannot reset a count; not replicated, as no credential depends on them.
 - Attempt windows: no eviction and replicated, so a failover cannot lift a limit on guesses.
+- Both window spaces are `pseudonymous`, as a key may be derived from a subject, and declare neither an eraser nor a bound, so they do not yet say how long a count is kept: incomplete for erasure (`manifest-incomplete`).
 - Lockouts: one state per name and key, `pseudonymous`, erased by `rate-limit` (internal module `lockout`). A state expires unless its hold is fixed or it counted a release; a dropped key never does.
 
 ## Depends on
