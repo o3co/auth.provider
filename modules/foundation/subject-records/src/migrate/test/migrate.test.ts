@@ -218,7 +218,6 @@ it("runs the owner's step again on a record changed before its removal, removing
 		changedOnce = true;
 		// Another writer changes the record after the step read it, before the removal.
 		const key = { space: indexed, partition: "o", name: "record" };
-		const { entry } = await s.get(key);
 		await plantValue(s, key, { owner: "nobody", issuer: "new" }, { kind: "never" });
 	};
 	expect(await migrateRecords(at(indexed), walk(), owners, { elsewhere })).toMatchObject({

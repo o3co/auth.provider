@@ -116,7 +116,6 @@ it("reads a set changed while its owner read it again, and wraps the value it th
 	const meanwhile: SetReading = async (key) => {
 		if (!added) {
 			added = true;
-			const version = (await raw(indexed, key))?.version ?? "";
 			const at = { space: indexed, partition: key, name: "set" };
 			await plantValue(s, at, both, { kind: "keep" });
 		}

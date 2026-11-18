@@ -291,7 +291,6 @@ it("decides again on what a racing writer left, and writes raw where records are
 		if (raced) return;
 		raced = true;
 		const at = { space: lists, partition: "alice", name: "record" };
-		const { entry } = await s.get(at);
 		await plantValue(s, at, envelope("alice", { n: 5 }), { kind: "keep" });
 	});
 	const answer = await changeSubjectRecords({
