@@ -66,7 +66,7 @@ export function journalContract(name: string, harness: JournalHarness): void {
 			for (const entry of list) expect(typeof entry.begunAt).toBe("number");
 		});
 
-		it("gives each subject the number of its last begun record, the later run's where it was begun twice", async (context) => {
+		it("gives each subject the number of its last begun record, the later run's where it was begun twice", async () => {
 			const { journal } = await created();
 			await journal.begun("alice", "ops-1");
 			await journal.begun("bob", "ops-2");
@@ -75,7 +75,6 @@ export function journalContract(name: string, harness: JournalHarness): void {
 			await journal.finished("alice");
 			const list = await journal.list();
 			if (!Array.isArray(list)) throw new Error("unusable");
-			if (list.some((e) => e.begunNumber === undefined)) return context.skip();
 			expect(list.map((e) => [e.subject, e.begunNumber, e.number])).toEqual([
 				["alice", 4, 5],
 				["bob", 2, 2],

@@ -26,8 +26,7 @@ export interface JournalEntry {
 	readonly begunAt: number;
 	readonly finished: boolean;
 	readonly number: number;
-	/** Optional in this release, then required. */
-	readonly begunNumber?: number;
+	readonly begunNumber: number;
 }
 
 /**
