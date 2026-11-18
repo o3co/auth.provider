@@ -20,6 +20,7 @@ import {
 	subjectRecordsPhase,
 	tombstoneFloor,
 } from "@mod/subject-records";
+import type { StatedNeeds } from "./needs.ts";
 
 /** Each need passkeys states for its passkeys, as the guarantee a space declares for it. */
 const guaranteeFor: Record<keyof typeof passkeyStoreNeeds, Guarantee> = {
@@ -28,11 +29,6 @@ const guaranteeFor: Record<keyof typeof passkeyStoreNeeds, Guarantee> = {
 	survivesFailover: "replicated",
 	confirmedReads: "confirmed-reads",
 };
-/**
- * The needs a feature states as `true`, each met by what a space declares; a need of another value,
- * such as a bound, is no guarantee, and is read where the space states it.
- */
-export type StatedNeeds<N> = { readonly [K in keyof N]: N[K] extends true ? K : never }[keyof N];
 /** Each need passkeys states for its challenges, as the guarantee a space declares for it, or records under a secret. */
 const { namesFromSecret: challengesUnder, ...challengeGuaranteeFor } = {
 	survivesCrash: "durable",

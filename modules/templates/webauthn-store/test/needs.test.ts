@@ -1,6 +1,6 @@
 import type { Guarantee } from "@mod/store";
 import { expect, expectTypeOf, it } from "vitest";
-import type { StatedNeeds } from "../src/module.ts";
+import type { StatedNeeds } from "../src/needs.ts";
 
 type Needs = { readonly durable: true; readonly replicated: true; readonly endsWithinMs: 600_000 };
 
