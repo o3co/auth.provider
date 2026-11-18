@@ -1,5 +1,13 @@
 import { Unavailable } from "@mod/kernel";
-import type { BatchWrite, Condition, Json, Key, Store, WriteOptions } from "@mod/store";
+import type {
+	BatchOptions,
+	BatchWrite,
+	Condition,
+	Json,
+	Key,
+	Store,
+	SubjectWriter,
+} from "@mod/store";
 import {
 	type Attempt,
 	again,
@@ -112,11 +120,10 @@ export interface ChangedRecord<T = Json> {
 function writtenBy(target: Store, conditions: readonly Condition[], writes: readonly BatchWrite[]) {
 	const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
 	const one = new Set(keys.map((k) => JSON.stringify([k.space.name, k.partition]))).size === 1;
-	if (one)
-		return (marked: Omit<WriteOptions, "expiry">) => target.batch(conditions, writes, marked);
+	if (one) return (marked: BatchOptions) => target.batch(conditions, writes, marked);
 	const batchAcross = target.batchAcross?.bind(target);
 	if (!batchAcross) throw new Error("the store writes no records of two partitions as one");
-	return (marked: Omit<WriteOptions, "expiry">) => batchAcross(conditions, writes, marked);
+	return (marked: BatchOptions) => batchAcross(conditions, writes, marked);
 }
 
 /**
@@ -131,6 +138,8 @@ function writtenBy(target: Store, conditions: readonly Condition[], writes: read
 export async function changeRecords(p: {
 	readonly targets: readonly Target[];
 	readonly watch?: (read: readonly (Json | undefined)[]) => readonly Target[];
+	/** The subject writer, sent with the one write: `subject-records` passes it, for spaces of subjects' data. */
+	readonly writer?: SubjectWriter;
 	/** Handed, as a change is, the deadline its attempt is written with; a retry its own. */
 	readonly decide: (
 		read: readonly (Json | undefined)[],
@@ -216,7 +225,8 @@ export async function changeRecords(p: {
 							expiry: { kind: "after", ms: 1 },
 						} as const,
 					];
-		const written = await untilAnswered(() => writtenBy(target, conditions, sent)(marked));
+		const options = p.writer === undefined ? marked : { ...marked, writer: p.writer };
+		const written = await untilAnswered(() => writtenBy(target, conditions, sent)(options));
 		if (written.kind === "late" || written.kind === "reused") throw new Unavailable("records");
 		if (written.kind === "conflict") return again;
 		const changedAt = (at: number): ChangedRecord => {
