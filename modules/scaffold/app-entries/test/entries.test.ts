@@ -42,8 +42,9 @@ export async function assemble({ runtime }) {
 	// Without the script's own runtime, the composed sink would write this line.
 	(runtime?.log ?? { warn: (event) => process.stdout.write(\`LOG \${event}\\n\`) }).warn("fake.assembled");
 	const { backfill, candidates, tool } = await import("fake-witnessing");
-	const resealer = { reseal: async () => Array.from({ length: Number(process.env.HOLDERS ?? 1) }, (_, i) => ({ name: \`holder-\${i}-\${"h".repeat(100)}\`, resealed: 0, left: 0 })) };
-	const asked = { resetCandidates: candidates, resealing: resealer, toolRun: tool };
+	const holders = Array.from({ length: Number(process.env.HOLDERS ?? 1) }, (_, i) => \`holder-\${i}-\${"h".repeat(100)} resealed 0 left 0\`);
+	const resealer = { run: async () => ({ lines: [...holders, "previous keys may be retired"], code: 0 }) };
+	const asked = { resetCandidates: candidates, resealRun: resealer, toolRun: tool };
 	// Where a test signals the app: kept alive once started, each stop told and slow.
 	const signalled = process.env.SIGNALLED !== undefined;
 	let alive;
@@ -75,7 +76,7 @@ import { appendFileSync } from "node:fs";
 export const witnessBackfill = "witnessBackfill";
 export const passkeyBackfill = "passkeyBackfill";
 export const resetCandidates = "resetCandidates";
-export const resealing = "resealing";
+export const resealRun = "resealRun";
 export const toolRun = "toolRun";
 /** A tool's call: its answer as the test asks for it, each holding what the script must never tell. */
 export const tool = {
@@ -132,11 +133,54 @@ export default {};`,
 	},
 };
 
+/** What the packages the fakes stand for declare of the app's entries, as their manifests do. */
+const declaredByFakes: readonly Declaring[] = [
+	{
+		name: "@mod/seal",
+		appEntries: [{ script: "reseal", shape: "call", contract: "resealRun", member: "run" }],
+	},
+	{
+		name: "@mod/mfa-witnessing",
+		appEntries: [
+			{
+				script: "witness-backfill",
+				shape: "settle-subjects",
+				contract: "witnessBackfill",
+				member: "settle",
+				answers: ["marked", "held", "none", "unclaimed", "inconsistent"],
+			},
+		],
+	},
+	{
+		name: "@mod/passkey-witnessing",
+		appEntries: [
+			{
+				script: "passkey-backfill",
+				shape: "settle-subjects",
+				contract: "passkeyBackfill",
+				member: "settle",
+				answers: ["marked", "held", "none", "pending", "inconsistent"],
+			},
+		],
+	},
+	{
+		name: "@mod/mfa-reset",
+		appEntries: [
+			{
+				script: "unclaimed-factors",
+				shape: "name-subjects",
+				contract: "resetCandidates",
+				member: "unclaimed",
+			},
+		],
+	},
+];
+
 /** The entry `runs` calls for, written over the fakes; a run of it on an input. */
 async function script(
 	runs = "@mod/mfa-witnessing",
 	file = "src/witness-backfill.ts",
-	declaring: readonly Declaring[] = [],
+	declaring: readonly Declaring[] = declaredByFakes,
 ) {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	for (const [name, files] of Object.entries(fakes)) {
@@ -437,7 +481,7 @@ it("hands on every refusal of a refused boot before it exits 78, from the app's 
 			file,
 		);
 		const done = await run.slowly("", { REFUSE_MANY: "5000" }, "stderr");
-		// A script reading subjects tells how many alone; the app's entry and reseal tell each.
+		// A script reading subjects tells how many alone; the app's entry and a call tell each.
 		const told =
 			file === "src/witness-backfill.ts"
 				? ["refused 5000: start the app with this configuration to read why"]
@@ -450,7 +494,7 @@ it("hands on every refusal of a refused boot before it exits 78, from the app's 
 	}
 }, 120_000);
 
-it("hands on every holder reseal tells before it exits, though standard output is read slowly", async () => {
+it("hands on every line a call answers before it exits, though standard output is read slowly", async () => {
 	const run = await script("@mod/seal", "src/reseal.ts");
 	const done = await run.slowly("", { HOLDERS: "5000" });
 	const told = done.stdout.split("\n").filter((l) => l !== "" && !l.startsWith("LOG "));
@@ -567,7 +611,7 @@ it.each([
 	expect((refused as Error).message).toContain(why);
 });
 
-it("reads only what the composed packages declare, and lets a declared script replace the table's of its name", async () => {
+it("reads only what the composed packages declare, and writes each declared script from its declaration", async () => {
 	const ignoredElsewhere = await refusal([{ name: "@mod/elsewhere", appEntries: "not read" }]);
 	expect(ignoredElsewhere.scripts).toEqual({});
 	const declared = declaring(

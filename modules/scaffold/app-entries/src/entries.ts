@@ -34,48 +34,6 @@ const rowOf = (entry: Declared): Row => ({
 	},
 });
 
-/** The entries no package declares yet. A declared script of the same name replaces one. */
-const table: readonly Row[] = [
-	{ package: "@mod/seal", script: "reseal", template: "reseal.ts.template", fill: {} },
-	...declaredEntries([
-		{
-			name: "@mod/mfa-witnessing",
-			appEntries: [
-				{
-					script: "witness-backfill",
-					shape: "settle-subjects",
-					contract: "witnessBackfill",
-					member: "settle",
-					answers: ["marked", "held", "none", "unclaimed", "inconsistent"],
-				},
-			],
-		},
-		{
-			name: "@mod/passkey-witnessing",
-			appEntries: [
-				{
-					script: "passkey-backfill",
-					shape: "settle-subjects",
-					contract: "passkeyBackfill",
-					member: "settle",
-					answers: ["marked", "held", "none", "pending", "inconsistent"],
-				},
-			],
-		},
-		{
-			name: "@mod/mfa-reset",
-			appEntries: [
-				{
-					script: "unclaimed-factors",
-					shape: "name-subjects",
-					contract: "resetCandidates",
-					member: "unclaimed",
-				},
-			],
-		},
-	]).map(rowOf),
-];
-
 /**
  * The scripts and files of the entries the composed modules call for; `run` writes the command
  * that runs a file, as the project starts its app. `declaring` is what the composed packages
@@ -90,12 +48,7 @@ export async function entriesOf(
 	declaring: readonly Declaring[] = [],
 ) {
 	const composed = declaring.filter((pkg) => modules.includes(pkg.name));
-	const declared = declaredEntries(composed).map(rowOf);
-	const rows = [
-		...table.filter((row) => !declared.some((d) => d.script === row.script)),
-		...declared,
-	];
-	const called = rows.filter((row) => modules.includes(row.package));
+	const called = declaredEntries(composed).map(rowOf);
 	const files: Record<string, string> = {};
 	for (const row of called) {
 		const fill = {
