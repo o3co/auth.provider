@@ -14,7 +14,8 @@ const app = await loadConfig(source)
 		// A variable 0.17 read, left in the environment, is named once, or refuses boot, as config-files says.
 		const told = await legacyVariablesCheck(source);
 		if (told !== undefined) await written(process.stderr, `warn config-files: ${told}\n`);
-		return assemble({ modules: [{{modules}}], config });
+		// A tool's: built and stopped, never started, so it serves nothing.
+		return assemble({ modules: [{{modules}}], config, neverStarted: true });
 	})
 	.catch(refused);
 /** Not finished, look and run again: a fixed line, never a value or an error's words, then 1. */
