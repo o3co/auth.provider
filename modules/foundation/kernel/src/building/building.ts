@@ -92,6 +92,7 @@ export function checkPoint<T>(
 export interface BuildingParts {
 	readonly runtime: Runtime;
 	readonly environment: BuildContext<unknown>["environment"];
+	readonly neverStarted: boolean;
 	readonly sections: ReadonlyMap<Module, unknown>;
 	readonly parts: {
 		readonly providers: ReadonlyMap<Contract<unknown>, Buildable>;
@@ -109,6 +110,7 @@ export interface BuildingParts {
 export function buildingWith({
 	runtime,
 	environment,
+	neverStarted,
 	sections,
 	parts,
 	heldTakes,
@@ -271,13 +273,11 @@ export function buildingWith({
 				);
 			},
 		});
-	/** The context with the deployment's environment, which no factory can write or redefine. */
-	const withEnvironment = (context: Omit<BuildContext<unknown>, "environment">) =>
-		Object.defineProperty(context, "environment", {
-			value: environment,
-			enumerable: true,
-			writable: false,
-			configurable: false,
+	/** The context with the deployment's environment and whether it is never started, which no factory can write or redefine. */
+	const withEnvironment = (context: Omit<BuildContext<unknown>, "environment" | "neverStarted">) =>
+		Object.defineProperties(context, {
+			environment: { value: environment, enumerable: true, writable: false, configurable: false },
+			neverStarted: { value: neverStarted, enumerable: true, writable: false, configurable: false },
 		}) as BuildContext<unknown>;
 	const build = (item: Buildable, stack: readonly Buildable[]): Promise<unknown> => {
 		const requester = stack.at(-1);

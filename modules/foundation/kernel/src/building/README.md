@@ -9,7 +9,7 @@ Internal module of `kernel`: building the provisions and contributions, each onc
 - The takes' preflight (`takes`). Reading sections and the duplicate providers, the order the stages build in, checking late references and refusing the boot (the package's assembly). Running the built and start hooks (the package's assembly), and the periodic tasks and the stop hooks (`lifecycle`).
 
 ## Offers
-- `buildingWith` (the runtime, the environment, the checked sections, who provides and contributes, the takes each module is held to, the refusals, a test's watch) → the parts below.
+- `buildingWith` (the runtime, the environment, whether the assembly is never started, the checked sections, who provides and contributes, the takes each module is held to, the refusals, a test's watch) → the parts below.
   - `build` (an item, the stack of builds asking it); the points collected with their checks' outcomes; the late references named; the hooks and periodic tasks registered.
   - `provided`: a contract → the interface its provision built, recorded as the build succeeds, or none.
   - `assembledWith` (readiness), from which late references and readiness answer.
@@ -21,7 +21,7 @@ Internal module of `kernel`: building the provisions and contributions, each onc
 - An item is built once, by whichever request comes first; a request from a build that the item waits on, directly or across branches, is a cycle, refused before the cache is joined.
 - A point is checked once, however many modules collect it: one refusal for a break.
 - A factory's thrown value is read as a refusal only where it is one; any other error's text is never kept.
-- The build context's `environment` cannot be written or redefined by a factory.
+- The build context's `environment` and `neverStarted` cannot be written or redefined by a factory.
 
 ## Depends on
 - None; the package's handles, module definitions, refusals, runtime, `lifecycle` (periodic tasks, the interval rule) and `takes` (the words a `takenBy` and a point's rule refuse with).
