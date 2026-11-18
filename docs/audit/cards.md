@@ -299,6 +299,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `outside` (`src/outside`): Gives an app composing packages outside the release what holds them to what was recorded: the record, the script checking the lockfile against it, the pnpm settings that keep one copy of the release and zod, and the check in the image.
 - `@mod/combinations` (assembly, `modules/scaffold/combinations`): Completes a list of modules with what comes with them by default: each feature's wirings, and the bridges whose modules are all composed.
 - `@mod/create-app` (assembly, `modules/scaffold/create-app`): Generates a listed app: the modules asked for through their `./module`, with what they need to run and the wirings and bridges they come with (`combinations`' `needed`), written as a pattern's deployment is.
+  - `declared` (`src/declared`): what a package's manifest declares for the generated project, read into what `app-output` takes.
   - `exported` (`src/exported`): Tells whether a package's `exports` maps a subpath to a target node would load for an app's import, read as node's resolver reads it, without running the package.
   - `outside` (`src/outside`): Reads the packages outside the release an operator had pnpm install into a project: each one's record, its declaration and its files.
   - `patterns` (`src/patterns`): Holds the patterns: each a deployment's use and the selection that composes it, in one file (`<name>.ts`) with a card of at most 10 lines (`<name>.md`).
