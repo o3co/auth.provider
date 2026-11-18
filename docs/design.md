@@ -18,7 +18,7 @@ A card's Offers list everything its entry points export but the types an exporte
 
 ## Dividing a package
 
-Storage uses a single shared contract. A feature never depends on `store` or on a capability. It declares its own store interface and required guarantees. The storage implementation treats record contents as opaque. A wiring package connects the interface to a capability such as `records`. Redis is one implementation of `store`; no feature knows about it.
+Storage uses a single shared contract. A feature never depends on `store` or on a capability. It declares its own store interface and required guarantees. The storage implementation treats record contents as opaque. A wiring package connects a capability, such as `records`, to one feature's interface; where it declares spaces, it keys their required guarantees by the feature's needs. Redis is one implementation of `store`; no feature knows about it.
 
 Do not add fields used by only one feature to a shared record. Modules contribute the client metadata, settings and discovery entries they use. `clients`, `kernel` and `discovery` provide the extension points for those contributions.
 
@@ -36,7 +36,7 @@ The kind names and their dependency order come from `kinds`; `guard` checks them
 | capability | A reusable implementation, such as `records`, that wiring adapts to feature-owned contracts. It depends on no feature. | Requires human review to avoid duplicating the same implementation across features. Interface changes also require review because they affect every wired feature. |
 | feature | Something the provider does for its users. | An ordinary change. |
 | adapter | An implementation of an owner's contract over an external system, or a default replacement for an owner without a composition module (`replaces` with `default: true`). | An ordinary change. |
-| wiring | Connects a capability to one feature's store interface. It contains no branching or loops. It ships with the product; numeric parameters such as capacities are settings with defaults. | An ordinary change. |
+| wiring | Connects a capability to one feature's interface; where it declares spaces, it keys their required guarantees by the feature's needs. It contains no branching or loops. It ships with the product; numeric parameters such as capacities are settings with defaults. | An ordinary change. |
 | assembly / verification | Project scaffolding and verification tools, including conformance tests and `guard`. | An ordinary change. |
 
 ## Deepening and splitting
