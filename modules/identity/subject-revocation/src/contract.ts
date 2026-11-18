@@ -59,9 +59,9 @@ export interface SubjectErasure {
 	markErased(subject: string): Promise<{ readonly kind: "marked"; readonly erasedAt: number }>;
 }
 
-/** Taken by no module until account erasure, which alone marks a subject erased, is named. */
+/** Taken by account erasure alone, which alone marks a subject erased. */
 export const subjectErasure = contract<SubjectErasure>("subject-revocation.erasure", {
-	takenBy: [],
+	takenBy: ["account-erasure"],
 });
 
 /**
