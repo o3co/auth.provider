@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	mkdir,
 	mkdtemp,
@@ -296,4 +297,34 @@ it("removes the lock a failed take could not, before the same journal's next tak
 	expect(held.kind).toBe("held");
 	if (held.kind === "held") await held.release();
 	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+/** The name a take of `holder` tries its own file under at `attempt`. */
+const ownName = (path: string, holder: string, attempt: number) =>
+	`${path}.lock.${createHash("sha256").update(`${holder}\n${attempt}`).digest("hex").slice(0, 16)}.tmp`;
+
+it("takes another name where its file's name is taken, leaving that file as it was", async () => {
+	const path = await fresh();
+	await writeFile(ownName(path, "one", 0), "someone else's");
+	const release = await nodeFiles.lock(path, "one");
+	expect(await readFile(`${path}.lock`, "utf8")).toBe("one");
+	expect(await readFile(ownName(path, "one", 0), "utf8")).toBe("someone else's");
+	expect((await readdir(dirname(path))).sort()).toEqual(
+		["journal.lock", ownName(path, "one", 0).slice(dirname(path).length + 1)].sort(),
+	);
+	await release();
+});
+
+it("fails a take that finds no free name for its file as unavailable, never as busy, with no lock", async () => {
+	const path = await fresh();
+	const files: JournalFiles = {
+		...nodeFiles,
+		lock: (p) => nodeFiles.lock(p, "fixed"),
+	};
+	for (let attempt = 0; attempt < 8; attempt++)
+		await writeFile(ownName(path, "fixed", attempt), "");
+	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
+	await expect(journal.hold()).rejects.toMatchObject({ name: "Unavailable" });
+	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+	expect(await readdir(dirname(path))).toHaveLength(8);
 });

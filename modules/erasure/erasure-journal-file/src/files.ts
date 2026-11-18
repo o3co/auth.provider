@@ -38,7 +38,20 @@ export interface FileSystem {
 
 const gone = (error: unknown) => (error as { code?: unknown }).code === "ENOENT";
 
-/** The release `lock` answers for `holder`'s lock. */
+/** A file of this take's own beside the lock, named from `holder`, another name where one is taken. */
+const ownFile = async (lockPath: string, holder: string) => {
+	for (let attempt = 0; attempt < 8; attempt++) {
+		const hash = createHash("sha256").update(`${holder}\n${attempt}`).digest("hex");
+		const name = `${lockPath}.${hash.slice(0, 16)}.tmp`;
+		try {
+			return { name, file: await open(name, "wx") };
+		} catch (error) {
+			if ((error as { code?: unknown }).code !== "EEXIST") throw error;
+		}
+	}
+	throw new Error("no free name for the lock's holder file");
+};
+
 const releaseOf = (fs: FileSystem, lockPath: string, holder: string) => async () => {
 	let recorded: string;
 	try {
@@ -87,9 +100,8 @@ export const nodeFilesWith = (fs: FileSystem = { syncDirectory, unlink }): Journ
 		const lockPath = `${path}.lock`;
 		// The holder is written whole and synced in a file of its own first, then published as the
 		// lock in one step: a lock never stands without its holder, whatever stops the take.
-		const written = `${lockPath}.${createHash("sha256").update(holder).digest("hex").slice(0, 16)}.tmp`;
+		const { name: written, file } = await ownFile(lockPath, holder);
 		try {
-			const file = await open(written, "wx");
 			try {
 				await file.writeFile(holder);
 				await file.sync();
