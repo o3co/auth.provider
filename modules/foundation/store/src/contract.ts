@@ -50,7 +50,7 @@ export type SubjectData =
 /**
  * The categories a change reaches only carrying the subject writer (`checks`): subjects' data, and an
  * index of it. A subset of `SubjectData` by construction; a name it misspells drops out, and the
- * tables held to it (`checks`', records') then fail to compile.
+ * tables held to it then fail to compile.
  */
 export type WriterHeld = Extract<
 	SubjectData,
