@@ -130,7 +130,7 @@ it("drops a subject's key under each name composed, after which every entry poin
 		const first = await eraser.online("alice", signal());
 		const again = await eraser.online("alice", signal());
 		return {
-			eraser: { name: eraser.name, erasable: eraser.erasable, after: eraser.after },
+			eraser: { name: eraser.name, erasable: eraser.erasable },
 			first,
 			again,
 			mfa: await everyEntry(l, "mfa", "alice"),
@@ -144,7 +144,7 @@ it("drops a subject's key under each name composed, after which every entry poin
 	});
 	expect(standIn).toEqual(real);
 	expect(real).toEqual({
-		eraser: { name: "rate-limit", erasable: true, after: undefined },
+		eraser: { name: "rate-limit", erasable: true },
 		first: {
 			reports: [{ kind: "forgotten", space: "rate-limit.lockouts", removed: 1 }],
 			logoutGaps: 0,
