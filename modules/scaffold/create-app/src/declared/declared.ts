@@ -1,6 +1,5 @@
 /** What a package's manifest declares for the generated project, read into what app-output takes. */
-import type { Declaring } from "@mod/app-entries";
-import type { Ask, Asked, Sampled } from "@mod/app-output";
+import type { Ask, Asked, Declaring, Sampled } from "@mod/app-output";
 
 /** What a manifest declares for the guide: its lines, the owner it adapts, and the name it registers under it. */
 export const askedIn = (

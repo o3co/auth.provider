@@ -17,4 +17,4 @@ Internal module of `create-app`: what a package's manifest declares for the gene
 - A declaration is taken as the manifest writes it: a field of another type is read as absent, and nothing is added.
 
 ## Depends on
-- `app-output` and `app-entries`, for the types of what they take.
+- `app-output`, for the types of what it takes.
