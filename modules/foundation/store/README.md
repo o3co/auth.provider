@@ -15,7 +15,7 @@
 - Expiry after a duration, at a time, none, keep, or extend only; counting in a fixed window.
 - `codePointOrder`: the order of members and of ties, by code point, which is also the order of their UTF-8 bytes, the same for every store.
 - The space declaration extension point, and the composition definition with `accept-volatile` (default false), which lets spaces needing durable or replicated boot on memory; every start that boots such spaces so warns `store.volatile_accepted`, naming them.
-- `./testing`: the contract test, test configuration builders, and a simulated replicated store (internal module `simulated`).
+- `./testing`: the contract test (`storeContract`, in the internal modules `contract-harness`, `contract-keys`, `contract-marks`, `contract-batches`, `contract-walking` and `contract-faults`), test configuration builders, and a simulated replicated store (internal module `simulated`).
 
 ## Invariants
 - Declared `forWiring`: a feature's storage is built on this by its wiring, so no feature depends on it; a feature's tests take it through `./testing` alone.
