@@ -154,10 +154,13 @@ const loadsOrTypes = (edge: Edge) =>
 	edge.form === "import-type" ||
 	(edge.bindings.length > 0 && edge.bindings.every((binding) => binding.typeOnly));
 
+/** A file that may hold imports, whichever the language: one the graph cannot read unless it is a source. */
+const script = /\.[cm]?[jt]sx?$/;
+
 /**
  * The package's own sources its imports reach from `roots` by the edges `follows` takes, each by its
- * path in the package; and whether any of them holds an import the graph cannot resolve (`facts`'
- * resolve tells why).
+ * path in the package; and whether the walk met what it cannot read: an import the graph cannot
+ * resolve (`facts`' resolve tells why), or a script of the package, a root among them, no source.
  */
 function reached(
 	s: Scope,
@@ -168,7 +171,7 @@ function reached(
 	const byReal = new Map(s.sources(p).map((file) => [realOf(join(p.dir, file)), file]));
 	const known = new Set(byReal.values());
 	const files = new Set<string>();
-	let unresolved = false;
+	let unresolved = roots.some((root) => script.test(root) && !known.has(root));
 	const next = roots.filter((root) => known.has(root));
 	for (let file = next.pop(); file !== undefined; file = next.pop()) {
 		if (files.has(file)) continue;
@@ -178,6 +181,8 @@ function reached(
 			if (edge.target.kind === "unresolved") unresolved = true;
 			const to = edge.target.kind === "file" ? byReal.get(edge.target.path) : undefined;
 			if (to !== undefined && !files.has(to)) next.push(to);
+			const target = edge.target.kind === "file" ? edge.target.path : "";
+			if (to === undefined && script.test(target) && s.ownerOf(target) === p) unresolved = true;
 		}
 	}
 	return { files, unresolved };
@@ -189,8 +194,8 @@ const testOnlyBy = new WeakMap<Scope, Map<string, ReadonlySet<string>>>();
  * The files a package's `./testing` reaches and nothing else in it does: no other export, and no file
  * not named a test that `./testing` does not reach. `./testing` is walked by the edges that load or
  * take types, the shipped roots by every edge, a resolve too: either way a file falls to shipped.
- * None where the shipped files hold an import the graph cannot resolve, or `./testing` is
- * conditional, failing closed. Read once a scope; beyond a file named as a test, no path decides it.
+ * None where the shipped walk meets an import the graph cannot resolve or a script of the package
+ * that is no source (a root too), or `./testing` is conditional, failing closed. Read once a scope; beyond a file named as a test, no path decides it.
  */
 function testOnlyOf(s: Scope, p: Pkg): ReadonlySet<string> {
 	const byPackage = testOnlyBy.get(s) ?? new Map<string, ReadonlySet<string>>();
@@ -222,7 +227,7 @@ function testOnlyOf(s: Scope, p: Pkg): ReadonlySet<string> {
  * loads or takes types and nothing else in the package does (a published contract test suite, its
  * internal modules among it).
  * Every other file is shipped, as is every file of a package whose shipped files hold an import the
- * graph cannot resolve. A file outside the graph (a template, a bundle) is read by its name alone.
+ * graph cannot resolve or reach a script of the package that is no source. A file outside the graph (a template, a bundle) is read by its name alone.
  */
 export function budgetsAsTest(s: Scope, p: Pkg, file: string) {
 	return s.isTest(file) || testOnlyOf(s, p).has(file);

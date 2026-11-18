@@ -106,3 +106,35 @@ it("follows from `./testing` the imports that load or take types, never a resolv
 	expect(read).toContain("src/kinds.ts");
 	expect(read).toContain("src/helper.ts");
 });
+
+it("reads every file as shipped where the shipped walk reaches a script of the package that is no source, a root too", () => {
+	const intermediate = {
+		...suite,
+		"src/contract.ts": 'import { bridge } from "./bridge.config.ts";\nexport const a = bridge;\n',
+		"src/bridge.config.ts":
+			'import { helper } from "./helper.ts";\nexport const bridge = helper;\n',
+	};
+	const viaConfig = pkg("@bt/intermediate", intermediate, {
+		exports: { ".": "./src/contract.ts", "./testing": "./src/testing.ts" },
+	});
+	expect(testCode(viaConfig, Object.keys(intermediate))).toEqual(["test/a.test.ts"]);
+	const built = { ...suite, "dist/built.js": "export const built = 1;\n" };
+	const rootBuilt = pkg("@bt/built", built, {
+		exports: {
+			".": "./src/contract.ts",
+			"./built": "./dist/built.js",
+			"./testing": "./src/testing.ts",
+		},
+	});
+	expect(testCode(rootBuilt, Object.keys(built))).toEqual(["test/a.test.ts"]);
+	const data = {
+		...suite,
+		"src/contract.ts":
+			'import data from "./data.json" with { type: "json" };\nexport const a = data;\n',
+		"src/data.json": "1\n",
+	};
+	const withData = pkg("@bt/data", data, {
+		exports: { ".": "./src/contract.ts", "./testing": "./src/testing.ts" },
+	});
+	expect(testCode(withData, Object.keys(data))).toContain("src/helper.ts");
+});

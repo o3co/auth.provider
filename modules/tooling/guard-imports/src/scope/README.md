@@ -8,7 +8,7 @@ Internal module of `guard-imports`: the scope every rule reads, and whether a fi
   - a file its package's `./testing` reaches and nothing else in the package does: no other export, and no file not named as a test that `./testing` does not reach. A published contract test suite and its internal modules are so read;
   - `./testing` is walked by the imports that load or take types (a value, a type, a dynamic import, a re-export), never by a resolve, which only names a file; the shipped roots by every edge, a resolve too. Either walk fails toward shipped;
   - every other file is shipped, a file `./testing` shares with another export among them;
-  - every file of a package is shipped, failing closed, where its shipped files hold an import the graph cannot resolve (for the reasons `facts`' resolve gives), or where its `./testing` is a conditional export; each string target of a conditional export is a shipped root;
+  - every file of a package is shipped, failing closed, where its shipped files hold an import the graph cannot resolve (for the reasons `facts`' resolve gives) or reach a script of the package that is no source (a `.config.ts`, a `.js`, a shipped root among them), or where its `./testing` is a conditional export; each string target of a conditional export is a shipped root;
   - a file outside the graph (a template, a bundle) is read by its name alone, and never throws;
   - the budgets and the rules on the clock, randomness, network, audit recording and owned properties read `budgetsAsTest`; the rules on imports between packages (G3, G4, G8, G31) read a file named as a test alone (`isTest`).
 
