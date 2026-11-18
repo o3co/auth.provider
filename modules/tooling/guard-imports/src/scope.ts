@@ -41,6 +41,12 @@ export interface Scope<B extends Rules = Rules> {
 	readonly report: (rule: string, where: string, detail: string) => void;
 	/** A package's kind, as its manifest names it. */
 	readonly kindOf: (p: Pkg) => string;
+	/**
+	 * The entries a package keeps for named takers: each `./name` key of its manifest's `takenBy`
+	 * that is one plain segment, none of `.`, `./testing`, `./module` and `./audit-events`, and names at
+	 * least one taker. Any other key is left out, unreported, for the rule reading it to refuse.
+	 */
+	readonly keptEntries: (p: Pkg) => string[];
 	/** A kind's place in the kind order; -1 for none or an unknown one. */
 	readonly level: (p: Pkg) => number;
 	readonly isCommon: (p: Pkg) => boolean;
@@ -53,6 +59,10 @@ export interface Scope<B extends Rules = Rules> {
 	/** The package whose directory holds a path, links followed; none outside every package. */
 	readonly ownerOf: (path: string) => Pkg | undefined;
 }
+
+/** The entries every package may have, which none keeps for named takers. */
+export const reservedEntries = [".", "./testing", "./module", "./audit-events"];
+const keptKey = /^\.\/[a-z][a-z0-9-]*$/;
 
 export function scopeOf<B extends Rules>(
 	packages: readonly Pkg[],
@@ -77,6 +87,15 @@ export function scopeOf<B extends Rules>(
 		byName,
 		report,
 		kindOf,
+		keptEntries: (p) => {
+			const declared = p.manifest.takenBy;
+			if (typeof declared !== "object" || declared === null || Array.isArray(declared)) return [];
+			return Object.entries(declared)
+				.filter(([key]) => keptKey.test(key) && !reservedEntries.includes(key))
+				.filter(([, takers]) => Array.isArray(takers) && takers.length > 0)
+				.filter(([, takers]) => (takers as unknown[]).every((t) => typeof t === "string"))
+				.map(([key]) => key);
+		},
 		level: (p) => budget.kindOrder.findIndex((kinds) => kinds.includes(kindOf(p))),
 		isCommon: (p) => kindOf(p) === budget.commonKind,
 		isTest: (file) => conventional.test(file),

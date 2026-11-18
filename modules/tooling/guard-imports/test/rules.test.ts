@@ -2,6 +2,7 @@ import { mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { importViolations, propertyDeclarations, type Rules } from "../src/contract.ts";
+import { scopeOf } from "../src/scope.ts";
 import type { Pkg } from "../src/workspace.ts";
 import { budget, pkg } from "./workspace.ts";
 
@@ -831,6 +832,76 @@ describe("guard-imports", () => {
 			"@g31e/passer/src/contract.ts ./writer of @g31e/store: a taker does not hand it on",
 			"@g31e/store ./missing: no entry of that name",
 		]);
+	});
+
+	it("G31 keeps an entry only where its key is one plain segment, not reserved, names a taker, is exported, and exports values alone", () => {
+		const files = {
+			"src/contract.ts": "export type Token = { readonly token: true };\n",
+			"src/ok.ts": "const token = Object.freeze({});\nexport { token };\nexport const other = 1;\n",
+			"src/typed.ts": "export type T = 1;\nexport const token = Object.freeze({});\n",
+			"src/shaped.ts": "export interface I {}\nexport const token = Object.freeze({});\n",
+			"src/again.ts": 'export type { Token } from "./contract.ts";\n',
+			"src/inline.ts": 'export { type Token } from "./contract.ts";\n',
+			"src/star.ts": 'export * from "./ok.ts";\n',
+		};
+		const exports = Object.fromEntries([
+			[".", "./src/contract.ts"],
+			["./testing", "./src/ok.ts"],
+			...["ok", "typed", "shaped", "again", "inline", "star", "none", "Upper"].map((n) => [
+				`./${n}`,
+				`./src/${n === "none" || n === "Upper" ? "ok" : n}.ts`,
+			]),
+		]);
+		const taker = ["@g31k/taker"];
+		const owner = pkg("@g31k/owner", files, {
+			exports,
+			takenBy: {
+				"./ok": taker,
+				".": taker,
+				"./testing": taker,
+				"./a/b": taker,
+				"./Upper": taker,
+				"./none": [],
+				"./missing": taker,
+				"./typed": taker,
+				"./shaped": taker,
+				"./again": taker,
+				"./inline": taker,
+				"./star": taker,
+			},
+		});
+		const takerPkg = pkg(
+			"@g31k/taker",
+			{ "src/contract.ts": "export {};\n" },
+			{
+				exports: { ".": "./src/contract.ts" },
+			},
+		);
+		// The scope's reading: well-formed keys alone, nothing reported.
+		const said: string[] = [];
+		expect(
+			scopeOf([owner, takerPkg], budget, (rule) => said.push(rule)).keptEntries(owner),
+		).toEqual(["./ok", "./missing", "./typed", "./shaped", "./again", "./inline", "./star"]);
+		expect(said).toEqual([]);
+		// G31 refuses every other key, and each kept entry not exported or exporting a type.
+		const reported = check([owner, takerPkg], budget)
+			.filter((v) => v.rule.startsWith("G31"))
+			.map((v) => `${v.where} ${v.detail}`);
+		expect(reported).toEqual(
+			[
+				".: a reserved entry is kept for no taker",
+				"./testing: a reserved entry is kept for no taker",
+				"./a/b: an entry kept is one plain segment, ./name",
+				"./Upper: an entry kept is one plain segment, ./name",
+				"./none: an entry kept names at least one taker",
+				"./missing: no entry of that name",
+				"./typed: an entry kept exports values alone, its types on `.`",
+				"./shaped: an entry kept exports values alone, its types on `.`",
+				"./again: an entry kept exports values alone, its types on `.`",
+				"./inline: an entry kept exports values alone, its types on `.`",
+				"./star: an entry kept exports values alone, its types on `.`",
+			].map((why) => `@g31k/owner ${why}`),
+		);
 	});
 
 	it("G31 refuses a takenBy declaration its contract's own takenBy does not match, or that names nothing known", () => {

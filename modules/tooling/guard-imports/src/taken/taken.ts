@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import ts from "typescript";
 import { valuesTaken } from "../rules.ts";
-import type { Scope } from "../scope.ts";
+import { reservedEntries, type Scope } from "../scope.ts";
 import { parse } from "../source.ts";
 import type { Pkg } from "../workspace.ts";
 
@@ -77,7 +77,45 @@ function moduleNameOf(s: Scope, p: Pkg): string | undefined {
 }
 
 /** Whether a `takenBy` key names an entry of the owner (`./name`) rather than a contract. */
-const isEntry = (key: string) => key.startsWith("./");
+const isEntry = (key: string) => key.startsWith(".");
+/** Whether a source file exports a type: a type or an interface, a type re-exported, or `export *`. */
+function exportsType(path: string): boolean {
+	return parse(path).statements.some((statement) => {
+		const exported = (
+			ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined
+		)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+		if (
+			exported &&
+			(ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement))
+		) {
+			return true;
+		}
+		if (!ts.isExportDeclaration(statement)) return false;
+		const clause = statement.exportClause;
+		return (
+			statement.isTypeOnly ||
+			clause === undefined ||
+			(ts.isNamedExports(clause) && clause.elements.some((element) => element.isTypeOnly))
+		);
+	});
+}
+
+/** Why a key naming an entry is none the owner keeps, or nothing where it keeps it: the scope's reading, explained, and the entry's file. */
+function whyNotKept(s: Scope, p: Pkg, key: string): string | undefined {
+	if (!s.keptEntries(p).includes(key)) {
+		if (reservedEntries.includes(key)) return "a reserved entry is kept for no taker";
+		if (!/^\.\/[a-z][a-z0-9-]*$/.test(key)) return "an entry kept is one plain segment, ./name";
+		return "an entry kept names at least one taker";
+	}
+	const exported = p.manifest.exports;
+	const file =
+		typeof exported === "object" && exported !== null
+			? (exported as Record<string, unknown>)[key]
+			: undefined;
+	if (typeof file !== "string") return "no entry of that name";
+	if (exportsType(join(p.dir, file))) return "an entry kept exports values alone, its types on `.`";
+	return undefined;
+}
 
 /**
  * G31's branch for an entry: the owner's entry `key` is loaded, in shipped code, by the packages it
@@ -86,11 +124,6 @@ const isEntry = (key: string) => key.startsWith("./");
  * module and no kernel `takenBy` is asked for.
  */
 function entryTaken(s: Scope, rule: string, owner: Pkg, key: string, takers: readonly string[]) {
-	const exported = owner.manifest.exports;
-	if (typeof exported !== "object" || exported === null || !(key in exported)) {
-		s.report(rule, owner.name, `${key}: no entry of that name`);
-		return;
-	}
 	for (const taker of takers) {
 		if (!s.byName.has(taker))
 			s.report(rule, owner.name, `${key}: ${taker} is no workspace package`);
@@ -128,12 +161,14 @@ export function takenByRules(s: Scope) {
 		const inCode = takenInCode(s, owner);
 		const allowed = new Map<string, readonly string[]>();
 		for (const [name, takers] of Object.entries(declared)) {
-			if (!isStrings(takers)) {
-				s.report(rule, owner.name, `${name}: takenBy names packages as a list of names`);
+			if (isEntry(name)) {
+				const why = whyNotKept(s, owner, name);
+				if (why !== undefined) s.report(rule, owner.name, `${name}: ${why}`);
+				else entryTaken(s, rule, owner, name, takers as string[]);
 				continue;
 			}
-			if (isEntry(name)) {
-				entryTaken(s, rule, owner, name, takers);
+			if (!isStrings(takers)) {
+				s.report(rule, owner.name, `${name}: takenBy names packages as a list of names`);
 				continue;
 			}
 			allowed.set(name, takers);

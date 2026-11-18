@@ -15,6 +15,7 @@ Internal module of `guard-imports`: G31, that a contract or an entry its owner d
 - A package's module is the name its shipped code gives `defineModule`; a contract's kernel `takenBy` is the list of names written in its exported `contract` call, read from the syntax tree, never run.
 - A contract's declaration names the modules of the kernel `takenBy` the contract declares, no more and no fewer.
 - An import is a value import of the contract by its exported name, an alias, a namespace import, `export { … } from` or `export * from`; a type-only import, a test and the owner itself are not counted.
+- The entries a package keeps are the scope's reading (`keptEntries`): one plain segment (`./name`), none of `.`, `./testing`, `./module` and `./audit-events`, at least one taker. G31 refuses every other key naming an entry, saying why, and a kept entry not exported, or whose file exports a type (a type, an interface, a type re-export or `export *`): its types go on `.`.
 - An entry is the owner's export of that `./name`; each package named is a workspace package, none asked for a module or a kernel `takenBy`. Every edge that loads the entry counts (an import, a re-export, `import()`, `require`); a type alone does not. A package named does not re-export it.
 
 ## Depends on
