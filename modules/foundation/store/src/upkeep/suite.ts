@@ -1,4 +1,4 @@
-import { Unavailable } from "@mod/kernel";
+import { BootRefused, BuildRefused, Unavailable } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import type { Key, Space, Store } from "../contract.ts";
 import { plantValue } from "../planting/planting.ts";
@@ -34,22 +34,27 @@ export const upkeepSpaces: readonly Space[] = Object.freeze([
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** What a refused start says: a library's refusal as thrown, or the boot's refusals an assembly gives. */
-function said(error: unknown): string {
-	const refusals = (error as { refusals?: readonly { where: string; reason: string }[] }).refusals;
-	if (refusals) return refusals.map((r) => `${r.where}: ${r.reason}`).join("\n");
-	return error instanceof Error ? error.message : String(error);
+/**
+ * What a refused start says, from kernel's refusals alone: a library's `BuildRefused` as thrown, or
+ * the `BootRefused` an assembly gives; anything else is no refusal and says nothing.
+ */
+function said(error: unknown): string | undefined {
+	if (BuildRefused.is(error)) return `${error.where}: ${error.reason}`;
+	if (BootRefused.is(error)) return error.refusals.map((r) => `${r.where}: ${r.reason}`).join("\n");
+	return undefined;
 }
 
-/** That `start` is refused, saying `words`. */
+/** That `start` is refused by kernel's refusal, saying `words`. */
 async function refusedSaying(start: Promise<unknown>, words: RegExp): Promise<void> {
 	const refused = await start.then(
 		() => undefined,
 		(error: unknown) => error,
 	);
-	expect(refused, "the start was not refused").toBeDefined();
-	expect(said(refused)).toMatch(words);
+	const says = said(refused);
+	expect(says, `not refused as kernel refuses: ${String(refused)}`).toBeDefined();
+	expect(says).toMatch(words);
 }
+
 const never = { expiry: { kind: "never" } } as const;
 
 /** The upkeep contract, run against any implementation offering it. */
@@ -194,6 +199,30 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				await p.upkeep.enterMaintenance();
 				const t = await tool(p, [none]);
 				expect(await t.upkeep.mark("test.replacing", 1)).toEqual({ kind: "marked" });
+			});
+
+			it("refuses on the maintenance key first, where both refusals apply", async () => {
+				const p = await harness.start(upkeepSpaces);
+				await p.upkeep.enterMaintenance();
+				await p.upkeep.require([held.name]);
+				await refusedSaying(harness.another(p, [none]), /maintenance key/);
+			});
+
+			it("writes no ledger entry when the maintenance key refuses a start", async () => {
+				const p = await harness.start(upkeepSpaces);
+				await p.upkeep.enterMaintenance();
+				const only: Space = { name: "upkeep-keyed-out", guarantees: [], subjectData: "none" };
+				await refusedSaying(harness.another(p, [none, only]), /maintenance key/);
+				expect((await p.upkeep.kept()).map((s) => s.name)).not.toContain(only.name);
+			});
+
+			it("starts a serving process that changes as before once the key lifts", async () => {
+				const p = await harness.start(upkeepSpaces);
+				await p.upkeep.enterMaintenance();
+				await p.upkeep.leaveMaintenance();
+				const q = await harness.another(p, upkeepSpaces);
+				expect((await q.store.putIfAbsent(fresh(), 1, never)).kind).toBe("written");
+				expect(await q.upkeep.mark("test.after-lift", 1)).toEqual({ kind: "marked" });
 			});
 
 			it("refuses a declaration that is no object at all before reading it, naming store.declaration", async () => {
