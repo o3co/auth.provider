@@ -80,7 +80,8 @@ export async function writeDeployment(
 	};
 	const http = { serves: names.includes(httpPackage), live: names.includes(opsPackage) };
 	const run = (file: string) => `node --env-file-if-exists=.env ${file}`;
-	const entries = await entriesOf(modules, packages.importOf, run, keys);
+	const declaring = packages.appEntries?.(names) ?? [];
+	const entries = await entriesOf(modules, packages.importOf, run, keys, declaring);
 	const dependencies = packages.dependencies(names);
 	// The one place a caller without packages outside the release is read as having none.
 	const release = packages.release();

@@ -616,3 +616,30 @@ it("takes a registry's credentials as a build secret, only where a scope records
 	expect(await read(plain, "Dockerfile")).not.toContain("npmrc");
 	expect(await read(plain, "README.md")).not.toContain("npmrc");
 });
+
+it("writes the entries the composed packages declare, read by app-entries, and none where the caller has no declarations", async () => {
+	const tool = { script: "tool", shape: "call", contract: "toolRun", member: "run" };
+	const packages = {
+		...fakePackages(),
+		appEntries: (names: readonly string[]) =>
+			[{ name: "@mod/tool", appEntries: [tool] }].filter((d) => names.includes(d.name)),
+	};
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/tool"], packages, readme);
+	const manifest = JSON.parse(await read(target, "package.json"));
+	expect(manifest.scripts.tool).toBe("node --env-file-if-exists=.env src/tool.ts");
+	expect(await read(target, "src/tool.ts")).toContain('import { toolRun } from "@o3co/x-tool";');
+
+	const older = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(older, ["@mod/tool"], fakePackages(), readme);
+	expect(JSON.parse(await read(older, "package.json")).scripts.tool).toBeUndefined();
+
+	const misdeclared = await mkdtemp(join(tmpdir(), "app-output-"));
+	const refusing = {
+		...packages,
+		appEntries: () => [{ name: "@mod/tool", appEntries: [{ ...tool, shape: "stream" }] }],
+	};
+	await expect(writeDeployment(misdeclared, ["@mod/tool"], refusing, readme)).rejects.toThrow(
+		"@mod/tool declares appEntries that cannot be read",
+	);
+});
