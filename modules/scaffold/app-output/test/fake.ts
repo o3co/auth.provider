@@ -1,3 +1,4 @@
+import type { Declaring } from "@mod/app-entries";
 import {
 	type Asked,
 	type Card,
@@ -37,6 +38,49 @@ const declared: readonly Asked[] = [
 	},
 ];
 
+/** What the packages with tool scripts declare of the app's entries, as their manifests would. */
+const entries: readonly Declaring[] = [
+	{
+		name: "@mod/seal",
+		appEntries: [{ script: "reseal", shape: "call", contract: "resealRun", member: "run" }],
+	},
+	{
+		name: "@mod/mfa-witnessing",
+		appEntries: [
+			{
+				script: "witness-backfill",
+				shape: "settle-subjects",
+				contract: "witnessBackfill",
+				member: "settle",
+				answers: ["marked", "held", "none", "unclaimed", "inconsistent"],
+			},
+		],
+	},
+	{
+		name: "@mod/passkey-witnessing",
+		appEntries: [
+			{
+				script: "passkey-backfill",
+				shape: "settle-subjects",
+				contract: "passkeyBackfill",
+				member: "settle",
+				answers: ["marked", "held", "none", "pending", "inconsistent"],
+			},
+		],
+	},
+	{
+		name: "@mod/mfa-reset",
+		appEntries: [
+			{
+				script: "unclaimed-factors",
+				shape: "name-subjects",
+				contract: "resetCandidates",
+				member: "unclaimed",
+			},
+		],
+	},
+];
+
 /** Packages as a caller would give them: the fragments above, published under `@o3co/x-`. */
 export function fakePackages(
 	release: Release = { version: "1.2.3" },
@@ -67,5 +111,6 @@ export function fakePackages(
 		release: () => release,
 		...(outside ? { outside: () => outside } : {}),
 		asks: (names) => declared.filter((d) => names.includes(d.name)),
+		appEntries: (names) => entries.filter((d) => names.includes(d.name)),
 	};
 }
