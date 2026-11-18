@@ -13,7 +13,7 @@ import {
 	subjectRevocation,
 } from "./contract.ts";
 import { markedIn } from "./erasure/erasure.ts";
-import { coveredBy, type Enablement, erasureMark, fenceOver } from "./erasure/gate.ts";
+import { type Enablement, erasureMark, fenceOver } from "./erasure/gate.ts";
 import { followedBy } from "./followers.ts";
 import { boundaryStore } from "./store.ts";
 
@@ -98,7 +98,12 @@ export default defineModule(
 			const { cannotTell } = await c.get(erasureReading);
 			return {
 				markErased: markedIn(await c.get(boundaryStore)),
-				covered: () => coveredBy(gate(), cannotTell),
+				covered: () => {
+					const { covered, reasons } = gate();
+					return covered
+						? { kind: "covered", cannotTell }
+						: { kind: "not-covered", reasons, cannotTell };
+				},
 			};
 		}),
 		// Where this process read erasure off at its start, no subject is marked (TLC's A2): no read.

@@ -389,20 +389,29 @@ it("refuses the start of an eraser whose build reaches the gate, collecting prob
 	]);
 });
 
-it("reads covered as the gate does, with its reasons where not, a store that cannot tell counting as not covered", async () => {
+it("reads covered as the gate does, with its reasons where not, and apart whether the store cannot tell", async () => {
 	const read = async (...args: Parameters<typeof gated>) =>
 		(await gated(...args)).app?.get(subjectErasure).covered();
-	expect(await read(true, () => {}, {}, { consent: true })).toEqual({ kind: "covered" });
+	expect(await read(true, () => {}, {}, { consent: true })).toEqual({
+		kind: "covered",
+		cannotTell: false,
+	});
 	expect(await read(false, () => {}, {}, { legacy: false })).toEqual({
 		kind: "not-covered",
 		reasons: [
 			"no module guards it or the boundary store does not fence",
 			"these cannot erase: legacy",
 		],
+		cannotTell: false,
 	});
 	expect(await read(true, () => {}, { erasureEnabled: false })).toEqual({
+		kind: "covered",
+		cannotTell: true,
+	});
+	expect(await read(false, () => {}, { erasureEnabled: false })).toEqual({
 		kind: "not-covered",
-		reasons: ["the boundary store does not tell whether erasure is enabled"],
+		reasons: ["no module guards it or the boundary store does not fence"],
+		cannotTell: true,
 	});
 });
 
@@ -432,5 +441,6 @@ it("lets account erasure's eraser take the erasure at its build, the covered rea
 	expect(erasure?.covered()).toEqual({
 		kind: "not-covered",
 		reasons: ["no module guards it or the boundary store does not fence"],
+		cannotTell: false,
 	});
 });

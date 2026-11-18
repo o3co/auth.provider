@@ -209,7 +209,7 @@ const standInBoundaries = contract<Map<string, Boundaries>>("subject-revocation.
 /**
  * A stand-in for tests of the modules that use subject revocation: boundaries kept in memory on
  * the composition's clock, recorded and compared by subject-revocation's own rules, and followed
- * by the contributed followers as there. Its erasure always answers covered.
+ * by the contributed followers as there. Its erasure answers covered, never cannot tell.
  */
 export const subjectRevocationStandIn = defineModule(
 	{ name: "subject-revocation", replicaSafe: false, takes: [revocationFollowers] },
@@ -229,7 +229,7 @@ export const subjectRevocationStandIn = defineModule(
 		m.provide(subjectRevocation).by(async (c) => subjectRevocationOf(await c.get(revocations))),
 		m.provide(subjectErasure).by(async (c) => ({
 			markErased: markedInto(await c.get(standInBoundaries), c.clock.now),
-			covered: () => ({ kind: "covered" }),
+			covered: () => ({ kind: "covered", cannotTell: false }),
 		})),
 		m.provide(erasedSubjects).by(async (c) => {
 			const boundaries = await c.get(standInBoundaries);
@@ -275,7 +275,7 @@ export function laggingRevocation() {
 			// A mark goes to the boundaries as they are; a lagging read sees it once caught up.
 			m.provide(subjectErasure).by((c) => ({
 				markErased: markedInto(boundaries, c.clock.now),
-				covered: () => ({ kind: "covered" }),
+				covered: () => ({ kind: "covered", cannotTell: false }),
 			})),
 			// Read as a compare is: by the boundaries as they stood at `lag()` until caught up.
 			m.provide(erasedSubjects).by(() => ({ erased: erasedInto(() => behind ?? boundaries) })),
