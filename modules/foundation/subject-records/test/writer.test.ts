@@ -7,35 +7,57 @@ const manifest: { exports: Record<string, string> } = JSON.parse(
 );
 
 /**
- * Every value reached from `value` through the own data properties of objects, arrays and functions
- * (a class's statics), to `depth`: no function is called, no getter run, no prototype walked.
+ * Each value a module offers, read from its namespace by name (a namespace's export names are
+ * enumerable; vitest serves them as accessors, which reading by name runs as an import does).
  */
-function reached(value: unknown, depth: number, seen = new Set<unknown>()): unknown[] {
-	const holds = (typeof value === "object" && value !== null) || typeof value === "function";
-	if (!holds || seen.has(value) || depth === 0) return [value];
-	seen.add(value);
-	const inner = Reflect.ownKeys(value as object)
-		.filter((key) => key !== "prototype")
-		.flatMap((key) => {
+const offeredBy = (namespace: Record<string, unknown>) =>
+	Object.keys(namespace).map((name) => namespace[name]);
+
+/**
+ * Every value reached from `roots` through the own data properties of objects, arrays and functions
+ * (a class's statics), each visited once, however deep: no function is called, no getter run, no
+ * prototype walked, and no Map or Set opened.
+ */
+function reached(roots: readonly unknown[]): Set<unknown> {
+	const seen = new Set<unknown>();
+	const next = [...roots];
+	while (next.length > 0) {
+		const value = next.shift();
+		if (seen.has(value)) continue;
+		seen.add(value);
+		if ((typeof value !== "object" || value === null) && typeof value !== "function") continue;
+		for (const key of Reflect.ownKeys(value)) {
+			if (key === "prototype") continue;
 			const property = Object.getOwnPropertyDescriptor(value, key);
-			return property && "value" in property ? reached(property.value, depth - 1, seen) : [];
-		});
-	return [value, ...inner];
+			if (property && "value" in property) next.push(property.value);
+		}
+	}
+	return seen;
 }
 
-it("hands the subject writer on from no entry, at any depth its exported values reach", async () => {
-	const entries = Object.values(manifest.exports);
+it("hands the subject writer from no entry: no export, and nothing its exports hold as data, is the writer", async () => {
+	const entries = Object.entries(manifest.exports);
 	expect(entries.length).toBeGreaterThan(0);
-	for (const entry of entries) {
-		const offered = await import(new URL(`../${entry}`, import.meta.url).href);
-		expect(reached(offered, 8)).not.toContain(subjectWriter);
+	for (const [entry, file] of entries) {
+		const namespace = await import(new URL(`../${file}`, import.meta.url).href);
+		const offered = offeredBy(namespace);
+		expect(offered.length, entry).toBeGreaterThan(0);
+		const walked = reached(offered);
+		// The walk starts from every export: it cannot pass having read none.
+		for (const value of offered) expect(walked.has(value), entry).toBe(true);
+		expect(walked.has(subjectWriter), entry).toBe(false);
 	}
 });
 
-it("finds the writer where a value would hand it on", () => {
-	class Holder {
-		static kept = { deep: [subjectWriter] };
+it("finds the writer an imported module hands on: exported itself, nested in data, or a class's static", async () => {
+	const namespace = await import("./fixtures/handing-on.ts");
+	for (const name of ["direct", "nested", "Holder"] as const) {
+		expect(reached(offeredBy({ [name]: namespace[name] })).has(subjectWriter), name).toBe(true);
 	}
-	expect(reached({ Holder }, 8)).toContain(subjectWriter);
-	expect(reached({ Holder }, 2)).not.toContain(subjectWriter);
+});
+
+it("finds the writer however the walk first met what holds it", () => {
+	const shared = { deep: [subjectWriter] };
+	const offered = { a: { b: { c: { d: { e: { f: shared } } } } }, b: shared };
+	expect(reached([offered]).has(subjectWriter)).toBe(true);
 });
