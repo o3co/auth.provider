@@ -123,8 +123,10 @@ describe("the declared spaces", () => {
 			(e: unknown) => e,
 		);
 		expect(error).toBeInstanceOf(BootRefused);
-		const reasons = (error as BootRefused).refusals.map((r) => r.reason).join("\n");
-		expect(reasons).toMatch(/space bare declares no subjectData/);
+		// The space is named, in the refusal's where or its reason.
+		const said = (error as BootRefused).refusals.map((r) => `${r.where}: ${r.reason}`).join("\n");
+		expect(said).toMatch(/\bbare\b/);
+		expect(said).toMatch(/declares no subjectData/);
 		redis.down();
 	});
 });
