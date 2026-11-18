@@ -113,7 +113,7 @@ async function refusal(
 	return reasons;
 }
 
-describe("the commands the store needs", () => {
+describe("the declared spaces", () => {
 	it("refuse boot over a space declaring no subjectData, naming it", async () => {
 		const redis = primary();
 		const bare = defineModule({ name: "bare", replicaSafe: false, takes: [] }, (m) => [
@@ -127,7 +127,9 @@ describe("the commands the store needs", () => {
 		expect(reasons).toMatch(/space bare declares no subjectData/);
 		redis.down();
 	});
+});
 
+describe("the commands the store needs", () => {
 	it("refuse boot where the server refuses one of a confirmation round's, naming it", async () => {
 		for (const command of ["WAIT", "ROLE", "SET", "INFO"]) {
 			const redis = primary();
