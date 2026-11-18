@@ -109,8 +109,11 @@ export function journalFileWith(parts: {
 			throw new Unavailable("erasure-journal");
 		}
 	};
-	/** The hold this journal has taken, if any, and its appends queued one after another under it. */
-	let holding: { queue: Promise<unknown> } | undefined;
+	/**
+	 * The hold this journal has taken, if any: its appends queued one after another under it, and
+	 * whether its release has begun, after which it takes no more.
+	 */
+	let holding: { queue: Promise<unknown>; closing: boolean } | undefined;
 	/** What the file holds, then one record appended, numbered next. */
 	const append = async (record: (n: number) => Entry) => {
 		const held = await records();
@@ -125,7 +128,7 @@ export function journalFileWith(parts: {
 	};
 	/** Under this journal's hold, one at a time; outside it, under the lock taken for this append. */
 	const appended = async (record: (n: number) => Entry) => {
-		if (holding) {
+		if (holding && !holding.closing) {
 			const turn = holding.queue.then(() => append(record));
 			holding.queue = turn.catch(() => {});
 			return turn;
@@ -163,14 +166,16 @@ export function journalFileWith(parts: {
 			const lock = await locked();
 			if (!("release" in lock)) return { kind: "busy", holder: lock.holder };
 			const { release } = lock;
-			const mine = { queue: Promise.resolve() as Promise<unknown> };
+			const mine = { queue: Promise.resolve() as Promise<unknown>, closing: false };
 			holding = mine;
 			return {
 				kind: "held",
 				release: async () => {
-					if (holding !== mine) return;
+					if (mine.closing) return;
+					// At once, before any wait: no append joins the hold from here, so the queue is final.
+					mine.closing = true;
 					await mine.queue;
-					holding = undefined;
+					if (holding === mine) holding = undefined;
 					await release();
 				},
 			};

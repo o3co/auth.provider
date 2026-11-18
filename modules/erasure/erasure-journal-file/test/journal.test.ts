@@ -154,3 +154,38 @@ it("leaves another holder's lock in place where a holder whose lock the operator
 	if (second.kind === "held") await second.release();
 	expect((await at(path).hold()).kind).toBe("held");
 });
+
+it("takes no append under a hold once its release began, finishing those it took before it lets the lock go", async () => {
+	const path = await fresh();
+	let open: () => void = () => {};
+	const gate = new Promise<void>((resolve) => {
+		open = resolve;
+	});
+	let first = true;
+	const files: JournalFiles = {
+		...nodeFiles,
+		append: async (p, bytes) => {
+			// The first append waits at the gate, as a slow disk would.
+			if (first) {
+				first = false;
+				await gate;
+			}
+			return nodeFiles.append(p, bytes);
+		},
+	};
+	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
+	await journal.create();
+	const held = await journal.hold();
+	if (held.kind !== "held") throw new Error("not held");
+	const taken = journal.begun("a", "o");
+	const released = held.release();
+	// Asked once the release began: not taken under the hold, and the lock is still there.
+	await expect(journal.begun("b", "o")).rejects.toMatchObject({ name: "Unavailable" });
+	await expect(stat(`${path}.lock`)).resolves.toBeDefined();
+	open();
+	expect(await taken).toEqual({ number: 1 });
+	await released;
+	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+	expect(await journal.begun("b", "o")).toEqual({ number: 2 });
+	expect((await journal.list()) as unknown[]).toHaveLength(2);
+});
