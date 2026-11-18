@@ -27,4 +27,4 @@ Internal module of `subject-records`: a subject's records, by the category its s
 - Refuses at build, through `refuse`: once indexed, a store that writes no records of two partitions as one; an index that is not the space's; another category; secret keys outside `bounded`.
 
 ## Depends on
-- `records` (`changeRecords`, its targets, `Next`), `store`; internal modules `envelope`, `index`
+- `records` (`changeRecords`, its targets, `Next`), `store`; internal modules `envelope`, `index`; the package's `changeWritten`

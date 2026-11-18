@@ -17,7 +17,7 @@
 - `indexSpaceOf` (a space) → its index space: `.index` after its name, its guarantees, `internal`; the wiring declares it beside the space. `tombstoneFloor` (no eviction, durable, replicated): what a space holding a subject's data declares beside its own needs, as its index keeps the tombstone with the space's guarantees. `SubjectPlace`, `Phase`.
 
 ## Invariants
-- Every write goes through `records`' `changeRecords`, the one door to a space holding a subject's data; a read goes to the store and writes nothing. In `reader`, each write is one record in one partition, which any store writes as one.
+- Every write goes through `records`' `changeRecords`, the one door to a space holding a subject's data, with `store`'s subject writer, so the store takes it as this package's. The writer is held in one file (`writer.ts`, `changeWritten`) and never handed on: no value an entry exports reaches it, which a test walks. A read goes to the store and writes nothing. In `reader`, each write is one record in one partition, which any store writes as one.
 - `reader`: records written raw, with no index or tombstone, as they were. `indexed`, from the mark `subject-records.phase`: a record of an `online-*` space is kept in an envelope with its subject (internal module `envelope`). An owner's value holding `records:v` at its top is refused in both phases.
 - A subject's part of the index (internal module `index`) holds its tombstone, 16 buckets of the entries of its records and sets, and, in an `online-keyed` space, the witness of its envelopes; no key holds a subject. A bucket in another shape is refused wherever it is read, never skipped.
 - Every write of an `online-keyed` envelope writes its subject's witness with it where missing; erasing removes it with what it witnesses; a removal or an end may leave it, holding nothing but its hashed key.
@@ -31,7 +31,7 @@
 - The builders' `unowned`: raw records of a space from before its non-subject records moved out, saved while the phase is `reader`, `closed` once `indexed`; removed in 0.22 (internal module `writes`).
 
 ## Depends on
-- `kernel`, `store`, `records` (`changeRecords`, its targets, keys and keyed sets' codec), `erasure-extensions` (the reports, `SubjectReading`, `Elsewhere`, `Walk`)
+- `kernel`, `store` (`subject-writer`), `records` (`changeRecords`, its targets, keys and keyed sets' codec), `erasure-extensions` (the reports, `SubjectReading`, `Elsewhere`, `Walk`)
 
 ## Vocabulary
 - subject: the account a record belongs to.

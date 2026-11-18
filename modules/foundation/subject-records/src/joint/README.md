@@ -23,4 +23,4 @@ Internal module of `subject-records`: records of several `online-indexed` places
 - Cost: a change with ops runs twice at least: the first round reads the targets and the watched records alone and writes only records' confirming mark, so the ops' index records and tombstones are known; the second reads them all and writes. A round that finds more needs does the same again.
 
 ## Depends on
-- `kernel` (Unavailable), `records` (`changeRecords`, `changesTogether`), `store`; internal modules `index`, `writes` (`rulesOf`)
+- `kernel` (Unavailable), `records` (`changeRecords`, `changesTogether`), `store`; internal modules `index`, `writes` (`rulesOf`); the package's `changeWritten`
