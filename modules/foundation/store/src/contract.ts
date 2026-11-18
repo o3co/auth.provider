@@ -34,7 +34,8 @@ export type Guarantee = "no-eviction" | "durable" | "replicated" | "confirmed-re
 
 /**
  * What a space holds of a subject's data, as its owner declares it for erasing an account, which
- * reads it. To store, each is opaque but `none` (`noSubjectData`).
+ * reads it. To store, each is opaque but `none` (`noSubjectData`) and the four a change reaches only
+ * carrying the subject writer (`checks`).
  */
 export type SubjectData =
 	| "online-indexed"
@@ -53,7 +54,7 @@ export const noSubjectData = "none" satisfies SubjectData;
 export interface Space {
 	readonly name: string;
 	readonly guarantees: readonly Guarantee[];
-	/** What it holds of a subject's data. Erasure's word, carried on the declaration for erasure to read. */
+	/** What it holds of a subject's data. Erasure's word, carried on the declaration for erasure to read, and for store to ask the subject writer of a change. */
 	readonly subjectData?: SubjectData;
 	/** The eraser that erases it, by its key, for erasure to find. */
 	readonly erasedBy?: string;

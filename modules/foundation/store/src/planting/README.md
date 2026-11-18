@@ -3,7 +3,7 @@
 Internal module of `store`: a value written at a key as an earlier version, or another writer, left it, for tests.
 
 ## Responsibilities
-- Writes one value at one key as one batch with no conditions, carrying the subject writer, so a space of subjects' data takes it as any other (`plantValue`).
+- Writes one value at one key as one batch with no conditions, carrying the subject writer, so a space of the four categories `checks` names takes it as any other (`plantValue`).
 
 ## Not here
 - A record in records' layout: `records`' `./testing`, over this.

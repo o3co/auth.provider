@@ -133,7 +133,8 @@ const heldByWriter = (k: Key) =>
 
 /** A key a single-key change port takes: none in a space held by the writer, which no such port carries. */
 function unheld(k: Key): Key {
-	if (heldByWriter(k)) fail(`a change to ${k.space.name} carries the subject writer, in a batch`);
+	if (heldByWriter(k))
+		fail(`a change to ${k.space.name} goes in a batch carrying the subject writer`);
 	return k;
 }
 
