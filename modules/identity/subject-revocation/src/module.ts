@@ -13,7 +13,7 @@ import {
 	subjectRevocation,
 } from "./contract.ts";
 import { markedIn } from "./erasure/erasure.ts";
-import { type Enablement, erasureMark, fenceOver } from "./erasure/gate.ts";
+import { coveredBy, type Enablement, erasureMark, fenceOver } from "./erasure/gate.ts";
 import { followedBy } from "./followers.ts";
 import { boundaryStore } from "./store.ts";
 
@@ -22,9 +22,10 @@ const erasureReading = contract<ReturnType<typeof erasureMark>>(
 	"subject-revocation.erasure-reading",
 );
 
-/** The boot gate's reading: whether the composition covers erasure, and the mark as read. */
+/** The boot gate's reading: whether the composition covers erasure, why not, and the mark as read. */
 const erasureGate = contract<{
 	readonly covered: boolean;
+	readonly reasons: readonly string[];
 	readonly enabled: () => Promise<Enablement>;
 }>("subject-revocation.erasure-gate");
 
@@ -37,12 +38,17 @@ export default defineModule(
 	(m) => [
 		m.provide(erasureReading).by(async (c) => erasureMark(await c.get(boundaryStore))),
 		// Covered is known without the store: a covered composition starts whatever the store answers.
-		// The gate collects erasers, so no eraser's build may reach it: only the probe takes it.
+		// The gate collects erasers, so no eraser's build may reach it: only the probe takes it, and
+		// `subjectErasure` reads it late.
 		m.provide(erasureGate).by(async (c) => {
 			const boundaries = await c.get(boundaryStore);
 			const guarded = boundaries.fence !== undefined && (await c.collect(erasureGuards)).length > 0;
 			const unerasable = (await c.collect(erasers)).filter((e) => !e.erasable).map((e) => e.name);
-			const covered = guarded && unerasable.length === 0;
+			const reasons = [
+				...(guarded ? [] : ["no module guards it or the boundary store does not fence"]),
+				...(unerasable.length > 0 ? [`these cannot erase: ${unerasable.join(", ")}`] : []),
+			];
+			const covered = reasons.length === 0;
 			const mark = await c.get(erasureReading);
 			// What a node that cannot tell must keep to, in the runbook's own words.
 			const rule = "this node must never serve a deployment where erasure is enabled";
@@ -66,13 +72,9 @@ export default defineModule(
 			}
 			if (!covered && (await mark.read()) === "on") {
 				// Every reason at once, so the operator is not refused again for the one left unnamed.
-				const reasons = [
-					...(guarded ? [] : ["no module guards it or the boundary store does not fence"]),
-					...(unerasable.length > 0 ? [`these cannot erase: ${unerasable.join(", ")}`] : []),
-				];
 				return c.refuse("subject-revocation", `erasure is enabled, yet ${reasons.join("; and ")}`);
 			}
-			return { covered, enabled: mark.read };
+			return { covered, reasons, enabled: mark.read };
 		}),
 		m.provide(revocations).by(async (c): Promise<Revocations> => {
 			const boundaries = await c.get(boundaryStore);
@@ -91,9 +93,14 @@ export default defineModule(
 			};
 		}),
 		m.provide(subjectRevocation).by(async (c) => subjectRevocationOf(await c.get(revocations))),
-		m
-			.provide(subjectErasure)
-			.by(async (c) => ({ markErased: markedIn(await c.get(boundaryStore)) })),
+		m.provide(subjectErasure).by(async (c) => {
+			const gate = c.late(erasureGate);
+			const { cannotTell } = await c.get(erasureReading);
+			return {
+				markErased: markedIn(await c.get(boundaryStore)),
+				covered: () => coveredBy(gate(), cannotTell),
+			};
+		}),
 		// Where this process read erasure off at its start, no subject is marked (TLC's A2): no read.
 		m.provide(erasedSubjects).by(async (c) => {
 			const marked = erasedIn(await c.get(boundaryStore));

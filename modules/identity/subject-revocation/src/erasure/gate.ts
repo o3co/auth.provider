@@ -1,6 +1,6 @@
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import { markIn, opened } from "../boundaries/written.ts";
-import type { ErasureFence } from "../contract.ts";
+import type { ErasureFence, SubjectErasure } from "../contract.ts";
 import type { BoundaryStore, StoredBoundary, StoredReceipt } from "../store.ts";
 
 /**
@@ -75,4 +75,16 @@ export function fenceOver(
 			return after === undefined ? "erased" : "passed";
 		},
 	};
+}
+
+/** The covered read: the gate's own answer, a store that cannot tell counting as not covered. */
+export function coveredBy(
+	gate: { readonly reasons: readonly string[] },
+	cannotTell: boolean,
+): ReturnType<SubjectErasure["covered"]> {
+	const reasons = [
+		...gate.reasons,
+		...(cannotTell ? ["the boundary store does not tell whether erasure is enabled"] : []),
+	];
+	return reasons.length === 0 ? { kind: "covered" } : { kind: "not-covered", reasons };
 }

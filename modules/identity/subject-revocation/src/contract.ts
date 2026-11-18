@@ -57,6 +57,14 @@ export interface SubjectErasure {
 	 * are; a subject marked already keeps its first mark, which is answered.
 	 */
 	markErased(subject: string): Promise<{ readonly kind: "marked"; readonly erasedAt: number }>;
+	/**
+	 * Whether the composition covers erasure, as the boot gate reads it, with the gate's reasons
+	 * where it does not; a store that cannot tell whether erasure is enabled counts as not covered.
+	 * Read once assembly is done.
+	 */
+	covered():
+		| { readonly kind: "covered" }
+		| { readonly kind: "not-covered"; readonly reasons: readonly string[] };
 }
 
 /** Taken by account erasure alone, which alone marks a subject erased. */

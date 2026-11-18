@@ -11,8 +11,9 @@ Internal module of `subject-revocation`: marking a subject erased, the fence a b
 ## Offers
 - `markedIn` (the store) → `markErased`: the mark, at the deadline of the write that makes it.
 - `erasureMark` (the store) → the one reading of whether erasure is enabled: on or off once read, held for the process; unread while the store cannot answer, read again next time; cannot tell where the store has no reading, known without it. The gate, the probe and the fence read its state, never the store's ports. `fenceOver` (the store, that reading) → the fence; `receiptLifetimeMs`.
-- The reading is a provision of its own, which the fence takes. The gate collects `erasers` and is taken by the probe alone, so no eraser's build may reach it, as one that collects `probes` does.
+- The reading is a provision of its own, which the fence takes. The gate collects `erasers` and is taken by the probe alone, `subjectErasure` reading it late, so no eraser's build may reach it, as one that collects `probes` does.
 - `subjectErasure.markErased(subject)`, the mark for good, taken by `account-erasure` alone; `erasureFence.fence(subject, receiptId)`, passed or `erased`, one per bundle of credentials, each fence's receipt id new, one already used thrown; extension point `erasureGuards` (many), a module's statement that it checks and fences on this boundary; the boot gate.
+- `subjectErasure.covered()`, once assembly is done: covered, or not covered with the gate's reasons; a store that cannot tell counts as not covered (`coveredBy`).
 
 ## Invariants
 - The mark is the deadline of a confirmed write, on the store's clock; the boundaries stay as they are, and a subject marked already keeps its first mark, which is answered, its record left as it is, whatever else it holds. A mark of no time is never marked over: unavailable, as the read is. A mark of a time is read first, so the comparison and the fence answer it as marking does: revoked and erased.
