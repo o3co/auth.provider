@@ -293,6 +293,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/app-output` (assembly, `modules/scaffold/app-output`): Writes a generated project: a deployment of the modules it is given, with its configuration from their fragments, the environment's and the local layer's examples, an image and the operator's guide.
   - `asked` (`src/asked`): what each composed module asks of the deployment, as its manifest declares it, rendered for the guide.
   - `fragments` (`src/fragments`): Reads each module's fragment (its section's example, `config.example` beside its package.json) as data.
+  - `image` (`src/image`): the generated app's image, its Dockerfile and what its build context leaves out.
   - `lockfile` (`src/lockfile`): Holds a pnpm lockfile to what was recorded of the packages outside the release when an app was generated: the version its root depends on, the content, the dependencies declared, and one copy of each package the app's overrides hold.
   - `reading` (`src/lockfile/reading`): a pnpm lockfile read as data, and the words of its keys and references.
   - `outside` (`src/outside`): Gives an app composing packages outside the release what holds them to what was recorded: the record, the script checking the lockfile against it, the pnpm settings that keep one copy of the release and zod, and the check in the image.
