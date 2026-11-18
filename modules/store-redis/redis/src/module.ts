@@ -324,26 +324,18 @@ export default defineModule(
 				replication: c.section.replication,
 			};
 			const taken: Taken = { epoch: "" };
-			let upkeep: ReturnType<typeof redisUpkeepWith>;
-			try {
-				upkeep = redisUpkeepWith({
-					run: scriptsOn(client),
-					serverOf,
-					confirmed:
-						options.replication === undefined ? undefined : confirmationRounds(confirmer, options),
-					keys: keysUnder(options.prefix),
-					declared,
-					taken,
-					random: c.random,
-					honours: (wanted) =>
-						honoursOf(client, c.section, wanted, `${options.prefix}:{#check}:fsync`),
-				});
-			} catch (error) {
-				// store's checks refuse a malformed declaration (one naming no `subjectData` among them):
-				// the boot is refused naming the space, never left a failure of assembly.
-				if (error instanceof TypeError) return c.refuse("store.declaration", error.message);
-				throw error;
-			}
+			const upkeep = redisUpkeepWith({
+				run: scriptsOn(client),
+				serverOf,
+				confirmed:
+					options.replication === undefined ? undefined : confirmationRounds(confirmer, options),
+				keys: keysUnder(options.prefix),
+				declared,
+				taken,
+				random: c.random,
+				honours: (wanted) =>
+					honoursOf(client, c.section, wanted, `${options.prefix}:{#check}:fsync`),
+			});
 			try {
 				await upkeep.start();
 			} catch {
