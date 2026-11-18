@@ -19,7 +19,7 @@ import {
 	type Store,
 	type StoreControl,
 	type StoreUpkeep,
-} from "./contract.ts";
+} from "../contract.ts";
 
 type Answer = { readonly kind: string };
 type Held = { readonly value: Json; readonly version: string; readonly expiresAt: number | null };

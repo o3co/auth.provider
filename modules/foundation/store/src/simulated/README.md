@@ -8,7 +8,7 @@ Internal module of `store`: a simulated replicated store, for tests, offered thr
 
 ## Not here
 - What a store promises: the `store` contract and its contract test.
-- A store kept in memory for a deployment: the memory store.
+- A store kept in memory for a deployment: the internal module `memory`.
 
 ## Offers
 - `simulatedStore()` → `SimulatedStore`: its module, the faults a test asks for, its marks, and the declared spaces.
@@ -17,4 +17,4 @@ Internal module of `store`: a simulated replicated store, for tests, offered thr
 - Inputs are checked once, at the facade; the primary, the replica and every replay run on memory's unchecked ports.
 
 ## Depends on
-- `store`'s contract and its memory store.
+- `store`'s contract; the internal module `memory`.

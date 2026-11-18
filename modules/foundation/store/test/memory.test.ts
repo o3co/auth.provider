@@ -9,7 +9,7 @@ import {
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { type Space, spaces, store } from "../src/contract.ts";
-import { memoryStore } from "../src/memory.ts";
+import { memoryStore } from "../src/memory/memory.ts";
 import storeModule from "../src/module.ts";
 import { contractSpaces, overwrite, storeContract } from "../src/testing.ts";
 

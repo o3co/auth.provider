@@ -1,7 +1,7 @@
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { expect, it } from "vitest";
 import { type Space, spaces, store, storeControl, storeUpkeep } from "../../contract.ts";
-import { type MemoryData, memoryData, memoryProcess } from "../../memory.ts";
+import { type MemoryData, memoryData, memoryProcess } from "../../memory/memory.ts";
 import storeModule from "../../module.ts";
 import { contractSpaces, type UpkeepProcess, upkeepContract } from "../../testing.ts";
 
