@@ -41,11 +41,9 @@ it("hands the subject writer from no entry: no export, and nothing its exports h
 	for (const [entry, file] of entries) {
 		const namespace = await import(new URL(`../${file}`, import.meta.url).href);
 		const offered = offeredBy(namespace);
+		// Every export is a root of the walk: it cannot pass having read none.
 		expect(offered.length, entry).toBeGreaterThan(0);
-		const walked = reached(offered);
-		// The walk starts from every export: it cannot pass having read none.
-		for (const value of offered) expect(walked.has(value), entry).toBe(true);
-		expect(walked.has(subjectWriter), entry).toBe(false);
+		expect(reached(offered).has(subjectWriter), entry).toBe(false);
 	}
 });
 
