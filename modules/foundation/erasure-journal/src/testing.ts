@@ -5,7 +5,10 @@ import type { ErasureJournal } from "./contract.ts";
 export interface JournalHarness {
 	/** A journal over a fresh place: not created yet. */
 	open(): Promise<ErasureJournal>;
-	/** Another journal over the same place as `journal`, as a later process opens it. */
+	/**
+	 * Another journal over the same place as `journal`, as a later process opens it: another holder,
+	 * answered `busy` while `journal` holds.
+	 */
 	reopen(journal: ErasureJournal): Promise<ErasureJournal>;
 	/** Cuts the last record of `journal`'s place short, as a crash during its write leaves it. */
 	tear(journal: ErasureJournal): Promise<void>;
@@ -66,6 +69,21 @@ export function journalContract(name: string, harness: JournalHarness): void {
 			for (const entry of list) expect(typeof entry.begunAt).toBe("number");
 		});
 
+		it("gives each subject the number of its last begun record, the later run's where it was begun twice", async () => {
+			const { journal } = await created();
+			await journal.begun("alice", "ops-1");
+			await journal.begun("bob", "ops-2");
+			await journal.finished("alice");
+			await journal.begun("alice", "ops-3");
+			await journal.finished("alice");
+			const list = await journal.list();
+			if (!Array.isArray(list)) throw new Error("unusable");
+			expect(list.map((e) => [e.subject, e.begunNumber, e.number])).toEqual([
+				["alice", 4, 5],
+				["bob", 2, 2],
+			]);
+		});
+
 		it("keeps what it answered for a later process that opens it", async () => {
 			const { journal, id } = await created();
 			await journal.begun("alice", "operator");
@@ -86,6 +104,27 @@ export function journalContract(name: string, harness: JournalHarness): void {
 			expect(await later.header()).toEqual(torn);
 			expect(await later.list()).toEqual(torn);
 			expect(await later.begun("carol", "operator")).toEqual(torn);
+		});
+
+		it("holds its place for the journal it was asked of, whatever the place holds, appending under the hold, and answers busy, naming the holder, to another journal", async () => {
+			const journal = await harness.open();
+			// Held before it is created: the hold does not read the journal.
+			const held = await journal.hold();
+			expect(held.kind).toBe("held");
+			const other = await harness.reopen(journal);
+			const busy = await other.hold();
+			expect(busy.kind).toBe("busy");
+			if (busy.kind === "busy") expect(busy.holder).not.toBe("");
+			// The holder appends under its hold; an append made outside it is unavailable.
+			expect((await journal.create()).kind).toBe("created");
+			expect(await journal.begun("alice", "operator")).toEqual({ number: 1 });
+			expect(await journal.begun("bob", "operator")).toEqual({ number: 2 });
+			await expect(other.begun("carol", "operator")).rejects.toBeInstanceOf(Unavailable);
+			if (held.kind === "held") await held.release();
+			const next = await other.hold();
+			expect(next.kind).toBe("held");
+			expect(await other.begun("carol", "operator")).toEqual({ number: 3 });
+			if (next.kind === "held") await next.release();
 		});
 
 		it("throws unavailable where the medium fails a write, appending nothing", async () => {
