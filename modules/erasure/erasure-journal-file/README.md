@@ -13,7 +13,7 @@
 ## Invariants
 - A record is its body's length in bytes, the body (JSON), its SHA-256 in hex and a line feed. The first is the header (format 1, the random id), the rest are numbered from 1.
 - Creating writes the file only where none is, then syncs the file and its directory.
-- The lock is a file holding its holder (pid, host, time, a token of the take), written whole and synced in a file of its own first, then linked as the lock only where none is: a lock never stands without its holder, and a failed take leaves no file.
+- The lock is a file holding its holder (pid, host, time, a token of the take), written whole and synced in a file of its own first, then linked as the lock only where none is: a lock never stands without its holder, and a failed take removes its lock. One whose removal fails too leaves it, naming this process: the same journal removes it before its next take; otherwise it is removed as a crashed holder's.
 - A take killed before it removes its own file leaves `<path>.lock.<16 hex>.tmp`, which nothing reads; the operator may remove it.
 - A lock whose holder cannot be read is named `unread`; one found empty, as an earlier version could leave one, `unnamed`. With no holder to check, the operator removes it only once no erasure command runs on the node.
 - `hold` takes it for the whole command, and the holder's appends take none, one after another; a lock held elsewhere answers `busy`, naming the holder as recorded. An append outside a hold takes it for itself and removes it after; held elsewhere, it is unavailable, naming the lock's path and its holder. The file is read and checked first, the record appended, then synced before the answer.

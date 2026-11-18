@@ -132,9 +132,15 @@ export function journalFileWith(parts: {
 				release?: unknown;
 			};
 			if (code === "EEXIST" && typeof holder === "string") return { holder };
-			if (typeof release === "function") stranded = { release: release as () => Promise<void> };
+			const failed = String(code ?? "failed");
+			if (typeof release === "function") {
+				stranded = { release: release as () => Promise<void> };
+				throw new Unavailable(
+					`erasure-journal (its lock ${path}.lock was taken, then failed (${failed}), and could not be removed: this journal removes it before its next take; otherwise remove it as a crashed holder's)`,
+				);
+			}
 			throw new Unavailable(
-				`erasure-journal (its lock ${path}.lock could not be taken: ${String(code ?? "failed")}; its directory must be writable and take hard links)`,
+				`erasure-journal (its lock ${path}.lock could not be taken: ${failed}; its directory must be writable and take hard links)`,
 			);
 		}
 	};
