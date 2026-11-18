@@ -318,6 +318,10 @@ it("G31 refuses a taker of an entry, or an adapter of a contract's owner, export
 		"src/declared.ts": `import { ${name} } from "${from}";\nexport const held = ${name} as object;\n`,
 		"src/defaulted.ts": `import { ${name} } from "${from}";\nexport default ${name};\n`,
 		"src/whole.ts": `import * as all from "${from}";\nexport { all };\n`,
+		"src/destructured.ts": `import * as ns from "${from}";\nconst { ${name} } = ns;\nexport { ${name} };\n`,
+		"src/member.ts": `import * as ns from "${from}";\nconst held = ns.${name};\nexport { held };\n`,
+		"src/keyed.ts": `import * as ns from "${from}";\nexport const { ${name}: held } = ns;\nexport default ns["${name}"];\n`,
+		"src/read.ts": `import * as ns from "${from}";\nexport const held = [ns.${name}];\nexport const named = (x: unknown) => x === ns.${name};\n`,
 		"src/used.ts": `import { ${name} } from "${from}";\nconst kept = ${name};\nexport const held = [kept];\nexport const named = (x: unknown) => x === kept;\n`,
 		"src/contract.ts": "export {};\n",
 	});
@@ -340,7 +344,17 @@ it("G31 refuses a taker of an entry, or an adapter of a contract's owner, export
 		{ adapts: "@g31h/store" },
 		budget.adapterKind,
 	);
-	const handed = ["aliased", "declared", "defaulted", "direct", "rebound", "whole"];
+	const handed = [
+		"aliased",
+		"declared",
+		"defaulted",
+		"destructured",
+		"direct",
+		"keyed",
+		"member",
+		"rebound",
+		"whole",
+	];
 	expect(
 		check([owner, taker, adapter], budget)
 			.filter((v) => v.rule.startsWith("G31"))

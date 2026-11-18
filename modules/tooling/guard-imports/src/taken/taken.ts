@@ -77,29 +77,47 @@ function moduleNameOf(s: Scope, p: Pkg): string | undefined {
 	return undefined;
 }
 
-/** An expression's own symbol where it is a name, seen through parentheses and type assertions. */
-function nameOf(facts: FileFacts, node: ts.Expression | undefined): ts.Symbol | undefined {
+/** An expression seen through parentheses and type assertions. */
+function bare(node: ts.Expression): ts.Expression {
 	let at = node;
 	while (
-		at !== undefined &&
-		(ts.isParenthesizedExpression(at) ||
-			ts.isAsExpression(at) ||
-			ts.isSatisfiesExpression(at) ||
-			ts.isNonNullExpression(at) ||
-			ts.isTypeAssertionExpression(at))
+		ts.isParenthesizedExpression(at) ||
+		ts.isAsExpression(at) ||
+		ts.isSatisfiesExpression(at) ||
+		ts.isNonNullExpression(at) ||
+		ts.isTypeAssertionExpression(at)
 	) {
 		at = at.expression;
 	}
-	return at !== undefined && ts.isIdentifier(at)
-		? facts.checker.getSymbolAtLocation(at)
-		: undefined;
+	return at;
+}
+
+/** A member read by a name written out: `o.name` or `o["name"]`. */
+function memberOf(node: ts.Expression): { object: ts.Expression; name: string } | undefined {
+	if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.name)) {
+		return { object: node.expression, name: node.name.text };
+	}
+	if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
+		return { object: node.expression, name: node.argumentExpression.text };
+	}
+	return undefined;
+}
+
+/** Each name a declaration binds, through object and array patterns. */
+function boundNames(name: ts.BindingName): ts.Identifier[] {
+	if (ts.isIdentifier(name)) return [name];
+	return name.elements.flatMap((element) =>
+		ts.isOmittedExpression(element) ? [] : boundNames(element.name),
+	);
 }
 
 /**
  * What a file imports from `from` as a value and exports again from itself, by the name it took:
  * `export { x }`, under an alias, `export default x`, `export const y = x`, or through a top-level
- * re-binding (`const y = x`) exported so; `*` for a namespace import. Lexical: a value put in an
- * object, an array or a call, a computed or spread property, or one assigned later is not followed.
+ * re-binding (`const y = x`) exported so; `*` for a namespace import exported whole. A member of a
+ * namespace import read by a name written out (`ns.x`, `ns["x"]`, `const { x } = ns`) is that
+ * member. Lexical: a value put in an object, an array or a call, a computed member or key, a rest
+ * element or a spread, or one assigned later is not followed.
  */
 function handedOn(facts: FileFacts, from: string): string[] {
 	const imported = new Map<ts.Symbol, string>();
@@ -112,6 +130,23 @@ function handedOn(facts: FileFacts, from: string): string[] {
 		}
 	}
 	if (imported.size === 0) return [];
+	const symbolOf = (node: ts.Node) => facts.checker.getSymbolAtLocation(node);
+	const takenAt = (node: ts.Expression | undefined): string | undefined => {
+		if (node === undefined) return undefined;
+		const at = bare(node);
+		if (ts.isIdentifier(at)) {
+			const symbol = symbolOf(at);
+			return symbol && imported.get(symbol);
+		}
+		const member = memberOf(at);
+		return member && takenAt(member.object) === "*" ? member.name : undefined;
+	};
+	const bind = (name: ts.Identifier, taken: string | undefined) => {
+		const symbol = symbolOf(name);
+		if (taken === undefined || symbol === undefined || imported.has(symbol)) return false;
+		imported.set(symbol, taken);
+		return true;
+	};
 	const statements = facts.file.statements;
 	const declarations = statements
 		.filter(ts.isVariableStatement)
@@ -119,22 +154,29 @@ function handedOn(facts: FileFacts, from: string): string[] {
 	for (let grew = true; grew; ) {
 		grew = false;
 		for (const declaration of declarations) {
-			const taken = imported.get(nameOf(facts, declaration.initializer) as ts.Symbol);
-			const symbol = facts.checker.getSymbolAtLocation(declaration.name);
-			if (taken === undefined || symbol === undefined || imported.has(symbol)) continue;
-			imported.set(symbol, taken);
-			grew = true;
+			const taken = takenAt(declaration.initializer);
+			if (ts.isIdentifier(declaration.name)) {
+				grew = bind(declaration.name, taken) || grew;
+			} else if (ts.isObjectBindingPattern(declaration.name) && taken === "*") {
+				for (const element of declaration.name.elements) {
+					const key = element.propertyName ?? element.name;
+					if (element.dotDotDotToken || !ts.isIdentifier(element.name)) continue;
+					if (!ts.isIdentifier(key) && !ts.isStringLiteralLike(key)) continue;
+					grew = bind(element.name, key.text) || grew;
+				}
+			}
 		}
 	}
-	const exported: (ts.Symbol | undefined)[] = [];
+	const exported: (string | undefined)[] = [];
 	for (const statement of statements) {
-		if (ts.isExportAssignment(statement)) exported.push(nameOf(facts, statement.expression));
+		if (ts.isExportAssignment(statement)) exported.push(takenAt(statement.expression));
 		const clause = ts.isExportDeclaration(statement) ? statement : undefined;
 		if (clause && !clause.moduleSpecifier && !clause.isTypeOnly && clause.exportClause) {
 			if (ts.isNamedExports(clause.exportClause)) {
 				for (const element of clause.exportClause.elements) {
 					if (element.isTypeOnly) continue;
-					exported.push(facts.checker.getExportSpecifierLocalTargetSymbol(element));
+					const symbol = facts.checker.getExportSpecifierLocalTargetSymbol(element);
+					exported.push(symbol && imported.get(symbol));
 				}
 			}
 		}
@@ -143,11 +185,14 @@ function handedOn(facts: FileFacts, from: string): string[] {
 			: false;
 		if (marked && ts.isVariableStatement(statement)) {
 			for (const declaration of statement.declarationList.declarations) {
-				exported.push(nameOf(facts, declaration.initializer));
+				for (const name of boundNames(declaration.name)) {
+					const symbol = symbolOf(name);
+					exported.push(symbol && imported.get(symbol));
+				}
 			}
 		}
 	}
-	return [...new Set(exported.flatMap((symbol) => imported.get(symbol as ts.Symbol) ?? []))];
+	return [...new Set(exported.filter((name) => name !== undefined))];
 }
 
 /** Whether a `takenBy` key names an entry of the owner (`./name`) rather than a contract. */
