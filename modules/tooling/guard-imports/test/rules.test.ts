@@ -922,6 +922,54 @@ describe("guard-imports", () => {
 		);
 	});
 
+	it("G31 counts no import by an adapter of the owner providing a kept contract, and every other one, a re-export of it too", () => {
+		const owner = pkg(
+			"@g31a/store",
+			{
+				"src/contract.ts": [
+					`import { contract } from "@g31a/kernel";`,
+					`export const upkeep = contract<object>("store.upkeep", { takenBy: [] });`,
+				].join("\n"),
+			},
+			{ exports: { ".": "./src/contract.ts" }, takenBy: { upkeep: [] } },
+		);
+		const other = pkg("@g31a/other", { "src/contract.ts": "export {};\n" });
+		const of = (name: string, manifest: Record<string, unknown>, text: string, kind: string) =>
+			pkg(
+				name,
+				{ "src/module.ts": text },
+				{ exports: { ".": "./src/module.ts" }, dependencies: { "@g31a/store": "*" }, ...manifest },
+				kind,
+			);
+		const provides = `import { upkeep } from "@g31a/store";\nexport const provided = [upkeep];\n`;
+		const adapter = of("@g31a/adapter", { adapts: "@g31a/store" }, provides, budget.adapterKind);
+		const feature = of("@g31a/feature", {}, provides, budget.featureKind);
+		const claiming = of("@g31a/claiming", { adapts: "@g31a/store" }, provides, budget.featureKind);
+		const elsewhere = of(
+			"@g31a/elsewhere",
+			{ adapts: "@g31a/other" },
+			provides,
+			budget.adapterKind,
+		);
+		const passing = of(
+			"@g31a/passing",
+			{ replaces: "@g31a/store" },
+			`export { upkeep } from "@g31a/store";\n`,
+			budget.adapterKind,
+		);
+		expect(
+			check([owner, other, adapter, feature, claiming, elsewhere, passing], budget)
+				.filter((v) => v.rule.startsWith("G31"))
+				.map((v) => `${v.where} ${v.detail}`)
+				.sort(),
+		).toEqual([
+			"@g31a/claiming/src/module.ts upkeep of @g31a/store",
+			"@g31a/elsewhere/src/module.ts upkeep of @g31a/store",
+			"@g31a/feature/src/module.ts upkeep of @g31a/store",
+			"@g31a/passing/src/module.ts upkeep of @g31a/store",
+		]);
+	});
+
 	it("G31 refuses a takenBy declaration its contract's own takenBy does not match, or that names nothing known", () => {
 		const taker = pkg("@g31b/taker", {
 			"src/contract.ts": "export const x = 1;\n",

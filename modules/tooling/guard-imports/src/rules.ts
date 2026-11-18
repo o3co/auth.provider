@@ -19,10 +19,15 @@ function packagesUsed(facts: FileFacts) {
 const typesAloneLoaded = (edge: Edge) =>
 	edge.loads && edge.bindings.length > 0 && edge.bindings.every((b) => b.typeOnly);
 
-/** The values a file takes from the module `from` by its top-level imports and re-exports (none inside a declared module): `default`, a name, or `*`. */
-export function valuesTaken(facts: FileFacts, from: string): string[] {
+/** The values a file takes from the module `from` by its top-level imports and re-exports (none inside a declared module), or by those of `forms` alone: `default`, a name, or `*`. */
+export function valuesTaken(
+	facts: FileFacts,
+	from: string,
+	forms: readonly ("import" | "export-from")[] = ["import", "export-from"],
+): string[] {
 	return facts.edges
-		.filter((e) => (e.form === "import" || e.form === "export-from") && e.specifier.text === from)
+		.filter((e) => (e.form === "import" || e.form === "export-from") && forms.includes(e.form))
+		.filter((e) => e.specifier.text === from)
 		.filter((e) => ts.isSourceFile(e.node.parent))
 		.flatMap((e) => e.bindings.filter((b) => !b.typeOnly))
 		.map((b) => (b.form === "named" ? b.imported : b.form === "default" ? "default" : "*"));

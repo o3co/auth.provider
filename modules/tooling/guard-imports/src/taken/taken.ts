@@ -197,8 +197,10 @@ export function takenByRules(s: Scope) {
 		}
 		for (const p of s.packages) {
 			if (p === owner) continue;
+			// An adapter of the owner imports its contracts to provide them; taking one is refused at assembly.
+			const forms = s.ownerServed(p) === owner.name ? (["export-from"] as const) : undefined;
 			for (const path of shipped(s, p)) {
-				const taken = valuesTaken(s.factsOf(p, path.slice(p.dir.length + 1)), owner.name);
+				const taken = valuesTaken(s.factsOf(p, path.slice(p.dir.length + 1)), owner.name, forms);
 				for (const [name, takers] of allowed) {
 					if (takers.includes(p.name)) continue;
 					if (taken.includes(name) || taken.includes("*")) {
