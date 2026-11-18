@@ -47,6 +47,16 @@ export type SubjectData =
 	| "retained"
 	| "internal";
 
+/**
+ * The categories a change reaches only carrying the subject writer (`checks`): subjects' data, and an
+ * index of it. A subset of `SubjectData` by construction; a name it misspells drops out, and the
+ * tables held to it then fail to compile.
+ */
+export type WriterHeld = Extract<
+	SubjectData,
+	"online-indexed" | "online-keyed" | "bounded" | "internal"
+>;
+
 /** The space holds no subject's data; any other category, or none declared, may hold some. */
 export const noSubjectData = "none" satisfies SubjectData;
 
