@@ -121,7 +121,13 @@ export const passkeyStoreNeeds = {
 	confirmedReads: true,
 } as const;
 
-/** Challenges by the challenge, never kept in clear, each kept for its lifetime. Every call throws Unavailable when the place cannot tell. */
+/**
+ * Challenges by the challenge, never kept in clear, each kept for its lifetime. Every call throws
+ * Unavailable when the place cannot tell. An assertion's holds who asked and a digest of its id,
+ * never a subject's id. A registration's, holding its subject, is kept here where no registration
+ * challenge store is composed (passkeys' eraser then answers `erasable: false`), and by a node
+ * before 0.20. TODO(0.22): assertions alone.
+ */
 export interface ChallengeStore {
 	/** Keeps a new challenge's record for its lifetime, unless the challenge holds one. */
 	open(

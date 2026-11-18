@@ -9,7 +9,7 @@ Internal module of `passkeys`: the passkey store's ports, as passkeys uses them.
 - The record shapes and their keys (`records`). What a write changes (`joint`). The ports' types (the package's store interface).
 
 ## Offers
-- `portsRefused` (the passkey store) → why its ports cannot be used, or none: the one statement, which boot refuses by.
+- `portsRefused` (the passkey store) → why its ports cannot be used, or none: the passkey store's statement, which boot refuses by.
 - `registrationPortsRefused` (the registration challenge store) → why its ports cannot be used, or none: `erase` and `migrate` both, or neither.
 - `togetherOf` (the passkey store) → its change of both spaces as one, as `joint`'s writes ask it.
 
