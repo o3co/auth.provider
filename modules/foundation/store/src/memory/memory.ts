@@ -174,9 +174,12 @@ export function memoryProcess(
 } {
 	const { clock, nextVersion, values, counters, answers, ledger, control: record } = data;
 	let taken = record.epoch;
-	/** Refuses a change once the record's epoch is not the one this process took. */
+	/** Whether this process took its epoch under the maintenance key: it changes only while the key is held. */
+	let keyed = record.maintenance;
+	/** Refuses a change once the record's epoch is not the one this process took, or its key has lifted. */
 	const refuseStale = () => {
 		if (record.epoch !== taken) throw new Unavailable("store");
+		if (keyed && !record.maintenance) throw new Unavailable("store");
 	};
 	// Refused before anything is written: a malformed declaration, then the control record's two.
 	declaredSpaces(declared);
@@ -341,6 +344,7 @@ export function memoryProcess(
 			record.epoch = epoch;
 			record.maintenance = true;
 			taken = epoch;
+			keyed = true;
 			return { kind: "entered", epoch };
 		},
 		leaveMaintenance: async () => {

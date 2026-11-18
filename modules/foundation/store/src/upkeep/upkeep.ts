@@ -17,6 +17,8 @@ export interface Mark {
  * takes the epoch from: under the maintenance key, unless it may build under it (this one first,
  * where both apply); without a space `requires` names, unless it may build under the key and is
  * under it. A refused process writes nothing: it takes no epoch and adds nothing to the ledger.
+ * A process that took its epoch under the key, by starting under it or entering it, changes only
+ * while the key is held: once the record shows no key, each change it makes is unavailable.
  */
 export interface Control {
 	readonly epoch: string | null;

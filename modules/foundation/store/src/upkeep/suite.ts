@@ -199,9 +199,10 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				await p.upkeep.leaveMaintenance();
 				await refusedSaying(harness.another(p, [none]), /requires/);
 				await refusedSaying(tool(p, [none]), /requires/);
-				expect((await harness.another(p, upkeepSpaces)).upkeep).toBeDefined();
-				await p.upkeep.enterMaintenance();
-				const t = await tool(p, [none]);
+				// p took its epoch under the key and left it, so it changes no more: another enters.
+				const q = await harness.another(p, upkeepSpaces);
+				await q.upkeep.enterMaintenance();
+				const t = await tool(q, [none]);
 				expect(await t.upkeep.mark("test.replacing", 1)).toEqual({ kind: "marked" });
 			});
 
@@ -257,6 +258,52 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				const only: Space = { name: "upkeep-refused", guarantees: [], subjectData: "none" };
 				await refusedSaying(harness.another(p, [none, only]), /requires/);
 				expect((await p.upkeep.kept()).map((s) => s.name)).not.toContain(only.name);
+			});
+		});
+
+		describe.runIf(harness.anotherMayBuildUnderKey)("the key's fence", () => {
+			const tool = (p: UpkeepProcess, declared: readonly Space[]) =>
+				(harness.anotherMayBuildUnderKey as NonNullable<UpkeepHarness["anotherMayBuildUnderKey"]>)(
+					p,
+					declared,
+				);
+			/** Every change a process may try, each to be unavailable once its key has lifted. */
+			const changes = (q: UpkeepProcess) => [
+				() => q.upkeep.mark("test.fenced", 1),
+				() => q.store.batch([], [{ key: fresh(), put: 1, ...never }]),
+				() => q.upkeep.enterMaintenance(),
+				() => q.upkeep.leaveMaintenance(),
+				() => q.upkeep.require([none.name]),
+				() => q.upkeep.retire("gone"),
+			];
+
+			it("fences a process that started under the key once the key lifts", async () => {
+				const p = await harness.start(upkeepSpaces);
+				await p.upkeep.enterMaintenance();
+				const t = await tool(p, upkeepSpaces);
+				expect(await t.upkeep.mark("test.under", 1)).toEqual({ kind: "marked" });
+				await t.upkeep.leaveMaintenance();
+				for (const change of changes(t)) await expect(change()).rejects.toBeInstanceOf(Unavailable);
+				expect((await t.control.control()).marks["test.fenced"]).toBeUndefined();
+			});
+
+			it("fences a process that entered the key once the key lifts, and a new one changes", async () => {
+				const p = await harness.start(upkeepSpaces);
+				await p.upkeep.enterMaintenance();
+				await p.upkeep.leaveMaintenance();
+				for (const change of changes(p)) await expect(change()).rejects.toBeInstanceOf(Unavailable);
+				const q = await harness.another(p, upkeepSpaces);
+				expect(await q.upkeep.mark("test.after", 1)).toEqual({ kind: "marked" });
+			});
+
+			it("fences a tool lacking a required space once it grows requires and lifts the key", async () => {
+				const p = await harness.start(upkeepSpaces);
+				await p.upkeep.enterMaintenance();
+				await p.upkeep.require([held.name]);
+				const t = await tool(p, [none]);
+				expect(await t.upkeep.require([held.name, plain.name])).toEqual({ kind: "required" });
+				await t.upkeep.leaveMaintenance();
+				for (const change of changes(t)) await expect(change()).rejects.toBeInstanceOf(Unavailable);
 			});
 		});
 
