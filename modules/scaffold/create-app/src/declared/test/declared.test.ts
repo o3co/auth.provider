@@ -18,6 +18,8 @@ const linked = () => packagesFor({ workspace: root }, noIndex);
 /** A map an owner takes entry samples for, and a type's sample of its contract. */
 const taken = [{ map: "owner.entries", of: "@mod/c" }];
 const sample = 'type = "typed"\n';
+/** An entry a member declares of the app's, as its manifest holds it. */
+const tool = { script: "tool", shape: "call", contract: "toolRun", member: "run" };
 /** An index as distribution writes it into a bundle: members' manifests and public names, with what they declare. */
 const indexed = () => {
 	const file = join(mkdtempSync(join(tmpdir(), "create-app-")), "index.json");
@@ -37,6 +39,7 @@ const indexed = () => {
 				{ ...entry("audit-http", "audit-receivers"), manifest: declared },
 				{ ...entry("owner", "up"), manifest: { name: "@mod/owner", takesSamples: taken } },
 				{ ...entry("typed", "up"), manifest: { name: "@mod/typed", sampleOf: "@mod/c" }, sample },
+				{ ...entry("tooling", "up"), manifest: { name: "@mod/tooling", appEntries: [tool] } },
 			],
 		}),
 	);
@@ -58,4 +61,12 @@ it("gives what each module declares for the guide and of entry samples, from the
 		{ name: "@mod/audit-stdout", adapts: "@mod/audit", registersAs: "stdout" },
 	]);
 	expect(linked().samples?.(["@mod/tokens"])).toEqual([{ name: "@mod/tokens" }]);
+}, 30_000);
+
+it("gives what each module declares of the app's entries, as written, from the index's manifests or the workspace's", () => {
+	const published = packagesFor({}, indexed());
+	expect(published.appEntries?.(["@mod/tooling", "@mod/tokens", "@mod/nowhere"])).toEqual([
+		{ name: "@mod/tooling", appEntries: [tool] },
+	]);
+	expect(linked().appEntries?.(["@mod/tokens"])).toEqual([]);
 }, 30_000);
