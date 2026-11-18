@@ -1,15 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import {
-	type Ask,
-	type Asked,
-	type Card,
-	fragmentsIn,
-	fragmentsOf,
-	type Packages,
-	type Sampled,
-	sampleFile,
-} from "@mod/app-output";
+import { type Card, fragmentsIn, fragmentsOf, type Packages, sampleFile } from "@mod/app-output";
+import { askedIn, sampledIn } from "./declared/declared.ts";
 import { bundlesIn, declaredRanges, type Outside, type Read } from "./outside/contract.ts";
 import { dependenciesOf, packageDirsIn } from "./project.ts";
 
@@ -26,28 +18,6 @@ const installed = (
 /** Whether a card has a section of what its module asks of the deployment. */
 const asksOfDeployment = (card: string) =>
 	existsSync(card) && /^## Deployment$/m.test(readFileSync(card, "utf8"));
-
-/** What a manifest declares for the guide: its lines, the owner it adapts, and the name it registers under it. */
-const askedIn = (name: string, manifest: Readonly<Record<string, unknown>> | undefined): Asked => ({
-	name,
-	...(Array.isArray(manifest?.asks) ? { asks: manifest.asks as Ask[] } : {}),
-	...(typeof manifest?.adapts === "string" ? { adapts: manifest.adapts } : {}),
-	...(typeof manifest?.registersAs === "string" ? { registersAs: manifest.registersAs } : {}),
-});
-
-/** What a manifest declares of entry samples: the maps it takes them for (`takesSamples`), or the contract its own sample is of (`sampleOf`), with the sample's text. */
-const sampledIn = (
-	name: string,
-	manifest: Readonly<Record<string, unknown>> | undefined,
-	sample: { readonly from: string; readonly text: string } | undefined,
-): Sampled => ({
-	name,
-	...(Array.isArray(manifest?.takesSamples)
-		? { takes: manifest.takesSamples as { map: string; of: string }[] }
-		: {}),
-	...(typeof manifest?.sampleOf === "string" ? { sampleOf: manifest.sampleOf } : {}),
-	...(sample ? { sample } : {}),
-});
 
 /** A repository URL as a manifest states it, a string or `{ url }`, plain https and no `.git`. */
 const repositoryOf = (stated: unknown): string | undefined => {
