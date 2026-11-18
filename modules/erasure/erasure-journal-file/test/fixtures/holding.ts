@@ -10,6 +10,6 @@ const journal = journalFileWith({
 	clock: { now: () => Date.now() },
 	random: { bytes: (length) => new Uint8Array(randomBytes(length)) },
 });
-const held = await journal.hold?.();
-process.stdout.write(`${held?.kind}\n`);
+const held = await journal.hold();
+process.stdout.write(`${held.kind}\n`);
 setInterval(() => {}, 60_000);

@@ -117,40 +117,40 @@ it("answers busy, naming the holder, to every hold after its holder was killed, 
 	await ended;
 	// A crash leaves the hold: nothing breaks it on a guess.
 	for (let i = 0; i < 2; i++) {
-		const busy = await at(path).hold?.();
+		const busy = await at(path).hold();
 		expect(busy).toMatchObject({
 			kind: "busy",
 			holder: expect.stringContaining(`"pid":${child.pid}`),
 		});
 	}
 	await unlink(`${path}.lock`);
-	const held = await at(path).hold?.();
-	expect(held?.kind).toBe("held");
-	if (held?.kind === "held") await held.release();
+	const held = await at(path).hold();
+	expect(held.kind).toBe("held");
+	if (held.kind === "held") await held.release();
 });
 
 it("queues the holder's appends one after another under its hold, taking no lock for each", async () => {
 	const path = await fresh();
 	const journal = at(path);
-	const held = await journal.hold?.();
+	const held = await journal.hold();
 	await journal.create();
 	const lockedBefore = await readFile(`${path}.lock`, "utf8");
 	const numbers = await Promise.all(["a", "b", "c"].map((s) => journal.begun(s, "o")));
 	expect(numbers).toEqual([{ number: 1 }, { number: 2 }, { number: 3 }]);
 	expect(await readFile(`${path}.lock`, "utf8")).toBe(lockedBefore);
-	if (held?.kind === "held") await held.release();
+	if (held.kind === "held") await held.release();
 	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 it("leaves another holder's lock in place where a holder whose lock the operator removed releases late", async () => {
 	const path = await fresh();
-	const first = await at(path).hold?.();
+	const first = await at(path).hold();
 	await unlink(`${path}.lock`);
-	const second = await at(path).hold?.();
-	expect([first?.kind, second?.kind]).toEqual(["held", "held"]);
-	if (first?.kind === "held") await first.release();
-	const third = await at(path).hold?.();
-	expect(third?.kind).toBe("busy");
-	if (second?.kind === "held") await second.release();
-	expect((await at(path).hold?.())?.kind).toBe("held");
+	const second = await at(path).hold();
+	expect([first.kind, second.kind]).toEqual(["held", "held"]);
+	if (first.kind === "held") await first.release();
+	const third = await at(path).hold();
+	expect(third.kind).toBe("busy");
+	if (second.kind === "held") await second.release();
+	expect((await at(path).hold()).kind).toBe("held");
 });
