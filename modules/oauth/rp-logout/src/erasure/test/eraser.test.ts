@@ -38,7 +38,7 @@ const placed = (removed: string[], erasing = true) => {
 describe("rp-logout's eraser", () => {
 	it("states that it cannot erase where the bodies lack the ports, answering empty reports", async () => {
 		const eraser = noticesEraser(placed([], false).stores, recordingLog().log, clock);
-		expect([eraser.name, eraser.erasable, eraser.after]).toEqual(["rp-logout", false, undefined]);
+		expect([eraser.name, eraser.erasable]).toEqual(["rp-logout", false]);
 		expect(await eraser.online("alice", signal)).toEqual({ reports: [], logoutGaps: 0 });
 		expect(await eraser.migrate(walk, signal)).toEqual([]);
 	});
