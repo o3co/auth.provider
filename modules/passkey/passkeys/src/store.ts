@@ -1,5 +1,6 @@
 import type { MigrationReport, SpaceReport, SubjectReading, Walk } from "@mod/erasure-extensions";
 import { contract } from "@mod/kernel";
+import { challengeLifetimeMaxMs } from "@mod/webauthn";
 
 declare const storedPasskey: unique symbol;
 /** A passkey record as the store keeps it: the store never reads it, and only passkeys opens it. */
@@ -146,11 +147,16 @@ export const challengeStoreNeeds = {
 	survivesFailover: true,
 	/** Names derive from the challenge, so the place never keeps it in clear. */
 	namesFromSecret: true,
+	/**
+	 * The longest passkeys keeps a registration challenge, from its opening: no guarantee, but the
+	 * bound a store fencing registration challenges by their subject declares.
+	 */
+	registrationsEndWithinMs: challengeLifetimeMaxMs,
 } as const;
 
 /**
  * Registration challenges by the challenge, never kept in clear, each for its subject and its
- * lifetime, at most webauthn's `challengeLifetimeMaxMs`. Every call throws Unavailable when the
+ * lifetime, at most `challengeStoreNeeds.registrationsEndWithinMs`. Every call throws Unavailable when the
  * place cannot tell. Optional in 0.20: a composition without it keeps registration challenges in
  * the challenge store, and passkeys reads a registration's challenge there where this one holds
  * none. TODO(0.22): required.

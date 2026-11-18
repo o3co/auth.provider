@@ -20,7 +20,7 @@
 - Store interfaces, which the assembly wires. The store never sees what a record holds.
   - Passkeys: credentials and subjects, each by a key passkeys makes, saved once for a subject, read, changed from what they hold, kept without end; records of both spaces and the ones a change watches from them changed as one (`updateAsOne`). Its ports: the internal module `ports`' card. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
   - Challenges: opened for a lifetime, taken by putting a mark in place. Needs: survives a crash, never rolled back by failover, names derived from the challenge.
-  - Registration challenges, optional until 0.22 (left out, they stay in the challenge store): opened for a lifetime and a subject (`erased` where fenced), changed from what they hold; `erase` and `migrate` both or neither. Needs: the challenge store's.
+  - Registration challenges, optional until 0.22 (left out, they stay in the challenge store): opened for a lifetime and a subject (`erased` where fenced), changed from what they hold; `erase` and `migrate` both or neither. Needs: the challenge store's; each ends within `registrationsEndWithinMs` of its opening, `webauthn`'s ceiling.
 - An eraser, `passkeys`, on `erasure-extensions`' `erasers`: the internal module `erasure`'s card.
 - Operator section: `user-verification` (default `preferred`; `discouraged` is warned of at every start, `passkeys.user_unverified`), `max-credentials` (per subject, default 10).
 - `./testing`: the section's test configuration builder, and the contract tests of the store interfaces.
