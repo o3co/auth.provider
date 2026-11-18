@@ -27,8 +27,6 @@ export const budgetOf = (numbers: Omit<Budget, keyof typeof codeRules>): Budget 
 	...numbers,
 	...codeRules,
 });
-/** The words a plan or a move in progress is written with; those go to the scope's list of plans. */
-/** A card holds the current contract: a plan, a move or a removal under way belongs to TODO. Matched as written, so a value that moved is no move. */
 /** G5, and what each source file reads: G11, G13, G15, G23; what it imports is guard-imports'. */
 function sourceRules(s: Scope, p: Pkg) {
 	const { budget, kindOf, report } = s;
