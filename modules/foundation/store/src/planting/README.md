@@ -1,6 +1,6 @@
 # planting
 
-Internal module of `store`: a value written as an earlier version, or another writer, left it (a record as 0.19 wrote it, say), for tests.
+Internal module of `store`: a value written at a key as an earlier version, or another writer, left it, for tests.
 
 ## Responsibilities
 - Writes one value at one key as one batch with no conditions, carrying the subject writer, so a space of subjects' data takes it as any other (`plantValue`).

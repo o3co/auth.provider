@@ -5,8 +5,8 @@ import { type Space, spaces, store } from "../../contract.ts";
 import { simulatedStore } from "../../simulated/simulated.ts";
 import { plantValue } from "../planting.ts";
 
-const subjects: Space = { name: "held", guarantees: ["durable"], subjectData: "internal" };
-const plain: Space = { name: "plain", guarantees: [] };
+const subjects: Space = { name: "held", guarantees: ["durable"], subjectData: "online-indexed" };
+const plain: Space = { name: "plain", guarantees: [], subjectData: "none" };
 
 it("plants a value at a key, in a space of subjects' data or any other, kept until its expiry", async () => {
 	const app = await assemble({
