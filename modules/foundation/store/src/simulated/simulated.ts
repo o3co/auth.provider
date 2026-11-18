@@ -10,8 +10,8 @@ import {
 	spaces,
 	store,
 	storeControl,
-} from "./contract.ts";
-import { memoryStore } from "./memory.ts";
+} from "../contract.ts";
+import { memoryStore } from "../memory.ts";
 
 const writes = new Set<string>([
 	"putIfAbsent",

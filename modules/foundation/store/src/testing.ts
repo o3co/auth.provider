@@ -11,7 +11,7 @@ import {
 } from "./contract.ts";
 import type { section } from "./section.ts";
 
-export { type SimulatedStore, simulatedStore } from "./simulated.ts";
+export { type SimulatedStore, simulatedStore } from "./simulated/simulated.ts";
 export {
 	type UpkeepHarness,
 	type UpkeepProcess,

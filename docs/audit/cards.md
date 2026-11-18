@@ -102,6 +102,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/seal` (foundation, `modules/foundation/seal`): Seals and opens stored data with authenticated encryption, by each key's algorithm (AES-256-GCM), under a key ring read at boot.
 - `@mod/secret-hash` (foundation, `modules/foundation/secret-hash`): Checks a secret against a stored bcrypt or scrypt hash, with the same work whether or not there is a hash to check against; knows no feature.
 - `@mod/store` (foundation, `modules/foundation/store`): Owns the contract of feature-neutral storage operations, each atomic and judged on the store clock, collects space declarations, and holds one memory implementation, not safe on many instances, whose `honours` answers durable and replicated unmet.
+  - `simulated` (`src/simulated`): a simulated replicated store, for tests, offered through `./testing`.
   - `upkeep` (`src/upkeep`): keeping a store's data whole, apart from reading and writing its keys.
 - `@mod/subject-records` (capability, `modules/foundation/subject-records`): Provides records of spaces that hold a subject's data, written so that erasing a subject finds them and nothing is written past its tombstone; a capability like `records`, built by a feature's wiring, never used by a feature.
   - `envelope` (`src/envelope`): the envelope a subject's record is kept in, its subject beside its value.
