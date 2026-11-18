@@ -1,5 +1,11 @@
 import { Unavailable } from "@mod/kernel";
 
+/** A batch's answer as committed: the versions, and the store time it committed at where it holds one. */
+export const committedOf = (answer: { at?: unknown }, versions: (string | null)[]) =>
+	typeof answer.at === "number"
+		? { kind: "committed" as const, versions, at: answer.at }
+		: { kind: "committed" as const, versions };
+
 /** cjson turns empty or sparse Lua arrays into objects; rebuild them by count. */
 export function list<T>(value: unknown, n: number): T[] {
 	return Array.from({ length: n }, (_, i) => (value as Record<number, T>)[i] as T);
