@@ -15,7 +15,7 @@ Internal module of `app-output`: the generated app's image, its Dockerfile and w
 - `dockerfile(http, beside, at)` → the Dockerfile's text; `dockerIgnored`, the build context's ignore list.
 
 ## Invariants
-- The image's build context leaves out what git leaves out (every env file but `.env.example`, the local layer, `*.pem` and `*.key`), and also `.env.example` and `.git`.
+- The image's build context leaves out git, every env file, the local layer, keys and the host's install (`node_modules/`).
 - The image follows one Node 24 minor, patch and digest unpinned, so a build takes its patches; a minor is fixed only until a newer one is out, so the operator moves `FROM` to the latest 24.x minor at each Node security release.
 - The image pins corepack by version and installs the locked production dependencies in a stage of their own; the stage the app runs in starts again from Node's image and takes out the npm, npx, corepack and yarn Node's image bundles, so no package manager but apk is in it, and runs node under `tini` as a user other than root.
 - The stage the app runs in takes Alpine's current packages; the guide builds it uncached.

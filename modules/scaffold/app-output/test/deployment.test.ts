@@ -270,6 +270,23 @@ it("adds each entry a composed package declares, of each shape, and none of a pa
 	]);
 });
 
+it("refuses a part's file that another writes, naming both, and writes nothing", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	const taking = {
+		...fakePackages(),
+		appEntries: () => [
+			{
+				name: "@mod/tool",
+				appEntries: [{ script: "main", shape: "call", contract: "toolRun", member: "run" }],
+			},
+		],
+	};
+	await expect(writeDeployment(target, ["@mod/tool"], taking, readme)).rejects.toThrow(
+		"the app's entries and app-output both write src/main.ts",
+	);
+	expect(await readdir(target)).toEqual([]);
+});
+
 it("refuses a target that holds anything, and writes nothing", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	await writeFile(join(target, "kept"), "");

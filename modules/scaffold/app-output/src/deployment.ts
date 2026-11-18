@@ -92,15 +92,13 @@ export async function writeDeployment(
 		...(release.integrity ? { integrity: release.integrity } : {}),
 		...(release.bundles ? { bundles: release.bundles } : {}),
 	});
-	await writeProject(target, {
+	const own: Record<string, string> = {
 		"package.json": manifestOf(
 			dependencies,
 			beside.scripts ? { start: run(paths.main), ...entries.scripts } : undefined,
 		),
 		"pnpm-workspace.yaml": workspaceFile(beside.settings),
-		...beside.files,
 		[paths.main]: await mainSource(modules, packages.importOf, keys),
-		...entries.files,
 		[paths.application]: applicationConf(fragments),
 		[paths.localExample]: localConfExample(fragments, sampleLines(packages.samples?.(names) ?? [])),
 		".env.example": envExample(settings),
@@ -125,7 +123,14 @@ export async function writeDeployment(
 				start: beside.scripts ? "pnpm start" : run(paths.main),
 				...readme.fill,
 			})) + beside.guide,
-	});
+	};
+	await writeProject(
+		target,
+		joined(own, [
+			["the packages outside the release", beside.files],
+			["the app's entries", entries.files],
+		]),
+	);
 }
 
 /** The guide's marks for what the modules ask: the lines, the lines under their heading, and the values decided. */
@@ -239,4 +244,25 @@ function httpLines(http: { readonly serves: boolean; readonly live: boolean }) {
 			? "Its health check asks `/_healthcheck`, which answers while the process runs; `/readyz` answers readiness, for a load balancer.\n"
 			: "",
 	};
+}
+
+/**
+ * The project's files: the output's own, then each part's. A path two of them would write is refused,
+ * naming both, so no part replaces another's file, the app's entry among them.
+ */
+function joined(
+	own: Readonly<Record<string, string>>,
+	parts: readonly (readonly [string, Readonly<Record<string, string>>])[],
+): Record<string, string> {
+	const writer = new Map(Object.keys(own).map((path) => [path, "app-output"]));
+	const files = { ...own };
+	for (const [part, given] of parts) {
+		for (const [path, text] of Object.entries(given)) {
+			const other = writer.get(path);
+			if (other !== undefined) throw new Error(`${part} and ${other} both write ${path}`);
+			writer.set(path, part);
+			files[path] = text;
+		}
+	}
+	return files;
 }

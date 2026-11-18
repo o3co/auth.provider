@@ -27,6 +27,7 @@
 ## Invariants
 - The manifest's `bundledInside` names each bundled file the package ships, by its path in the package, with every package from outside it holds inside, for the release's list of what it ships: the package's test holds it to the files there and to the packages each bundle's own regions name.
 - A target that holds anything is refused, never overwritten; a missing or empty one is taken. Every file is made before any is written.
+- A path two would write, the output itself, the app's entries and the packages outside the release among them, is refused, naming both: no part replaces another's file.
 - A name not an npm package is refused by `namesPackages`, before anything is written.
 - The manifest names the pnpm the workspace builds with, by version and sha512, which corepack checks the pnpm it runs against, and the app also depends on `zod` at the packages' version.
 - Every app has `pnpm-workspace.yaml`, holding the settings `outside` gives and `pmOnFail: ignore`, and saying why: pnpm otherwise writes the pnpm the manifest pins in a YAML document of its own ahead of `pnpm-lock.yaml`'s, which GitHub's dependency graph does not read and `lockfile`'s check refuses. Interim: once GitHub's graph reads that document, `lockfile` learns it and the setting goes.
