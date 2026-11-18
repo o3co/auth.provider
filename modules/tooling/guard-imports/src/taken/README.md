@@ -17,7 +17,9 @@ Internal module of `guard-imports`: G31, that a contract or an entry its owner d
 - An import is a value import of the contract by its exported name, an alias, a namespace import, `export { … } from` or `export * from`; a type-only import, a test, the owner itself, and an adapter of the owner importing to provide it are not counted; taking it is refused at assembly (kernel `takenBy`). An adapter handing it on is counted.
 - The entries a package keeps are the scope's reading (`takenEntries`), from the manifest alone. G31 reports every other key naming an entry with the scope's reason, and refuses a kept entry whose file exports a type (a type, an interface, a type re-export, `export *` or `export * as`): its types go on `.`.
 - An entry is the owner's export of that `./name`; each package named is a workspace package, none asked for a module or a kernel `takenBy`. Every edge that loads the entry counts (an import, a re-export, `import()`, `require`); a type alone does not. A package named does not hand it on.
-- Handing on is a re-export, or exporting again a binding imported as a value: under its name or an alias, as `export default`, as `export const y = x`, or through a top-level re-binding (`const y = x`) so exported; a member of a namespace import read by a name written out (`ns.x`, `ns["x"]`, `const { x } = ns`) is that member. It is read lexically: a value put in an object, an array or a call, a computed member or key, a rest element or a spread, or a later assignment is not followed.
+- G31 sees a kept value handed on only where a shipped file exports a binding as it was imported (directly, renamed or re-bound); a value made from it (a default, a pattern, a field, a return, an expression) is not seen.
+- The kernel refuses any module that takes a kept contract; the writer is held by `subject-records`' own test and review.
+- The hand-on check is in-repo defence in depth. The guarantees are the kernel's `takenBy` for contracts, and the import binding with `subject-records`' own test for the writer. Shapes beyond the principle above are accepted limits.
 
 ## Depends on
 - `typescript`.

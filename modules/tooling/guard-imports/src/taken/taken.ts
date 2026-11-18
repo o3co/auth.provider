@@ -112,12 +112,11 @@ function boundNames(name: ts.BindingName): ts.Identifier[] {
 }
 
 /**
- * What a file imports from `from` as a value and exports again from itself, by the name it took:
- * `export { x }`, under an alias, `export default x`, `export const y = x`, or through a top-level
- * re-binding (`const y = x`) exported so; `*` for a namespace import exported whole. A member of a
- * namespace import read by a name written out (`ns.x`, `ns["x"]`, `const { x } = ns`) is that
- * member. Lexical: a value put in an object, an array or a call, a computed member or key, a rest
- * element or a spread, or one assigned later is not followed.
+ * What a file imports from `from` as a value and exports again as it was imported, by the name it
+ * took: directly, renamed, or re-bound at the top level (`const y = x`); `*` for a namespace import
+ * exported whole, and a namespace member read by a name written out for that member. A value made
+ * from it (a default, a pattern, a field, a return, an expression, a member or key not written out)
+ * is not seen: an accepted limit of a check that is defence in depth (the card says why).
  */
 function handedOn(facts: FileFacts, from: string): string[] {
 	const imported = new Map<ts.Symbol, string>();
