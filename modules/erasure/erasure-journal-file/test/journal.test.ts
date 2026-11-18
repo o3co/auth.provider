@@ -270,7 +270,7 @@ const failing = (counts: { syncs: number; unlinks: number }, removed: string[] =
 				await directory.close();
 			}
 		},
-		unlink: async (p) => {
+		removeLock: async (p) => {
 			removed.push(p);
 			if (counts.unlinks-- > 0) throw eio();
 			await unlink(p);

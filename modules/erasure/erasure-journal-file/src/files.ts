@@ -30,10 +30,10 @@ const syncDirectory = async (path: string) => {
 	}
 };
 
-/** What the files sync a directory and remove a file by: the node's own, or a test's. */
-export interface FileSystem {
+/** The two steps a test can fail: syncing a directory, and removing the lock (nothing else). */
+export interface MediumSteps {
 	readonly syncDirectory: (path: string) => Promise<void>;
-	readonly unlink: (path: string) => Promise<void>;
+	readonly removeLock: (lockPath: string) => Promise<void>;
 }
 
 const gone = (error: unknown) => (error as { code?: unknown }).code === "ENOENT";
@@ -52,7 +52,7 @@ const ownFile = async (lockPath: string, holder: string) => {
 	throw new Error("no free name for the lock's holder file");
 };
 
-const releaseOf = (fs: FileSystem, lockPath: string, holder: string) => async () => {
+const releaseOf = (steps: MediumSteps, lockPath: string, holder: string) => async () => {
 	let recorded: string;
 	try {
 		recorded = await readFile(lockPath, "utf8");
@@ -61,13 +61,15 @@ const releaseOf = (fs: FileSystem, lockPath: string, holder: string) => async ()
 		throw error;
 	}
 	if (recorded !== holder) return;
-	await fs.unlink(lockPath).catch((error: unknown) => {
+	await steps.removeLock(lockPath).catch((error: unknown) => {
 		if (!gone(error)) throw error;
 	});
 };
 
 /** The journal's files on a file system: the node's own unless a test gives another. */
-export const nodeFilesWith = (fs: FileSystem = { syncDirectory, unlink }): JournalFiles => ({
+export const nodeFilesWith = (
+	steps: MediumSteps = { syncDirectory, removeLock: unlink },
+): JournalFiles => ({
 	read: (path) => readFile(path),
 	create: async (path, bytes) => {
 		const file = await open(path, "wx");
@@ -77,7 +79,7 @@ export const nodeFilesWith = (fs: FileSystem = { syncDirectory, unlink }): Journ
 		} finally {
 			await file.close();
 		}
-		await fs.syncDirectory(path);
+		await steps.syncDirectory(path);
 	},
 	append: async (path, bytes) => {
 		const file = await open(path, "r+");
@@ -122,9 +124,9 @@ export const nodeFilesWith = (fs: FileSystem = { syncDirectory, unlink }): Journ
 		} finally {
 			await unlink(written).catch(() => {});
 		}
-		const release = releaseOf(fs, lockPath, holder);
+		const release = releaseOf(steps, lockPath, holder);
 		try {
-			await fs.syncDirectory(lockPath);
+			await steps.syncDirectory(lockPath);
 		} catch (error) {
 			// Not taken after all: this take's lock goes with it.
 			try {
