@@ -10,6 +10,7 @@ import type {
 	SubjectData,
 	Version,
 	WriteOptions,
+	WriterHeld,
 } from "../contract.ts";
 import type { Honours, KeptSpace, StoreUpkeep } from "../upkeep/upkeep.ts";
 import { subjectWriter } from "../writer/subject-writer.ts";
@@ -120,16 +121,19 @@ function readLimits(value: unknown): { deadline?: number; idempotency?: string }
 	};
 }
 
-/** The categories of subjects' data a change reaches only carrying the subject writer. */
-const writerHeld: readonly SubjectData[] = [
-	"online-indexed",
-	"online-keyed",
-	"bounded",
-	"internal",
-];
+/**
+ * `WriterHeld`, as a table: a fresh literal so the compiler holds it to `WriterHeld` both ways; no
+ * spread, `as` or intermediate.
+ */
+const writerHeld = {
+	"online-indexed": true,
+	"online-keyed": true,
+	bounded: true,
+	internal: true,
+} satisfies Record<WriterHeld, true>;
 /** Whether a key's declared space is one a change reaches only carrying the subject writer. */
 const heldByWriter = (k: Key) =>
-	k.space.subjectData !== undefined && writerHeld.includes(k.space.subjectData);
+	k.space.subjectData !== undefined && Object.hasOwn(writerHeld, k.space.subjectData);
 
 /** A key a single-key change port takes: none in a space held by the writer, which no such port carries. */
 function unheld(k: Key): Key {
@@ -203,16 +207,17 @@ function readBatchWrite(value: unknown, key: (value: unknown) => Key): BatchWrit
 	return { key: k, put: json(read.put), expiry: readExpiry(read.expiry) };
 }
 
-const subjectDataKinds: readonly SubjectData[] = [
-	"online-indexed",
-	"online-keyed",
-	"bounded",
-	"window",
-	"none",
-	"pseudonymous",
-	"retained",
-	"internal",
-];
+/** Every `SubjectData`, as a table: a fresh literal so the compiler holds it to `SubjectData` both ways; no spread, `as` or intermediate. */
+const subjectDataKinds = {
+	"online-indexed": true,
+	"online-keyed": true,
+	bounded: true,
+	window: true,
+	none: true,
+	pseudonymous: true,
+	retained: true,
+	internal: true,
+} satisfies Record<SubjectData, true>;
 const spaceFields = [
 	"name",
 	"guarantees",
@@ -235,7 +240,7 @@ function declaredSpaces(declared: readonly Space[]): ReadonlyMap<string, Space> 
 		text("space", read.name);
 		if (
 			read.subjectData !== undefined &&
-			!subjectDataKinds.includes(read.subjectData as SubjectData)
+			(typeof read.subjectData !== "string" || !Object.hasOwn(subjectDataKinds, read.subjectData))
 		)
 			fail(`space ${read.name} declares an unknown subjectData`);
 		if (read.erasedBy !== undefined) text("erasedBy", read.erasedBy);
