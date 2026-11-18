@@ -270,3 +270,62 @@ it("G31 refuses a takenBy declaration its contract's own takenBy does not match,
 		"@g31b/keys undeclared: takenBy in code, but not in the manifest",
 	]);
 });
+
+it("G31 refuses a taker of an entry, or an adapter of a contract's owner, exporting again what it imported, and lets one use it", () => {
+	const owner = pkg(
+		"@g31h/store",
+		{
+			"src/contract.ts": [
+				`import { contract } from "@g31h/kernel";`,
+				`export const upkeep = contract<object>("store.upkeep", { takenBy: [] });`,
+			].join("\n"),
+			"src/writer.ts": "export const writer = Object.freeze({});\n",
+		},
+		{
+			exports: { ".": "./src/contract.ts", "./writer": "./src/writer.ts" },
+			takenBy: { upkeep: [], "./writer": ["@g31h/taker"] },
+		},
+	);
+	// The same shapes of handing on, over the entry and over the contract.
+	const shapes = (name: string, from: string) => ({
+		"src/direct.ts": `import { ${name} } from "${from}";\nexport { ${name} };\n`,
+		"src/aliased.ts": `import { ${name} as held } from "${from}";\nexport { held as handed };\n`,
+		"src/rebound.ts": `import { ${name} } from "${from}";\nconst kept = (${name});\nconst again = kept;\nexport { again };\n`,
+		"src/declared.ts": `import { ${name} } from "${from}";\nexport const held = ${name} as object;\n`,
+		"src/defaulted.ts": `import { ${name} } from "${from}";\nexport default ${name};\n`,
+		"src/whole.ts": `import * as all from "${from}";\nexport { all };\n`,
+		"src/used.ts": `import { ${name} } from "${from}";\nconst kept = ${name};\nexport const held = [kept];\nexport const named = (x: unknown) => x === kept;\n`,
+		"src/contract.ts": "export {};\n",
+	});
+	const user = (
+		name: string,
+		files: Record<string, string>,
+		more: Record<string, unknown>,
+		kind: string,
+	) =>
+		pkg(
+			name,
+			files,
+			{ exports: { ".": "./src/contract.ts" }, dependencies: { "@g31h/store": "*" }, ...more },
+			kind,
+		);
+	const taker = user("@g31h/taker", shapes("writer", "@g31h/store/writer"), {}, budget.featureKind);
+	const adapter = user(
+		"@g31h/adapter",
+		shapes("upkeep", "@g31h/store"),
+		{ adapts: "@g31h/store" },
+		budget.adapterKind,
+	);
+	const handed = ["aliased", "declared", "defaulted", "direct", "rebound", "whole"];
+	expect(
+		check([owner, taker, adapter], budget)
+			.filter((v) => v.rule.startsWith("G31"))
+			.map((v) => `${v.where} ${v.detail}`)
+			.sort(),
+	).toEqual([
+		...handed.map((file) => `@g31h/adapter/src/${file}.ts upkeep of @g31h/store`),
+		...handed.map(
+			(file) => `@g31h/taker/src/${file}.ts ./writer of @g31h/store: a taker does not hand it on`,
+		),
+	]);
+});
