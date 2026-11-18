@@ -9,6 +9,7 @@ import {
 import { quietRuntime } from "@mod/kernel/testing";
 import {
 	challengeStore,
+	challengeStoreNeeds,
 	passkeyStore,
 	registrationChallengeStore,
 	type StoredChallenge,
@@ -21,7 +22,6 @@ import {
 } from "@mod/passkeys/testing";
 import { type Space, type Store, spaces, store } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
-import { challengeLifetimeMaxMs } from "@mod/webauthn";
 import { expect, it } from "vitest";
 import wiring from "../src/module.ts";
 
@@ -128,7 +128,7 @@ challengeStoreContract("webauthn-store on records, on a simulated replicated sto
 	};
 });
 
-it("declares the passkeys indexed and the registration challenges bounded at webauthn's ceiling, erased by passkeys; assertion challenges hold no subject's data", async () => {
+it("declares the passkeys indexed and the registration challenges bounded at the time passkeys keeps one, erased by passkeys; assertion challenges hold no subject's data", async () => {
 	const reader = defineModule({ name: "reader", replicaSafe: true, takes: [spaces] }, (m) => [
 		m.provide(declared).by(async (c) => c.collect(spaces)),
 	]);
@@ -143,7 +143,7 @@ it("declares the passkeys indexed and the registration challenges bounded at web
 	}
 	expect(named["webauthn-store.registration-challenges"]).toMatchObject({
 		subjectData: "bounded",
-		boundedMs: challengeLifetimeMaxMs,
+		boundedMs: challengeStoreNeeds.registrationsEndWithinMs,
 		erasedBy: "passkeys",
 	});
 	expect(named["webauthn-store.challenges"]).toMatchObject({ subjectData: "none" });

@@ -2,7 +2,7 @@ import { contract, defineModule, optional, probes } from "@mod/kernel";
 import {
 	type ChallengeStore,
 	challengeStore,
-	type challengeStoreNeeds,
+	challengeStoreNeeds,
 	type PasskeyStore,
 	passkeyStore,
 	type passkeyStoreNeeds,
@@ -20,7 +20,6 @@ import {
 	subjectRecordsPhase,
 	tombstoneFloor,
 } from "@mod/subject-records";
-import { challengeLifetimeMaxMs } from "@mod/webauthn";
 
 /** Each need passkeys states for its passkeys, as the guarantee a space declares for it. */
 const guaranteeFor: Record<keyof typeof passkeyStoreNeeds, Guarantee> = {
@@ -52,21 +51,21 @@ const credentials = passkeySpace("webauthn-store.credentials");
 const subjects = passkeySpace("webauthn-store.subjects");
 /**
  * Assertion challenges: who asked, by its own name, a digest of its id and a time; no subject's
- * data. A node before 0.20 also keeps a subject's registration challenges here, each ending at
- * webauthn's `challengeLifetimeMaxMs`: account erasure is enabled only once that long has passed
- * in its maintenance window.
+ * data. A node before 0.20 also keeps a subject's registration challenges here, each ending within
+ * `challengeStoreNeeds.registrationsEndWithinMs` of its opening. Waiting them out before erasure is
+ * enabled is account erasure's to check, not this module's.
  */
 const challenges: Space = {
 	name: "webauthn-store.challenges",
 	guarantees: Object.values(challengeGuaranteeFor),
 	subjectData: "none",
 };
-/** Registration challenges, each a subject's for at most webauthn's ceiling: fenced by its tombstone, ending by then. */
+/** Registration challenges, each a subject's for at most the time passkeys keeps one: fenced by its tombstone, ending by then. */
 const registrations: Space = {
 	name: "webauthn-store.registration-challenges",
 	guarantees: [...new Set([...Object.values(challengeGuaranteeFor), ...tombstoneFloor])],
 	subjectData: "bounded",
-	boundedMs: challengeLifetimeMaxMs,
+	boundedMs: challengeStoreNeeds.registrationsEndWithinMs,
 	erasedBy: "passkeys",
 };
 
