@@ -1,5 +1,6 @@
 import { isUnavailable } from "@mod/kernel";
 import type { Json, Space, Store } from "@mod/store";
+import { plantValue } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import { bucketOf, envelope, part, placed } from "../../../test/placed.ts";
 import { eraseSubject, indexSpaceOf } from "../../subject-records.ts";
@@ -37,10 +38,11 @@ async function opened(phase: "reader" | "indexed" = "indexed", over?: (s: Store)
 	const erase = (space: Space, subject: string) => eraseSubject(p.at(space), subject);
 	/** The subject's tombstone alone, its records left: as they stand while they await their eraser. */
 	const tombed = (space: Space, subject: string) =>
-		p.s.putIfAbsent(
+		plantValue(
+			p.s,
 			{ space: indexSpaceOf(space), partition: `${part(space, subject)}.tomb`, name: "record" },
 			{ at: 1 },
-			{ expiry: { kind: "never" } },
+			{ kind: "never" },
 		);
 	/** What the store holds under the key, raw: an envelope where it wrote one. */
 	const held = async (space: Space, key: string) => (await p.raw(space, key))?.value;
@@ -290,9 +292,7 @@ it("decides again on what a racing writer left, and writes raw where records are
 		raced = true;
 		const at = { space: lists, partition: "alice", name: "record" };
 		const { entry } = await s.get(at);
-		await s.replaceIf(at, entry?.version ?? "", envelope("alice", { n: 5 }), {
-			expiry: { kind: "keep" },
-		});
+		await plantValue(s, at, envelope("alice", { n: 5 }), { kind: "keep" });
 	});
 	const answer = await changeSubjectRecords({
 		targets: [{ place: "lists", key: "alice" }],

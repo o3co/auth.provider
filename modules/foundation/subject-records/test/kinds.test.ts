@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Space, Store } from "@mod/store";
+import { plantValue } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import { indexSpaceOf, subjectKeyedSetsIn, subjectRecordsIn } from "../src/subject-records.ts";
 import { bucketOf, part, placed } from "./placed.ts";
@@ -31,7 +32,7 @@ async function opened() {
 				partition: `${part(space, subject)}.tomb`,
 				name: "record",
 			};
-			await p.s.putIfAbsent(tomb, { at: 1 }, { expiry: { kind: "never" } });
+			await plantValue(p.s, tomb, { at: 1 }, { kind: "never" });
 		},
 	};
 }
