@@ -69,6 +69,7 @@ const app = await loadConfig(source)
 		if (told !== undefined) {
 			tell(2, "warn variables 0.17 read are set and never read: start the app to name them\n");
 		}
-		return assemble({ modules: composed.map((read) => read.default), config, runtime });
+		// A tool's: built and stopped, never started, so it serves nothing.
+		return assemble({ modules: composed.map((read) => read.default), config, runtime, neverStarted: true });
 	})
 	.catch(notBuilt);
