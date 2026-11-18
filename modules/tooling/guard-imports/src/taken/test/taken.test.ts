@@ -114,11 +114,12 @@ it("G31 keeps an entry only where its key is one plain segment, not reserved, na
 		"src/again.ts": 'export type { Token } from "./contract.ts";\n',
 		"src/inline.ts": 'export { type Token } from "./contract.ts";\n',
 		"src/star.ts": 'export * from "./ok.ts";\n',
+		"src/spaced.ts": 'export * as shapes from "./ok.ts";\n',
 	};
 	const exports = Object.fromEntries([
 		[".", "./src/contract.ts"],
 		["./testing", "./src/ok.ts"],
-		...["ok", "typed", "shaped", "again", "inline", "star", "none", "Upper"].map((n) => [
+		...["ok", "typed", "shaped", "again", "inline", "star", "spaced", "none", "Upper"].map((n) => [
 			`./${n}`,
 			`./src/${n === "none" || n === "Upper" ? "ok" : n}.ts`,
 		]),
@@ -139,6 +140,7 @@ it("G31 keeps an entry only where its key is one plain segment, not reserved, na
 			"./again": taker,
 			"./inline": taker,
 			"./star": taker,
+			"./spaced": taker,
 		},
 	});
 	const takerPkg = pkg(
@@ -158,6 +160,7 @@ it("G31 keeps an entry only where its key is one plain segment, not reserved, na
 		"./again",
 		"./inline",
 		"./star",
+		"./spaced",
 	]);
 	expect(said).toEqual([]);
 	// G31 refuses every other key, and each kept entry not exported or exporting a type.
@@ -177,6 +180,7 @@ it("G31 keeps an entry only where its key is one plain segment, not reserved, na
 			"./again: an entry kept exports values alone, its types on `.`",
 			"./inline: an entry kept exports values alone, its types on `.`",
 			"./star: an entry kept exports values alone, its types on `.`",
+			"./spaced: an entry kept exports values alone, its types on `.`",
 		].map((why) => `@g31k/owner ${why}`),
 	);
 });

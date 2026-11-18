@@ -78,7 +78,7 @@ function moduleNameOf(s: Scope, p: Pkg): string | undefined {
 
 /** Whether a `takenBy` key names an entry of the owner (`./name`) rather than a contract. */
 const isEntry = (key: string) => key.startsWith(".");
-/** Whether a source file exports a type: a type or an interface, a type re-exported, or `export *`. */
+/** Whether a source file exports a type: a type or an interface, a type re-exported, `export *` or `export * as`. */
 function exportsType(path: string): boolean {
 	return parse(path).statements.some((statement) => {
 		const exported = (
@@ -95,6 +95,7 @@ function exportsType(path: string): boolean {
 		return (
 			statement.isTypeOnly ||
 			clause === undefined ||
+			ts.isNamespaceExport(clause) ||
 			(ts.isNamedExports(clause) && clause.elements.some((element) => element.isTypeOnly))
 		);
 	});
