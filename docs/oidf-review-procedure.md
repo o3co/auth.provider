@@ -50,7 +50,7 @@ For each test, compare the page with the table below. Write `ok` where the page 
 | rp-initiated-logout | `oidcc-rp-initiated-logout-query-added-to-post-logout-redirect-uri` | An error page: the `post_logout_redirect_uri` is not registered. | An error saying the request is invalid because the `post_logout_redirect_uri` is not registered. A page saying the user was logged out is `ng`. |
 | rp-initiated-logout | `oidcc-rp-initiated-logout-bad-id-token-hint` | An error page: the `id_token_hint` is not valid. | An error saying the `id_token_hint` is not valid. |
 | rp-initiated-logout | `oidcc-rp-initiated-logout-modified-id-token-hint` | An error page: the `id_token_hint` is not valid. | An error saying the `id_token_hint` is not valid. |
-| rp-initiated-logout | `oidcc-rp-initiated-logout-no-id-token-hint` | An error page: the `id_token_hint` is missing. | An error saying the `id_token_hint` is required. |
+| rp-initiated-logout | `oidcc-rp-initiated-logout-no-id-token-hint` | An error page: the `id_token_hint` is missing. | A page asking whether to log out. An error is `ng`. |
 | rp-initiated-logout | `oidcc-rp-initiated-logout-no-params` | The user is logged out, and a page says so. | A page saying the user was logged out, or one asking whether to log out. An error is `ng`. |
 | rp-initiated-logout | `oidcc-rp-initiated-logout-no-post-logout-redirect-uri` | The user is logged out, and a page says so. | A page saying the user was logged out. An error is `ng`. |
 | rp-initiated-logout | `oidcc-rp-initiated-logout-only-state` | The user is logged out, and a page says so. | A page saying the user was logged out, or one asking whether to log out. An error is `ng`. |
