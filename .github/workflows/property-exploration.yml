@@ -39,6 +39,7 @@ jobs:
   explore:
     name: Explore the properties
     runs-on: ubuntu-latest
+    cache-mode: none
     timeout-minutes: 60
     permissions:
       contents: read
