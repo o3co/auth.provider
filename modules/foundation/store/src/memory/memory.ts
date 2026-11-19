@@ -18,6 +18,7 @@ import {
 	type Store,
 	type StoreControl,
 	type StoreUpkeep,
+	type UpkeepImplementation,
 } from "../contract.ts";
 
 type Answer = { readonly kind: string };
@@ -332,7 +333,7 @@ export function memoryProcess(
 		durable: "memory loses everything on restart",
 		replicated: "memory has no replica",
 	};
-	const upkeep: StoreUpkeep = {
+	const upkeep: UpkeepImplementation = {
 		mark: async (name, value) => {
 			refuseStale();
 			record.marks.set(name, { value: JSON.parse(canonicalJson(value)), epoch: record.epoch });

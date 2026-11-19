@@ -327,7 +327,9 @@ export function checkedUpkeep(
 	declared: readonly Space[],
 ): StoreUpkeep {
 	const known = declaredSpaces(declared);
+	const ordered = Object.freeze([...declared]);
 	return {
+		declared: () => ordered,
 		mark: async (name, value) => inner.mark(text("mark name", name), json(value)),
 		require: async (names) => {
 			if (!Array.isArray(names) || names.length === 0) fail("require needs one space or more");
