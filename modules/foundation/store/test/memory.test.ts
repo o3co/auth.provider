@@ -219,6 +219,47 @@ it("refuses the boot over a malformed declaration, naming its space, with store'
 	]);
 });
 
+it("refuses the boot over guarantees that are no plain list of known guarantees, naming the space, and runs none of its getters", async () => {
+	const reason = "declares guarantees that are no list of known guarantees";
+	const ran: string[] = [];
+	const accessor = Object.defineProperty([], "0", {
+		enumerable: true,
+		get: () => {
+			ran.push("index");
+			return "durable";
+		},
+	});
+	const trapped = new Proxy(["durable"], {
+		getOwnPropertyDescriptor: () => {
+			throw new Error("a trap threw");
+		},
+	});
+	for (const guarantees of ["durable", accessor, [1], ["fast"], trapped]) {
+		const label = Array.isArray(guarantees) ? `[${guarantees.length}]` : String(guarantees);
+		expect(
+			await refusalsOver([{ name: "listed", guarantees, subjectData: "none" }]),
+			label,
+		).toEqual([{ where: "listed", reason }]);
+	}
+	expect(ran).toEqual([]);
+});
+
+it("accepts an empty list of guarantees, and a guarantee named twice", async () => {
+	const owner = defineModule({ name: "owner", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(spaces).by(() => ({ name: "empty", guarantees: [], subjectData: "none" })),
+		m
+			.contribute(spaces)
+			.by(() => ({ name: "twice", guarantees: ["durable", "durable"], subjectData: "none" })),
+	]);
+	await expect(
+		assemble({
+			modules: [storeModule, owner],
+			config: { ...kernelConfig(), ...storeConfig() },
+			runtime: quietRuntime(),
+		}),
+	).resolves.toBeDefined();
+});
+
 it("names the space where kernel takes its name, and store.declaration where it does not, never the name in the reason", async () => {
 	const unprintable = "bell\u0007";
 	const [refusal] = await refusalsOver([{ name: unprintable, guarantees: [] }]);

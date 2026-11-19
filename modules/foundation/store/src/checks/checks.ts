@@ -228,12 +228,27 @@ const spaceFields = [
 	"boundedMs",
 	"requiredOnceErasing",
 ];
-const guarantees: readonly Guarantee[] = [
-	"no-eviction",
-	"durable",
-	"replicated",
-	"confirmed-reads",
-];
+/** Every `Guarantee`, as a table, held to the type both ways as `subjectDataKinds` is. */
+const guaranteeKinds = {
+	"no-eviction": true,
+	durable: true,
+	replicated: true,
+	"confirmed-reads": true,
+} satisfies Record<Guarantee, true>;
+const isGuarantee = (g: unknown): g is Guarantee =>
+	typeof g === "string" && Object.hasOwn(guaranteeKinds, g);
+
+/** Whether `value` is a plain list of known guarantees, each own data entry read through its descriptor: no getter or method of it run. */
+function knownGuarantees(value: unknown): boolean {
+	if (!Array.isArray(value)) return false;
+	const length = Object.getOwnPropertyDescriptor(value, "length");
+	if (!length || !("value" in length)) return false;
+	for (let i = 0; i < length.value; i++) {
+		const entry = Object.getOwnPropertyDescriptor(value, String(i));
+		if (!entry || !("value" in entry) || !isGuarantee(entry.value)) return false;
+	}
+	return true;
+}
 
 /**
  * Refuses the boot over a malformed declaration (kernel's `BuildRefused`), naming its space; the
@@ -284,6 +299,12 @@ export function declaredSpaces(declared: readonly Space[]): ReadonlyMap<string, 
 			refusedDeclaration(space, "declares a boundedMs that is no whole number of ms of 1 or more");
 		if (read.requiredOnceErasing !== undefined && typeof read.requiredOnceErasing !== "boolean")
 			refusedDeclaration(space, "declares a requiredOnceErasing that is no boolean");
+		let listed = false;
+		takes(() => {
+			listed = knownGuarantees(read.guarantees);
+		});
+		if (!listed)
+			refusedDeclaration(space, "declares guarantees that are no list of known guarantees");
 	}
 	return new Map(declared.map((space) => [space.name, space]));
 }
@@ -311,7 +332,7 @@ export function checkedUpkeep(inner: StoreUpkeep, declared: readonly Space[]): S
 		retire: async (name) => inner.retire(text("space", name)),
 		honours: async (asked): Promise<Honours> => {
 			if (!Array.isArray(asked)) fail("guarantees must be a list");
-			for (const g of asked) if (!guarantees.includes(g)) fail(`unknown guarantee ${String(g)}`);
+			for (const g of asked) if (!isGuarantee(g)) fail(`unknown guarantee ${String(g)}`);
 			return inner.honours([...new Set(asked)]);
 		},
 		sweep: async (target, cursor) =>
