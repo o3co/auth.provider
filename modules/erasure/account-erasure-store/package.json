@@ -10,6 +10,11 @@
 	},
 	"dependencies": {
 		"@mod/account-erasure": "workspace:*",
-		"@mod/kernel": "workspace:*"
+		"@mod/kernel": "workspace:*",
+		"@mod/store": "workspace:*",
+		"@mod/subject-records": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5"
 	}
 }
