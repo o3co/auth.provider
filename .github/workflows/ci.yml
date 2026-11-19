@@ -27,6 +27,10 @@ concurrency:
   group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# A job that checks out a ref other than its run's own commit (a ref an
+# earlier job computed, or develop on the schedule, which runs on main) never
+# writes the cache: `cache-mode: read`, or `none` where it caches nothing.
+# Held by distribution's `workflow-caches`.
 jobs:
   # Everything a change must pass on every pull request: typecheck, lint, the
   # unit tests, guard and distribution's checks (`pnpm check`), and the source
@@ -355,6 +359,7 @@ jobs:
     needs: conformance-due
     if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true')) }}
     runs-on: ubuntu-latest
+    cache-mode: none
     outputs:
       areas: ${{ steps.plan.outputs.areas }}
       patterns: ${{ steps.plan.outputs.patterns }}
@@ -412,6 +417,7 @@ jobs:
     needs: conformance-plan
     if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.conformance-plan.outputs.areas != '[]' }}
     runs-on: ubuntu-latest
+    cache-mode: read
     outputs:
       legacy: ${{ steps.kept.outputs.artifact-id }}
     env:
@@ -480,6 +486,7 @@ jobs:
     # A skipped conformance-due above would otherwise skip this job too; none planned, none runs.
     if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.legacy-build.result == 'success' && needs.conformance-plan.outputs.areas != '[]' }}
     runs-on: ubuntu-latest
+    cache-mode: read
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -556,6 +563,7 @@ jobs:
     # A skipped conformance-due above would otherwise skip this job too; none planned, none runs.
     if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.conformance-plan.outputs.patterns != '[]' }}
     runs-on: ubuntu-latest
+    cache-mode: read
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -633,6 +641,7 @@ jobs:
     needs: conformance-plan
     if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.conformance-plan.outputs.faults != '[]' }}
     runs-on: ubuntu-latest
+    cache-mode: read
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -751,6 +760,7 @@ jobs:
   interop-due:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
+    cache-mode: none
     outputs:
       oidf: ${{ steps.due.outputs.oidf }}
       clients: ${{ steps.due.outputs.clients }}
@@ -815,6 +825,7 @@ jobs:
     needs: interop-due
     if: ${{ !cancelled() && needs.interop-due.outputs.clients == 'true' }}
     runs-on: ubuntu-latest
+    cache-mode: read
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -890,6 +901,7 @@ jobs:
     needs: interop-due
     if: ${{ !cancelled() && needs.interop-due.outputs.oidf == 'true' }}
     runs-on: ubuntu-latest
+    cache-mode: read
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -1084,6 +1096,7 @@ jobs:
     needs: [checks, integration, conformance-plan, conformance-area, conformance-pattern, conformance-faults, interop-due, interop-oidf, interop-clients, release-check]
     if: always()
     runs-on: ubuntu-latest
+    cache-mode: none
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
