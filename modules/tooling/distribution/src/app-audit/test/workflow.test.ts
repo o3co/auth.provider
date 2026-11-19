@@ -8,6 +8,8 @@ interface Workflow {
 	readonly on: Record<string, unknown>;
 	readonly env?: unknown;
 	readonly defaults?: unknown;
+	readonly permissions?: unknown;
+	readonly concurrency?: unknown;
 	readonly jobs: Record<string, Job>;
 }
 const workflow = parse(
@@ -59,16 +61,41 @@ const normal = (job: Job) => ({
 	})),
 });
 
-/** Whether the workflow runs the job daily and on every push to develop, main and a release. */
-const triggered = (on: Record<string, unknown>) => {
-	const branches = (on.push as { branches?: unknown } | undefined)?.branches;
-	return (
-		Array.isArray(on.schedule) &&
-		on.schedule.length > 0 &&
-		Array.isArray(branches) &&
-		["develop", "main", "release/**"].every((b) => branches.includes(b))
-	);
+/**
+ * What of the workflow, shared with its other jobs, the audit needs as it is: when it runs, daily
+ * and on every push to develop, main and a release branch, and by hand; and nothing that cancels
+ * it, widens what it may do, or sets its environment or shell. A change to the workflow's triggers
+ * changes this object on purpose.
+ */
+const concurrencyGroup =
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub expression, not a template
+	"ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}";
+const canonicalWorkflow = {
+	schedule: [{ cron: "17 3 * * *" }],
+	push: { branches: ["develop", "main", "release/**"] },
+	dispatch: true,
+	permissions: { contents: "read" },
+	concurrency: {
+		group: concurrencyGroup,
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub expression, not a template
+		"cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+	},
+	env: undefined,
+	defaults: undefined,
 };
+const workflowPart = (w: Workflow) => ({
+	schedule: w.on.schedule,
+	push: w.on.push,
+	dispatch: "workflow_dispatch" in w.on,
+	permissions: w.permissions,
+	concurrency: w.concurrency,
+	env: w.env,
+	defaults: w.defaults,
+});
+const workflowHeld = (w: Workflow) =>
+	expect(workflowPart(w), "update the canonical workflow on purpose").toStrictEqual(
+		canonicalWorkflow,
+	);
 
 const audit = workflow.jobs.audit as Job;
 const steps = audit.steps ?? [];
@@ -79,13 +106,8 @@ it("is the canonical job: install, pack the release, audit its app's install", (
 	held(audit);
 });
 
-it("runs daily and on every push to develop, main and a release branch", () => {
-	expect(triggered(workflow.on)).toBe(true);
-});
-
-it("takes no environment or shell setting from the workflow", () => {
-	expect(workflow.env).toBeUndefined();
-	expect(workflow.defaults).toBeUndefined();
+it("runs daily, on every push to develop, main and a release branch, and by hand, uncancelled", () => {
+	workflowHeld(workflow);
 });
 
 const auditStep = steps.length - 1;
@@ -131,9 +153,32 @@ it.each<[string, Job]>([
 	expect(() => held(mutated)).toThrow();
 });
 
-it("refuses a workflow without its schedule", () => {
-	const { schedule: _, ...on } = workflow.on;
-	expect(triggered(on)).toBe(false);
+const withOn = (on: Record<string, unknown>): Workflow => ({
+	...workflow,
+	on: { ...workflow.on, ...on },
+});
+const { workflow_dispatch: _, ...undispatched } = workflow.on;
+const push = workflow.on.push as { readonly branches: readonly string[] };
+it.each<[string, Workflow]>([
+	["run yearly", withOn({ schedule: [{ cron: "17 3 1 1 *" }] })],
+	["without its schedule", withOn({ schedule: undefined })],
+	[
+		"with its branches negated",
+		withOn({ push: { branches: [...push.branches, "!develop", "!main", "!release/**"] } }),
+	],
+	["with push paths", withOn({ push: { ...push, paths: ["docs/**"] } })],
+	["with push paths ignored", withOn({ push: { ...push, "paths-ignore": ["**"] } })],
+	["with push branches ignored", withOn({ push: { ...push, "branches-ignore": ["develop"] } })],
+	["without its manual run", { ...workflow, on: undispatched }],
+	[
+		"cancelling a run in progress",
+		{ ...workflow, concurrency: { group: "ci", "cancel-in-progress": true } },
+	],
+	["with every permission", { ...workflow, permissions: "write-all" }],
+	["with an environment", { ...workflow, env: { NODE_OPTIONS: "-e process.exit(0)" } }],
+	["with a shell of its own", { ...workflow, defaults: { run: { shell: "sh -c true" } } }],
+])("refuses the workflow %s", (_, mutated) => {
+	expect(() => workflowHeld(mutated)).toThrow();
 });
 
 it("takes an action's new version, a step's new name and a comment in a command", () => {
