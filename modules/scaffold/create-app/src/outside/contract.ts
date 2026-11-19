@@ -6,4 +6,5 @@ export {
 	type Read,
 	type Release,
 	readOutside,
+	unreadWarnings,
 } from "./outside.ts";

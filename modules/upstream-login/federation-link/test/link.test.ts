@@ -40,6 +40,10 @@ function standIn(
 		/** Taking the tokens back throws. */
 		withdrawThrows: false,
 		down: undefined as "users" | "entering" | "session" | "handoff" | undefined,
+		/** The entry the handle answers at `none`, where it differs from `byHandle`. */
+		byNone: undefined as Entry | undefined,
+		/** What a read of the session's subject (`none`) throws, where it throws. */
+		readThrows: undefined as Error | undefined,
 	};
 	const levels: unknown[] = [];
 	/** The handles the session was asked the entry of, with the level when one was named. */
@@ -49,6 +53,8 @@ function standIn(
 	const joined: unknown[] = [];
 	const withdrawn: unknown[] = [];
 	const unlinks: unknown[] = [];
+	/** The recordings `failed` left running, awaited as a stop awaits them. */
+	const tracked: Promise<void>[] = [];
 	const logged = recordingLog();
 	const link = linkWith({
 		origin: { sameOrigin: () => set.sameOrigin },
@@ -63,6 +69,11 @@ function standIn(
 			},
 			entryOf: async (handle, level) => {
 				if (set.down === "session") throw new Unavailable("session");
+				if (level === "none" && set.readThrows) throw set.readThrows;
+				if (level === "none" && set.byNone) {
+					asked.push([handle, level]);
+					return set.byNone;
+				}
 				asked.push(level === undefined ? handle : [handle, level]);
 				return set.byHandle;
 			},
@@ -94,10 +105,11 @@ function standIn(
 			},
 		},
 		log: logged.log,
+		track: (work) => void tracked.push(work),
 		...(more.stepUp ? { stepUp: more.stepUp } : {}),
 	});
-	/** What this link's start kept. */
-	const kept = { session: "s1", subject: "alice" };
+	/** What this link's start kept: the session's handle alone. */
+	const kept = { session: "s1" };
 	const completing = (more: Partial<Continued> = {}): Continued => ({
 		request: testRequest(),
 		idp: "corp",
@@ -122,6 +134,7 @@ function standIn(
 		link,
 		kept,
 		completing,
+		stopped: () => Promise.all(tracked),
 	};
 }
 /** What a start or a callback answered: its status and its JSON. */
@@ -134,11 +147,9 @@ const refusedAt = async (s: ReturnType<typeof standIn>, request: HttpRequest = t
 	return "answer" in begun ? answered(begun.answer) : begun;
 };
 
-it("starts only for a session entered at the credentials level, recording it and its subject", async () => {
+it("starts only for a session entered at the credentials level, keeping its handle and no subject", async () => {
 	const s = standIn();
-	expect(await s.link.begin(testRequest(), "corp")).toEqual({
-		kept: { session: "s1", subject: "alice" },
-	});
+	expect(await s.link.begin(testRequest(), "corp")).toEqual({ kept: { session: "s1" } });
 	expect(s.levels).toEqual(["credentials"]);
 	s.set.entry = { kind: "absent" };
 	expect(await refusedAt(s)).toEqual([401, { error: "login_required" }]);
@@ -274,7 +285,9 @@ const enteredAs = (subject: string): Entry => ({
 	endsAt: 0,
 });
 
-it("links nothing once the browser is in another session, or its session closed, fell short of a requirement or changed hands", async () => {
+// A session keeps its login's subject while its record lives (session's card), so only a 0.19 start,
+// which kept one, can find it changed: below.
+it("links nothing once the browser is in another session, or its session closed or fell short of a requirement", async () => {
 	const changes: Record<string, [(set: Settings) => void, string]> = {
 		another: [
 			(set) => {
@@ -294,12 +307,6 @@ it("links nothing once the browser is in another session, or its session closed,
 				set.byHandle = short;
 			},
 			"session_short",
-		],
-		subject: [
-			(set) => {
-				set.byHandle = enteredAs("bob");
-			},
-			"login_required",
 		],
 	};
 	for (const [change, [apply, reason]] of Object.entries(changes)) {
@@ -337,16 +344,14 @@ it("fails as unavailable when the tokens cannot be handed over, the link and its
 const upstream = { idp: "corp", subject: "u-1" };
 const undone = ["federation.identity.linked", "federation.identity.link_refused"];
 
-it("undoes a link it wrote, and takes the tokens back, when the session closed, fell short or changed hands meanwhile: 401", async () => {
+// A session keeps its login's subject while its record lives (session's card): none changes hands.
+it("undoes a link it wrote, and takes the tokens back, when the session closed or fell short meanwhile: 401", async () => {
 	const changes: Record<string, (set: Settings) => void> = {
 		closed: (set) => {
 			set.byHandle = { kind: "absent" };
 		},
 		short: (set) => {
 			set.byHandle = short;
-		},
-		subject: (set) => {
-			set.byHandle = enteredAs("bob");
 		},
 	};
 	for (const [change, apply] of Object.entries(changes)) {
@@ -446,12 +451,16 @@ it("undoes the link and takes the tokens back before failing as unavailable when
 	expect(s.events.map((e) => e.kind)).toEqual(["federation.identity.linked"]);
 });
 
-it("records a refusal after the take for the subject its start kept, and nothing for what it cannot read", () => {
+it("records a refusal after the take once the session's subject is read, after the answer, and nothing for what it cannot read", async () => {
 	const s = standIn();
 	const at = { idp: "corp", reason: "exchange_failed", source: "127.0.0.1", userAgent: "ua/1" };
 	s.link.failed({ ...at, kept: s.kept });
 	s.link.failed({ ...at, kept: undefined });
 	s.link.failed({ ...at, kept: { unheard: 1 } });
+	// Off the answer's path: recorded once the read answers, and a stop awaits it.
+	expect(s.events).toEqual([]);
+	await s.stopped();
+	expect(s.asked).toEqual([["s1", "none"]]);
 	expect(s.events).toEqual([
 		{
 			kind: "federation.identity.link_refused",
@@ -464,4 +473,75 @@ it("records a refusal after the take for the subject its start kept, and nothing
 			},
 		},
 	]);
+});
+
+/** What 0.19 kept for a link (frozen from v0.19.1, federation-link's `begin`): read until 0.22. */
+const keptBy0191 = { session: "s1", subject: "alice" };
+
+it("completes a link a 0.19 instance began, taking the subject from the session, and refuses one whose subject differs", async () => {
+	const s = standIn();
+	expect((await s.link.complete(s.completing({ kept: keptBy0191 }))).status).toBe(303);
+	expect(s.links).toEqual([["alice", { idp: "corp", subject: "u-1" }]]);
+	const other = standIn();
+	other.set.byHandle = enteredAs("bob");
+	const refused = await other.link.complete(other.completing({ kept: keptBy0191 }));
+	expect(answered(refused)).toEqual([401, { error: "login_required" }]);
+	expect(other.links).toEqual([]);
+	// The session entered, so its subject is recorded with no check more.
+	expect(other.asked).toEqual([["s1", "credentials"]]);
+	// No event takes its subject from what was kept: bob is the session's, read then.
+	expect(other.events.map((e) => [e.subject, e.attributes?.reason])).toEqual([
+		["bob", "login_required"],
+	]);
+});
+
+it("records a refusal with the subject the session holds while it lives, and none once it is closed", async () => {
+	const live = standIn();
+	live.set.byHandle = short;
+	// Short of credentials, still live: it enters at `none`.
+	live.set.byNone = { kind: "entered", session: s1, endsAt: 0 };
+	await live.link.complete(live.completing());
+	expect(live.asked).toEqual([
+		["s1", "credentials"],
+		["s1", "none"],
+	]);
+	expect(live.events.map((e) => [e.subject, e.attributes?.reason])).toEqual([
+		["alice", "session_short"],
+	]);
+	const closed = standIn();
+	closed.set.byHandle = { kind: "absent" };
+	await closed.link.complete(closed.completing());
+	expect(closed.events.map((e) => ["subject" in e, e.attributes?.reason])).toEqual([
+		[false, "login_required"],
+	]);
+});
+
+it("records the conflict with the entered session's subject, reading nothing more", async () => {
+	const s = standIn();
+	s.set.linked = "conflict";
+	await s.link.complete(s.completing());
+	expect(s.asked).toEqual([["s1", "credentials"]]);
+	expect(s.events.map((e) => [e.subject, e.attributes?.reason])).toEqual([["alice", "conflict"]]);
+});
+
+it("changes no answer where the subject's read fails: an outage records none, another failure is warned by kind", async () => {
+	for (const [thrown, warned] of [
+		[new Unavailable("session"), []],
+		[new TypeError("broken"), [{ idp: "corp", kind: "TypeError" }]],
+	] as const) {
+		const s = standIn();
+		s.set.entered = { id: "s2", context: alice };
+		s.set.readThrows = thrown;
+		expect(answered(await s.link.complete(s.completing()))).toEqual([
+			401,
+			{ error: "login_required" },
+		]);
+		expect(s.events.map((e) => ["subject" in e, e.attributes?.reason])).toEqual([
+			[false, "login_required"],
+		]);
+		const unread = s.logged
+			.lines()
+			.filter((l) => l.event === "federation.link_subject_read_failed");
+		expect(unread.map((l) => l.fields)).toEqual(warned);
+	}
 });

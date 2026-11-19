@@ -17,11 +17,6 @@ local function num(x) return string.format('%.0f', x) end
 local run_id = string.match(redis.call('INFO', 'server'), 'run_id:(%w+)')
 -- Every answer names the server it was computed on, so a confirmation is checked against it.
 local function out(answer) return run_id .. '\\n' .. answer end
--- An entry is gone at its very expiry time by this script's clock; Redis would still hold it.
-for _, key in ipairs(KEYS) do
-  local expires = redis.call('PEXPIRETIME', key)
-  if expires >= 0 and expires <= now then redis.call('DEL', key) end
-end
 local function next_version(vkey)
   local server = string.sub(run_id, 1, 12)
     .. string.sub(string.match(redis.call('INFO', 'replication'), 'master_replid:(%w+)'), 1, 12)
@@ -79,23 +74,33 @@ local function entry(key)
   local held = redis.call('HMGET', key, 'v', 'ver')
   if not held[1] then return false end
   local expires = redis.call('PEXPIRETIME', key)
+  -- Gone at its very expiry time by this script's clock, though Redis may still hold it: absent, not removed.
+  if expires >= 0 and expires <= now then return false end
   return {value = held[1], version = held[2], expiresAt = expires >= 0 and num(expires) or cjson.null}
 end
 `;
 
 /**
- * First in each script that changes data: under another epoch than the control record's it changes
- * nothing, neither removing what expired nor replaying an answer. ARGV's last two: the record's key
- * (not in KEYS: one server, as boot refuses a cluster) and the epoch taken ('' for none).
+ * First in each change, both fences read from the record here: under another epoch, or once the key lifts for a process that took its epoch under it, nothing is changed, removed or replayed.
+ * ARGV's last three: the record's key (one server, as boot refuses a cluster), the epoch taken ('' for none), '1' if taken under the key.
  */
 const epochCheck = `
-local held_epoch = redis.call('HGET', ARGV[#ARGV - 1], 'epoch') or ''
-if held_epoch ~= ARGV[#ARGV] then
+local fence = redis.call('HMGET', ARGV[#ARGV - 2], 'epoch', 'maintenance')
+local held_epoch = fence[1] or ''
+if held_epoch ~= ARGV[#ARGV - 1] or (ARGV[#ARGV] == '1' and fence[2] ~= '1') then
   return string.match(redis.call('INFO', 'server'), 'run_id:(%w+)') .. '\\n' .. cjson.encode({kind = 'stale'})
 end
 `;
 
-export const changing = `${epochCheck}${prelude}`;
+/** In a change, behind both fences: an entry is gone at its very expiry time by this script's clock, though Redis may still hold it. */
+const removeExpired = `
+for _, key in ipairs(KEYS) do
+  local expires = redis.call('PEXPIRETIME', key)
+  if expires >= 0 and expires <= now then redis.call('DEL', key) end
+end
+`;
+
+export const changing = `${epochCheck}${prelude}${removeExpired}`;
 
 /** KEYS: key, version key, mark key. ARGV: mode, value, expected, kind, arg, deadline, digest, has mark. */
 /**

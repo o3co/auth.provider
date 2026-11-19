@@ -1,5 +1,6 @@
 import { metadataSections } from "@mod/clients";
 import { csrfChecked } from "@mod/csrf";
+import { erasers } from "@mod/erasure-extensions";
 import { type HttpRequest, type HttpResponse, routes, use } from "@mod/http";
 import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { contract, defineModule } from "@mod/kernel";
@@ -10,10 +11,13 @@ import { loopbackPagesRefused } from "@mod/url-setting";
 import { confirmFrom, confirmPath, confirmTakes, unavailable } from "./confirm/confirm.ts";
 import { upstreamEnds } from "./contract.ts";
 import { endingFrom, endingTakes } from "./ending/ending.ts";
+import { noticesEraser } from "./erasure/eraser.ts";
+import { portsRefused } from "./erasure/ports.ts";
 import { type Notices, noticesFrom, noticesTakes } from "./notices/notices.ts";
 import { remembering, rememberingTakes } from "./redemptions/redemptions.ts";
 import { registrationIn } from "./registration/registration.ts";
 import { type Settings, section } from "./section.ts";
+import { noticeBodies, noticeQueue, pendingNotices } from "./store.ts";
 
 type Handler = (request: HttpRequest) => Promise<HttpResponse>;
 
@@ -52,6 +56,9 @@ export default defineModule(
 		m.contribute(metadataSections).by(registrationIn),
 		remembering(m, name),
 		m.provide(shared).by(async (c) => {
+			// The bodies' erasure ports come whole or not at all.
+			const refused = portsRefused(await c.get(noticeBodies));
+			if (refused) return c.refuse(name, refused);
 			const notices = await noticesFrom(c);
 			c.every(c.section["sweep-interval"] * 1000, async () => {
 				const { failed } = await notices.sweep();
@@ -69,10 +76,13 @@ export default defineModule(
 				name,
 				// Answers once every notice is kept; the first try goes on after, and the sweep takes what it leaves.
 				closing: async (session) => {
-					const trying = notices.deliver(await notices.closing(session));
+					const { entries, withheld } = await notices.closing(session);
+					const trying = notices.deliver(entries);
 					running.add(trying);
 					// deliver never rejects, so the try left running ends without an unhandled rejection.
 					void trying.then(() => running.delete(trying));
+					// Kept nowhere, their subject erased: tried once now, the close failing where one would be again.
+					if (withheld.length > 0) await notices.tellOnce(withheld);
 				},
 			};
 		}),
@@ -117,6 +127,18 @@ export default defineModule(
 				unavailable: { response: unavailable },
 				handle: await c.get(ending),
 			})),
+		),
+		// Its build takes only its stores, collecting no probes: the erasure gate collects erasers.
+		m.contribute(erasers).by(async (c) =>
+			noticesEraser(
+				{
+					bodies: await c.get(noticeBodies),
+					queue: await c.get(noticeQueue),
+					pending: await c.get(pendingNotices),
+				},
+				c.log,
+				c.clock,
+			),
 		),
 		m.contribute(metadata).by(async (c) => {
 			const origin = endpointOrigin(await c.get(issuer));

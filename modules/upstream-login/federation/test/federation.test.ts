@@ -429,8 +429,9 @@ describe("federation", () => {
 
 	describe("a round trip an earlier version wrote, carrying a link's session as its own field", () => {
 		/**
-		 * A round trip store writing each record in that earlier shape: a link's session as `link`, a
-		 * login's with none; `forced` gives a login's one too, and `mixed` keeps the name beside it.
+		 * A round trip store writing each record in that earlier shape: a link's session and alice as
+		 * `link`, whatever the link kept, a login's with none; `forced` gives a login's one too, and
+		 * `mixed` keeps the name beside it.
 		 */
 		const earlier = ({ mixed = false, forced = false } = {}) => {
 			const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
@@ -441,10 +442,9 @@ describe("federation", () => {
 							carried: { by?: string; kept?: unknown };
 						};
 						const { by, kept: link, ...left } = was;
+						const session = (link as { session?: string } | undefined)?.session ?? "s-old";
 						const old =
-							by !== undefined || forced
-								? { ...left, link: link ?? { session: "s-old", subject: "alice" } }
-								: left;
+							by !== undefined || forced ? { ...left, link: { session, subject: "alice" } } : left;
 						if (mixed) Object.assign(old, { by: "link" });
 						return kept.records.create(key, { ...rest, carried: old } as never, lifetimeMs);
 					},

@@ -1,11 +1,24 @@
-import { mkdtemp, stat, truncate, unlink, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+	mkdir,
+	mkdtemp,
+	open,
+	readdir,
+	readFile,
+	rmdir,
+	stat,
+	truncate,
+	unlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ErasureJournal } from "@mod/erasure-journal";
 import { journalContract } from "@mod/erasure-journal/testing";
 import { quietRuntime } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { type JournalFiles, nodeFiles } from "../src/files.ts";
+import { type JournalFiles, nodeFiles, nodeFilesWith } from "../src/files/files.ts";
 import { framed, journalFileWith, readRecords } from "../src/journal.ts";
 
 /** Each journal the harness opened, with its path and its files, so the harness reaches them again. */
@@ -94,4 +107,270 @@ it("names the lock path and its holder where a lock a crash left behind holds ev
 	expect(String((held as Error).message)).toContain('"pid":4242');
 	await unlink(`${path}.lock`);
 	expect(await journal.begun("s", "o")).toEqual({ number: 1 });
+});
+
+const fresh = async () => join(await mkdtemp(join(tmpdir(), "erasure-journal-")), "journal");
+
+it("answers busy, naming the holder, to every hold after its holder was killed, and holds once the operator removes the lock", async () => {
+	const path = await fresh();
+	const child = spawn(
+		process.execPath,
+		[join(import.meta.dirname, "fixtures", "holding.ts"), path],
+		{
+			stdio: ["ignore", "pipe", "inherit"],
+		},
+	);
+	// A child that ends without a word fails the test, never leaves it waiting.
+	const said = await new Promise<string>((resolve) => {
+		child.stdout.once("data", (d) => resolve(String(d)));
+		child.once("exit", (code) => resolve(`ended (${code})`));
+	});
+	expect(said.trim()).toBe("held");
+	const ended = new Promise((resolve) => child.once("exit", resolve));
+	child.kill("SIGKILL");
+	await ended;
+	// A crash leaves the hold: nothing breaks it on a guess.
+	for (let i = 0; i < 2; i++) {
+		const busy = await at(path).hold();
+		expect(busy).toMatchObject({
+			kind: "busy",
+			holder: expect.stringContaining(`"pid":${child.pid}`),
+		});
+	}
+	await unlink(`${path}.lock`);
+	const held = await at(path).hold();
+	expect(held.kind).toBe("held");
+	if (held.kind === "held") await held.release();
+});
+
+it("queues the holder's appends one after another under its hold, taking no lock for each", async () => {
+	const path = await fresh();
+	const journal = at(path);
+	const held = await journal.hold();
+	await journal.create();
+	const lockedBefore = await readFile(`${path}.lock`, "utf8");
+	const numbers = await Promise.all(["a", "b", "c"].map((s) => journal.begun(s, "o")));
+	expect(numbers).toEqual([{ number: 1 }, { number: 2 }, { number: 3 }]);
+	expect(await readFile(`${path}.lock`, "utf8")).toBe(lockedBefore);
+	if (held.kind === "held") await held.release();
+	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("leaves another holder's lock in place where a holder whose lock the operator removed releases late", async () => {
+	const path = await fresh();
+	const first = await at(path).hold();
+	await unlink(`${path}.lock`);
+	const second = await at(path).hold();
+	expect([first.kind, second.kind]).toEqual(["held", "held"]);
+	if (first.kind === "held") await first.release();
+	const third = await at(path).hold();
+	expect(third.kind).toBe("busy");
+	if (second.kind === "held") await second.release();
+	expect((await at(path).hold()).kind).toBe("held");
+});
+
+it("takes no append under a hold once its release began, finishing those it took before it lets the lock go", async () => {
+	const path = await fresh();
+	let openGate: () => void = () => {};
+	const gate = new Promise<void>((resolve) => {
+		openGate = resolve;
+	});
+	let first = true;
+	const files: JournalFiles = {
+		...nodeFiles,
+		append: async (p, bytes) => {
+			// The first append waits at the gate, as a slow disk would.
+			if (first) {
+				first = false;
+				await gate;
+			}
+			return nodeFiles.append(p, bytes);
+		},
+	};
+	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
+	await journal.create();
+	const held = await journal.hold();
+	if (held.kind !== "held") throw new Error("not held");
+	const taken = journal.begun("a", "o");
+	const released = held.release();
+	// Asked once the release began: not taken under the hold, and the lock is still there.
+	await expect(journal.begun("b", "o")).rejects.toMatchObject({ name: "Unavailable" });
+	await expect(stat(`${path}.lock`)).resolves.toBeDefined();
+	openGate();
+	expect(await taken).toEqual({ number: 1 });
+	await released;
+	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+	expect(await journal.begun("b", "o")).toEqual({ number: 2 });
+	expect((await journal.list()) as unknown[]).toHaveLength(2);
+});
+
+it("throws unavailable where the medium fails a release, keeping the lock, and releases when made again", async () => {
+	const path = await fresh();
+	let failures = 1;
+	const files: JournalFiles = {
+		...nodeFiles,
+		lock: async (p, holder) => {
+			const release = await nodeFiles.lock(p, holder);
+			return async () => {
+				if (failures-- > 0) throw Object.assign(new Error("i/o error"), { code: "EIO" });
+				return release();
+			};
+		},
+	};
+	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
+	const held = await journal.hold();
+	if (held.kind !== "held") throw new Error("not held");
+	await expect(held.release()).rejects.toMatchObject({ name: "Unavailable" });
+	await expect(stat(`${path}.lock`)).resolves.toBeDefined();
+	await held.release();
+	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("finds a lock already gone done, and throws where the lock cannot be read", async () => {
+	const path = await fresh();
+	const gone = await nodeFiles.lock(path, "one");
+	await unlink(`${path}.lock`);
+	await gone();
+	const unread = await nodeFiles.lock(path, "two");
+	await unlink(`${path}.lock`);
+	await mkdir(`${path}.lock`);
+	await expect(unread()).rejects.toMatchObject({ code: "EISDIR" });
+	await rmdir(`${path}.lock`);
+});
+
+it("never shows a lock without its holder: one take of many holds, every other answers busy naming it, and no take leaves a file", async () => {
+	const path = await fresh();
+	const answers = await Promise.all(Array.from({ length: 20 }, () => at(path).hold()));
+	const held = answers.filter((a) => a.kind === "held");
+	expect(held).toHaveLength(1);
+	const recorded = await readFile(`${path}.lock`, "utf8");
+	expect(recorded).not.toBe("");
+	for (const answer of answers) {
+		if (answer.kind === "busy") expect(answer.holder).toBe(recorded);
+	}
+	expect(await readdir(dirname(path))).toEqual(["journal.lock"]);
+});
+
+it("names an empty lock, as an earlier version could leave one, with a fixed word", async () => {
+	const path = await fresh();
+	await writeFile(`${path}.lock`, "");
+	expect(await at(path).hold()).toEqual({ kind: "busy", holder: "unnamed" });
+});
+
+/** The node's files, the next `syncs` directory syncs and the next `unlinks` removals failing as an I/O error. */
+const failing = (counts: { syncs: number; unlinks: number }, removed: string[] = []) => {
+	const eio = () => Object.assign(new Error("i/o error"), { code: "EIO" });
+	return nodeFilesWith({
+		syncDirectory: async (p) => {
+			if (counts.syncs-- > 0) throw eio();
+			const directory = await open(dirname(p), "r");
+			try {
+				await directory.sync();
+			} finally {
+				await directory.close();
+			}
+		},
+		removeLock: async (p) => {
+			removed.push(p);
+			if (counts.unlinks-- > 0) throw eio();
+			await unlink(p);
+		},
+	});
+};
+
+it("removes its own lock where a take's directory sync fails, so the next take holds", async () => {
+	const path = await fresh();
+	const files = failing({ syncs: 1, unlinks: 0 });
+	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
+	await expect(journal.hold()).rejects.toMatchObject({ name: "Unavailable" });
+	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+	expect((await journal.hold()).kind).toBe("held");
+});
+
+it("removes the lock a failed take could not, before the same journal's next take", async () => {
+	const path = await fresh();
+	const files = failing({ syncs: 1, unlinks: 1 });
+	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
+	await expect(journal.hold()).rejects.toMatchObject({ name: "Unavailable" });
+	// Left, naming this journal's failed take: another journal finds it held.
+	expect((await at(path).hold()).kind).toBe("busy");
+	const held = await journal.hold();
+	expect(held.kind).toBe("held");
+	if (held.kind === "held") await held.release();
+	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+/** The name a take of `holder` tries its own file under at `attempt`. */
+const ownName = (path: string, holder: string, attempt: number) =>
+	`${path}.lock.${createHash("sha256").update(`${holder}\n${attempt}`).digest("hex").slice(0, 16)}.tmp`;
+
+it("takes another name where its file's name is taken, leaving that file as it was", async () => {
+	const path = await fresh();
+	await writeFile(ownName(path, "one", 0), "someone else's");
+	const release = await nodeFiles.lock(path, "one");
+	expect(await readFile(`${path}.lock`, "utf8")).toBe("one");
+	expect(await readFile(ownName(path, "one", 0), "utf8")).toBe("someone else's");
+	expect((await readdir(dirname(path))).sort()).toEqual(
+		["journal.lock", ownName(path, "one", 0).slice(dirname(path).length + 1)].sort(),
+	);
+	await release();
+});
+
+it("fails a take that finds no free name for its file as unavailable, never as busy, with no lock", async () => {
+	const path = await fresh();
+	const files: JournalFiles = {
+		...nodeFiles,
+		lock: (p) => nodeFiles.lock(p, "fixed"),
+	};
+	for (let attempt = 0; attempt < 8; attempt++)
+		await writeFile(ownName(path, "fixed", attempt), "");
+	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
+	await expect(journal.hold()).rejects.toMatchObject({ name: "Unavailable" });
+	await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+	expect(await readdir(dirname(path))).toHaveLength(8);
+});
+
+it("answers a release made while another is under way with that one, removing the lock once", async () => {
+	const path = await fresh();
+	let removals = 0;
+	const files: JournalFiles = {
+		...nodeFiles,
+		lock: async (p, holder) => {
+			const release = await nodeFiles.lock(p, holder);
+			return async () => {
+				removals += 1;
+				return release();
+			};
+		},
+	};
+	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
+	const held = await journal.hold();
+	if (held.kind !== "held") throw new Error("not held");
+	const [first, second] = [held.release(), held.release()];
+	expect(second).toBe(first);
+	await Promise.all([first, second]);
+	expect(removals).toBe(1);
+	const next = await at(path).hold();
+	expect(next.kind).toBe("held");
+	await held.release();
+	expect(removals).toBe(1);
+	expect((await at(path).hold()).kind).toBe("busy");
+	if (next.kind === "held") await next.release();
+});
+
+it("removes a lock a failed take left once, for two takes made at once, of which one holds and its lock stands", async () => {
+	const path = await fresh();
+	const removed: string[] = [];
+	const files = failing({ syncs: 1, unlinks: 1 }, removed);
+	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
+	await expect(journal.hold()).rejects.toMatchObject({ name: "Unavailable" });
+	removed.length = 0;
+	const answers = await Promise.all([journal.hold(), journal.hold()]);
+	expect(answers.map((a) => a.kind).sort()).toEqual(["busy", "held"]);
+	expect(removed).toEqual([`${path}.lock`]);
+	const recorded = await readFile(`${path}.lock`, "utf8");
+	expect(answers.find((a) => a.kind === "busy")).toEqual({ kind: "busy", holder: recorded });
+	expect((await at(path).hold()).kind).toBe("busy");
+	const held = answers.find((a) => a.kind === "held");
+	if (held?.kind === "held") await held.release();
 });

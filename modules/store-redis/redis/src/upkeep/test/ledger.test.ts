@@ -6,7 +6,8 @@ import { keysUnder } from "../../keys.ts";
 import { redisStore, scriptsOn, serverOf } from "../../redis-store.ts";
 import { redisUpkeepWith } from "../upkeep.ts";
 
-const space: Space = { name: "kept", guarantees: [] };
+// A space holding a subject's data, written plainly through the store's ports, so the shared ledger records it.
+const space: Space = { name: "kept", guarantees: [], subjectData: "retained" };
 const key = { space, partition: "p", name: "k" };
 const never = { expiry: { kind: "never" } } as const;
 
@@ -35,11 +36,11 @@ function heldLedger(
 				if (!(await ledger)) throw new Error("NOREPLICAS Not enough good replicas to write.");
 				return `abc\n{"kind":"kept"}`;
 			}
-			sent.push(argv.at(-2)?.endsWith(":{#control}") ? `change ${argv[5] ?? ""}` : "read");
+			sent.push(argv.at(-3)?.endsWith(":{#control}") ? `change ${argv[5] ?? ""}` : "read");
 			return `abc\n${JSON.stringify(answer)}`;
 		},
 	} as unknown as Redis;
-	const taken = { epoch: "" };
+	const taken = { epoch: "", keyed: false };
 	const upkeep = redisUpkeepWith({
 		run: scriptsOn(client),
 		serverOf,

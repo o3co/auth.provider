@@ -37,8 +37,8 @@ async function codes() {
 }
 
 it("names a record by records' own digest, so one a 0.19 instance wrote under a secret is found by name and by secret", async () => {
-	// The 0.19 path: records' secret records in a plain space of the same name.
-	const plain: Space = { name, guarantees: g };
+	// The 0.19 path: records' secret records in a plain space of the same name, holding no subject's data.
+	const plain: Space = { name, guarantees: g, subjectData: "none" };
 	const held = contract<Store>("test.plain-store");
 	const app = await assemble({
 		modules: [

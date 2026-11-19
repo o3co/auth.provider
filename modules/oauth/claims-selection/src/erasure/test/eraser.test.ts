@@ -20,11 +20,7 @@ const families = (answer: () => Promise<FamilySubject>): FamilySubjects => ({ su
 describe("claims-selection's eraser", () => {
 	it("states that it cannot erase where the store lacks the ports, answering empty reports", async () => {
 		const eraser = selectionEraser(plain, undefined);
-		expect([eraser.name, eraser.erasable, eraser.after]).toEqual([
-			"claims-selection",
-			false,
-			undefined,
-		]);
+		expect([eraser.name, eraser.erasable]).toEqual(["claims-selection", false]);
 		expect(await eraser.online("alice", signal)).toEqual({ reports: [], logoutGaps: 0 });
 		expect(await eraser.window(["alice"], walk, signal)).toEqual({ reports: [], logoutGaps: 0 });
 		expect(await eraser.migrate(walk, signal)).toEqual([]);

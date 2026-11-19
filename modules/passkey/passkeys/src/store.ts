@@ -1,4 +1,6 @@
+import type { MigrationReport, SpaceReport, SubjectReading, Walk } from "@mod/erasure-extensions";
 import { contract } from "@mod/kernel";
+import { challengeLifetimeMaxMs } from "@mod/webauthn";
 
 declare const storedPasskey: unique symbol;
 /** A passkey record as the store keeps it: the store never reads it, and only passkeys opens it. */
@@ -10,15 +12,74 @@ export type StoredChallenge = { readonly [storedChallenge]: true };
 
 /** Records by a key passkeys makes, each changed only from what it holds, kept without end. */
 export interface PasskeyRecords {
-	/** Keeps a key's first record, unless the key holds one. */
-	save(key: string, record: StoredPasskey, lifetimeMs: "endless"): Promise<"created" | "exists">;
+	/**
+	 * Keeps a key's first record for its subject, unless the key holds one (`exists`) or, where the
+	 * Store fences saves past a subject's erasure, the subject is erased there (`erased`).
+	 */
+	save(
+		key: string,
+		record: StoredPasskey,
+		lifetimeMs: "endless",
+		subject: string,
+	): Promise<"created" | "exists" | "erased">;
 	read(key: string): Promise<StoredPasskey | undefined>;
-	/** Changes the record from what it holds; `change` runs again on a race, so it is pure; none leaves it. Nothing when gone. */
+	/**
+	 * Changes the record from what it holds; `change` runs again on a race, so it is pure; none
+	 * leaves it. Nothing when gone, or, where the Store fences saves past a subject's erasure, when
+	 * its subject is erased.
+	 */
 	update(
 		key: string,
 		change: (record: StoredPasskey) => { readonly value: StoredPasskey } | undefined,
 	): Promise<{ readonly before: StoredPasskey; readonly after: StoredPasskey } | undefined>;
+	/**
+	 * Erases a subject's records here, where the Store can: optional in 0.20, required in 0.22. Both
+	 * spaces' `erase` and `migrate` come together or none; a part refuses the boot.
+	 */
+	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
+	/** Once, under the maintenance key, each record read by passkeys' reading; optional as `erase` is. */
+	migrate?(walk: Walk, reading: SubjectReading, signal: AbortSignal): Promise<MigrationReport>;
 }
+
+/** A record of the passkey store, as a change as one names it: its space, and its key. */
+export interface PasskeyKey {
+	readonly place: keyof PasskeyKeys;
+	readonly key: string;
+}
+
+/** A record as a change as one reads it: its value, and the subject the Store keeps it for; none, kept raw. */
+export type PasskeyRead = { readonly value: StoredPasskey; readonly subject?: string } | undefined;
+
+/** What a change as one does to one record; its words are subject-records' joint change's. */
+export type PasskeyOp =
+	| {
+			readonly kind: "create";
+			readonly value: StoredPasskey;
+			readonly lifetimeMs: "endless";
+			readonly subject: string;
+	  }
+	| { readonly kind: "change"; readonly value: StoredPasskey }
+	| { readonly kind: "remove" }
+	| { readonly kind: "move"; readonly value: StoredPasskey; readonly to: string };
+
+/** A record of a change as one: what it held, and holds after. */
+export interface PasskeyChanged {
+	readonly before: PasskeyRead;
+	readonly after: PasskeyRead;
+}
+
+/** A change as one, whole: written, or refused at one record (`nth` in its list), nothing written. */
+export type PasskeysAnswer =
+	| {
+			readonly kind: "written";
+			readonly targets: readonly PasskeyChanged[];
+			readonly watched: readonly PasskeyChanged[];
+	  }
+	| {
+			readonly kind: "refused";
+			readonly at: { readonly in: "targets" | "watched"; readonly nth: number };
+			readonly why: "exists" | "erased" | "missing";
+	  };
 
 /** Keys of the passkey store, by space. */
 export interface PasskeyKeys {
@@ -26,44 +87,28 @@ export interface PasskeyKeys {
 	readonly subjects: readonly string[];
 }
 
-/** What records of both spaces changed as one held, by space: the keys named, then the watched ones, in order. */
-export interface PasskeysRead {
-	readonly credentials: readonly (StoredPasskey | undefined)[];
-	readonly subjects: readonly (StoredPasskey | undefined)[];
-}
-
-/** The next of each record read, by space in the order read; none keeps it. */
-export interface PasskeysNext {
-	readonly credentials?: readonly ({ readonly value: StoredPasskey } | undefined)[];
-	readonly subjects?: readonly ({ readonly value: StoredPasskey } | undefined)[];
-}
-
-/** One record of a change as one: what it held, and holds after. */
-export interface ChangedPasskey {
-	readonly before: StoredPasskey | undefined;
-	readonly after: StoredPasskey | undefined;
-}
-
 /** Passkeys by credential, and each subject's handle and credentials, apart. Every call throws Unavailable when the place cannot tell. */
 export interface PasskeyStore {
 	readonly credentials: PasskeyRecords;
 	readonly subjects: PasskeyRecords;
 	/**
-	 * Changes records of both spaces as one: those `keys` names, and those `watch` names (in either
-	 * space) from what they hold. `change` answers the next of each, by space in the order read; it
-	 * runs again on a race, so it is pure, and a record it leaves out is kept. Every record read is
-	 * held to what was read; a record named twice is read once and written from one naming at most.
+	 * Changes records of both spaces as one: those `targets` names, and those `watch` names from what
+	 * they hold, each by the op `decide` gives it, written as one, or refused at one record, nothing
+	 * written; `decide` runs again on a race, so it is pure. Its words are subject-records' joint
+	 * change's. Where the Store fences saves past a subject's erasure, a move from a subject whose
+	 * tombstone alone stands is Unavailable.
 	 */
-	updateTogether(
-		keys: PasskeyKeys,
-		p: {
-			readonly watch: (read: PasskeysRead) => Partial<PasskeyKeys>;
-			readonly change: (read: PasskeysRead) => PasskeysNext;
-		},
-	): Promise<{
-		readonly credentials: readonly ChangedPasskey[];
-		readonly subjects: readonly ChangedPasskey[];
-	}>;
+	updateAsOne(p: {
+		readonly targets: readonly PasskeyKey[];
+		readonly watch?: (read: readonly PasskeyRead[]) => readonly PasskeyKey[];
+		readonly decide: (
+			read: readonly PasskeyRead[],
+			watched: readonly PasskeyRead[],
+		) => {
+			readonly targets?: readonly (PasskeyOp | undefined)[];
+			readonly watched?: readonly (PasskeyOp | undefined)[];
+		};
+	}): Promise<PasskeysAnswer>;
 }
 
 export const passkeyStore = contract<PasskeyStore>("passkeys.passkey-store");
@@ -76,7 +121,13 @@ export const passkeyStoreNeeds = {
 	confirmedReads: true,
 } as const;
 
-/** Challenges by the challenge, never kept in clear, each kept for its lifetime. Every call throws Unavailable when the place cannot tell. */
+/**
+ * Challenges by the challenge, never kept in clear, each kept for its lifetime. Every call throws
+ * Unavailable when the place cannot tell. An assertion's holds who asked and a digest of its id,
+ * never a subject's id. A registration's, holding its subject, is kept here where no registration
+ * challenge store is composed (passkeys' eraser then answers `erasable: false`), and by a node
+ * before 0.20. TODO(0.22): assertions alone.
+ */
 export interface ChallengeStore {
 	/** Keeps a new challenge's record for its lifetime, unless the challenge holds one. */
 	open(
@@ -93,10 +144,61 @@ export interface ChallengeStore {
 
 export const challengeStore = contract<ChallengeStore>("passkeys.challenge-store");
 
-/** A challenge taken that came back could be answered twice; one lost to memory only fails its ceremony. */
+/**
+ * A challenge taken that came back could be answered twice; one lost to memory only fails its
+ * ceremony. The registration challenge store's needs too.
+ */
 export const challengeStoreNeeds = {
 	survivesCrash: true,
 	survivesFailover: true,
 	/** Names derive from the challenge, so the place never keeps it in clear. */
 	namesFromSecret: true,
+	/**
+	 * The longest passkeys keeps a registration challenge, from its opening: no guarantee, but the
+	 * bound a store fencing registration challenges by their subject declares.
+	 */
+	registrationsEndWithinMs: challengeLifetimeMaxMs,
 } as const;
+
+/**
+ * Registration challenges by the challenge, never kept in clear, each for its subject and its
+ * lifetime, at most `challengeStoreNeeds.registrationsEndWithinMs`. Every call throws Unavailable when the
+ * place cannot tell. Optional in 0.20: a composition without it keeps registration challenges in
+ * the challenge store, and passkeys reads a registration's challenge there where this one holds
+ * none. TODO(0.22): required.
+ */
+export interface RegistrationChallengeStore {
+	/**
+	 * Keeps a new challenge's record for its lifetime and its subject, unless the challenge holds one
+	 * (`exists`) or, where the Store fences saves past a subject's erasure, the subject is erased.
+	 */
+	open(
+		challenge: string,
+		record: StoredChallenge,
+		lifetimeMs: number,
+		subject: string,
+	): Promise<"created" | "exists" | "erased">;
+	/**
+	 * Changes the challenge's record from what it holds, for the rest of its lifetime; `change` runs
+	 * again on a race, so it is pure. Nothing when gone. A subject's erasure fences opening only: a
+	 * challenge opened before it is changed until its end, and what it is answered with is written
+	 * through the passkey store, which fences that subject.
+	 */
+	update(
+		challenge: string,
+		change: (record: StoredChallenge) => { readonly value: StoredChallenge } | undefined,
+	): Promise<{ readonly before: StoredChallenge; readonly after: StoredChallenge } | undefined>;
+	/**
+	 * Fences a subject's registration challenges, where the Store can: optional in 0.20, required in
+	 * 0.22. `erase` and `migrate` come together or none; one alone refuses the boot.
+	 */
+	erase?(subject: string, signal: AbortSignal): Promise<SpaceReport>;
+	/** Once, under the maintenance key; a bounded space indexes none. */
+	migrate?(walk: Walk, reading: SubjectReading, signal: AbortSignal): Promise<MigrationReport>;
+}
+
+/** Left unprovided, registration challenges stay in the challenge store. TODO(0.22): required, and the fallback read goes. */
+export const registrationChallengeStore = contract<RegistrationChallengeStore>(
+	"passkeys.registration-challenge-store",
+	{ optional: true },
+);

@@ -12,6 +12,7 @@
 	},
 	"dependencies": {
 		"@mod/cookies": "workspace:*",
+		"@mod/erasure-extensions": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"zod": "4.6.7"

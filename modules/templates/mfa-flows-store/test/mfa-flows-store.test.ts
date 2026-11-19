@@ -7,7 +7,7 @@ import {
 	transactionStore,
 } from "@mod/mfa-flows";
 import { transactionListingsContract, transactionStoreContract } from "@mod/mfa-flows/testing";
-import { secretRecordsIn } from "@mod/records";
+import { plantRecord } from "@mod/records/testing";
 import { type Space, type Store, spaces, store } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
@@ -169,11 +169,10 @@ it("reads, in either phase, a transaction a 0.19 node saved through records unde
 		const { store: kept, spaces: declared } = app.get(held);
 		const space = declared.find((s) => s.name === "mfa-flows-store.transactions");
 		const random = { bytes: (n: number) => new Uint8Array(n).fill(7) };
-		// The space as 0.19 declared it: the same name and guarantees, no subject data stated, so its keys.
-		const { subjectData: _, boundedMs: __, erasedBy: ___, ...as019 } = space as Space;
-		const before = secretRecordsIn<StoredTransaction>({ store: kept, space: as019, random });
+		// A transaction as a 0.19 node saved it through records under a secret: the same key and value.
 		const record = { n: 19 } as unknown as StoredTransaction;
-		expect(await before.create("t-0.19", record, 60_000)).toBe("created");
+		const place = { store: kept, space: space as Space, random };
+		await plantRecord({ place, secret: "t-0.19" }, record, 60_000);
 		const transactions = app.get(transactionStore);
 		expect(await transactions.read("t-0.19")).toEqual(record);
 		expect(

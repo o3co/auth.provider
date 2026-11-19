@@ -9,7 +9,7 @@ import {
 	type Module,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { spaces } from "@mod/store";
+import { type Space, spaces } from "@mod/store";
 import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
@@ -24,12 +24,16 @@ afterEach(async () => {
 
 /** A space whose writes are confirmed on every replica, so a write takes a confirmation round. */
 const replicated = defineModule({ name: "replicated-owner", replicaSafe: true, takes: [] }, (m) => [
-	m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] })),
+	m
+		.contribute(spaces)
+		.by(() => ({ name: "replicated", guarantees: ["replicated"], subjectData: "none" })),
 ]);
 
 /** A space whose writes must survive a crash, so the server's fsyncs are checked. */
 const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
-	m.contribute(spaces).by(() => ({ name: "durable", guarantees: ["durable"] })),
+	m
+		.contribute(spaces)
+		.by(() => ({ name: "durable", guarantees: ["durable"], subjectData: "none" })),
 ]);
 
 /** A primary that refuses writes without a replica, as `replicas` needs. */
@@ -109,6 +113,67 @@ async function refusal(
 	return reasons;
 }
 
+describe("the declared spaces", () => {
+	it("refuse boot over a declaration whose guarantees a getter holds, as store refuses it, the server's checks running no getter", async () => {
+		const redis = primary();
+		const trapped = Object.defineProperty({ name: "trapped", subjectData: "none" }, "guarantees", {
+			enumerable: true,
+			get: () => {
+				throw new Error("a getter ran");
+			},
+		});
+		const owner = defineModule({ name: "trapped", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(spaces).by(() => trapped as unknown as Space),
+		]);
+		const error = await boot(await redis.listen(), undefined, undefined, [owner]).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		const [refusal] = (error as BootRefused).refusals;
+		expect(refusal?.where).toBe("trapped");
+		expect(refusal?.reason).not.toMatch(/getter ran|failed during assembly/);
+		redis.down();
+	});
+
+	it("refuse boot over a declaration whose guarantees a getter holds at an index, as store refuses it, the server's checks running no getter", async () => {
+		const redis = primary();
+		const guarantees = Object.defineProperty([], "0", {
+			enumerable: true,
+			get: () => {
+				throw new Error("a getter ran");
+			},
+		});
+		const owner = defineModule({ name: "indexed", replicaSafe: false, takes: [] }, (m) => [
+			m
+				.contribute(spaces)
+				.by(() => ({ name: "indexed", guarantees, subjectData: "none" }) as Space),
+		]);
+		const error = await boot(await redis.listen(), undefined, undefined, [owner]).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect((error as BootRefused).refusals).toEqual([
+			{ where: "indexed", reason: "declares guarantees that are no list of known guarantees" },
+		]);
+		redis.down();
+	});
+
+	it("refuse boot over a space declaring no subjectData, naming it", async () => {
+		const redis = primary();
+		const bare = defineModule({ name: "bare", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(spaces).by(() => ({ name: "bare", guarantees: [] }) as unknown as Space),
+		]);
+		const error = await boot(await redis.listen(), undefined, undefined, [bare]).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect((error as BootRefused).refusals).toEqual([
+			{ where: "bare", reason: "declares no subjectData" },
+		]);
+		redis.down();
+	});
+});
+
 describe("the commands the store needs", () => {
 	it("refuse boot where the server refuses one of a confirmation round's, naming it", async () => {
 		for (const command of ["WAIT", "ROLE", "SET", "INFO"]) {
@@ -179,6 +244,54 @@ describe("the commands the store needs", () => {
 		await app?.stop(1000);
 		redis.settings["no-appendfsync-on-rewrite"] = "no";
 		await boot(port, undefined, undefined, [durable]);
+		redis.down();
+	});
+
+	it("refuse boot for a durable space whose guarantees hold methods of their own, for the fsync gap and then as store refuses it, running none of them", async () => {
+		const redis = primary();
+		Object.assign(redis.settings, { appendonly: "yes", appendfsync: "always" });
+		redis.settings["no-appendfsync-on-rewrite"] = "yes";
+		const ran: string[] = [];
+		const guarantees = ["durable"];
+		for (const method of ["filter", "map", "includes", Symbol.iterator] as const) {
+			Object.defineProperty(guarantees, method, {
+				value: () => {
+					ran.push(String(method));
+					throw new Error("a method of the declaration ran");
+				},
+			});
+		}
+		const owned = defineModule({ name: "owned", replicaSafe: true, takes: [] }, (m) => [
+			m.contribute(spaces).by(() => ({ name: "owned", guarantees, subjectData: "none" }) as Space),
+		]);
+		const port = await redis.listen();
+		const error = await boot(port, undefined, undefined, [owned]).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect(String((error as BootRefused).refusals.map((r) => r.reason))).toContain(
+			"no-appendfsync-on-rewrite no",
+		);
+		redis.settings["no-appendfsync-on-rewrite"] = "no";
+		const then = await boot(port, undefined, undefined, [owned]).catch((e: unknown) => e);
+		expect((then as BootRefused).refusals).toEqual([
+			{ where: "owned", reason: "declares guarantees that are no list of known guarantees" },
+		]);
+		expect(ran).toEqual([]);
+		redis.down();
+	});
+
+	it("refuse boot over a sparse list of guarantees as store refuses it, the server's checks stopping at its first hole", async () => {
+		const redis = primary();
+		const guarantees: string[] = [];
+		guarantees.length = 2 ** 32 - 1;
+		const owner = defineModule({ name: "sparse", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(spaces).by(() => ({ name: "sparse", guarantees, subjectData: "none" }) as Space),
+		]);
+		const error = await boot(await redis.listen(), undefined, undefined, [owner]).catch(
+			(e: unknown) => e,
+		);
+		expect((error as BootRefused).refusals).toEqual([
+			{ where: "sparse", reason: "declares guarantees that are no list of known guarantees" },
+		]);
 		redis.down();
 	});
 

@@ -57,11 +57,23 @@ export interface SubjectErasure {
 	 * are; a subject marked already keeps its first mark, which is answered.
 	 */
 	markErased(subject: string): Promise<{ readonly kind: "marked"; readonly erasedAt: number }>;
+	/**
+	 * Whether the composition covers erasure, as the boot gate reads it, with the gate's reasons
+	 * where it does not; and apart, `cannotTell`: whether the store cannot tell whether erasure is
+	 * enabled, as it has no reading (not unread). Read once assembly is done.
+	 */
+	covered():
+		| { readonly kind: "covered"; readonly cannotTell: boolean }
+		| {
+				readonly kind: "not-covered";
+				readonly reasons: readonly string[];
+				readonly cannotTell: boolean;
+		  };
 }
 
-/** Taken by no module until account erasure, which alone marks a subject erased, is named. */
+/** Taken by account erasure alone, which alone marks a subject erased. */
 export const subjectErasure = contract<SubjectErasure>("subject-revocation.erasure", {
-	takenBy: [],
+	takenBy: ["account-erasure"],
 });
 
 /**

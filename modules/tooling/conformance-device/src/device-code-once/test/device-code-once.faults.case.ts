@@ -21,7 +21,13 @@ import {
 	pollAt,
 	said,
 } from "../../faults/test/faults.ts";
-import { confirmedOf, decisionOf, isStoreCall, takeOf } from "../../faults/test/wire.ts";
+import {
+	approvalOf,
+	confirmedOf,
+	decisionOf,
+	isStoreCall,
+	takeOf,
+} from "../../faults/test/wire.ts";
 
 const issued = [200, "Bearer"];
 // A taken code answers no description, as an unknown one does; an expired one answers `expired_token`.
@@ -76,7 +82,35 @@ const lostOnly = (i: Instance, match: Match) => {
 	).toBe(true);
 };
 
+/**
+ * An approval whose `written` write has its answer lost once: resent under its first mark, it settles,
+ * the approver is answered 200, and the device issues once, then is refused as taken.
+ */
+const approvalLostOnce = (name: string, written: (d: Device) => Match) =>
+	on({ name }, async (deployed) => {
+		const i = instanceOf(deployed);
+		await control(i);
+		const dv = await deviceAt(i);
+		const drop = i.relay.dropReplyTo(written(dv));
+		const decided = await decideAt(i, await loginAt(i), "approve", dv);
+		const dropped = await drop.first;
+		expect(dropped.collateral.filter((x) => isStoreCall(x.command))).toEqual([]);
+		expect(decided.status).toBe(200);
+		expect(successes(i, written(dv)).every((e) => sameMark(dropped.command, e.command))).toBe(true);
+		expect(said(await pollAt(i, dv))).toEqual(issued);
+		expect(successes(i, takeOf(dv))).toHaveLength(1);
+		await refusedAsTaken(i, dv);
+	});
+
 describe("a device code decided and redeemed once under faults", () => {
+	it("issues once for a device whose decision's answer is lost once, the resend taking the first answer [guarantee-5-f] {fault:Lr}", async () => {
+		await approvalLostOnce("device-code-once-lr-decision", (d) => decisionOf(d, "approved"));
+	});
+
+	it("issues once for a device whose approval create's answer is lost once, the resend taking the first answer [guarantee-5-f] {fault:Lr}", async () => {
+		await approvalLostOnce("device-code-once-lr-approval", approvalOf);
+	});
+
 	it("issues once for a device whose take's answer is lost once, the resend taking the first answer [guarantee-5-f] {fault:Lr}", async () => {
 		await on({ name: "device-code-once-lr" }, async (d) => {
 			const i = instanceOf(d);

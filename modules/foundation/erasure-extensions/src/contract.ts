@@ -37,8 +37,9 @@ export const forgottenIn = (space: string, removed: number): ForgottenReport => 
 
 /**
  * What putting one space's records or keyed sets written before indexing into the index did:
- * indexed, or removed as holding no subject's data (`removed`: orphans proven to have no owner,
- * those the owner kept elsewhere first among them); or not finished, with why.
+ * indexed, or removed as holding no subject's data that a reading can recover (`removed`: orphans
+ * proven to have no owner, those the owner kept elsewhere first among them, and records whose
+ * subject is unrecoverable by construction, never by a failed read); or not finished, with why.
  */
 export type MigrationReport = ReportMade &
 	(
@@ -133,7 +134,8 @@ export interface Walk {
  * Erases one owner's spaces of a subject's data, by its name, which those spaces' `erasedBy`
  * gives. A run cut short by `signal` answers `stopped` (`aborted`) for each space `subject-records`
  * reports; an eraser over no such space throws the signal's reason. An eraser that throws, abort
- * included, is not done, and running it again finishes it.
+ * included, is not done, and running it again finishes it. No order among erasers is promised:
+ * each erases its own spaces, whichever runs before it.
  */
 export interface Eraser {
 	readonly name: string;
@@ -144,8 +146,6 @@ export interface Eraser {
 	 * Required in 0.20; optional, read as true, in 0.22; removed after.
 	 */
 	readonly erasable: boolean;
-	/** The erasers, by name, whose runs this one's follow: for account erasure to order them by. */
-	readonly after?: readonly string[];
 	/** While the provider serves: erases the subject's data in its spaces. */
 	online(subject: string, signal: AbortSignal): Promise<Erased>;
 	/** Under the maintenance key: the same for each subject, walking where an index cannot reach. */

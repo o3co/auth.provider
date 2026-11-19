@@ -42,6 +42,11 @@ export interface AssemblyInput {
 	readonly modules: readonly Module[];
 	readonly config: unknown;
 	readonly runtime?: Runtime;
+	/**
+	 * A tool's assembly, which builds and stops but never serves: `start` rejects. Set by code
+	 * alone; no config key or environment variable sets it, and nothing changes it after `assemble`.
+	 */
+	readonly neverStarted?: true;
 }
 
 /** A top-level build as a value; a failure's refusal is recorded already. */
@@ -85,6 +90,7 @@ export async function assembleWatching(
 	watch?: TakesWatch,
 ): Promise<Assembly> {
 	const modules = input.modules;
+	const neverStarted = input.neverStarted === true;
 	const refusals: Refusal[] = [];
 	const { kernel, unsure, sections } = readSections(modules, input.config, refusals);
 	hearStandardStreams();
@@ -113,6 +119,7 @@ export async function assembleWatching(
 	const { build, collected, lateNamed, provided, hooks, assembledWith } = buildingWith({
 		runtime,
 		environment: kernel.environment,
+		neverStarted,
 		sections,
 		parts,
 		heldTakes,
@@ -146,11 +153,13 @@ export async function assembleWatching(
 		const values = outcomes.flatMap((outcome) => (outcome.ok ? [outcome.value] : []));
 		if (point === probes) probeList = values as Probe[];
 		// A point no module collects still keeps its promises; a failed contribution is refused already.
+		// The outcome is kept, so a later contribution's factory that collects the point reads it.
 		if (outcomes.every((outcome) => outcome.ok) && !collected.has(point)) {
 			try {
-				checkPoint(point, values, refusals);
+				collected.set(point, checkPoint(point, values, refusals));
 			} catch (error) {
 				recordFailure(error, point.label, refusals);
+				collected.set(point, undefined);
 			}
 		}
 	}
@@ -190,6 +199,7 @@ export async function assembleWatching(
 			return found.value as T;
 		},
 		start: async () => {
+			if (neverStarted) throw new TypeError("this assembly is never started");
 			for (const hook of hooks.start) await hook();
 			for (const task of hooks.periodics) task.start();
 		},

@@ -22,4 +22,4 @@ Internal module of `subject-records`: the one migration of a space's records or 
 - It runs in the maintenance window after `indexed` and before erasure is enabled (account erasure §5.1): no owner writes and no erasure run beside it.
 
 ## Depends on
-- `erasure-extensions` (the report, `SubjectReading`, `SetReading`, `Elsewhere`, `Walk`), `kernel` (Unavailable), `records` (`changeRecords`, the keyed set codec's strict read), `store`; internal modules `envelope`, `index`
+- `erasure-extensions` (the report, `SubjectReading`, `SetReading`, `Elsewhere`, `Walk`), `kernel` (Unavailable), `records` (`changeRecords`, the keyed set codec's strict read), `store`; internal modules `envelope`, `index`; the package's `changeWritten`

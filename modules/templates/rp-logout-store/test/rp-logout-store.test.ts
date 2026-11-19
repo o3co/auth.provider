@@ -1,7 +1,12 @@
-import { assemble, kernelConfig } from "@mod/kernel";
+import { assemble, type BuildContext, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { pendingNotices, sessionClients } from "@mod/rp-logout";
-import { pendingNoticesContract, sessionClientsContract } from "@mod/rp-logout/testing";
+import { noticeBodies, noticeQueue, pendingNotices, sessionClients } from "@mod/rp-logout";
+import {
+	noticeBodiesContract,
+	noticeQueueContract,
+	pendingNoticesContract,
+	sessionClientsContract,
+} from "@mod/rp-logout/testing";
 import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import wiring from "../src/module.ts";
@@ -11,8 +16,9 @@ import { section } from "../src/section.ts";
 let now = 1_800_000_000_000;
 const runtime = quietRuntime({ clock: { now: () => now } });
 
-async function open(settings?: Record<string, number>) {
+async function open(settings?: Record<string, number>, phase: "reader" | "indexed" = "reader") {
 	const simulated = simulatedStore();
+	if (phase === "indexed") simulated.mark("subject-records.phase", "indexed");
 	const app = await assemble({
 		modules: [simulated.module, wiring],
 		config: { ...kernelConfig(), ...(settings && { "rp-logout-store": settings }) },
@@ -42,6 +48,45 @@ sessionClientsContract("rp-logout-store on records, on a simulated replicated st
 pendingNoticesContract("rp-logout-store on records, on a simulated replicated store", async () => {
 	const { app, faults } = await open();
 	return { notices: app.get(pendingNotices), ...faults };
+});
+
+for (const phase of ["reader", "indexed"] as const) {
+	noticeBodiesContract(
+		`rp-logout-store on subject-records, on a simulated replicated store (${phase})`,
+		async () => {
+			const { app, faults } = await open(undefined, phase);
+			return {
+				bodies: app.get(noticeBodies),
+				advance: (ms) => {
+					now += ms;
+				},
+				...faults,
+			};
+		},
+	);
+}
+
+noticeQueueContract("rp-logout-store on records, on a simulated replicated store", async () => {
+	const { app, faults } = await open();
+	return { queue: app.get(noticeQueue), ...faults };
+});
+
+it("starts over a store's blip unready, out of traffic, and turns ready once the store answers", async () => {
+	const simulated = simulatedStore();
+	simulated.mark("subject-records.phase", "indexed");
+	simulated.unreachable(true);
+	let context: BuildContext<unknown> | undefined;
+	const asker = defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
+		m.provide(contract<object>("asker")).by((c) => {
+			context = c;
+			return {};
+		}),
+	]);
+	await assemble({ modules: [simulated.module, wiring, asker], config: kernelConfig(), runtime });
+	const ready = () => context?.readinessReport(1000).then((r) => r.answer);
+	expect(await ready()).toBe("unready");
+	simulated.unreachable(false);
+	expect(await ready()).toBe("ready");
 });
 
 it("keeps 64 clients to a session, and spreads notices over 64 shards of 1,000, unless told otherwise", () => {

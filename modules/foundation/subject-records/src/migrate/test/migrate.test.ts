@@ -1,5 +1,6 @@
 import type { Elsewhere, SubjectReading } from "@mod/erasure-extensions";
 import type { Json, Space } from "@mod/store";
+import { plantValue } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import { bucketOf, envelope, placed } from "../../../test/placed.ts";
 import { migrateRecords, subjectRecordsIn } from "../../subject-records.ts";
@@ -158,12 +159,9 @@ it("removes as an orphan no record another run migrated meanwhile: the removal h
 	const loose: SubjectReading = async (key, held) => {
 		if (!raced && (held as { "records:v"?: number })["records:v"] === 1) {
 			raced = true;
-			await s.replaceIf(
-				{ space: indexed, partition: key, name: "record" },
-				(await raw(indexed, key))?.version ?? "",
-				value,
-				{ expiry: { kind: "keep" } },
-			);
+			await plantValue(s, { space: indexed, partition: key, name: "record" }, value, {
+				kind: "keep",
+			});
 			await migrateRecords(at(indexed), walk(), owners);
 			return { kind: "orphan" };
 		}
@@ -220,15 +218,7 @@ it("runs the owner's step again on a record changed before its removal, removing
 		changedOnce = true;
 		// Another writer changes the record after the step read it, before the removal.
 		const key = { space: indexed, partition: "o", name: "record" };
-		const { entry } = await s.get(key);
-		await s.replaceIf(
-			key,
-			entry?.version ?? "",
-			{ owner: "nobody", issuer: "new" },
-			{
-				expiry: { kind: "never" },
-			},
-		);
+		await plantValue(s, key, { owner: "nobody", issuer: "new" }, { kind: "never" });
 	};
 	expect(await migrateRecords(at(indexed), walk(), owners, { elsewhere })).toMatchObject({
 		kind: "migrated",

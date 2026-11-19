@@ -12,7 +12,7 @@ import {
 	type Store,
 } from "@mod/store";
 import { type Redis, ReplyError } from "ioredis";
-import { answerOf, list } from "./answer/answer.ts";
+import { answerOf, committedOf, list } from "./answer/answer.ts";
 import { keysUnder, literal } from "./keys.ts";
 import { confirmationPipeline, confirmationRounds } from "./round/round.ts";
 import * as scripts from "./scripts.ts";
@@ -152,9 +152,10 @@ export async function roundProblems(
 				"",
 				"",
 				"0",
-				// The epoch check's: the control record, and no epoch, as a process starts with.
+				// The epoch check's: the control record, no epoch, and not taken under the key, as a process starts with.
 				`${options.prefix}:{#control}`,
 				"",
+				"0",
 			],
 		],
 	];
@@ -182,6 +183,8 @@ export async function roundProblems(
 /** The epoch a process took at its start, or entered since; '' for none. */
 export interface Taken {
 	epoch: string;
+	/** Whether the epoch was taken under the maintenance key: the process then changes only while the key is held. */
+	keyed: boolean;
 }
 
 /** Runs a script, its answer naming its server (`serverOf`); one refused for an old epoch is unavailable. */
@@ -212,7 +215,7 @@ export function redisStore(
 	confirmer: Redis,
 	options: RedisStoreOptions,
 	declared: readonly Space[],
-	taken: Taken = { epoch: "" },
+	taken: Taken = { epoch: "", keyed: false },
 	ready: () => Promise<void> = async () => {},
 ): Store {
 	const { prefix } = options;
@@ -221,7 +224,7 @@ export function redisStore(
 	const run = scriptsOn(client);
 	const change = async (script: string, keys: string[], args: (string | number)[]) => {
 		await ready();
-		return run(script, keys, [...args, controlKey, taken.epoch]);
+		return run(script, keys, [...args, controlKey, taken.epoch, taken.keyed ? "1" : "0"]);
 	};
 	const confirmed = confirmationRounds(confirmer, options);
 	/**
@@ -254,10 +257,6 @@ export function redisStore(
 					expiresAt: raw.expiresAt === null ? null : Number(raw.expiresAt),
 				})
 			: null;
-	const committed = (answer: { at?: unknown }, versions: (string | null)[]) =>
-		typeof answer.at === "number"
-			? { kind: "committed" as const, versions, at: answer.at }
-			: { kind: "committed" as const, versions };
 	const samePartition = (keys: readonly Key[]) => {
 		if (new Set(keys.map(slot)).size > 1) throw new Error("keys span more than one partition");
 	};
@@ -346,7 +345,7 @@ export function redisStore(
 				if (!first) {
 					// The script answers its own shape; an empty batch committed names no versions.
 					const empty = await change(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
-					return empty.kind === "committed" ? committed(empty, []) : empty;
+					return empty.kind === "committed" ? committedOf(empty, []) : empty;
 				}
 				const names = [...new Set(keys.map(valueKey))];
 				const index = (key: Key) => names.indexOf(valueKey(key)) + 1;
@@ -373,7 +372,7 @@ export function redisStore(
 				);
 				await confirm(first, answer);
 				return answer.kind === "committed"
-					? committed(answer, list<string | null>(answer.versions, answer.n))
+					? committedOf(answer, list<string | null>(answer.versions, answer.n))
 					: answer;
 			},
 			batchAcross: async (conditions, writes, options) => {
@@ -381,7 +380,7 @@ export function redisStore(
 				const [first] = keys;
 				if (!first) {
 					const empty = await change(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
-					return empty.kind === "committed" ? committed(empty, []) : empty;
+					return empty.kind === "committed" ? committedOf(empty, []) : empty;
 				}
 				const names = [...new Set(keys.map(valueKey))];
 				const index = (key: Key) => names.indexOf(valueKey(key)) + 1;
@@ -414,7 +413,7 @@ export function redisStore(
 				// The spaces share their guarantees, so the first key's tells how to confirm.
 				await confirm(first, answer);
 				return answer.kind === "committed"
-					? committed(answer, list<string | null>(answer.versions, answer.n))
+					? committedOf(answer, list<string | null>(answer.versions, answer.n))
 					: answer;
 			},
 			count: async (key, window, options) => {

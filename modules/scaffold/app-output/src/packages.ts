@@ -1,4 +1,5 @@
 /** What the output takes from where the packages come from; the caller implements it. */
+import type { Declaring } from "@mod/app-entries";
 import type { Asked } from "./asked/asked.ts";
 import type { Fragment, Sampled } from "./fragments/contract.ts";
 import type { OutsideModules } from "./outside/contract.ts";
@@ -21,6 +22,8 @@ export interface Packages {
 	asks?(names: readonly string[]): readonly Asked[];
 	/** What each name declares of entry samples, its sample's text among it; none where the caller has none. */
 	samples?(names: readonly string[]): readonly Sampled[];
+	/** What each name declares of the app's entries, as its manifest has it; none where the caller has none, as an older bundle has. */
+	appEntries?(names: readonly string[]): readonly Declaring[];
 }
 
 /** A module's card and section defaults, as the app installs them, from the app's directory. */

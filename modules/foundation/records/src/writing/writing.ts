@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { BuildRefused, isUnavailable, type Log, type Random, Unavailable } from "@mod/kernel";
-import type { Expiry, Json, Key, Space, Store, WriteOptions } from "@mod/store";
+import type { Expiry, Json, Key, Space, Store, WriteOptions, WriterHeld } from "@mod/store";
 
 export interface Place {
 	readonly store: Store;
@@ -138,19 +138,29 @@ const openedFor = new WeakMap<Store, Map<string, "records" | "secret records">>(
 export const nameOf = (space: Space, secret: string) =>
 	`1.${createHash("sha256").update(`${space.name}\n${secret}`).digest("base64url")}`;
 
-/** The categories of a space holding a subject's data, which subject-records alone writes. */
-const heldForSubjects = new Set(["online-indexed", "online-keyed", "bounded"]);
+/**
+ * The categories of a space holding a subject's data, or an index of one, which subject-records alone
+ * writes: store's `WriterHeld`, as a fresh literal so the compiler holds it to `WriterHeld` both ways;
+ * no spread, `as` or intermediate.
+ */
+const heldForSubjects = {
+	"online-indexed": true,
+	"online-keyed": true,
+	bounded: true,
+	internal: true,
+} satisfies Record<WriterHeld, true>;
 
 /**
  * Refuses the boot where a plain builder (records, under a secret, deferred work, keyed sets)
- * opens a space holding a subject's data: subject-records writes those, through `changeRecords`.
+ * opens a space holding a subject's data, or an index of one: subject-records writes those, through
+ * `changeRecords`.
  */
 export function plainDoor(place: Place) {
 	const held = place.space.subjectData;
-	if (held !== undefined && heldForSubjects.has(held)) {
+	if (held !== undefined && Object.hasOwn(heldForSubjects, held)) {
 		throw new BuildRefused(
 			place.space.name,
-			"a space holding a subject's data is written through subject-records",
+			"a space holding a subject's data, or an index of one, is written through subject-records",
 		);
 	}
 }

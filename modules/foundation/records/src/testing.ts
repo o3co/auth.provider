@@ -7,9 +7,13 @@ import {
 	type KeyedSetWrite,
 	keyedSetsIn,
 	type Next,
+	type Walk,
+	type Walked,
 	writeDeadline,
 } from "./records.ts";
 import { type DeferredSize, shardOf } from "./shards.ts";
+
+export { plantRecord } from "./planting/planting.ts";
 
 /** Jobs that all land in one shard of deferred work, and how many that shard keeps before it refuses. */
 export function crowdingFor(size: DeferredSize) {
@@ -103,6 +107,19 @@ export function memoryRecords<T extends Json>(now: () => number, size: DeferredS
 			},
 			read: async (key: string): Promise<T | undefined> => {
 				return live(key)?.value;
+			},
+			/** Hands `visit` each living record's value; in memory, the tool's walk is not asked. */
+			walk: async (
+				_walk: Walk,
+				visit: (value: T) => Promise<boolean> | boolean,
+				signal?: AbortSignal,
+			): Promise<Walked> => {
+				for (const key of [...kept.keys()]) {
+					if (signal?.aborted) return { kind: "unfinished", reason: "aborted" };
+					const found = live(key);
+					if (found && !(await visit(found.value))) return { kind: "stopped" };
+				}
+				return { kind: "walked" };
 			},
 			remove: async (key: string): Promise<void> => {
 				kept.delete(key);

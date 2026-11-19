@@ -38,13 +38,29 @@ const recordWrite = (d: Device, is: (r: DeviceRecord) => boolean): Match =>
 		value: (v) => is(v as DeviceRecord),
 	});
 
-/** The poll's write that takes the approval, before any token is made. */
+/**
+ * The poll's write that takes the device, before any token is made: the record keeps no approval, as
+ * it is kept apart, so a take putting a subject on the device is no take. A denied device's take
+ * matches too; no scene counts one.
+ */
 export const takeOf = (d: Device) =>
-	recordWrite(d, (r) => r.state === "taken" && r.approval !== undefined);
+	recordWrite(d, (r) => r.state === "taken" && r.approval === undefined);
 
-/** The write that decides the device: approved, with alice's approval, or denied. */
+/** The write that decides the device: approved or denied, the record keeping no approval. */
 export const decisionOf = (d: Device, state: "approved" | "denied") =>
-	recordWrite(d, (r) => r.state === state);
+	recordWrite(d, (r) => r.state === state && r.approval === undefined);
+
+/**
+ * The write that keeps a device's approval apart, by the device's name, for its subject. Approvals are
+ * `subject-records`' records, so a create is a batch, its record with what keeps it.
+ */
+export const approvalOf = (d: Device): Match =>
+	storeWrite({
+		prefix,
+		space: "device-grant-store.approvals",
+		partition: partitionOf(d),
+		operations: ["batch"],
+	});
 
 /**
  * The write a rewrite sends where what it read leaves nothing to write: it confirms the record still

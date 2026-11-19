@@ -4,6 +4,7 @@ import type { RoundTrips } from "./round-trips.ts";
 export type { Begun, Carried, Live, RoundTrips, Taken } from "./round-trips.ts";
 export {
 	type RoundTripStore,
+	type RoundTripsWalked,
 	roundTripStore,
 	roundTripStoreNeeds,
 	type StoredRoundTrip,

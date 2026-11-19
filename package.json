@@ -42,6 +42,7 @@
 		"release:sbom": "pnpm --filter @mod/distribution run release-sbom",
 		"release:scan": "pnpm --filter @mod/distribution run release-scan",
 		"image:scan": "pnpm --filter @mod/distribution run image-scan",
+		"app:audit": "pnpm --filter @mod/distribution run app-audit",
 		"release:listed": "pnpm --filter @mod/distribution run release-listed",
 		"release:notes": "pnpm --filter @mod/distribution run release-notes"
 	},

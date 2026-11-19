@@ -1,0 +1,222 @@
+import { keys } from "@mod/keys";
+import { DestinationRefused } from "@mod/outbound";
+import { sessions } from "@mod/session";
+import { expect, it } from "vitest";
+import { issuer, keptNotices, servedEach, settled, until } from "../../../test/harness.ts";
+
+const serve = servedEach();
+
+/** Whether `ready` holds, the test's clock moved a sweep's interval each look, so each failed try's wait is over by the next sweep. */
+const passing = (h: { advance(ms: number): void }, ready: boolean) => {
+	if (!ready) h.advance(1000);
+	return ready;
+};
+
+it("posts each client of a closing session a logout token, however the session closes [oidc-bcl-2.4-a] [oidc-bcl-2.4-b] [oidc-bcl-2.4-c] [oidc-bcl-2.4-d] [oidc-bcl-2.4-e] [oidc-bcl-2.4-f] [oidc-bcl-2.4-g] [oidc-bcl-2.4-h] [oidc-bcl-2.4-i] [oidc-bcl-2.4-j] [oidc-bcl-2.4-k] [oidc-bcl-2.4-m]", async () => {
+	const h = await serve();
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	expect(h.sent.map((s) => [s.url, s.request?.method])).toEqual([
+		["https://app.example/bc", "POST"],
+	]);
+	const request = h.sent[0]?.request;
+	expect(request?.headers).toEqual({ "content-type": "application/x-www-form-urlencoded" });
+	const token = new URLSearchParams(String(request?.body)).get("logout_token") ?? "";
+	const verified = await h.app.get(keys).verify(token, "logout+jwt");
+	if (verified.kind !== "valid") throw new Error(verified.reason);
+	const { iat, exp, jti, ...claims } = verified.claims;
+	expect(claims).toEqual({
+		iss: issuer,
+		sub: "alice",
+		aud: "app",
+		sid: session.id,
+		events: { "http://schemas.openid.net/event/backchannel-logout": {} },
+	});
+	expect([typeof jti, Number(exp) - Number(iat)]).toEqual(["string", 300]);
+	await settled(h, 500);
+	expect(await keptNotices(h)).toEqual([]);
+});
+
+it("gives a logout token the lifetime the section sets", async () => {
+	const h = await serve({ settings: { "logout-token-lifetime": "1m" } });
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	const token = new URLSearchParams(String(h.sent[0]?.request?.body)).get("logout_token") ?? "";
+	const verified = await h.app.get(keys).verify(token, "logout+jwt");
+	if (verified.kind !== "valid") throw new Error(verified.reason);
+	expect(Number(verified.claims.exp) - Number(verified.claims.iat)).toBe(60);
+	await settled(h, 500);
+});
+
+it("leaves out the session for a client that did not ask for it, and tells no client without a URL", async () => {
+	const h = await serve({
+		sections: {
+			app: {
+				"backchannel-logout-uri": "https://app.example/bc",
+				"backchannel-logout-session-required": false,
+			},
+			quiet: {},
+		},
+	});
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.redeemed(session.id, "quiet");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	const token = new URLSearchParams(String(h.sent[0]?.request?.body)).get("logout_token") ?? "";
+	const verified = await h.app.get(keys).verify(token, "logout+jwt");
+	expect(verified.kind === "valid" && "sid" in verified.claims).toBe(false);
+	expect(h.sent).toHaveLength(1);
+});
+
+it("keeps a notice the client could not take yet, and the sweep delivers it", async () => {
+	const h = await serve();
+	const answers = [503, 429, 408];
+	h.answering.answer = async () => answers.shift() ?? 200;
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	expect(await keptNotices(h)).toHaveLength(1);
+	await until(() => passing(h, h.sent.length >= 4), 6000);
+	await settled(h);
+	expect([h.sent.length, await keptNotices(h)]).toEqual([4, []]);
+	expect(h.logs().filter((l) => l.event === "rp-logout.notices_kept")).toContainEqual(
+		expect.objectContaining({ level: "warn", fields: { count: 1 } }),
+	);
+}, 10_000);
+
+it.each([
+	["the client refuses it", async () => 400],
+	[
+		"the destination policy refuses it",
+		async (): Promise<number> => {
+			throw new DestinationRefused("redirect");
+		},
+	],
+	[
+		"a second bundled copy of the destination policy refuses it",
+		async (): Promise<number> => {
+			throw Object.assign(new Error("outbound destination refused: redirect"), {
+				[Symbol.for("@mod/outbound-policy.destination-refused")]: true,
+				reason: "redirect",
+			});
+		},
+	],
+])("settles a notice once %s [oidc-bcl-2.5-b]", async (_name, answer) => {
+	const h = await serve();
+	h.answering.answer = answer;
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	await settled(h, 500);
+	expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
+});
+
+it("posts to a back channel with a query as registered, adding nothing to it [oidc-bcl-2.2-b]", async () => {
+	const h = await serve({
+		sections: { app: { "backchannel-logout-uri": "https://app.example/bc?tenant=a&x=1" } },
+	});
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	expect(h.sent.map((s) => s.url)).toEqual(["https://app.example/bc?tenant=a&x=1"]);
+	expect([...new URLSearchParams(String(h.sent[0]?.request?.body)).keys()]).toEqual([
+		"logout_token",
+	]);
+	await settled(h, 500);
+});
+
+it("gives up a notice past its time, without sending it again", async () => {
+	const h = await serve({ settings: { "notify-within": "1m" } });
+	h.answering.answer = async () => 503;
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	h.advance(61_000);
+	await settled(h);
+	expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
+});
+
+it("delivers a notice a newer host wrote with fields this one does not know", async () => {
+	const h = await serve();
+	const notice = { client: "app", session: "s-1", subject: "alice", until: 9e15, added: "x" };
+	await h.stores.notices.add(JSON.stringify(notice));
+	await until(() => h.sent.length > 0, 4000);
+	await settled(h);
+	expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
+});
+
+it("sends a notice tried again with the same token id, so the client can tell a repeat", async () => {
+	const h = await serve();
+	const answers = [503];
+	h.answering.answer = async () => answers.shift() ?? 200;
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => passing(h, h.sent.length >= 2), 6000);
+	const ids = await Promise.all(
+		h.sent.map(async (s) => {
+			const token = new URLSearchParams(String(s.request?.body)).get("logout_token") ?? "";
+			const verified = await h.app.get(keys).verify(token, "logout+jwt");
+			return verified.kind === "valid" ? verified.claims.jti : undefined;
+		}),
+	);
+	expect(ids[0]).toBeTypeOf("string");
+	expect(ids[1]).toBe(ids[0]);
+}, 10_000);
+
+it("settles a notice the client takes with any 2xx, as taken [oidc-bcl-2.5-b]", async () => {
+	const h = await serve();
+	h.answering.answer = async () => 204;
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	await settled(h, 500);
+	expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
+	expect(h.logs().filter((l) => l.event === "rp-logout.backchannel_rejected")).toEqual([]);
+});
+
+it("keeps nothing for an erased subject's close, tries each client once, and fails the close where a try would be again", async () => {
+	for (const [answer, closes] of [
+		[200, true],
+		[503, false],
+	] as const) {
+		const h = await serve();
+		h.answering.answer = async () => answer;
+		const { session } = await h.login();
+		await h.redeemed(session.id, "app");
+		h.stores.erased.add("alice");
+		// A close whose participant threw is left pending, the session still closing.
+		expect((await h.app.get(sessions).close(session.id)).kind).toBe(closes ? "closed" : "pending");
+		expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
+		const told = h.logs().filter((l) => l.event === "rp-logout.notice_unkept");
+		expect(told).toEqual([
+			expect.objectContaining({ fields: { client: "app", told: String(closes) } }),
+		]);
+		expect(JSON.stringify(told)).not.toContain("alice");
+	}
+});
+
+it("writes nothing to the 0.19 notices: a notice it keeps, or tries again, is an entry and a body", async () => {
+	const h = await serve();
+	const answers = [503];
+	h.answering.answer = async () => answers.shift() ?? 200;
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	const old: string[] = [];
+	await h.stores.notices.each(async (notice) => {
+		old.push(notice);
+	});
+	expect([old, (await keptNotices(h)).length]).toEqual([[], 1]);
+});

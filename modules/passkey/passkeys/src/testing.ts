@@ -4,13 +4,18 @@ import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { keptPasskeys } from "./records.ts";
 import type { section } from "./section.ts";
-import type {
-	ChallengeStore,
-	PasskeyRecords,
-	PasskeyStore,
-	StoredChallenge,
-	StoredPasskey,
+import {
+	type ChallengeStore,
+	challengeStoreNeeds,
+	type PasskeyOp,
+	type PasskeyRecords,
+	type PasskeyStore,
+	type RegistrationChallengeStore,
+	type StoredChallenge,
+	type StoredPasskey,
 } from "./store.ts";
+
+type AsOne = Parameters<PasskeyStore["updateAsOne"]>[0];
 
 export type PasskeysSettings = z.input<typeof section>;
 
@@ -62,10 +67,12 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			const { passkeys } = await open();
 			const key = fresh();
 			const odd = held({ state: "unheard-of", nested: { list: [1, "two"] } });
-			expect(await passkeys.credentials.save(key, odd, "endless")).toBe("created");
-			expect(await passkeys.credentials.save(key, held({ n: 1 }), "endless")).toBe("exists");
+			expect(await passkeys.credentials.save(key, odd, "endless", "alice")).toBe("created");
+			expect(await passkeys.credentials.save(key, held({ n: 1 }), "endless", "alice")).toBe(
+				"exists",
+			);
 			expect(await passkeys.subjects.read(key)).toBeUndefined();
-			expect(await passkeys.subjects.save(key, held({ n: 1 }), "endless")).toBe("created");
+			expect(await passkeys.subjects.save(key, held({ n: 1 }), "endless", "alice")).toBe("created");
 			expect(await passkeys.credentials.read(key)).toEqual(odd);
 			expect(await passkeys.subjects.update(key, plus(1))).toEqual({
 				before: held({ n: 1 }),
@@ -74,125 +81,132 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			expect(await passkeys.credentials.update(fresh(), plus(1))).toBeUndefined();
 		});
 
-		it("changes records of both spaces as one, giving the change what it watched, each space apart", async () => {
-			const { passkeys } = await open();
-			const together = passkeys.updateTogether.bind(passkeys);
-			// One key in both spaces, and the owner's in both: each space keeps its own.
-			const [key, owner] = [fresh(), fresh()];
-			await passkeys.subjects.save(owner, held({ n: 7 }), "endless");
-			await passkeys.credentials.save(owner, held({ n: 9 }), "endless");
-			const seen: unknown[] = [];
-			const first = await together(
-				{ credentials: [key], subjects: [key] },
-				{
-					watch: () => ({ subjects: [owner] }),
-					change: (read) => {
-						seen.push(read);
-						return {
-							credentials: [{ value: held({ n: 1 }) }],
-							subjects: [{ value: held({ n: 2 }) }],
-						};
-					},
-				},
-			);
-			expect(seen).toEqual([{ credentials: [undefined], subjects: [undefined, held({ n: 7 })] }]);
-			expect(first).toEqual({
-				credentials: [{ before: undefined, after: held({ n: 1 }) }],
-				subjects: [
-					{ before: undefined, after: held({ n: 2 }) },
-					{ before: held({ n: 7 }), after: held({ n: 7 }) },
-				],
-			});
-			expect([
-				await passkeys.credentials.read(key),
-				await passkeys.subjects.read(key),
-				await passkeys.credentials.read(owner),
-			]).toEqual([held({ n: 1 }), held({ n: 2 }), held({ n: 9 })]);
-			// A record it leaves out is kept.
-			const kept = await together(
-				{ credentials: [key], subjects: [key] },
-				{ watch: () => ({}), change: () => ({ subjects: [plus(1)(held({ n: 2 }))] }) },
-			);
-			expect(kept).toEqual({
-				credentials: [{ before: held({ n: 1 }), after: held({ n: 1 }) }],
-				subjects: [{ before: held({ n: 2 }), after: held({ n: 3 }) }],
-			});
-		});
-
 		it("writes the records it watched as well, as a subject's list and the credentials it names", async () => {
 			const { passkeys } = await open();
-			const together = passkeys.updateTogether.bind(passkeys);
 			const [list, a, b] = [fresh(), fresh(), fresh()];
-			await passkeys.subjects.save(list, held({ ids: [a, b] }), "endless");
-			await passkeys.credentials.save(a, held({ n: 1 }), "endless");
+			await passkeys.subjects.save(list, held({ ids: [a, b] }), "endless", "alice");
+			await passkeys.credentials.save(a, held({ n: 1 }), "endless", "alice");
 			const idsOf = (record: StoredPasskey | undefined) =>
 				(record as unknown as { ids?: string[] } | undefined)?.ids ?? [];
-			const cleared = await together(
-				{ credentials: [], subjects: [list] },
-				{
-					watch: ({ subjects: [held] }) => ({ credentials: idsOf(held) }),
-					change: ({ credentials }) => ({
-						subjects: [{ value: held({ ids: [] }) }],
-						credentials: credentials.map((record) => record && { value: held({ gone: true }) }),
-					}),
-				},
-			);
-			expect(cleared).toEqual({
-				credentials: [
-					{ before: held({ n: 1 }), after: held({ gone: true }) },
-					{ before: undefined, after: undefined },
-				],
-				subjects: [{ before: held({ ids: [a, b] }), after: held({ ids: [] }) }],
+			const change = (value: StoredPasskey): PasskeyOp => ({ kind: "change", value });
+			const cleared = await passkeys.updateAsOne({
+				targets: [{ place: "subjects", key: list }],
+				watch: ([holder]) =>
+					idsOf(holder?.value).map((key) => ({ place: "credentials" as const, key })),
+				decide: (_read, watched) => ({
+					targets: [change(held({ ids: [] }))],
+					watched: watched.map((record) => record && change(held({ gone: true }))),
+				}),
 			});
+			expect(cleared.kind).toBe("written");
+			if (cleared.kind !== "written") return;
+			expect(cleared.targets.map((c) => [c.before?.value, c.after?.value])).toEqual([
+				[held({ ids: [a, b] }), held({ ids: [] })],
+			]);
+			expect(cleared.watched.map((c) => [c.before?.value, c.after?.value])).toEqual([
+				[held({ n: 1 }), held({ gone: true })],
+				[undefined, undefined],
+			]);
 			expect([await passkeys.credentials.read(a), await passkeys.credentials.read(b)]).toEqual([
 				held({ gone: true }),
 				undefined,
 			]);
 		});
 
-		it("changes records as one again where another writer changes what it watched first", async (ctx) => {
+		it("changes records as one again where another writer changes what it watched first, keeping a record given no op", async (ctx) => {
 			const { passkeys, raceNextTogether: race } = await open();
-			const together = passkeys.updateTogether.bind(passkeys);
-			if (!race) {
-				ctx.skip();
-				return;
-			}
+			if (!race) return ctx.skip();
 			const [key, owner, other] = [fresh(), fresh(), fresh()];
-			await passkeys.credentials.save(key, held({ owner }), "endless");
-			await passkeys.subjects.save(owner, held({ n: 1 }), "endless");
-			await passkeys.subjects.save(other, held({ n: 2 }), "endless");
+			await passkeys.credentials.save(key, held({ owner }), "endless", "alice");
+			await passkeys.subjects.save(owner, held({ n: 1 }), "endless", "alice");
+			await passkeys.subjects.save(other, held({ n: 2 }), "endless", "alice");
 			const ownerOf = (record: StoredPasskey | undefined) =>
 				(record as unknown as { owner?: string } | undefined)?.owner;
 			const watched: unknown[] = [];
 			const run = () =>
-				together(
-					{ credentials: [key], subjects: [] },
-					{
-						watch: ({ credentials: [credential] }) => {
-							const o = ownerOf(credential);
-							return { subjects: o ? [o] : [] };
-						},
-						change: ({ subjects: [list] }) => {
-							watched.push(list);
-							return {};
-						},
+				passkeys.updateAsOne({
+					targets: [{ place: "credentials", key }],
+					watch: ([credential]) => {
+						const o = ownerOf(credential?.value);
+						return o ? [{ place: "subjects", key: o }] : [];
 					},
-				);
+					decide: (_read, [list]) => {
+						watched.push(list?.value);
+						return {};
+					},
+				});
 			// The watched list changes first: read again.
 			race("subjects", owner, () => held({ n: 10 }));
-			await run();
+			expect((await run()).kind).toBe("written");
 			expect(watched).toEqual([held({ n: 1 }), held({ n: 10 })]);
 			// The credential's owner changes first: the new owner is watched, and read.
 			watched.length = 0;
 			race("credentials", key, () => held({ owner: other }));
 			await run();
 			expect(watched).toEqual([held({ n: 10 }), held({ n: 2 })]);
+			// Given no op, each record is kept as it was.
+			expect(await passkeys.credentials.read(key)).toEqual(held({ owner: other }));
+			expect(await passkeys.subjects.read(owner)).toEqual(held({ n: 10 }));
+		});
+
+		it("changes records of both spaces as one by the ops decided, writing nothing where one is refused", async (_context) => {
+			const { passkeys } = await open();
+			const asOne = (p: AsOne) => passkeys.updateAsOne(p);
+			const [list, record, other] = [fresh(), fresh(), fresh()];
+			const [inList, inRecords] = [
+				{ place: "subjects" as const, key: list },
+				{ place: "credentials" as const, key: record },
+			];
+			const create = (n: number): PasskeyOp => ({
+				kind: "create",
+				value: held({ n }),
+				lifetimeMs: "endless",
+				subject: "alice",
+			});
+			const written = await asOne({
+				targets: [inRecords, inList],
+				decide: () => ({ targets: [create(1), create(2)] }),
+			});
+			expect(written).toMatchObject({
+				kind: "written",
+				targets: [{ after: { value: { n: 1 } } }, {}],
+			});
+			const refused = await asOne({
+				targets: [{ place: "credentials", key: other }, inList],
+				decide: () => ({ targets: [create(3), create(4)] }),
+			});
+			expect(refused).toEqual({ kind: "refused", at: { in: "targets", nth: 1 }, why: "exists" });
+			expect(await passkeys.credentials.read(other)).toBeUndefined();
+			const moved = await asOne({
+				targets: [inRecords],
+				watch: () => [inList],
+				decide: () => ({ targets: [{ kind: "move", value: held({ n: 5 }), to: "alice" }] }),
+			});
+			expect(moved).toMatchObject({ kind: "written", watched: [{ after: { value: { n: 2 } } }] });
+			expect(await passkeys.credentials.read(record)).toEqual(held({ n: 5 }));
+			// The two spaces stay apart: one key, a record in each.
+			expect(await passkeys.subjects.read(record)).toBeUndefined();
+		});
+
+		it("refuses, where it erases, every record saved for a subject it erased, in each space and only for that subject", async (context) => {
+			const { passkeys } = await open();
+			for (const space of [passkeys.credentials, passkeys.subjects]) {
+				const { erase } = space;
+				if (!erase) return context.skip();
+				await space.save(fresh(), held({ n: 1 }), "endless", "erin");
+				const report = await erase.call(space, "erin", new AbortController().signal);
+				// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+				if (report.kind === "stopped") return context.skip();
+				expect(report.kind).toBe("erased");
+				expect(await space.save(fresh(), held({ n: 2 }), "endless", "erin")).toBe("erased");
+				expect(await space.save(fresh(), held({ n: 3 }), "endless", "finn")).toBe("created");
+			}
 		});
 
 		it("changes a record only from what it holds, again after a racing writer", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.passkeys.subjects.save(key, held({ n: 1 }), "endless");
+			await place.passkeys.subjects.save(key, held({ n: 1 }), "endless", "alice");
 			place.raceNextUpdate(key, (record) => held({ n: counted(record) * 10 }));
 			expect((await place.passkeys.subjects.update(key, plus(1)))?.after).toEqual(held({ n: 11 }));
 		});
@@ -200,7 +214,7 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 		it("keeps records without end, through a restart and through memory pressure", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.passkeys.credentials.save(key, held({ n: 1 }), "endless");
+			await place.passkeys.credentials.save(key, held({ n: 1 }), "endless", "alice");
 			place.advance(10 * 365 * 86_400_000);
 			await place.restart?.();
 			await place.pressMemory?.();
@@ -213,7 +227,9 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			if (!lose || !failover) return context.skip();
 			const key = fresh();
 			lose();
-			expect(await place.passkeys.subjects.save(key, held({ n: 1 }), "endless")).toBe("created");
+			expect(await place.passkeys.subjects.save(key, held({ n: 1 }), "endless", "alice")).toBe(
+				"created",
+			);
 			lose();
 			expect((await place.passkeys.subjects.update(key, plus(1)))?.after).toEqual(held({ n: 2 }));
 			await failover();
@@ -232,7 +248,9 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 				await failover();
 				place.advance(60_000);
 			});
-			await place.passkeys.credentials.save(key, held({ n: 1 }), "endless").catch(() => undefined);
+			await place.passkeys.credentials
+				.save(key, held({ n: 1 }), "endless", "alice")
+				.catch(() => undefined);
 			expect(await place.passkeys.credentials.read(key)).toEqual(seen);
 		});
 
@@ -272,19 +290,19 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			const keys: string[] = [];
 			const spied = (records: PasskeyRecords): PasskeyRecords => ({
 				...records,
-				save: (key, record, lifetimeMs) => {
-					keys.push(key);
-					return records.save(key, record, lifetimeMs);
+				save: (...given) => {
+					keys.push(given[0]);
+					return records.save(...given);
 				},
 			});
 			const [subject, id] = [fresh(), randomBytes(16).toString("base64url")];
+			// A registration writes its record together with its listing: its key is the first named.
 			const watched: PasskeyStore = {
 				credentials: spied(passkeys.credentials),
 				subjects: spied(passkeys.subjects),
-				// A registration writes its record together with its listing: its key is the first named.
-				updateTogether: (named, p) => {
-					keys.push(...named.credentials);
-					return passkeys.updateTogether(named, p);
+				updateAsOne: (p: AsOne) => {
+					keys.push(...p.targets.filter((t) => t.place === "credentials").map((t) => t.key));
+					return passkeys.updateAsOne(p);
 				},
 			};
 			const records = keptPasskeys(watched, writeToken);
@@ -366,6 +384,98 @@ export function challengeStoreContract(name: string, open: () => Promise<Challen
 			await restart();
 			await failover();
 			expect((await place.challenges.take(challenge, mark))?.before).toEqual(mark);
+		});
+	});
+}
+
+/** A place that keeps passkeys' registration challenges, as one implementation of its store interface offers it. */
+export interface RegistrationChallengePlace extends Omit<ChallengePlace, "challenges"> {
+	readonly registrations: RegistrationChallengeStore;
+}
+
+/**
+ * What passkeys needs from any implementation of the registration challenge store: a challenge
+ * kept once for its subject and its lifetime, up to the longest passkeys keeps one, marked once,
+ * never in clear; where it erases, none opened for an erased subject.
+ */
+export function registrationChallengeStoreContract(
+	name: string,
+	open: () => Promise<RegistrationChallengePlace>,
+): void {
+	const fresh = () => randomBytes(32).toString("base64url");
+	const held = (value: object) => value as unknown as StoredChallenge;
+	const mark = held({ taken: true });
+	const marked = () => ({ value: mark });
+
+	describe(`passkeys' registration challenge store interface: ${name}`, () => {
+		it("keeps a challenge once for its subject, and puts the mark in its place for the rest of its lifetime", async () => {
+			const place = await open();
+			const { registrations } = place;
+			const challenge = fresh();
+			const record = held({ kind: "registration", nested: [1, "two"] });
+			expect(await registrations.open(challenge, record, 1000, "alice")).toBe("created");
+			expect(await registrations.open(challenge, held({ n: 1 }), 1000, "alice")).toBe("exists");
+			place.advance(500);
+			expect(await registrations.update(challenge, marked)).toEqual({
+				before: record,
+				after: mark,
+			});
+			expect(await registrations.update(challenge, marked)).toEqual({ before: mark, after: mark });
+			place.advance(500);
+			expect(await registrations.update(challenge, marked)).toBeUndefined();
+			expect(await registrations.update(fresh(), marked)).toBeUndefined();
+		});
+
+		it("keeps a challenge opened for the longest passkeys keeps one, until that end", async () => {
+			const place = await open();
+			const { registrations } = place;
+			const longest = challengeStoreNeeds.registrationsEndWithinMs;
+			const [challenge, record] = [fresh(), held({ kind: "registration" })];
+			expect(await registrations.open(challenge, record, longest, "alice")).toBe("created");
+			place.advance(longest - 1000);
+			expect((await registrations.update(challenge, marked))?.before).toEqual(record);
+			place.advance(1000);
+			expect(await registrations.update(challenge, marked)).toBeUndefined();
+		});
+
+		it("never gives a challenge to what the place holds, in clear", async (context) => {
+			const place = await open();
+			const { holds } = place;
+			if (!holds) return context.skip();
+			const [challenge, kept] = [fresh(), fresh()];
+			await place.registrations.open(challenge, held({ kept }), 60_000, "alice");
+			await place.registrations.update(challenge, marked);
+			expect([holds(kept), holds(challenge)]).toEqual([true, false]);
+		});
+
+		it("keeps a mark through a restart, a lost answer and a failover", async (context) => {
+			const place = await open();
+			const { restart, loseNextAnswer: lose, failover } = place;
+			if (!restart || !lose || !failover) return context.skip();
+			const challenge = fresh();
+			await place.registrations.open(challenge, held({ n: 1 }), 60_000, "alice");
+			lose();
+			expect((await place.registrations.update(challenge, marked))?.before).toEqual(held({ n: 1 }));
+			await restart();
+			await failover();
+			expect((await place.registrations.update(challenge, marked))?.before).toEqual(mark);
+		});
+
+		it("opens none for a subject it erased, where it erases, and only for that subject", async (context) => {
+			const { registrations } = await open();
+			const { erase } = registrations;
+			if (!erase) return context.skip();
+			const [before, theirs] = [fresh(), fresh()];
+			await registrations.open(before, held({ n: 1 }), 60_000, "erin");
+			await registrations.open(theirs, held({ n: 2 }), 60_000, "finn");
+			const report = await erase.call(registrations, "erin", new AbortController().signal);
+			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+			if (report.kind === "stopped") return context.skip();
+			expect(await registrations.open(fresh(), held({ n: 3 }), 60_000, "erin")).toBe("erased");
+			// Fenced at opening only: one opened before is marked until its end.
+			expect((await registrations.update(before, marked))?.before).toEqual(held({ n: 1 }));
+			expect((await registrations.update(theirs, marked))?.before).toEqual(held({ n: 2 }));
+			expect(await registrations.open(fresh(), held({ n: 4 }), 60_000, "finn")).toBe("created");
 		});
 	});
 }

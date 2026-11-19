@@ -10,6 +10,7 @@ Internal module of `redis`: a store script's answer read as data.
 
 ## Offers
 - `answerOf` (a script's reply): the server that ran it, and its answer with its times, counts and times left as numbers; a reply holding no run id and JSON object is unavailable.
+- `committedOf` (a batch's answer, its versions): committed, with the store time it committed at. An answer a script from before that time kept under an idempotency mark holds none, and is unavailable: no time is made up for it.
 - `list` (a value cjson wrote, its count): the list it stands for.
 
 ## Invariants

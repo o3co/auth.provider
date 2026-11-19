@@ -1,7 +1,8 @@
 import { join } from "node:path";
 import ts from "typescript";
+import type { FileFacts } from "../facts/facts.ts";
 import { valuesTaken } from "../rules.ts";
-import type { Scope } from "../scope.ts";
+import type { Scope } from "../scope/scope.ts";
 import { parse } from "../source.ts";
 import type { Pkg } from "../workspace.ts";
 
@@ -76,10 +77,185 @@ function moduleNameOf(s: Scope, p: Pkg): string | undefined {
 	return undefined;
 }
 
+/** An expression seen through parentheses and type assertions. */
+function bare(node: ts.Expression): ts.Expression {
+	let at = node;
+	while (
+		ts.isParenthesizedExpression(at) ||
+		ts.isAsExpression(at) ||
+		ts.isSatisfiesExpression(at) ||
+		ts.isNonNullExpression(at) ||
+		ts.isTypeAssertionExpression(at)
+	) {
+		at = at.expression;
+	}
+	return at;
+}
+
+/** A member read by a name written out: `o.name` or `o["name"]`. */
+function memberOf(node: ts.Expression): { object: ts.Expression; name: string } | undefined {
+	if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.name)) {
+		return { object: node.expression, name: node.name.text };
+	}
+	if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
+		return { object: node.expression, name: node.argumentExpression.text };
+	}
+	return undefined;
+}
+
+/** Each name a declaration binds, through object and array patterns. */
+function boundNames(name: ts.BindingName): ts.Identifier[] {
+	if (ts.isIdentifier(name)) return [name];
+	return name.elements.flatMap((element) =>
+		ts.isOmittedExpression(element) ? [] : boundNames(element.name),
+	);
+}
+
+/**
+ * What a file imports from `from` as a value and exports again as it was imported, by the name it
+ * took: directly, renamed, or re-bound at the top level (`const y = x`); `*` for a namespace import
+ * exported whole, and a namespace member read by a name written out for that member. A value made
+ * from it (a default, a pattern, a field, a return, an expression, a member or key not written out)
+ * is not seen: an accepted limit of a check that is defence in depth (the card says why).
+ */
+function handedOn(facts: FileFacts, from: string): string[] {
+	const imported = new Map<ts.Symbol, string>();
+	for (const edge of facts.edges) {
+		if (!edge.loads || edge.specifier.text !== from) continue;
+		for (const binding of edge.bindings) {
+			const symbol = binding.local && facts.checker.getSymbolAtLocation(binding.local);
+			if (symbol === undefined || binding.typeOnly) continue;
+			imported.set(symbol, binding.form === "namespace" ? "*" : binding.imported);
+		}
+	}
+	if (imported.size === 0) return [];
+	const symbolOf = (node: ts.Node) => facts.checker.getSymbolAtLocation(node);
+	const takenAt = (node: ts.Expression | undefined): string | undefined => {
+		if (node === undefined) return undefined;
+		const at = bare(node);
+		if (ts.isIdentifier(at)) {
+			const symbol = symbolOf(at);
+			return symbol && imported.get(symbol);
+		}
+		const member = memberOf(at);
+		return member && takenAt(member.object) === "*" ? member.name : undefined;
+	};
+	const bind = (name: ts.Identifier, taken: string | undefined) => {
+		const symbol = symbolOf(name);
+		if (taken === undefined || symbol === undefined || imported.has(symbol)) return false;
+		imported.set(symbol, taken);
+		return true;
+	};
+	const statements = facts.file.statements;
+	const declarations = statements
+		.filter(ts.isVariableStatement)
+		.flatMap((statement) => [...statement.declarationList.declarations]);
+	for (let grew = true; grew; ) {
+		grew = false;
+		for (const declaration of declarations) {
+			const taken = takenAt(declaration.initializer);
+			if (ts.isIdentifier(declaration.name)) {
+				grew = bind(declaration.name, taken) || grew;
+			} else if (ts.isObjectBindingPattern(declaration.name) && taken === "*") {
+				for (const element of declaration.name.elements) {
+					const key = element.propertyName ?? element.name;
+					if (element.dotDotDotToken || !ts.isIdentifier(element.name)) continue;
+					if (!ts.isIdentifier(key) && !ts.isStringLiteralLike(key)) continue;
+					grew = bind(element.name, key.text) || grew;
+				}
+			}
+		}
+	}
+	const exported: (string | undefined)[] = [];
+	for (const statement of statements) {
+		if (ts.isExportAssignment(statement)) exported.push(takenAt(statement.expression));
+		const clause = ts.isExportDeclaration(statement) ? statement : undefined;
+		if (clause && !clause.moduleSpecifier && !clause.isTypeOnly && clause.exportClause) {
+			if (ts.isNamedExports(clause.exportClause)) {
+				for (const element of clause.exportClause.elements) {
+					if (element.isTypeOnly) continue;
+					const symbol = facts.checker.getExportSpecifierLocalTargetSymbol(element);
+					exported.push(symbol && imported.get(symbol));
+				}
+			}
+		}
+		const marked = ts.isVariableStatement(statement)
+			? ts.getModifiers(statement)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+			: false;
+		if (marked && ts.isVariableStatement(statement)) {
+			for (const declaration of statement.declarationList.declarations) {
+				for (const name of boundNames(declaration.name)) {
+					const symbol = symbolOf(name);
+					exported.push(symbol && imported.get(symbol));
+				}
+			}
+		}
+	}
+	return [...new Set(exported.filter((name) => name !== undefined))];
+}
+
+/** Whether a source file exports a type: a type or an interface, a type re-exported, `export *` or `export * as`. */
+function exportsType(path: string): boolean {
+	return parse(path).statements.some((statement) => {
+		const exported = (
+			ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined
+		)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+		if (
+			exported &&
+			(ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement))
+		) {
+			return true;
+		}
+		if (!ts.isExportDeclaration(statement)) return false;
+		const clause = statement.exportClause;
+		return (
+			statement.isTypeOnly ||
+			clause === undefined ||
+			ts.isNamespaceExport(clause) ||
+			(ts.isNamedExports(clause) && clause.elements.some((element) => element.isTypeOnly))
+		);
+	});
+}
+
+/** The file the owner exports a kept entry from. */
+const entryFile = (p: Pkg, key: string) =>
+	join(p.dir, (p.manifest.exports as Record<string, string>)[key] as string);
+
+/**
+ * G31's branch for an entry: the owner's entry `key` is loaded, in shipped code, by the packages it
+ * names alone, by any edge (an import, a re-export, `import()`, `require`), a type alone not counted;
+ * and a package it names does not hand it on, by a re-export or by exporting again what it imported
+ * (`handedOn`). The owner keeps the runtime half itself, so no
+ * module and no kernel `takenBy` is asked for.
+ */
+function entryTaken(s: Scope, rule: string, owner: Pkg, key: string, takers: readonly string[]) {
+	for (const taker of takers) {
+		if (!s.byName.has(taker))
+			s.report(rule, owner.name, `${key}: ${taker} is no workspace package`);
+	}
+	const specifier = `${owner.name}/${key.slice(2)}`;
+	for (const p of s.packages) {
+		if (p === owner) continue;
+		for (const path of shipped(s, p)) {
+			const file = path.slice(p.dir.length + 1);
+			const edges = s.factsOf(p, file).edges.filter((e) => e.specifier.text === specifier);
+			const where = `${p.name}/${file}`;
+			if (!takers.includes(p.name)) {
+				if (edges.some((e) => e.loads)) s.report(rule, where, `${key} of ${owner.name}`);
+			} else if (
+				edges.some((e) => e.form === "export-from" && e.loads) ||
+				handedOn(s.factsOf(p, file), specifier).length > 0
+			) {
+				s.report(rule, where, `${key} of ${owner.name}: a taker does not hand it on`);
+			}
+		}
+	}
+}
+
 /**
  * G31: a contract its owner's manifest declares `takenBy` is imported, in shipped code, by the
  * packages it names alone; and the declaration names the modules of the kernel `takenBy` the
- * contract itself declares, no more and no fewer.
+ * contract itself declares, no more and no fewer. A key naming an entry is held by `entryTaken`.
  */
 export function takenByRules(s: Scope) {
 	const rule = "G31 a contract declared takenBy is imported by the packages it names alone";
@@ -92,7 +268,25 @@ export function takenByRules(s: Scope) {
 		}
 		const inCode = takenInCode(s, owner);
 		const allowed = new Map<string, readonly string[]>();
+		// Which keys name an entry, and which of those the owner keeps, is the scope's reading alone.
+		const entries = s.takenEntries(owner);
+		const notKept = new Map(entries.notKept.map(({ key, why }) => [key, why]));
 		for (const [name, takers] of Object.entries(declared)) {
+			const why = notKept.get(name);
+			if (why !== undefined) {
+				s.report(rule, owner.name, `${name}: ${why}`);
+				continue;
+			}
+			if (entries.kept.includes(name)) {
+				if (exportsType(entryFile(owner, name))) {
+					s.report(
+						rule,
+						owner.name,
+						`${name}: an entry kept exports values alone, its types on \`.\``,
+					);
+				} else entryTaken(s, rule, owner, name, takers as string[]);
+				continue;
+			}
 			if (!isStrings(takers)) {
 				s.report(rule, owner.name, `${name}: takenBy names packages as a list of names`);
 				continue;
@@ -123,8 +317,13 @@ export function takenByRules(s: Scope) {
 		}
 		for (const p of s.packages) {
 			if (p === owner) continue;
+			// An adapter of the owner imports its contracts to provide them; taking one is refused at assembly.
+			// Handing one on is counted: a re-export, or exporting again what it imported (`handedOn`).
+			const forms = s.ownerServed(p) === owner.name ? (["export-from"] as const) : undefined;
 			for (const path of shipped(s, p)) {
-				const taken = valuesTaken(s.factsOf(p, path.slice(p.dir.length + 1)), owner.name);
+				const facts = s.factsOf(p, path.slice(p.dir.length + 1));
+				const taken = valuesTaken(facts, owner.name, forms);
+				if (forms !== undefined) taken.push(...handedOn(facts, owner.name));
 				for (const [name, takers] of allowed) {
 					if (takers.includes(p.name)) continue;
 					if (taken.includes(name) || taken.includes("*")) {

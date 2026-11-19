@@ -1,4 +1,5 @@
 /** For tests: what any implementation of the round trip store interface must do. */
+import type { Walk } from "@mod/erasure-extensions";
 import { describe, expect, it } from "vitest";
 import type { RoundTripStore, StoredRoundTrip } from "./store.ts";
 
@@ -15,6 +16,8 @@ export interface RoundTripPlace {
 	readonly failover?: () => Promise<void>;
 	/** Where what the place was given can be searched: whether any of it carried `text`. */
 	readonly holds?: (text: string) => boolean;
+	/** Where the round trips can be walked: the walk a maintenance tool would hand in, over this store. */
+	readonly walkOf?: () => Walk;
 }
 
 /**
@@ -82,6 +85,28 @@ export function roundTripStoreContract(name: string, open: () => Promise<RoundTr
 			expect((await place.roundTrips.update(key, plus))?.after).toEqual(asStored({ n: 2 }));
 			await failover();
 			expect(await read(place.roundTrips, key)).toEqual(asStored({ n: 2 }));
+		});
+
+		it("walks every round trip, handing each over, and stops where the visitor does", async (context) => {
+			const place = await open();
+			const { walk } = place.roundTrips;
+			if (!walk || !place.walkOf) return context.skip();
+			const signal = new AbortController().signal;
+			const keys = [fresh(), fresh(), fresh()];
+			for (const [n, key] of keys.entries())
+				await place.roundTrips.save(key, asStored({ n }), 60_000);
+			const seen: number[] = [];
+			const all = await walk.call(
+				place.roundTrips,
+				place.walkOf(),
+				(record) => (seen.push(counted(record)), true),
+				signal,
+			);
+			expect(all).toEqual({ kind: "walked" });
+			expect(seen).toEqual(expect.arrayContaining([0, 1, 2]));
+			let left = 1;
+			const one = await walk.call(place.roundTrips, place.walkOf(), () => left-- > 0, signal);
+			expect(one).toEqual({ kind: "stopped" });
 		});
 	});
 }

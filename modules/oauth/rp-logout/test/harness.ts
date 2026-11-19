@@ -41,7 +41,7 @@ import usersModule from "@mod/users/module";
 import { memoryUsersStores, usersConfig } from "@mod/users/testing";
 import { afterEach } from "vitest";
 import rpLogout from "../src/module.ts";
-import { type SessionClients, sessionClients } from "../src/store.ts";
+import { type NoticeBodies, type SessionClients, sessionClients } from "../src/store.ts";
 import { type RpLogoutSettings, rpLogoutConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
@@ -81,6 +81,8 @@ export async function harness(
 		/** Each client's redirect URIs, by id; `https://app.example/cb` for one not named. */
 		readonly redirects?: Readonly<Record<string, readonly string[]>>;
 		readonly extra?: readonly Module[];
+		/** Changes the stand-in's notice bodies before the composition is assembled. */
+		readonly bodies?: (bodies: NoticeBodies) => void;
 		/** Leaves `http`'s public origin unwritten: the issuer alone names this provider. */
 		readonly noPublicOrigin?: true;
 		readonly sessionsModule?: Module;
@@ -98,6 +100,7 @@ export async function harness(
 	const logged = recordingLog();
 	const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
 	const stores = memoryStores(() => now);
+	options.bodies?.(stores.bodies);
 	const recorded = auditStandIn();
 	const sent: Sent[] = [];
 	const answering = { answer: async (_url: string): Promise<number> => 200 };
@@ -434,13 +437,15 @@ export function servedEach() {
 	};
 }
 
-/** The notices kept, without settling any: `each` keeps every notice whose handling throws. */
+/** The notices kept, entries and 0.19 notices, without settling any: `each` keeps every one whose handling throws. */
 export async function keptNotices(h: Harness) {
 	const found: string[] = [];
-	await h.stores.notices.each(async (notice) => {
-		found.push(notice);
+	const listing = async (kept: string) => {
+		found.push(kept);
 		throw new Error("only listing");
-	});
+	};
+	await h.stores.queue.each(listing);
+	await h.stores.notices.each(listing);
 	return found;
 }
 

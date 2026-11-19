@@ -15,6 +15,7 @@
   - `settle(subject)` → `marked` (this call filled it), `held` (marked already, or by another meanwhile), `none`, `pending` (only pending ones written; the mark as it is), or `inconsistent` (a mark it did not set beside nothing written, left as it is). It reads what is written through `passkeys`' `passkeyReading`.
   - It reads the passkeys again after marking: a mark it set beside none (a reset took them meanwhile) goes by its token; a mark still standing beside none after that withdraw is `inconsistent`. After that withdraw it reads again and marks anew where a passkey stands, three times at most; every mark it makes is checked so, and past the last it is unavailable.
   - Unavailable where the witness or `passkeys` cannot answer, their failure passed on as it is; past its last mark anew, or where its mark is gone though a passkey stands, it throws its own (`passkeys`). It records nothing.
+- The generated app's `passkey-backfill` script, declared in the manifest's `appEntries`: it settles each subject read through `passkeyBackfill` and counts the answers, in this order: `marked`, `held`, `none`, `pending`, `inconsistent`. Its counts carry no subject, configured value or error's words.
 - Audit event `passkey.enrollment_inconsistent` (`at`), declared in `./audit-events`.
 
 ## Invariants

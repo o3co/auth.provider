@@ -1,7 +1,7 @@
 # passkeys
 
 ## Responsibilities
-- Keeps passkeys: each subject's user handle, and the credentials registered for it; its internal module `registration` registers them, `records` reads and writes them in the shape written, and `joint` changes a list and its records as one.
+- Keeps passkeys: each subject's user handle, and the credentials registered for it; its internal module `registration` registers them, `records` reads and writes them in the shape written, `joint` changes a list and its records as one, and `ports` uses the store's ports.
 - Answers assertions by the passkeys it keeps, through `webauthn`'s ceremonies; its internal module `challenges` keeps the challenges both answer.
 - Asks the witnessing contributed, if any, where it settles, handing what it reads anew, so a passkey witness's mark is kept in line by `passkey-witnessing`; its internal module `holders` asks it.
 
@@ -18,27 +18,25 @@
 - Extension point `passkeyWitnessing` (at most one, two refusing boot), for `passkey-witnessing`: `settle` and `emptied`, asked as the internal module `holders`' card says; `emptied` takes the mark off only on `none`.
 - `passkeyReading`, taken only by `passkey-witnessing` (its backfill): `writtenHolding` (what the subject's list names as written, read anew: `passkey`, only `pending` ones, or `none`). Its `takenBy`, like `passkeyClearing`'s, is a composition rule (the kernel at assembly, the guard on shipped imports: imported only by the packages named), not a runtime defence: a module trusting a read the witness is not asked about would pass what the witness disputes.
 - Store interfaces, which the assembly wires. The store never sees what a record holds.
-  - Passkeys: credentials and subjects, each by a key passkeys makes, saved once, read, changed from what they hold, kept without end; records of both spaces and the ones a change watches from them changed as one (`updateTogether`), which boot requires. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
+  - Passkeys: credentials and subjects, each by a key passkeys makes, saved once for a subject, read, changed from what they hold, kept without end; records of both spaces and the ones a change watches from them changed as one (`updateAsOne`). Its ports: the internal module `ports`' card. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
   - Challenges: opened for a lifetime, taken by putting a mark in place. Needs: survives a crash, never rolled back by failover, names derived from the challenge.
+  - Registration challenges, optional until 0.22 (left out, they stay in the challenge store): opened for a lifetime and a subject (`erased` where fenced), changed from what they hold; `erase` and `migrate` both or neither. Needs: the challenge store's; each ends within `registrationsEndWithinMs` of its opening, `webauthn`'s ceiling.
+- An eraser, `passkeys`, on `erasure-extensions`' `erasers`: the internal module `erasure`'s card.
 - Operator section: `user-verification` (default `preferred`; `discouraged` is warned of at every start, `passkeys.user_unverified`), `max-credentials` (per subject, default 10).
-- `./testing`: the section's test configuration builder, and the contract tests of both store interfaces.
+- `./testing`: the section's test configuration builder, and the contract tests of the store interfaces.
 
 ## Invariants
-- A challenge is taken once, within `webauthn`'s `lifetimeMs` on `kernel`'s clock, whatever the store's expiry. An assertion's challenge is made for a requester: who asks, by its own name, and an id of its own; redeemed by the same alone, another module's with the same id is `challenge`, after it is taken. An assertion challenge is kept as format 2: who asked (`by`) and the id's SHA-256. A format 1 one, as 0.18 opened them, is read, taken and refused as `challenge`, since it names no asker.
 - `registrations`' creation options require a discoverable credential, as `passkeys` lists none to ask for. `passkeys` refuses an assertion without a user handle before any store is read; the handle must be its holder's, judged after the signature.
 - A user handle is made on a subject's first options, or by `cleared` where the subject has no holder, and kept; a credential is listed only on the holder whose handle it was made under. A record read in another shape is unavailable.
-- A credential id its holder lists is refused at registration; one no holder lists (removed, or left by 0.18) can be registered. Options exclude the subject's own. `conflict` tells the caller that some subject lists an id; ids are high-entropy, made by the authenticator: it answers only for an id known.
-- The count is written only over the passkey judged, its subject, key and count; a lost race, or its id taken over by another meanwhile, is `raced`.
-- A pending record is no passkey to every read: none to assert (`unknown-credential`), list or rename, and its sign count never moves.
-- A removed passkey leaves its holder's list, which ends its use. Every read takes it as removed: no passkey (`unknown-credential`), a count `raced`, an id a new registration may take over.
+- A challenge's taking and asker, a registration's refusals and counts, and a pending or removed record's reads: the internal modules `challenges`', `registration`'s and `records`' cards.
 - A store that cannot tell is unavailable (`passkeys`), never a refusal; so is the witnessing, wherever a settle runs.
 - With a witnessing, a registration and a removal settle after their write: a registration whose settle fails keeps the passkey written and answers unavailable. A passkey witness composed with no witnessing to ask it refuses boot: a lost store would read as holding none.
 
 ## Data
-- Passkeys and subjects through the passkey store; challenges through the challenge store. Their keys are the ones `webauthn` made before this package, so the records kept stay readable.
+- Passkeys and subjects through the passkey store; registration challenges through their store where composed, other challenges through the challenge store. Their keys are the ones `webauthn` made before this package, so the records kept stay readable.
 
 ## Depends on
-- `kernel`, `webauthn` (the ceremonies, the credential's form), `passkey-witness` (whether a witness is composed)
+- `kernel`, `webauthn` (the ceremonies, the credential's form), `passkey-witness` (whether a witness is composed), `erasure-extensions` (the eraser, the stores' erase and migrate reports)
 
 ## Vocabulary
 - holder: a subject's user handle, the ids of its passkeys, and its fence, which each write that empties the list moves on, never back. passkey: a credential this package keeps for a subject.

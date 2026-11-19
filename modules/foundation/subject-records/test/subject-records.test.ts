@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { type Json, type Space, type Store, spaces, store } from "@mod/store";
-import { simulatedStore } from "@mod/store/testing";
+import { plantValue, simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import { kept, opened, ownersValue } from "../src/envelope/envelope.ts";
 import { indexSpaceOf, type Phase, subjectRecordsIn } from "../src/subject-records.ts";
@@ -75,7 +75,7 @@ async function opened_() {
 				partition: `${part(space, subject)}.tomb`,
 				name: "record",
 			};
-			await s.putIfAbsent(tomb, { at: 1 }, { expiry: { kind: "never" } });
+			await plantValue(s, tomb, { at: 1 }, { kind: "never" });
 		},
 	};
 }
@@ -218,8 +218,8 @@ it("saves a record holding no subject raw while records are not indexed, and ans
 
 it("changes a record kept raw, from before records were indexed, raw", async () => {
 	const { s, build, raw } = await opened_();
-	await s.putIfAbsent({ space: indexedSpace, partition: "old", name: "record" }, 1, {
-		expiry: { kind: "never" },
+	await plantValue(s, { space: indexedSpace, partition: "old", name: "record" }, 1, {
+		kind: "never",
 	});
 	const records = build<number>("indexed");
 	expect(await records.change("old", (n) => ({ value: n + 1 }))).toEqual({ before: 1, after: 2 });
@@ -234,12 +234,11 @@ it("keeps for records keyed by their subject itself only the witness and the tom
 	// The envelope's witness is written with it: a migration tells it from a raw value of its shape.
 	expect(await indexOf("alice", keyedSpace)).toEqual({ "witness.record": 1 });
 	// An envelope with no witness gets one from the change that rewrites it.
-	await s.putIfAbsent(
+	await plantValue(
+		s,
 		{ space: keyedSpace, partition: "carol", name: "record" },
 		envelope("carol", 1),
-		{
-			expiry: { kind: "never" },
-		},
+		{ kind: "never" },
 	);
 	expect(await records.change("carol", (n) => ({ value: n + 1 }))).toEqual({ before: 1, after: 2 });
 	expect(await indexOf("carol", keyedSpace)).toEqual({ "witness.record": 1 });
@@ -262,5 +261,8 @@ it("refuses to build without a batch across, over an index not the space's, or a
 	expect(at(indexedSpace, { ...indexSpaceOf(indexedSpace), name: "other.index" })).toThrow(/index/);
 	expect(at(indexedSpace, { ...indexSpaceOf(indexedSpace), guarantees: [] })).toThrow(/index/);
 	expect(at({ ...indexedSpace, subjectData: "none" })).toThrow(/category/);
-	expect(at({ name: indexedSpace.name, guarantees: indexedSpace.guarantees })).toThrow(/category/);
+	// A declaration with no category, as an untyped wiring may still hand one over.
+	expect(at({ name: indexedSpace.name, guarantees: indexedSpace.guarantees } as Space)).toThrow(
+		/category/,
+	);
 });

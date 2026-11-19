@@ -31,7 +31,7 @@ const carried = z.strictObject({
 
 /**
  * What an earlier version carried, which instances not yet upgraded still write: the continuation
- * named `link`, its session and subject as a field of their own. Read only, never written.
+ * named `link`, its session and subject as a field of their own. Read only. TODO(0.22): goes.
  */
 const earlier = z.strictObject({
 	redirectTo: z.string().optional(),

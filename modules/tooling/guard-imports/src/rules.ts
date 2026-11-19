@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { type Edge, type FileFacts, type Reference, realOf } from "./facts/facts.ts";
-import type { Scope } from "./scope.ts";
+import { budgetsAsTest, type Scope } from "./scope/scope.ts";
 import type { Surface } from "./surface/surface.ts";
 import type { Pkg } from "./workspace.ts";
 
@@ -19,10 +19,15 @@ function packagesUsed(facts: FileFacts) {
 const typesAloneLoaded = (edge: Edge) =>
 	edge.loads && edge.bindings.length > 0 && edge.bindings.every((b) => b.typeOnly);
 
-/** The values a file takes from the module `from` by its top-level imports and re-exports (none inside a declared module): `default`, a name, or `*`. */
-export function valuesTaken(facts: FileFacts, from: string): string[] {
+/** The values a file takes from the module `from` by its top-level imports and re-exports (none inside a declared module), or by those of `forms` alone: `default`, a name, or `*`. */
+export function valuesTaken(
+	facts: FileFacts,
+	from: string,
+	forms: readonly ("import" | "export-from")[] = ["import", "export-from"],
+): string[] {
 	return facts.edges
-		.filter((e) => (e.form === "import" || e.form === "export-from") && e.specifier.text === from)
+		.filter((e) => (e.form === "import" || e.form === "export-from") && forms.includes(e.form))
+		.filter((e) => e.specifier.text === from)
 		.filter((e) => ts.isSourceFile(e.node.parent))
 		.flatMap((e) => e.bindings.filter((b) => !b.typeOnly))
 		.map((b) => (b.form === "named" ? b.imported : b.form === "default" ? "default" : "*"));
@@ -57,7 +62,11 @@ function keyedBy(facts: FileFacts, from: string): string[] {
 		.map((r) => r.node.text);
 }
 
-/** G3, G4, G8: what one source file of a package may import. */
+/**
+ * G3, G4, G8: what one source file of a package may import. G4 reads test code as the budgets do
+ * (`budgetsAsTest`), so a test helper `./testing` alone reaches may use another package's; G3 and G8
+ * read only a file named as a test as one.
+ */
 export function fileImportRules(s: Scope, p: Pkg, file: string) {
 	const { byName, report } = s;
 	const runtimeDeps = new Set(
@@ -65,13 +74,14 @@ export function fileImportRules(s: Scope, p: Pkg, file: string) {
 	);
 	const exportsModule = p.manifest.exports?.["./module"] !== undefined;
 	if (s.isTest(file)) return;
+	const testCode = budgetsAsTest(s, p, file);
 	const where = `${p.name}/${file}`;
 	for (const { edge, name, subpath } of packagesUsed(s.factsOf(p, file))) {
 		const specifier = edge.specifier.text ?? "";
 		if (exportsModule && byName.has(name) && subpath === "module") {
 			report("G3 only assembly uses composition definitions", where, specifier);
 		}
-		if (byName.has(name) && subpath === "testing") {
+		if (byName.has(name) && subpath === "testing" && !testCode) {
 			report("G4 contract tests are used only from tests", where, specifier);
 		}
 		if (edge.loads && !runtimeDeps.has(name)) {
@@ -218,8 +228,6 @@ export function bridgeRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
 			bridges.filter((b) => b !== p && takes(b)),
 		);
 	}
-	const ownerOf = ({ manifest: { replaces, adapts } }: Pkg) =>
-		typeof replaces === "string" ? replaces : typeof adapts === "string" ? adapts : undefined;
 	for (const p of s.packages) {
 		const own = p.manifest.exports?.["./module"];
 		for (const file of s.sources(p).filter((f) => s.isTest(f))) {
@@ -227,7 +235,8 @@ export function bridgeRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
 			const compose = (name: string) => {
 				composed.add(name);
 				const q = s.byName.get(name);
-				const owner = q && ownerOf(q);
+				// Only an adapter serves an owner (G25), so composing it composes its owner.
+				const owner = q && s.ownerServed(q);
 				if (owner) composed.add(owner);
 			};
 			const facts = s.factsOf(p, file);
@@ -257,7 +266,7 @@ export function bridgeRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
 }
 
 /** G22, G24: which packages wire a feature's store interface, and how. */
-export function wiringRules(s: Scope) {
+export function wiringRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
 	const { kindOf, report } = s;
 	const g22 = "G22 only wiring wires, and a feature that declares storeWiring has one";
 	const isWiring = (p: Pkg) => kindOf(p) === s.budget.wiringKind;
@@ -267,17 +276,31 @@ export function wiringRules(s: Scope) {
 			report(g22, p.name, `kind ${kindOf(p) || "none"}`);
 		if (p.manifest.storeWiring && !wired.has(p.name)) report(g22, p.name, "no package wires it");
 	}
-	// G24: a wiring keys its guarantees by the needs its feature declares, so the feature declares them.
+	// G24: a wiring that declares spaces keys their guarantees by the needs its feature declares. It
+	// declares spaces where its shipped code takes a point of a package made for wirings.
+	const forWiring = s.packages.filter((p) => p.manifest.forWiring === true);
+	const declaresSpaces = (w: Pkg) =>
+		s
+			.sources(w)
+			.filter((file) => !s.isTest(file))
+			.some((file) =>
+				forWiring.some((q) => {
+					const points = surfaces.get(q.name)?.points ?? new Set<string>();
+					return valuesTaken(s.factsOf(w, file), q.name).some(
+						(name) => points.has(name) || (name === "*" && points.size > 0),
+					);
+				}),
+			);
 	for (const w of s.packages.filter(isWiring)) {
 		const feature = w.manifest.wires;
-		if (feature === undefined) continue;
+		if (feature === undefined || !declaresSpaces(w)) continue;
 		const keyed = s
 			.sources(w)
 			.filter((file) => !s.isTest(file))
 			.some((file) => keyedBy(s.factsOf(w, file), feature).length > 0);
 		if (!keyed) {
 			report(
-				"G24 a wired feature declares its store's needs",
+				"G24 a wiring that declares spaces keys their guarantees by the needs its feature declares",
 				feature,
 				`${w.name} keys no guarantee by them`,
 			);
@@ -297,8 +320,9 @@ export function axisRules(s: Scope) {
 			report(g25, p.name, "declares replaces and adapts");
 		} else if (isAdapter && replaces === undefined && adapts === undefined) {
 			report(g25, p.name, "declares neither replaces nor adapts");
-		} else if (isAdapter) {
-			const owner = String(replaces ?? adapts);
+		}
+		const owner = s.ownerServed(p);
+		if (owner !== undefined) {
 			if (!s.byName.has(owner)) report(g25, p.name, `names no workspace package: ${owner}`);
 			else axes.set(owner, [...(axes.get(owner) ?? []), p]);
 			// Wording comes with its axis as the default, so it never also joins its owner as a bridge.

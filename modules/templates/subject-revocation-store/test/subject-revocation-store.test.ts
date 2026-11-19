@@ -119,7 +119,7 @@ describe("subject-revocation's erasure over the wiring", () => {
 		expect(await fence.fence("alice", "r1")).toBe("erased");
 		expect(await fence.fence("bob", "r2")).toBe("passed");
 		const kept = await app.get(store).get({
-			space: { name: "subject-revocation-store.receipts", guarantees: [] },
+			space: simulated.declaredSpace("subject-revocation-store.receipts"),
 			partition: "r2",
 			name: "record",
 		});
@@ -128,7 +128,7 @@ describe("subject-revocation's erasure over the wiring", () => {
 		expect(
 			(
 				await app.get(store).get({
-					space: { name: "subject-revocation-store.receipts", guarantees: [] },
+					space: simulated.declaredSpace("subject-revocation-store.receipts"),
 					partition: "r2",
 					name: "record",
 				})

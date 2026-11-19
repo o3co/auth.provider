@@ -1,0 +1,54 @@
+import { legacyVariablesCheck, loadConfig } from "{{configFiles}}";
+import { assemble, BootRefused } from "{{kernel}}";
+// The declared contract under a name of the script's own, so no name it bears meets one used here.
+import { {{contract}} as declaredContract } from "{{entry}}";
+{{imports}}
+
+{{refused}}
+
+// The app as `start` builds it, never started: no route is served while the member runs.
+const files = (process.env.APP_CONFIG ?? "config/application.conf").split(",");
+const source = { files, env: process.env };
+const app = await loadConfig(source)
+	.then(async (config) => {
+		// A variable 0.17 read, left in the environment, is named once, or refuses boot, as config-files says.
+		const told = await legacyVariablesCheck(source);
+		if (told !== undefined) await written(process.stderr, `warn config-files: ${told}\n`);
+		// A tool's: built and stopped, never started, so it serves nothing.
+		return assemble({ modules: [{{modules}}], config, neverStarted: true });
+	})
+	.catch(refused);
+/** Not finished, look and run again: a fixed line, never a value or an error's words, then 1. */
+const failed = async (line: string): Promise<never> => {
+	await written(process.stderr, `failed: ${line}\n`).catch(() => undefined);
+	// Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
+	await app.stop().catch(() => undefined);
+	process.exit(1);
+};
+// The arguments go to the member unread; it parses them, and answers a usage error itself.
+// Typed as the shape asks, and read as anything: an answer of no such shape reaches the fixed line.
+let answer: unknown;
+try {
+	const typed: { readonly lines: readonly string[]; readonly code: number } = await app
+		.get(declaredContract)
+		.{{member}}(process.argv.slice(2));
+	answer = typed;
+} catch {
+	answer = await failed("the run stopped on an unexpected error");
+}
+const read: { lines?: unknown; code?: unknown } =
+	typeof answer === "object" && answer !== null ? answer : {};
+const lines: readonly string[] =
+	Array.isArray(read.lines) && read.lines.every((line) => typeof line === "string")
+		? read.lines
+		: await failed("the run's answer could not be read");
+// 78 is a refused boot's alone, and nothing past it is passed on.
+const code: number =
+	typeof read.code === "number" && Number.isInteger(read.code) && read.code >= 0 && read.code <= 77
+		? read.code
+		: await failed("the run answered a code this script does not pass on");
+// The member's own lines, written whole once it answered: a run that is killed writes none.
+if (lines.length > 0) await written(process.stdout, `${lines.join("\n")}\n`);
+// Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
+await app.stop().catch(() => undefined);
+process.exit(code);

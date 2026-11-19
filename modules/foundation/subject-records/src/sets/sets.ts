@@ -9,6 +9,7 @@ import {
 	type SubjectPlace,
 	witnessed,
 } from "../index/index.ts";
+import { changeWritten } from "../writer.ts";
 
 /**
  * Keyed sets in a space holding subjects' data, in the format `records`' keyed sets keep
@@ -37,7 +38,7 @@ export function subjectKeyedSetsIn(
 		open((await place.store.get(changeRecords.keyOf(setOf(key)))).entry?.value).value;
 	/** Rewrites a set as the codec decides on what it holds, in the envelope it was read in. */
 	const rewritten = (key: string, decide: (current: Json | undefined) => Next<Json>) =>
-		changeRecords({
+		changeWritten({
 			targets: [setOf(key)],
 			watch: ([held]) => {
 				const { subject } = open(held);
@@ -75,7 +76,7 @@ export function subjectKeyedSetsIn(
 				| { readonly pushedOut: readonly string[] }
 				| "erased"
 				| "another-subject";
-			await changeRecords({
+			await changeWritten({
 				targets: byKeys
 					? [setOf(key), bucketOf(subject, key)]
 					: witnessing

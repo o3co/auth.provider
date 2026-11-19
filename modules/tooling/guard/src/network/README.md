@@ -37,7 +37,7 @@ Internal module of `guard`: G26, how product code may reach the network, and G27
 - Every starter `forks` names is held to that form, whatever its scan finds it reaches: one starting nothing as written is refused all the same.
 - Every helper `forks` names is a plain `.mjs` file, else reported and never read. It imports `node:dns/promises`' `lookup` alone, by one import, and loads nothing else: no other import, no re-export, no `import()` or `require`. What it reaches counts toward the package's words.
 - `redis` and `smtp` reach a server the deployment provides: a package declaring either has a `## Deployment` section on its card, stating what that server must be (G27).
-- A place no declared word lets through is refused, as is a word guard does not know, a declared word the package reaches nothing with, and a word its card does not state. Only the product kinds' packages are read (common, protocol, verification and assembly are not), and in them neither tests, test tables nor a published contract test suite.
+- A place no declared word lets through is refused, as is a word guard does not know, a declared word the package reaches nothing with, and a word its card does not state. Only the product kinds' packages are read (common, protocol, verification and assembly are not), and in them neither tests, test tables nor test code as guard-imports reads it (`budgetsAsTest`: what only a package's `./testing` reaches).
 
 ## Depends on
 - `guard-imports`: each file's `facts`, and `lexicalAnalysis` for a file read alone.

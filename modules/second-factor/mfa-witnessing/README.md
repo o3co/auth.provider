@@ -19,6 +19,7 @@
   - It reads the factors again after marking: a mark it set beside nothing counting (a reset took the factors meanwhile) goes, by `withdraw` where offered; a mark still standing beside nothing counting after a withdraw is `inconsistent`. After that removal it reads again and marks anew where one counts, three times at most; every mark it makes is checked so, and past the last it is unavailable, leaving at worst a factor unmarked.
   - Unavailable where the witness or `mfa` cannot answer, named `mfa` as `mfa` names it.
   - Unavailable too where a reset lands between its last read of the factors and its last read of the witness, though neither then holds anything; asked again, it answers `none`.
+- The generated app's `witness-backfill` script, declared in the manifest's `appEntries`: it settles each subject read through `witnessBackfill` and counts the answers, in this order: `marked`, `held`, `none`, `unclaimed`, `inconsistent`. Its counts carry no subject, configured value or error's words.
 - Audit event `mfa.enrollment_inconsistent`, declared in `./audit-events`.
 
 ## Invariants

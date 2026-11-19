@@ -47,7 +47,7 @@ export function passkeysOver(p: PasskeyParts): Passkeys {
 			if (typeof handle !== "string" || handle === "") return refused("no-user-handle");
 			const challenge = challengeOf(response);
 			if (challenge === undefined || typeof answered?.id !== "string") return refused("malformed");
-			const opened = await p.challenges.take(challenge);
+			const opened = await p.challenges.take(challenge, "assertion");
 			// A format 1 challenge names no asker (`by` none), so it is taken and refused whatever it names.
 			const mine =
 				opened?.kind === "assertion" &&

@@ -13,6 +13,12 @@ export interface BuildContext<S> extends Runtime {
 	 * No factory can write or redefine it.
 	 */
 	readonly environment: "production" | "development";
+	/**
+	 * Whether this assembly is never started (`AssemblyInput.neverStarted`): a tool's, which builds
+	 * and stops but never serves. Set by code at `assemble` alone, never by config; no factory can
+	 * write or redefine it.
+	 */
+	readonly neverStarted: boolean;
 	get<T>(contract: Contract<T>): Promise<T>;
 	/** The interface of a contract the module takes optionally, or none where no module provides it. */
 	getOptional<T>(contract: Contract<T>): Promise<T | undefined>;

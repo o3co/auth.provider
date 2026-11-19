@@ -9,7 +9,7 @@ Internal module of `claims-selection`: erasing a subject's selections, and readi
 - What the store keeps and how it fences (the Store). When erasure runs (`account-erasure`). Whose a family is (the module keeping families, through `familySubjects`).
 
 ## Offers
-- `selectionEraser` (the store, the family reading if composed) → the eraser: a subject's selections erased through the store's `erase`, a window doing the same for each subject, and `migrate` with `selectionSubjectOf`; `erasable` only where the store offers both ports, empty reports where not. It runs after no other eraser.
+- `selectionEraser` (the store, the family reading if composed) → the eraser: a subject's selections erased through the store's `erase`, a window doing the same for each subject, and `migrate` with `selectionSubjectOf`; `erasable` only where the store offers both ports, empty reports where not.
 - `selectionSubjectOf` (the family reading if composed) → the migration's reading: format 2's own subject; a family's target 0.19 kept without one by its family, ended taken for an orphan; a code's selection, a pin or a token's target 0.19 kept without one unreadable, its reason giving the one bound (86,520 s after the last 0.19 instance stopped, frozen from v0.19.1) and that a stop past it means a 0.19 instance still writes.
 - `portsRefused` (the store) → why its ports cannot be used, or none: `erase` and `migrate` together or neither, a part refused at build; `portsOf` → both, or none.
 

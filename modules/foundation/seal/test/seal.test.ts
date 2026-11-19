@@ -9,7 +9,7 @@ import {
 } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { resealers, resealing, seal } from "../src/contract.ts";
+import { resealers, resealing, resealRun, seal } from "../src/contract.ts";
 import sealModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 
@@ -203,6 +203,49 @@ it("reseals through each holder in name order, answering counts alone, past a ho
 	expect(
 		await (await bootWith({ current: { id: "a", key: key() } })).get(resealing).reseal(),
 	).toEqual([]);
+});
+
+it("answers the reseal script's lines and code: each holder's counts, then whether previous keys may be retired", async () => {
+	const holder = (name: string, answer: { resealed: number; left: number } | "fails") =>
+		defineModule({ name: `holder-${name}`, replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(resealers).by(() => ({
+				name,
+				reseal: async () => {
+					if (answer === "fails") throw new Error("secret of a holder");
+					return answer;
+				},
+			})),
+		]);
+	const run = async (holders: Module[], args: readonly string[] = []) =>
+		(await bootWith({ current: { id: "a", key: key() } }, holders)).get(resealRun).run(args);
+	expect(
+		await run([holder("b", { resealed: 0, left: 0 }), holder("a", { resealed: 0, left: 0 })]),
+	).toEqual({
+		lines: ["a resealed 0 left 0", "b resealed 0 left 0", "previous keys may be retired"],
+		code: 0,
+	});
+	expect(await run([])).toEqual({ lines: ["previous keys may be retired"], code: 0 });
+	const again = "run reseal again before retiring a key";
+	expect(await run([holder("a", { resealed: 0, left: 0 }), holder("b", "fails")])).toEqual({
+		lines: ["a resealed 0 left 0", "b failed", again],
+		code: 1,
+	});
+	// A holder that failed outranks values left, which outrank values sealed again.
+	expect(await run([holder("a", { resealed: 1, left: 1 }), holder("b", "fails")])).toMatchObject({
+		code: 1,
+	});
+	expect(await run([holder("a", { resealed: 3, left: 1 })])).toEqual({
+		lines: ["a resealed 3 left 1", again],
+		code: 2,
+	});
+	expect(await run([holder("a", { resealed: 3, left: 0 })])).toEqual({
+		lines: ["a resealed 3 left 0", again],
+		code: 3,
+	});
+	expect(await run([holder("a", { resealed: 0, left: 0 })], ["--now"])).toEqual({
+		lines: ["usage: reseal takes no arguments"],
+		code: 64,
+	});
 });
 
 it("takes every handle its takes name", async () => {

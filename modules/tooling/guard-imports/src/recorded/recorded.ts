@@ -1,6 +1,6 @@
 import { join, resolve, sep } from "node:path";
 import ts from "typescript";
-import { budgetsAsTest, type Scope } from "../scope.ts";
+import { budgetsAsTest, type Scope } from "../scope/scope.ts";
 import { importsOf, packageOf } from "../source.ts";
 
 const options: ts.CompilerOptions = {

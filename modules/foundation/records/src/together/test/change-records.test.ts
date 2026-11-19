@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { type Json, type Space, type Store, spaces, store } from "@mod/store";
+import { subjectWriter } from "@mod/store/subject-writer";
 import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import {
@@ -19,8 +20,8 @@ const runtime = quietRuntime({
 	random: { bytes: (n) => new Uint8Array(n) },
 });
 const guarantees = ["no-eviction", "durable", "replicated"] as const;
-const lists: Space = { name: "many-lists", guarantees: [...guarantees] };
-const items: Space = { name: "many-items", guarantees: [...guarantees] };
+const lists: Space = { name: "many-lists", guarantees: [...guarantees], subjectData: "none" };
+const items: Space = { name: "many-items", guarantees: [...guarantees], subjectData: "none" };
 const opened = contract<Store>("test.store");
 
 type List = { readonly ids: readonly string[] };
@@ -65,6 +66,38 @@ const clearing = (owner: string) => ({
 			(item as Item | undefined)?.owner === owner ? { value: { owner, gone: true } } : undefined,
 		),
 	}),
+});
+
+it("sends the subject writer given with its one write, in one partition and across two, and none where none is given", async () => {
+	const { s, listPlace, itemPlace, at } = await open();
+	const sent: unknown[] = [];
+	// The same store, keeping the options each write reached it with.
+	const spied = new Proxy(s, {
+		get: (store, name) => {
+			const port = Reflect.get(store, name);
+			if (name !== "batch" && name !== "batchAcross") return port?.bind?.(store) ?? port;
+			return (conditions: unknown, writes: unknown, options: unknown) => {
+				sent.push(options);
+				return port.call(store, conditions, writes, options);
+			};
+		},
+	}) as Store;
+	const list = { ...listPlace, store: spied };
+	const item = { ...itemPlace, store: spied };
+	const write = (targets: { place: Place; key: string }[], writer?: typeof subjectWriter) =>
+		changeRecords({
+			targets,
+			...(writer ? { writer } : {}),
+			decide: (read) => ({ targets: read.map(() => ({ value: { ids: [] } })) }),
+		});
+	await write([at(list, "one")], subjectWriter);
+	await write([at(list, "two"), at(item, "two")], subjectWriter);
+	await write([at(list, "three")]);
+	expect(sent.map((o) => (o as { writer?: unknown }).writer)).toEqual([
+		subjectWriter,
+		subjectWriter,
+		undefined,
+	]);
 });
 
 it("writes a record and the records it names, watched, as one", async () => {
@@ -357,7 +390,7 @@ it("pairs records of two places to change as one, apart by place, and refuses th
 	expect(() =>
 		pairedRecordsAcross(listPlace, { ...itemPlace, store: another }, "user", refuse),
 	).toThrow();
-	const loose: Space = { name: "many-items", guarantees: ["no-eviction"] };
+	const loose: Space = { name: "many-items", guarantees: ["no-eviction"], subjectData: "none" };
 	expect(() =>
 		pairedRecordsAcross(listPlace, { ...itemPlace, space: loose }, "user", refuse),
 	).toThrow();
@@ -420,7 +453,7 @@ it("gives a record the stand-in changes a lifetime of 1 ms at least, as records 
 });
 
 it("reads and writes a record under a secret with a plain one as one, and refuses a space named both ways", async () => {
-	const secrets: Space = { name: "many-secrets", guarantees: [...guarantees] };
+	const secrets: Space = { name: "many-secrets", guarantees: [...guarantees], subjectData: "none" };
 	const app = await assemble({
 		modules: [
 			simulatedStore().module,

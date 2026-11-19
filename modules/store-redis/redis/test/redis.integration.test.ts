@@ -191,7 +191,12 @@ afterAll(() => {
 });
 
 const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
-	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable", "no-eviction"] })),
+	// A space holding a subject's data, written plainly through the store's ports, so the shared ledger records it.
+	m.contribute(spaces).by(() => ({
+		name: "kept",
+		guarantees: ["durable", "no-eviction"],
+		subjectData: "retained",
+	})),
 	...contractSpaces.map((space) => m.contribute(spaces).by(() => space)),
 ]);
 
@@ -203,6 +208,7 @@ async function open(
 	prefix = `t${Date.now()}x${++opened}`,
 	through = url,
 	replication: string | null = "replicas",
+	mayBuildUnderKey = false,
 ) {
 	const app = await assemble({
 		modules: [redisModule, tlsOptionsForTests, ...extra],
@@ -210,6 +216,7 @@ async function open(
 			...kernelConfig({ deployment: "multi" }),
 			redis: { url: through, prefix, ...(replication ? { replication } : {}) },
 		},
+		...(mayBuildUnderKey ? { neverStarted: true as const } : {}),
 	});
 	prefixes.set(app.get(store), prefix);
 	return app;
@@ -291,11 +298,11 @@ storeContract("redis", {
 
 /** The prefix each process of the upkeep contract opened, so another opens the same data. */
 const upkeepPrefixes = new WeakMap<UpkeepProcess, string>();
-const startOn = async (prefix: string, declared: readonly Space[]) => {
+const startOn = async (prefix: string, declared: readonly Space[], mayBuildUnderKey = false) => {
 	const owner = defineModule({ name: "upkeep-owner", replicaSafe: true, takes: [] }, (m) =>
 		declared.map((space) => m.contribute(spaces).by(() => space)),
 	);
-	const app = await open([owner], prefix, proxyUrl);
+	const app = await open([owner], prefix, proxyUrl, "replicas", mayBuildUnderKey);
 	stops.push(() => app.stop(1000));
 	const process = {
 		store: app.get(store),
@@ -312,6 +319,9 @@ upkeepContract("redis", {
 		const raw = keysUnder(upkeepPrefixes.get(process) as string).valueKey(key);
 		return cli(container, "exists", raw) === "1";
 	},
+	expiresOnItsOwn: true,
+	anotherMayBuildUnderKey: (process, declared) =>
+		startOn(upkeepPrefixes.get(process) as string, declared, true),
 });
 
 it("answers durable unmet once the server skips its fsyncs while it rewrites, and verified again once it does not", async () => {
@@ -807,7 +817,13 @@ describe("one server alone, as configured with replication none", () => {
 	});
 	const replicatedOnly = defineModule(
 		{ name: "replicated-owner", replicaSafe: true, takes: [] },
-		(m) => [m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] }))],
+		(m) => [
+			m.contribute(spaces).by(() => ({
+				name: "replicated",
+				guarantees: ["replicated"],
+				subjectData: "none",
+			})),
+		],
 	);
 
 	it("boots on Redis 7.4 and 7.0 alike: one server, its run id the same to both connections, and the store's scripts run, warning at each boot of the spaces it leaves unreplicated", async () => {
@@ -875,7 +891,11 @@ describe("settings the server will not show", () => {
 		if (blocked) docker("rm", "-f", "-v", blocked);
 	});
 	const kept = defineModule({ name: "kept-owner", replicaSafe: true, takes: [] }, (m) => [
-		m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable", "no-eviction"] })),
+		m.contribute(spaces).by(() => ({
+			name: "kept",
+			guarantees: ["durable", "no-eviction"],
+			subjectData: "none",
+		})),
 	]);
 	const boot = (redis: object, through = blockedUrl, recorded = recordingLog()) =>
 		assemble({

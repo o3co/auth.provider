@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import type { section } from "./section.ts";
-import type { PendingNotices, SessionClients } from "./store.ts";
+import type { NoticeBodies, NoticeQueue, PendingNotices, SessionClients } from "./store.ts";
 
 export type RpLogoutSettings = z.input<typeof section>;
 
@@ -85,11 +85,29 @@ export interface PendingNoticesPlace extends Faults {
 	readonly notices: PendingNotices;
 }
 
-/** What rp-logout needs from any implementation of the notices: each kept until done, a failed one kept, through faults. */
+/** What rp-logout needs from any implementation of the 0.19 notices: each kept until done, a failed one kept, through faults. */
 export function pendingNoticesContract(
 	name: string,
 	open: () => Promise<PendingNoticesPlace>,
 ): void {
+	listContract("rp-logout's pending notices", name, open);
+}
+
+/** A place that keeps the queue of entries, as one implementation of the store interface offers it. */
+export interface NoticeQueuePlace extends Faults {
+	readonly queue: NoticeQueue;
+}
+
+/** What rp-logout needs from any implementation of the queue: each entry kept until done, a failed one kept, through faults. */
+export function noticeQueueContract(name: string, open: () => Promise<NoticeQueuePlace>): void {
+	listContract("rp-logout's notice queue", name, async () => {
+		const { queue, ...faults } = await open();
+		return { notices: queue, ...faults };
+	});
+}
+
+/** The cases a list kept until done answers, the 0.19 notices' or the queue's. */
+function listContract(label: string, name: string, open: () => Promise<PendingNoticesPlace>): void {
 	let n = 0;
 	const fresh = () => `n-${++n}-${Math.random().toString(36).slice(2)}`;
 	const listed = async (notices: PendingNotices) => {
@@ -99,7 +117,7 @@ export function pendingNoticesContract(
 		});
 		return found.sort();
 	};
-	describe(`rp-logout's pending notices: ${name}`, () => {
+	describe(`${label}: ${name}`, () => {
 		it("keeps each notice until done, and one whose handling fails", async () => {
 			const place = await open();
 			const [kept, settled] = [fresh(), fresh()].sort() as [string, string];
@@ -125,6 +143,74 @@ export function pendingNoticesContract(
 			await restart();
 			await pressMemory();
 			expect(await listed(place.notices)).toEqual([kept, settled]);
+		});
+	});
+}
+
+/** A place that keeps the notices' bodies, as one implementation of the store interface offers it. */
+export interface NoticeBodiesPlace extends Faults {
+	readonly bodies: NoticeBodies;
+	/** Moves the place's clock on, so lifetimes run out. */
+	advance(ms: number): void;
+}
+
+/**
+ * What rp-logout needs from any implementation of the bodies: each kept once by id for its subject
+ * and exactly its lifetime, removed on asking, erased by subject handing each removed over, through
+ * faults. Their queue is checked as the pending notices are (`pendingNoticesContract`).
+ */
+export function noticeBodiesContract(name: string, open: () => Promise<NoticeBodiesPlace>): void {
+	let n = 0;
+	const fresh = () => `b-${++n}-${Math.random().toString(36).slice(2)}`;
+	describe(`rp-logout's notice bodies: ${name}`, () => {
+		it("keeps a body once by id, for exactly its lifetime, removed on asking, and through faults", async () => {
+			const {
+				bodies,
+				advance,
+				loseNextAnswer: lose,
+				failover,
+				restart,
+				pressMemory,
+			} = await open();
+			const [id, gone, settled] = [fresh(), fresh(), fresh()];
+			expect(await bodies.create(id, "one", 1000, "alice")).toBe("created");
+			expect(await bodies.create(id, "two", 1000, "alice")).toBe("exists");
+			await bodies.create(gone, "three", 60_000, "alice");
+			await bodies.remove(gone);
+			advance(999);
+			expect([await bodies.read(id), await bodies.read(gone)]).toEqual(["one", undefined]);
+			advance(1);
+			expect(await bodies.read(id)).toBeUndefined();
+			// Where the place has them: a lost answer settles, and the body survives a failover, a
+			// restart and memory pressure.
+			if (!lose || !failover || !restart || !pressMemory) return;
+			lose();
+			expect(await bodies.create(settled, "settled", 60_000, "alice")).toBe("created");
+			await failover();
+			await restart();
+			await pressMemory();
+			expect(await bodies.read(settled)).toBe("settled");
+		});
+
+		it("erases, where the place erases, a subject's bodies, handing each over, and only that subject's", async (context) => {
+			const { bodies } = await open();
+			const { erase } = bodies;
+			if (!erase) return context.skip();
+			const [first, kept] = [fresh(), fresh()];
+			await bodies.create(first, "erin's", 60_000, "erin");
+			await bodies.create(kept, "finn's", 60_000, "finn");
+			const removed: string[] = [];
+			const report = await erase.call(bodies, "erin", new AbortController().signal, (b) => {
+				removed.push(b);
+			});
+			// A Store that erases nothing now (its records not indexed yet) says so, and fences nothing.
+			if (report.kind === "stopped") return context.skip();
+			expect([report.kind, removed, await bodies.read(kept)]).toEqual([
+				"erased",
+				["erin's"],
+				"finn's",
+			]);
+			expect(await bodies.create(fresh(), "again", 60_000, "erin")).toBe("erased");
 		});
 	});
 }

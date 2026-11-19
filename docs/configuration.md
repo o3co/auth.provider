@@ -144,7 +144,7 @@ From `@mod/erasure-journal-file`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `erasure-journal-file.path` | string |  | yes |  |  | The journal's file, an absolute path on the one node that runs erasure, kept apart from the store's backups. Its lock is the same path with `.lock` added. |
+| `erasure-journal-file.path` | string |  | yes |  |  | The journal's file, an absolute path on the one node that runs erasure, kept apart from the store's backups, in a directory on a file system that takes hard links (the lock is linked in place). Its lock is the same path with `.lock` added. |
 
 ## exchange-id-tokens
 

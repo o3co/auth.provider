@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Unavailable } from "@mod/kernel";
 import type { Control, Json, Space, Store } from "@mod/store";
+import { plantValue } from "@mod/store/testing";
 import { expect, it } from "vitest";
 import { clockAllowanceMs } from "../src/erase/erase.ts";
 import { jointRecordsIn } from "../src/joint/joint.ts";
@@ -61,15 +62,14 @@ async function opened() {
 				partition: `${part(space, subject)}.${bucket}`,
 				name: "record",
 			};
-			await s.putIfAbsent(
+			await plantValue(
+				s,
 				key,
 				keys
 					.filter((k) => bucketOf(k) === bucket)
 					.sort()
 					.map((k) => [k, "record"]),
-				{
-					expiry: { kind: "never" },
-				},
+				{ kind: "never" },
 			);
 		}
 	};
@@ -336,8 +336,8 @@ it("refuses to erase over an index not the space's, as the builders refuse it", 
 it("reads every value raw while records are only read, whatever its shape, and changes it raw", async () => {
 	const { s, at, raw } = await opened();
 	const lookalike = { "records:v": 1, subject: "bob", value: { pii: "alice" } };
-	await s.putIfAbsent({ space: indexed, partition: "old", name: "record" }, lookalike, {
-		expiry: { kind: "never" },
+	await plantValue(s, { space: indexed, partition: "old", name: "record" }, lookalike, {
+		kind: "never",
 	});
 	const reading = subjectRecordsIn<Json>(at(indexed, s, "reader"), "w", refuse);
 	expect(await reading.read("old")).toEqual(lookalike);
@@ -350,7 +350,7 @@ it("reads every value raw while records are only read, whatever its shape, and c
 it("reads a bucket in no shape it knows as unreadable everywhere, skipping no entry", async () => {
 	const { s, at, raw } = await opened();
 	const put = (space: Space, partition: string, value: Json, name = "record") =>
-		s.putIfAbsent({ space, partition, name }, value, { expiry: { kind: "never" } });
+		plantValue(s, { space, partition, name }, value, { kind: "never" });
 	const envelope = { "records:v": 1, subject: "alice", value: 1 };
 	await put(indexed, "k", envelope);
 	await put(indexed, "k", envelope, "set");

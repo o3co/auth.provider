@@ -19,7 +19,7 @@ export interface BoundaryWrite {
 	readonly deadline: number;
 }
 
-/** Boundaries by subject, each changed only from what it holds, kept without end. Every call throws Unavailable when the place cannot tell. */
+/** Boundaries by subject, each changed only from what it holds, kept without end. Every call throws Unavailable when the place cannot answer. */
 export interface BoundaryStore {
 	/** Keeps a subject's first boundary, unless the subject holds one, made from each attempt's write. */
 	save(

@@ -1,7 +1,8 @@
-import { type BuildContext, contract, defineModule } from "@mod/kernel";
+import { erasers } from "@mod/erasure-extensions";
+import { type BuildContext, contract, defineModule, optional } from "@mod/kernel";
 import { passkeyWitnesses } from "@mod/passkey-witness";
 import { ceremonies, freshHandle } from "@mod/webauthn";
-import { keptChallenges } from "./challenges/challenges.ts";
+import { type KeptChallenges, keptChallenges } from "./challenges/challenges.ts";
 import {
 	challengeStore,
 	type PasskeyHolders,
@@ -12,10 +13,13 @@ import {
 	passkeyStore,
 	passkeys,
 	passkeyWitnessing,
+	registrationChallengeStore,
 	registrations,
 } from "./contract.ts";
+import { passkeysEraser } from "./erasure/eraser.ts";
 import { holdersOver } from "./holders/holders.ts";
 import { passkeysOver } from "./passkeys.ts";
+import { portsRefused, registrationPortsRefused } from "./ports/ports.ts";
 import { type KeptPasskeys, keptPasskeys } from "./records.ts";
 import { registrationsOver } from "./registration/registrations.ts";
 import { type Settings, section } from "./section.ts";
@@ -28,9 +32,9 @@ const kept = contract<KeptPasskeys>("passkeys.records");
 const passkeysOf = (c: Context) => c.get(kept);
 /** The holders, made once for each face of holding. */
 const made = contract<PasskeyHolders>("passkeys.holders-made");
-// A challenge lives as long as the relying party lets one be answered.
-const challengesOf = async (c: Context) =>
-	keptChallenges(await c.get(challengeStore), c.clock.now, (await c.get(ceremonies)).lifetimeMs);
+/** The challenges, made once for the module's parts. */
+const challengesKept = contract<KeptChallenges>("passkeys.challenges");
+const challengesOf = (c: Context) => c.get(challengesKept);
 /** The holdings over the one witnessing contributed, if any; two, or a witness with none, refuse boot. */
 const holdingOf = async (c: Context) => {
 	const [witnessing, ...others] = await c.collect(passkeyWitnessing);
@@ -55,16 +59,35 @@ export default defineModule(
 		name: "passkeys",
 		section,
 		replicaSafe: true,
-		takes: [challengeStore, passkeyStore, passkeyWitnesses, passkeyWitnessing, ceremonies],
+		takes: [
+			challengeStore,
+			// TODO(0.22): required.
+			optional(registrationChallengeStore),
+			passkeyStore,
+			passkeyWitnesses,
+			passkeyWitnessing,
+			ceremonies,
+		],
 	},
 	(m) => [
-		// Over a store that changes both its spaces as one: typed as required, and checked here for a
-		// store built where no type is checked.
+		// Over a passkey store, its ports whole: checked here, as the types cannot say all or none.
+		// A challenge lives as long as the relying party lets one be answered; over a registration
+		// challenge store, where composed, its ports whole.
+		m.provide(challengesKept).by(async (c) => {
+			const registrations = await c.getOptional(registrationChallengeStore);
+			const parted = registrations && registrationPortsRefused(registrations);
+			if (parted !== undefined) return c.refuse("passkeys", parted);
+			return keptChallenges(
+				await c.get(challengeStore),
+				c.clock.now,
+				(await c.get(ceremonies)).lifetimeMs,
+				registrations,
+			);
+		}),
 		m.provide(kept).by(async (c) => {
 			const store = await c.get(passkeyStore);
-			if (typeof store.updateTogether !== "function") {
-				return c.refuse("passkeys", "its passkey store cannot change both its spaces as one");
-			}
+			const parted = portsRefused(store);
+			if (parted !== undefined) return c.refuse("passkeys", parted);
 			return keptPasskeys(store, tokenOf(c), c.clock.now);
 		}),
 		m.provide(passkeys).by(async (c) => {
@@ -98,6 +121,12 @@ export default defineModule(
 			const records = await passkeysOf(c);
 			return { writtenHolding: (subject) => records.writtenHolding(subject) };
 		}),
+		// Its build takes only the stores, collecting no probes: the erasure gate collects erasers.
+		m
+			.contribute(erasers)
+			.by(async (c) =>
+				passkeysEraser(await c.get(passkeyStore), await c.getOptional(registrationChallengeStore)),
+			),
 		m.provide(made).by(async (c) => {
 			const held = await holdingOf(c);
 			if ("refused" in held) return c.refuse("passkeys", held.refused);

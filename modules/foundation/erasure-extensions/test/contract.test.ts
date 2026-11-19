@@ -36,12 +36,11 @@ it("takes no plain object for a report: one is made by records, behind a cast", 
 	expect(forged.kind).toBe("erased");
 });
 
-it("states whether an eraser can erase, and which erasers it follows", () => {
+it("states whether an eraser can erase", () => {
 	const empty = { reports: [], logoutGaps: 0 };
 	const eraser: Eraser = {
 		name: "mfa-flows",
 		erasable: false,
-		after: ["mfa"],
 		online: async () => empty,
 		window: async () => empty,
 		migrate: async () => [],
@@ -49,7 +48,7 @@ it("states whether an eraser can erase, and which erasers it follows", () => {
 	expect(eraser.erasable).toBe(false);
 	// @ts-expect-error Whether it can erase is stated, never left out, in 0.20.
 	const unstated: Eraser = { ...eraser, erasable: undefined };
-	expect(unstated.after).toEqual(["mfa"]);
+	expect(unstated.name).toBe("mfa-flows");
 });
 
 it("reads a record's subject three ways, an unreadable one with why", async () => {

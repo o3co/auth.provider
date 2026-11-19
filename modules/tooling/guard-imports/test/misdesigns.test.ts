@@ -86,7 +86,26 @@ const signer = feature("@mis/signer", {
 	by: "() => signing",
 	on: ["@mis/keys"],
 });
-const sound: readonly Pkg[] = [kernel, store, owner, adapter, keys, signer];
+/** An owner keeping an entry for one named taker, and that taker. */
+const kept = pkg(
+	"@mis/kept",
+	{
+		"src/contract.ts": "export {};\n",
+		"src/token.ts": "export const token = Object.freeze({});\n",
+	},
+	{
+		exports: { ".": "./src/contract.ts", "./token": "./src/token.ts" },
+		dependencies: { "@mis/kernel": "*" },
+		takenBy: { "./token": ["@mis/holder"] },
+	},
+	"foundation",
+);
+const holder = feature("@mis/holder", {
+	imports: 'import { token } from "@mis/kept/token";',
+	by: "() => token",
+	on: ["@mis/kept"],
+});
+const sound: readonly Pkg[] = [kernel, store, owner, adapter, keys, signer, kept, holder];
 /** The rules the whole workspace raises with `misdesigned` in it. */
 const raised = (misdesigned: Pkg) =>
 	[
@@ -123,6 +142,20 @@ describe("static-analysis specimens: misdesigns the import rules stop", () => {
 			on: ["@mis/owner"],
 		});
 		expect(raised(composing)).toEqual(["G3"]);
+	});
+
+	it("G31 stops a feature that loads an entry its owner keeps for named takers, and a taker handing it on", () => {
+		const loading = feature("@mis/loads-token", {
+			imports: 'import { token } from "@mis/kept/token";',
+			by: "() => token",
+			on: ["@mis/kept"],
+		});
+		expect(raised(loading)).toEqual(["G31"]);
+		const typed = feature("@mis/types-token", {
+			imports: 'import type { token } from "@mis/kept/token";\nexport type T = typeof token;',
+			on: ["@mis/kept"],
+		});
+		expect(raised(typed)).toEqual([]);
 	});
 
 	it("G31 stops a feature that takes a contract its owner keeps for named takers", () => {

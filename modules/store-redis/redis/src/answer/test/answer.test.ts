@@ -1,6 +1,6 @@
 import { Unavailable } from "@mod/kernel";
 import { expect, it } from "vitest";
-import { answerOf, list } from "../answer.ts";
+import { answerOf, committedOf, list } from "../answer.ts";
 
 const reply = (answer: unknown) => `run1\n${JSON.stringify(answer)}`;
 
@@ -40,4 +40,16 @@ it("answers unavailable for a reply holding no run id and JSON object", () => {
 
 it("rebuilds a list cjson wrote as an object, by its count", () => {
 	expect(list<string>({ 0: "a", 2: "c" }, 3)).toEqual(["a", undefined, "c"]);
+});
+
+it("reads a batch's committed answer with the time it committed at, and one holding none as unavailable", () => {
+	expect(committedOf({ at: 1_800_000_000_000 }, ["7"])).toEqual({
+		kind: "committed",
+		versions: ["7"],
+		at: 1_800_000_000_000,
+	});
+	// As a script from before the time was answered kept it under an idempotency mark.
+	for (const older of [{}, { at: "1800000000000" }, { at: null }]) {
+		expect(() => committedOf(older, []), JSON.stringify(older)).toThrow(Unavailable);
+	}
 });

@@ -79,6 +79,36 @@ describe("guard-imports", () => {
 		expect(rules([m, o]).sort()).toEqual(["G3", "G4"]);
 	});
 
+	it("G4 lets test code only its package's `./testing` reaches use another package's, and refuses shipped code", () => {
+		const o = pkg(
+			"@t4/o",
+			{ "src/contract.ts": "export const o = 1;\n", "src/testing.ts": "export const suite = 1;\n" },
+			{
+				exports: { ".": "./src/contract.ts", "./testing": "./src/testing.ts" },
+			},
+		);
+		const helper = 'import { suite } from "@t4/o/testing";\nexport const planted = suite;\n';
+		const m = pkg(
+			"@t4/m",
+			{
+				"src/contract.ts": "export const m = 1;\n",
+				"src/testing.ts": 'export { planted } from "./planting/planting.ts";\n',
+				"src/planting/planting.ts": helper,
+				"src/shipped.ts": helper,
+			},
+			{
+				exports: {
+					".": "./src/contract.ts",
+					"./testing": "./src/testing.ts",
+					"./shipped": "./src/shipped.ts",
+				},
+				dependencies: { "@t4/o": "*" },
+			},
+		);
+		const g4 = check([m, o], budget).filter((v) => v.rule.startsWith("G4"));
+		expect(g4.map((v) => v.where)).toEqual(["@t4/m/src/shipped.ts"]);
+	});
+
 	it("checks a published contract test suite's imports as shipped code", () => {
 		const p = pkg(
 			"@t/suite",
@@ -567,14 +597,24 @@ describe("guard-imports", () => {
 		]);
 	});
 
-	it("G24 refuses a wiring that keys no guarantee by the needs its feature declares", () => {
-		// Without exports, so no contract surface is built: this rule reads the wiring's source alone.
+	it("G24 refuses a wiring that declares spaces and keys no guarantee by the needs its feature declares", () => {
+		// A package made for wirings, whose `spaces` point a wiring takes to declare a space.
+		const store = pkg(
+			"@t/store",
+			{
+				"src/contract.ts": `import { extensionPoint } from "@t/kernel";\nexport const spaces = extensionPoint<string>("store.spaces", { multiplicity: "many" });\n`,
+			},
+			{ exports: { ".": "./src/contract.ts" }, forWiring: true },
+			"foundation",
+		);
+		const declares = `import { spaces } from "@t/store";\nexport const declared = spaces;\n`;
+		// The features without exports, so no contract surface is built for them: the rule reads the wirings' sources.
 		const needs = "export const fNeeds = { neverEvicted: true } as const;\n";
 		const feature = pkg("@t/f", { "src/store.ts": needs }, { storeWiring: true });
 		const keyed = pkg(
 			"@t/f-store",
 			{
-				"src/module.ts": `import { type fNeeds } from "@t/f";\nexport const g: Record<keyof typeof fNeeds, string> = { neverEvicted: "no-eviction" };\n`,
+				"src/module.ts": `${declares}import { type fNeeds } from "@t/f";\nexport const g: Record<keyof typeof fNeeds, string> = { neverEvicted: "no-eviction" };\n`,
 			},
 			{ wires: "@t/f" },
 			"wiring",
@@ -584,7 +624,7 @@ describe("guard-imports", () => {
 			"@t/g-store",
 			{
 				// Each falls short: no keyof, a name from elsewhere, and a test file.
-				"src/module.ts": `import { type gNeeds } from "@t/g";\nimport { type other } from "@t/f";\nexport const a: typeof gNeeds = { n: 1 };\nexport const b: Record<keyof typeof other, 1> = {};\n`,
+				"src/module.ts": `${declares}import { type gNeeds } from "@t/g";\nimport { type other } from "@t/f";\nexport const a: typeof gNeeds = { n: 1 };\nexport const b: Record<keyof typeof other, 1> = {};\n`,
 				"src/module.test.ts": `import { type gNeeds } from "@t/g";\nexport const c: Record<keyof typeof gNeeds, 1> = {};\n`,
 			},
 			{ wires: "@t/g" },
@@ -595,7 +635,7 @@ describe("guard-imports", () => {
 			"@t/h-store",
 			{
 				// The default taken by name keys as any name does.
-				"src/module.ts": `import { default as hNeeds } from "@t/h";\nexport const g: Record<keyof typeof hNeeds, string> = {};\n`,
+				"src/module.ts": `${declares}import { default as hNeeds } from "@t/h";\nexport const g: Record<keyof typeof hNeeds, string> = {};\n`,
 			},
 			{ wires: "@t/h" },
 			"wiring",
@@ -605,18 +645,45 @@ describe("guard-imports", () => {
 			"@t/k-store",
 			{
 				// An import inside a declared module keys nothing the wiring runs.
-				"src/module.ts": `declare module "other" {\n\timport { kNeeds } from "@t/k";\n\ttype A = keyof typeof kNeeds;\n}\nexport {};\n`,
+				"src/module.ts": `${declares}declare module "other" {\n\timport { kNeeds } from "@t/k";\n\ttype A = keyof typeof kNeeds;\n}\n`,
 			},
 			{ wires: "@t/k" },
 			"wiring",
 		);
+		// A wiring declaring no space keys nothing and is not asked to.
+		const plainFeature = pkg("@t/m", { "src/store.ts": needs }, { storeWiring: true });
+		const plain = pkg(
+			"@t/m-store",
+			{ "src/module.ts": "export const wired = 1;\n" },
+			{ wires: "@t/m" },
+			"wiring",
+		);
+		// A namespace import and a re-export take the point as a named import does.
+		const nsFeature = pkg("@t/n", { "src/store.ts": needs }, { storeWiring: true });
+		const throughNamespace = pkg(
+			"@t/n-store",
+			{ "src/module.ts": `import * as s from "@t/store";\nexport const declared = s.spaces;\n` },
+			{ wires: "@t/n" },
+			"wiring",
+		);
+		const reFeature = pkg("@t/r", { "src/store.ts": needs }, { storeWiring: true });
+		const throughReExport = pkg(
+			"@t/r-store",
+			{ "src/module.ts": `export { spaces } from "@t/store";\n` },
+			{ wires: "@t/r" },
+			"wiring",
+		);
+		const all = [store, feature, keyed, bare, unkeyed, named, byDefault, ambientFeature, ambient];
+		const added = [plainFeature, plain, nsFeature, throughNamespace, reFeature, throughReExport];
 		expect(
-			check([feature, keyed, bare, unkeyed, named, byDefault, ambientFeature, ambient], budget)
+			check([...all, ...added], budget)
 				.filter((v) => v.rule.startsWith("G24"))
 				.map((v) => `${v.where} ${v.detail}`),
 		).toEqual([
 			"@t/g @t/g-store keys no guarantee by them",
 			"@t/k @t/k-store keys no guarantee by them",
+			"@t/n @t/n-store keys no guarantee by them",
+			"@t/r @t/r-store keys no guarantee by them",
 		]);
 	});
 
@@ -738,94 +805,6 @@ describe("guard-imports", () => {
 			"@b/app/test/adapter.test.ts @b/reqs (@b/entry)",
 			"@b/app/test/missing.test.ts @b/reqs (@b/entry)",
 			"@b/entry/test/own.test.ts @b/reqs (@b/entry)",
-		]);
-	});
-
-	it("G31 refuses an import of a contract its owner's manifest declares takenBy, from a package it does not name", () => {
-		const owner = pkg(
-			"@g31/keys",
-			{
-				"src/contract.ts": [
-					`import { contract } from "@g31/kernel";`,
-					`export const signing = contract<object>("keys.signing", { takenBy: ["taker"] });`,
-					`export const open = contract<object>("keys.open");`,
-				].join("\n"),
-			},
-			{ exports: { ".": "./src/contract.ts" }, takenBy: { signing: ["@g31/taker"] } },
-		);
-		const user = (name: string, files: Record<string, string>) =>
-			pkg(name, files, {
-				exports: { ".": "./src/contract.ts" },
-				dependencies: { "@g31/keys": "*" },
-			});
-		const taker = user("@g31/taker", {
-			"src/contract.ts": `import { signing } from "@g31/keys";\nexport const s = signing;\n`,
-			"src/module.ts": `export default defineModule({ name: "taker" }, () => []);\n`,
-		});
-		const other = user("@g31/other", {
-			"src/contract.ts": `import { open } from "@g31/keys";\nexport const o = open;\n`,
-			"src/named.ts": `import { signing } from "@g31/keys";\nexport const s = signing;\n`,
-			"src/alias.ts": `import { signing as s } from "@g31/keys";\nexport const t = s;\n`,
-			"src/whole.ts": `import * as k from "@g31/keys";\nexport const t = k;\n`,
-			"src/again.ts": `export { signing } from "@g31/keys";\n`,
-			"src/every.ts": `export * from "@g31/keys";\n`,
-			"src/typed.ts": `import type { signing } from "@g31/keys";\nexport type T = typeof signing;\n`,
-			"test/other.test.ts": `import { signing } from "@g31/keys";\nexport const s = signing;\n`,
-		});
-		expect(
-			check([owner, taker, other], budget)
-				.filter((v) => v.rule.startsWith("G31"))
-				.map((v) => `${v.where} ${v.detail}`)
-				.sort(),
-		).toEqual([
-			"@g31/other/src/again.ts signing of @g31/keys",
-			"@g31/other/src/alias.ts signing of @g31/keys",
-			"@g31/other/src/every.ts signing of @g31/keys",
-			"@g31/other/src/named.ts signing of @g31/keys",
-			"@g31/other/src/whole.ts signing of @g31/keys",
-		]);
-	});
-
-	it("G31 refuses a takenBy declaration its contract's own takenBy does not match, or that names nothing known", () => {
-		const taker = pkg("@g31b/taker", {
-			"src/contract.ts": "export const x = 1;\n",
-			"src/module.ts": `export default defineModule({ name: "taker" }, () => []);\n`,
-		});
-		const bare = pkg("@g31b/bare", { "src/contract.ts": "export const x = 1;\n" });
-		const owner = pkg(
-			"@g31b/keys",
-			{
-				"src/contract.ts": [
-					`export const same = contract<object>("k.same", { takenBy: ["taker"] });`,
-					`export const apart = contract<object>("k.apart", { takenBy: ["someone"] });`,
-					`export const unbound = contract<object>("k.unbound");`,
-					`export const undeclared = contract<object>("k.undeclared", { takenBy: ["taker"] });`,
-				].join("\n"),
-			},
-			{
-				exports: { ".": "./src/contract.ts" },
-				takenBy: {
-					same: ["@g31b/taker"],
-					apart: ["@g31b/taker"],
-					unbound: ["@g31b/taker"],
-					missing: ["@g31b/taker"],
-					strange: ["@g31b/nobody"],
-					moduleless: ["@g31b/bare"],
-				},
-			},
-		);
-		expect(
-			check([owner, taker, bare], budget)
-				.filter((v) => v.rule.startsWith("G31"))
-				.map((v) => `${v.where} ${v.detail}`)
-				.sort(),
-		).toEqual([
-			"@g31b/keys apart: takenBy in code names someone, the manifest taker",
-			"@g31b/keys missing: no contract of that name declares takenBy",
-			"@g31b/keys moduleless: @g31b/bare has no module to take it",
-			"@g31b/keys strange: @g31b/nobody is no workspace package",
-			"@g31b/keys unbound: no contract of that name declares takenBy",
-			"@g31b/keys undeclared: takenBy in code, but not in the manifest",
 		]);
 	});
 

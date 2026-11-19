@@ -1,5 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	contract,
+	defineModule,
+	kernelConfig,
+	Unavailable,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { type Control, type Space, type Store, spaces, store } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
@@ -9,6 +16,7 @@ import {
 	phasedJointRecordsIn,
 	phasedKeyedSetsIn,
 	phasedRecordsIn,
+	subjectRecordsIn,
 	subjectRecordsPhase,
 } from "../src/subject-records.ts";
 import { envelope, placed } from "./placed.ts";
@@ -213,4 +221,82 @@ it("changes records of several places as one over the phase read once, shared wi
 			refuse,
 		),
 	).rejects.toThrow(/refused at build/);
+});
+
+it("refuses the boot over a bounded space with no boundedMs, under its name, whether the phase reads or not", async () => {
+	const named = (name: string): Space => ({ name, guarantees: g, subjectData: "bounded" });
+	const random = { bytes: (n: number) => new Uint8Array(randomBytes(n)) };
+	/** A wiring of the bare space, building its records through `build` once the store is up. */
+	const wired = (
+		build: (s: Store, refused: typeof refuse) => Promise<unknown> | unknown,
+		bare = named("phased-bare"),
+	) =>
+		assemble({
+			modules: [
+				simulatedStore().module,
+				defineModule({ name: "user", replicaSafe: false, takes: [store] }, (m) => [
+					m.contribute(spaces).by(() => bare),
+					m.contribute(spaces).by(() => indexSpaceOf(bare)),
+					m
+						.provide(contract<unknown>("test.bare"))
+						.by(async (c) => build(await c.get(store), c.refuse)),
+				]),
+			],
+			config: kernelConfig(),
+			runtime: quietRuntime(),
+		}).then(
+			() => [],
+			(error: unknown) => (error instanceof BootRefused ? error.refusals : [error]),
+		);
+	const at = (s: Store, bare = named("phased-bare")) => ({
+		store: s,
+		space: bare,
+		index: indexSpaceOf(bare),
+		random,
+	});
+	const refusal = [{ where: "phased-bare", reason: "declares bounded with no boundedMs" }];
+	const { state, control: c } = control("indexed");
+	state.down = true;
+	expect(
+		await wired((s, refused) => phasedRecordsIn(at(s), subjectRecordsPhase.once(c), "w", refused)),
+	).toEqual(refusal);
+	expect(
+		await wired((s, refused) => subjectRecordsIn({ ...at(s), phase: "reader" }, "w", refused)),
+	).toEqual(refusal);
+	// A name past kernel's bounds on a `where` keeps the refusal, under the package's label.
+	const long = named("b".repeat(201));
+	expect(
+		await wired(
+			(s, refused) => subjectRecordsIn({ ...at(s, long), phase: "reader" }, "w", refused),
+			long,
+		),
+	).toEqual([{ where: "subject-records", reason: "declares bounded with no boundedMs" }]);
+});
+
+it("lets a TypeError from reading a bounded space's name through as itself, never as the refusal", () => {
+	const unreadable = new Proxy(
+		{ name: "never-read", guarantees: g, subjectData: "bounded" } satisfies Space,
+		{
+			get: (target, key) => {
+				if (key === "name") throw new TypeError("name unreadable");
+				return Reflect.get(target, key);
+			},
+		},
+	);
+	const random = { bytes: (n: number) => new Uint8Array(randomBytes(n)) };
+	const place = {
+		store: {} as Store,
+		space: unreadable,
+		index: unreadable,
+		random,
+		phase: "reader",
+	};
+	let thrown: unknown;
+	try {
+		subjectRecordsIn(place as never, "w", refuse);
+	} catch (error) {
+		thrown = error;
+	}
+	expect(thrown).toBeInstanceOf(TypeError);
+	expect((thrown as Error).message).toBe("name unreadable");
 });

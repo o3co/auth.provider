@@ -5,8 +5,8 @@ name: OSV-Scanner
 # to develop that change a lockfile, and daily, since a new advisory arrives
 # without a change to the code (a `schedule` event runs only from the default
 # branch, main). It reports to code scanning and fails on no vulnerability; a
-# scan that writes no results fails the run. The daily `pnpm audit` in ci.yml
-# is the check that fails.
+# scan that writes no results fails the run. The check that fails is ci.yml's
+# `audit` job, `pnpm app:audit`, over what an app of the release installs.
 on:
   push:
     branches: [develop]

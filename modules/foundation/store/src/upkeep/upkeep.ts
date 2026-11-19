@@ -12,6 +12,13 @@ export interface Mark {
  * each entry to maintenance and never one the data had, null where none ever was. `requires` names
  * the spaces every process must declare to start. `marks` are values their owners name, prefixed
  * with the owner's name as space names are; store keeps them and never reads them.
+ *
+ * A process is refused at start (kernel's `BuildRefused`), judged on the same read of the record it
+ * takes the epoch from: under the maintenance key, unless it may build under it (this one first,
+ * where both apply); without a space `requires` names, unless it may build under the key and is
+ * under it. A refused process writes nothing: it takes no epoch and adds nothing to the ledger.
+ * A process that took its epoch under the key, by starting under it or entering it, changes only
+ * while the key is held: once the record shows no key, each change it makes is unavailable.
  */
 export interface Control {
 	readonly epoch: string | null;
@@ -88,4 +95,5 @@ export interface StoreUpkeep {
  * closed, as long as store adapters of 0.19 provide none.
  */
 export const storeControl = contract<StoreControl>("store.control", { optional: true });
-export const storeUpkeep = contract<StoreUpkeep>("store.upkeep");
+/** Taken by no module until account erasure's wiring, which alone keeps the store's data whole, is named. */
+export const storeUpkeep = contract<StoreUpkeep>("store.upkeep", { takenBy: [] });

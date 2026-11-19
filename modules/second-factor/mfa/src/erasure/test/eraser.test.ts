@@ -69,7 +69,7 @@ describe("mfa's eraser", () => {
 				({ kind: "migrated", space: "factors", indexed: 0, removed: 0 }) as MigrationReport,
 		} as unknown as FactorStore;
 		const eraser = factorEraser(store);
-		expect([eraser.name, eraser.erasable, eraser.after]).toEqual(["mfa", true, undefined]);
+		expect([eraser.name, eraser.erasable]).toEqual(["mfa", true]);
 		expect(await eraser.online("ann", signal)).toEqual({ reports: [report], logoutGaps: 0 });
 		expect((await eraser.window(["bob", "cy"], walk, signal)).reports).toEqual([report, report]);
 		expect(await eraser.migrate(walk, signal)).toHaveLength(1);

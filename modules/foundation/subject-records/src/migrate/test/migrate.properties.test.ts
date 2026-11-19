@@ -19,7 +19,7 @@ import type { MigrationReport, SpaceReport, SubjectReading, Walk } from "@mod/er
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { type Json, type Key, type Space, type Store, spaces, store } from "@mod/store";
-import { simulatedStore } from "@mod/store/testing";
+import { plantValue, simulatedStore } from "@mod/store/testing";
 import fc from "fast-check";
 import { expect, it, vi } from "vitest";
 import { eraseSubject, indexSpaceOf, migrateRecords } from "../../subject-records.ts";
@@ -341,10 +341,11 @@ it("migrates every record written before indexing once, whole, into its subject'
 					};
 					for (const kind of ["listed", "keyed"] as const) {
 						for (const r of before[kind]) {
-							await d.inner.putIfAbsent(
+							await plantValue(
+								d.inner,
 								{ space: kinds[kind], partition: r.key, name: "record" },
 								rawValue(r.key, r),
-								{ expiry: { kind: "never" } },
+								{ kind: "never" },
 							);
 						}
 					}
@@ -514,11 +515,11 @@ it("reports the migration done only on what is confirmed: after a run whose ever
 			listed: rawValue(k, { owner: "alice", lookalike: false }),
 			keyed: rawValue("alice", { owner: "alice", lookalike: false }),
 		};
-		await d.inner.putIfAbsent({ space: listed, partition: k, name: "record" }, values.listed, {
-			expiry: { kind: "never" },
+		await plantValue(d.inner, { space: listed, partition: k, name: "record" }, values.listed, {
+			kind: "never",
 		});
-		await d.inner.putIfAbsent({ space: keyed, partition: "alice", name: "record" }, values.keyed, {
-			expiry: { kind: "never" },
+		await plantValue(d.inner, { space: keyed, partition: "alice", name: "record" }, values.keyed, {
+			kind: "never",
 		});
 		let id = 0;
 		for (const kind of ["listed", "keyed"] as const) {
@@ -557,8 +558,8 @@ it("removes no record another run migrated meanwhile: a run reading as an orphan
 		const d = await migrating(undefined, 1);
 		const k = listedKeys[0] as string;
 		const value = rawValue(k, { owner: "alice", lookalike: false });
-		await d.inner.putIfAbsent({ space: listed, partition: k, name: "record" }, value, {
-			expiry: { kind: "never" },
+		await plantValue(d.inner, { space: listed, partition: k, name: "record" }, value, {
+			kind: "never",
 		});
 		// Run 1 migrates k, every answer lost: the envelope stands on the primary only.
 		d.lostFor.add(1);

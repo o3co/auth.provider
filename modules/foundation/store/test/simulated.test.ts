@@ -5,7 +5,11 @@ import { type Space, spaces, store } from "../src/contract.ts";
 import storeModule from "../src/module.ts";
 import { overwrite, simulatedStore } from "../src/testing.ts";
 
-const space: Space = { name: "simulated", guarantees: ["no-eviction", "durable", "replicated"] };
+const space: Space = {
+	name: "simulated",
+	guarantees: ["no-eviction", "durable", "replicated"],
+	subjectData: "none",
+};
 const key = (name: string) => ({ space, partition: "p", name });
 const now = 1_800_000_000_000;
 const runtime = quietRuntime({
@@ -18,6 +22,7 @@ const at = (where: Space, name: string) => ({ space: where, partition: "p", name
 const fullyConfirmed: Space = {
 	name: "confirmed",
 	guarantees: ["no-eviction", "durable", "replicated", "confirmed-reads"],
+	subjectData: "none",
 };
 
 /** A simulated store over the spaces given, on the test's clock unless another is given. */
@@ -33,6 +38,17 @@ async function open(declared: readonly Space[] = [space], clock: Runtime["clock"
 	});
 	return { simulated, s: app.get(store) };
 }
+
+it("answers a space exactly as the composition declared it, and refuses one not declared or a store not built", async () => {
+	const unbuilt = simulatedStore();
+	expect(() => unbuilt.declaredSpace("simulated")).toThrow("the simulated store is not built yet");
+	const { simulated } = await open([space, fullyConfirmed]);
+	expect(simulated.declaredSpace("confirmed")).toBe(fullyConfirmed);
+	expect(simulated.declaredSpace("simulated")).toBe(space);
+	expect(() => simulated.declaredSpace("elsewhere")).toThrow(
+		"no composed module declares the space elsewhere",
+	);
+});
 
 it("loses on failover what was applied but not confirmed, and keeps what a later write confirmed", async () => {
 	const { simulated, s } = await open();
@@ -79,8 +95,12 @@ it("refuses writes or everything on demand, and keeps a clock of its own", async
 });
 
 it("stalls replicas: replicated writes and confirmed reads fail, other spaces answer", async () => {
-	const plain: Space = { name: "plain", guarantees: [] };
-	const confirmed: Space = { name: "confirmed", guarantees: ["replicated", "confirmed-reads"] };
+	const plain: Space = { name: "plain", guarantees: [], subjectData: "none" };
+	const confirmed: Space = {
+		name: "confirmed",
+		guarantees: ["replicated", "confirmed-reads"],
+		subjectData: "none",
+	};
 	const { simulated, s } = await open([space, plain, confirmed]);
 	simulated.stallReplicas(true);
 	await expect(overwrite(s, at(space, "a"), 1, never)).rejects.toThrow();
@@ -131,9 +151,17 @@ it("fails just the next call of one operation, without applying it", async () =>
 async function openWith() {
 	const all: Space = space;
 	const lacking = {
-		replicated: { name: "unreplicated", guarantees: ["no-eviction", "durable"] },
-		durable: { name: "volatile", guarantees: ["no-eviction", "replicated"] },
-		"no-eviction": { name: "evictable", guarantees: ["durable", "replicated"] },
+		replicated: {
+			name: "unreplicated",
+			guarantees: ["no-eviction", "durable"],
+			subjectData: "none",
+		},
+		durable: { name: "volatile", guarantees: ["no-eviction", "replicated"], subjectData: "none" },
+		"no-eviction": {
+			name: "evictable",
+			guarantees: ["durable", "replicated"],
+			subjectData: "none",
+		},
 	} as const satisfies Record<string, Space>;
 	const { simulated, s } = await open([all, ...Object.values(lacking)]);
 	return { simulated, s, all, lacking };
@@ -322,9 +350,13 @@ it("holds a write while replicas are stalled, answering others meanwhile, then a
 });
 
 it("loses on a restart or under memory pressure what the declared space allows, whatever a key claims", async () => {
-	const declared: Space = { name: "volatile", guarantees: ["replicated"] };
+	const declared: Space = { name: "volatile", guarantees: ["replicated"], subjectData: "none" };
 	const { simulated, s } = await open([declared]);
-	const claimed: Space = { name: "volatile", guarantees: ["no-eviction", "durable", "replicated"] };
+	const claimed: Space = {
+		name: "volatile",
+		guarantees: ["no-eviction", "durable", "replicated"],
+		subjectData: "none",
+	};
 	for (const fault of ["restart", "pressMemory"] as const) {
 		const k = at(claimed, fault);
 		await overwrite(s, k, 1, never);
@@ -419,9 +451,13 @@ const pairOf = (first: Space, second: Space, tag: string) => [
 ];
 
 it("keeps or loses a batch across whole, its values and its mark, by the guarantees its spaces share", async () => {
-	const durableTwin: Space = { name: "simulated-twin", guarantees: space.guarantees };
-	const volatile: Space = { name: "volatile", guarantees: [] };
-	const volatileTwin: Space = { name: "volatile-twin", guarantees: [] };
+	const durableTwin: Space = {
+		name: "simulated-twin",
+		guarantees: space.guarantees,
+		subjectData: "none",
+	};
+	const volatile: Space = { name: "volatile", guarantees: [], subjectData: "none" };
+	const volatileTwin: Space = { name: "volatile-twin", guarantees: [], subjectData: "none" };
 	for (const fault of ["restart", "pressMemory", "failover"] as const) {
 		const { simulated, s } = await open([space, durableTwin, volatile, volatileTwin]);
 		const across = s.batchAcross?.bind(s);
@@ -458,7 +494,7 @@ it("keeps or loses a batch across whole, its values and its mark, by the guarant
 });
 
 it("loses on failover a batch across whose answer was lost, mark and all, and keeps one a later write confirmed", async () => {
-	const twin: Space = { name: "simulated-twin", guarantees: space.guarantees };
+	const twin: Space = { name: "simulated-twin", guarantees: space.guarantees, subjectData: "none" };
 	const { simulated, s } = await open([space, twin]);
 	const across = s.batchAcross?.bind(s);
 	if (!across) throw new Error("no batch across");

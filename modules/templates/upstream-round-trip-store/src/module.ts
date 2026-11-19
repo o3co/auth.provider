@@ -12,9 +12,17 @@ const { namesFromSecret: recordsFor, ...guaranteeFor } = {
 	survivesFailover: "replicated",
 	namesFromSecret: secretRecordsIn,
 } satisfies Record<keyof typeof roundTripStoreNeeds, Guarantee | typeof secretRecordsIn>;
+/**
+ * The round trips: no subject's data from 0.20, as callers carry none. A round trip a 0.19 instance
+ * began may carry a subject's data until its record's lifetime ends: upstream-round-trip's migration
+ * stops until none remains, once the longest lifetime this deployment's callers give has passed since
+ * the provider's connections were locked out (at most 3,600 s for 0.19.1's own callers); a stop past
+ * that means something still begins round trips.
+ */
 const roundTrips: Space = {
 	name: "upstream-round-trip-store.round-trips",
 	guarantees: Object.values(guaranteeFor),
+	subjectData: "none",
 };
 
 export default defineModule(
@@ -24,7 +32,7 @@ export default defineModule(
 		m.provide(roundTripStore).by(async (c) => {
 			const place = { store: await c.get(store), space: roundTrips, log: c.log, random: c.random };
 			const records = recordsFor<StoredRoundTrip>(place);
-			return { save: records.create, update: records.change };
+			return { save: records.create, update: records.change, walk: records.walk };
 		}),
 	],
 );

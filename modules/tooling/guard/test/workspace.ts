@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Pkg } from "@mod/guard-imports";
+import { standardEntries } from "../src/check.ts";
 import type { Budget } from "../src/contract.ts";
 
 /** A budget for the tests' workspaces, close to the repository's. */
@@ -46,6 +47,7 @@ export const budget: Budget = {
 	capabilityBlind: ["feature"],
 	adapterKind: "adapter",
 	featureKind: "feature",
+	standardEntries,
 };
 
 /** Where the tests' packages are written. */

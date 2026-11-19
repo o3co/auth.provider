@@ -38,7 +38,7 @@ export function removingWith(
 							credentials: [
 								heldBy(read.credentials[0], subject) ? { value: removedOf(subject) } : undefined,
 							],
-							subjects: [{ value: listing(ours, rest) }],
+							subjects: [{ value: listing(ours, rest, subject) }],
 						};
 					},
 				},
@@ -61,14 +61,16 @@ export function removingWith(
 					}),
 					change: (read) => {
 						const ours = read.subjects[0];
-						const made = stored({ v: 1, handle: fresh, credentials: [], fence: 1 });
+						const made = stored({ v: 1, handle: fresh, credentials: [], fence: 1, subject });
 						if (!ours) return { subjects: [{ value: made }] };
 						const held = holderOf(ours);
 						return {
 							credentials: read.credentials.map((r) =>
 								heldBy(r, subject) ? { value: removedOf(subject) } : undefined,
 							),
-							subjects: [{ value: stored({ ...ours, credentials: [], fence: held.fence + 1 }) }],
+							subjects: [
+								{ value: stored({ ...ours, credentials: [], fence: held.fence + 1, subject }) },
+							],
 						};
 					},
 				},
