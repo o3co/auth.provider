@@ -94,22 +94,37 @@ export interface StoreUpkeep {
 	/** Checks again, on every call, whether the store gives these guarantees now. */
 	honours(guarantees: readonly Guarantee[]): Promise<Honours>;
 	/**
-	 * A page of the space's live value keys, as `scan` walks, removing for good each expired one it
-	 * meets, confirmed as a write; `server` names the server the page ran on, so a walker starts over
-	 * when it changes.
+	 * A page of a space's live value keys, the space named as this process declares it, as `scan`
+	 * walks, removing for good each expired one it meets, confirmed as a write; `server` names the
+	 * server the page ran on, so a walker starts over when it changes. A name this process does not
+	 * declare is a caller's error (`TypeError`).
 	 */
-	sweep(
-		space: Space,
-		cursor?: string,
-	): Promise<{ readonly keys: readonly Key[]; readonly cursor?: string; readonly server: string }>;
-	/** Reads anew, on every call, whether another process is attached to the store's data; unavailable where a read is disturbed. */
-	alone?(): Promise<Alone>;
+	sweep(name: string, cursor?: string): Promise<Swept>;
+	/**
+	 * Reads anew, on every call, whether another process is attached to the store's data; unavailable
+	 * where a read is disturbed. Where the implementation offers no way to look, `unchecked` with
+	 * store's own code, `no-look-offered`.
+	 */
+	alone(): Promise<Alone>;
 	/** The spaces this process declares, in declaration order, as checked: the declarations themselves, in a frozen array. */
 	declared(): readonly Space[];
 }
 
-/** The upkeep an implementation answers; `checkedUpkeep` adds the rest (`declared`). */
-export type UpkeepImplementation = Omit<StoreUpkeep, "declared">;
+/** A page of a space's walk: its live value keys, the next cursor, and the server it ran on. */
+export interface Swept {
+	readonly keys: readonly Key[];
+	readonly cursor?: string;
+	readonly server: string;
+}
+
+/**
+ * The upkeep an implementation answers; `checkedUpkeep` adds the rest (`declared`), answers
+ * `alone()` where the implementation offers none, and hands `sweep` the declared space a name names.
+ */
+export type UpkeepImplementation = Omit<StoreUpkeep, "declared" | "alone" | "sweep"> & {
+	alone?(): Promise<Alone>;
+	sweep(space: Space, cursor?: string): Promise<Swept>;
+};
 
 /**
  * Its owner lets it go unprovided until 0.22: a taker reads a mark it cannot read as unknown, failing

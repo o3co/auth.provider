@@ -33,6 +33,8 @@ export interface UpkeepHarness {
 	disturbRead?(process: UpkeepProcess): Promise<void>;
 	/** The values `process`'s store was configured with, none of which a reason of `alone()` may hold. */
 	configured?(process: UpkeepProcess): readonly string[];
+	/** Set where the implementation offers `alone()`; one that offers none answers `unchecked` (`no-look-offered`). */
+	readonly looks?: true;
 }
 
 /** The spaces the upkeep contract test declares: holding no subject's data, holding some the subject writer guards, and holding some it does not. */
@@ -205,7 +207,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 					() => old.upkeep.leaveMaintenance(),
 					() => old.upkeep.require([none.name]),
 					() => old.upkeep.retire("gone"),
-					() => old.upkeep.sweep(none),
+					() => old.upkeep.sweep(none.name),
 				];
 				if (old.store.batchAcross) {
 					refused.push(async () => old.store.batchAcross?.([], [{ key: k, remove: true }]));
@@ -325,7 +327,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				...(q.store.batchAcross
 					? [async () => q.store.batchAcross?.([], [{ key: fresh(), put: 1, ...never }])]
 					: []),
-				() => q.upkeep.sweep(none),
+				() => q.upkeep.sweep(none.name),
 				() => q.upkeep.enterMaintenance(),
 				() => q.upkeep.leaveMaintenance(),
 				() => q.upkeep.require([none.name]),
@@ -449,12 +451,22 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 		});
 
 		describe("alone, where offered: kinds only, never the count", () => {
-			/** A fresh process offering `alone()`, the case skipped where it offers none. */
+			/** A fresh process whose implementation offers `alone()`, the case skipped where it offers none. */
 			const offering = async (skip: () => never) => {
+				if (!harness.looks) return skip();
 				const p = await harness.start(upkeepSpaces);
-				const alone = p.upkeep.alone?.bind(p.upkeep);
-				return alone ? { p, alone } : skip();
+				return { p, alone: () => p.upkeep.alone() };
 			};
+			it.skipIf(harness.looks)(
+				"answers unchecked, no-look-offered, where the implementation offers no way to look",
+				async () => {
+					const p = await harness.start(upkeepSpaces);
+					expect(await p.upkeep.alone()).toEqual({
+						kind: "unchecked",
+						reasons: ["no-look-offered"],
+					});
+				},
+			);
 			it("answers alone where no other process is attached", async (ctx) => {
 				const { alone } = await offering(() => ctx.skip());
 				expect((await alone()).kind).toBe("alone");
@@ -514,6 +526,12 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 		});
 
 		describe("sweep", () => {
+			it("walks a space by the name this process declares it by, and refuses any other name as a caller's error", async () => {
+				const p = await harness.start(upkeepSpaces);
+				expect((await p.upkeep.sweep(held.name)).server).toEqual(expect.any(String));
+				await expect(p.upkeep.sweep("upkeep-undeclared")).rejects.toBeInstanceOf(TypeError);
+			});
+
 			it("walks every live key of the space by pages, each naming the same server", async () => {
 				const p = await harness.start(upkeepSpaces);
 				const keys = Array.from({ length: 150 }, (_, i) => ({
@@ -527,7 +545,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				const servers = new Set<string>();
 				let cursor: string | undefined;
 				do {
-					const page = await p.upkeep.sweep(held, cursor);
+					const page = await p.upkeep.sweep(held.name, cursor);
 					for (const k of page.keys) seen.add(`${k.partition}/${k.name}`);
 					servers.add(page.server);
 					cursor = page.cursor;
@@ -550,7 +568,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				let seen = 0;
 				let cursor: string | undefined;
 				do {
-					const page = await p.upkeep.sweep(held, cursor);
+					const page = await p.upkeep.sweep(held.name, cursor);
 					seen += page.keys.filter((k) => k.partition === partition).length;
 					cursor = page.cursor;
 				} while (cursor !== undefined);
@@ -564,7 +582,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				await sleep(40);
 				let cursor: string | undefined;
 				do {
-					const page = await p.upkeep.sweep(plain, cursor);
+					const page = await p.upkeep.sweep(plain.name, cursor);
 					expect(page.keys.some((at) => at.partition === k.partition)).toBe(false);
 					cursor = page.cursor;
 				} while (cursor !== undefined);

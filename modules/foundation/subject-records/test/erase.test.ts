@@ -107,6 +107,27 @@ it("reads the phase from its mark in any epoch, and writes only indexed, only un
 	});
 });
 
+it("writes the phase's mark through the upkeep's own write where it may, and nothing where it refuses", async () => {
+	const { s } = await opened();
+	const { batchAcross: _, ...lacking } = s;
+	const unpaired = lacking as Store;
+	const marked: [string, string][] = [];
+	const markWith = async (name: string, value: string) => {
+		marked.push([name, value]);
+	};
+	expect(await subjectRecordsPhase.writeWith(control(false), s, markWith)).toEqual({
+		kind: "not-in-maintenance",
+	});
+	expect(await subjectRecordsPhase.writeWith(control(true), unpaired, markWith)).toEqual({
+		kind: "not-paired",
+	});
+	expect(marked).toEqual([]);
+	expect(await subjectRecordsPhase.writeWith(control(true), s, markWith)).toEqual({
+		kind: "written",
+	});
+	expect(marked).toEqual([[subjectRecordsPhase.mark, "indexed"]]);
+});
+
 it("erases a subject's records and sets its index lists, past a tombstone no create crosses, leaving another's", async () => {
 	const { at, indexOf, raw } = await opened();
 	const records = subjectRecordsIn<number>(at(indexed), "w", refuse);

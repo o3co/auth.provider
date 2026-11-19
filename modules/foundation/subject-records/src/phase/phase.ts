@@ -29,6 +29,19 @@ const subjectRecordsPhaseOnce = (control: StoreControl | undefined): PhaseOnce =
 	};
 };
 
+/** The mark that turns records indexed, decided for the store whose control record `control` is. */
+const write = (
+	control: Control,
+	store: Store,
+):
+	| { readonly kind: "write"; readonly name: string; readonly value: "indexed" }
+	| { readonly kind: "not-in-maintenance" }
+	| { readonly kind: "not-paired" } => {
+	if (!control.maintenance) return { kind: "not-in-maintenance" };
+	if (!changesTogether(store)) return { kind: "not-paired" };
+	return { kind: "write", name: mark, value: "indexed" };
+};
+
 export const subjectRecordsPhase = Object.freeze({
 	mark,
 	read,
@@ -43,15 +56,23 @@ export const subjectRecordsPhase = Object.freeze({
 	 * `not-in-maintenance` outside the maintenance key, then `not-paired` where the store writes no
 	 * records of two partitions as one, which indexed records need, so every next start would refuse.
 	 */
-	write: (
+	write,
+	/**
+	 * Writes that mark through `markWith`, the holder of the store's upkeep's own write, where `write`
+	 * decides it: `written` once it is written, or `write`'s refusal, with nothing written.
+	 */
+	writeWith: async (
 		control: Control,
 		store: Store,
-	):
-		| { readonly kind: "write"; readonly name: string; readonly value: "indexed" }
+		markWith: (name: string, value: "indexed") => Promise<unknown>,
+	): Promise<
+		| { readonly kind: "written" }
 		| { readonly kind: "not-in-maintenance" }
-		| { readonly kind: "not-paired" } => {
-		if (!control.maintenance) return { kind: "not-in-maintenance" };
-		if (!changesTogether(store)) return { kind: "not-paired" };
-		return { kind: "write", name: mark, value: "indexed" };
+		| { readonly kind: "not-paired" }
+	> => {
+		const decided = write(control, store);
+		if (decided.kind !== "write") return decided;
+		await markWith(decided.name, decided.value);
+		return { kind: "written" };
 	},
 });

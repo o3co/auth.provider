@@ -14,7 +14,13 @@ import type {
 	WriterHeld,
 } from "../contract.ts";
 import { malformedDeclaration } from "../declaration.ts";
-import type { Honours, KeptSpace, StoreUpkeep, UpkeepImplementation } from "../upkeep/upkeep.ts";
+import type {
+	Alone,
+	Honours,
+	KeptSpace,
+	StoreUpkeep,
+	UpkeepImplementation,
+} from "../upkeep/upkeep.ts";
 import { subjectWriter } from "../writer/subject-writer.ts";
 
 const maxTime = 8_640_000_000_000_000;
@@ -321,6 +327,19 @@ function spaceIn(known: ReadonlyMap<string, Space>, value: unknown): Space {
 	return space;
 }
 
+/** The declared space `name` names; any other name is a caller's error. */
+function declaredNamed(known: ReadonlyMap<string, Space>, name: unknown): Space {
+	const space = known.get(text("space", name));
+	if (!space) fail(`space ${String(name)} is not declared`);
+	return space;
+}
+
+/** `alone()`'s answer where the implementation offers no way to look. */
+const noLookOffered: Alone = Object.freeze({
+	kind: "unchecked",
+	reasons: Object.freeze(["no-look-offered"]),
+});
+
 /** Checks upkeep's input once, as `checkedStore` checks the store's: names, values and spaces. */
 export function checkedUpkeep(
 	inner: UpkeepImplementation,
@@ -328,10 +347,10 @@ export function checkedUpkeep(
 ): StoreUpkeep {
 	const known = declaredSpaces(declared);
 	const ordered = Object.freeze([...declared]);
-	const alone = inner.alone?.bind(inner);
 	return {
 		declared: () => ordered,
-		...(alone === undefined ? {} : { alone }),
+		// Where the implementation offers no way to look, store's own code: never `alone` in doubt.
+		alone: inner.alone?.bind(inner) ?? (async () => noLookOffered),
 		mark: async (name, value) => inner.mark(text("mark name", name), json(value)),
 		require: async (names) => {
 			if (!Array.isArray(names) || names.length === 0) fail("require needs one space or more");
@@ -346,9 +365,9 @@ export function checkedUpkeep(
 			for (const g of asked) if (!isGuarantee(g)) fail(`unknown guarantee ${String(g)}`);
 			return inner.honours([...new Set(asked)]);
 		},
-		sweep: async (target, cursor) =>
+		sweep: async (name, cursor) =>
 			inner.sweep(
-				spaceIn(known, target),
+				declaredNamed(known, name),
 				cursor === undefined ? undefined : text("cursor", cursor, cursorLength),
 			),
 	};
