@@ -249,7 +249,15 @@ export const store = contract<Store>("store");
 
 export const spaces = extensionPoint<Space>("store.spaces", {
 	multiplicity: "keyed",
-	keyOf: (space) => space.name,
+	// Read with no getter run, assuming no shape: a malformed declaration keys as "", which no name
+	// is, and store's checks refuse it as the store is built (`BuildRefused`).
+	keyOf: (space) => {
+		const named =
+			typeof space === "object" && space !== null
+				? Object.getOwnPropertyDescriptor(space, "name")?.value
+				: undefined;
+		return typeof named === "string" ? named : "";
+	},
 });
 
 export type Decision =

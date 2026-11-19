@@ -223,3 +223,8 @@ it("names the space where kernel takes its name, and store.declaration where it 
 	const [refusal] = await refusalsOver([{ name: unprintable, guarantees: [] }]);
 	expect(refusal).toEqual({ where: "store.declaration", reason: "declares no subjectData" });
 });
+
+it("refuses the boot over a declaration that is no object at all, as store.declaration", async () => {
+	const [refusal] = await refusalsOver([null]);
+	expect(refusal?.where).toBe("store.declaration");
+});
