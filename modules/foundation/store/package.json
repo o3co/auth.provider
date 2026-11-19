@@ -12,7 +12,9 @@
 		"./subject-writer": [
 			"@mod/subject-records"
 		],
-		"storeUpkeep": []
+		"storeUpkeep": [
+			"@mod/account-erasure-store"
+		]
 	},
 	"exports": {
 		".": "./src/store.ts",
