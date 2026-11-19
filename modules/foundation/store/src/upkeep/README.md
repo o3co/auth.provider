@@ -19,7 +19,7 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
 - A process is refused at start (kernel's `BuildRefused`), judged on the same read of the record it takes the epoch from:
   - under the maintenance key, unless it may build under it; this refusal first, where both apply;
   - without a space `requires` names, unless it may build under the key and is under it; the refusal names no space, and the operator reads `requires` from the control record (`storeControl`);
-  - refused, it writes nothing to the control record, the ledger or any declared space: it takes no epoch and adds nothing to the ledger. An implementation's own checks of its server at boot may write keys of their own.
+  - refused, it writes nothing to the control record, the ledger or any declared space: it takes no epoch and adds nothing to the ledger. An implementation's own checks of its server at boot may write keys of their own, outside every space, holding no value of any process's data and no subject's data.
 - A process that took its epoch under the maintenance key, by starting under it or entering it, changes only while the key is held. Once the record shows no key, each change it makes, through `store` or upkeep, `enterMaintenance` and `leaveMaintenance` among them, is unavailable and writes nothing.
 - Entering maintenance sets the key and a new epoch, never one the data had, in one write, and the process entering takes the epoch; leaving lifts the key and keeps the epoch.
 - A mark is kept with the epoch it was written in, through later epochs; its reader judges what that epoch means for it.
