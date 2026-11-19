@@ -7,6 +7,7 @@ import {
 	checkedSubjectPlace,
 	type Entry,
 	entriesIn,
+	everyWritten,
 	indexOver,
 	listedWithout,
 	type SubjectPlace,
@@ -99,14 +100,9 @@ export async function eraseSubject(
 		readonly eachRemoved?: (value: Json) => void;
 	} = {},
 ): Promise<SpaceReport> {
-	const category = checkedSubjectPlace(
-		place,
-		["online-indexed", "online-keyed", "bounded"],
-		"subject-records",
-		(_, reason) => {
-			throw new TypeError(`subject-records: ${place.space.name}: ${reason}`);
-		},
-	);
+	const category = checkedSubjectPlace(place, everyWritten, "subject-records", (_, reason) => {
+		throw new TypeError(`subject-records: ${place.space.name}: ${reason}`);
+	});
 	const space = place.space.name;
 	const boundedMs = place.space.boundedMs;
 	if (category === "bounded" && boundedMs === undefined) {

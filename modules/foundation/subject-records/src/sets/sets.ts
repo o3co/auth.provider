@@ -25,7 +25,12 @@ export function subjectKeyedSetsIn(
 	where: string,
 	refuse: (where: string, reason: string) => never,
 ) {
-	const category = checkedSubjectPlace(place, ["online-indexed", "online-keyed"], where, refuse);
+	const category = checkedSubjectPlace(
+		place,
+		{ "online-indexed": true, "online-keyed": true },
+		where,
+		refuse,
+	);
 	const codec = keyedSetsIn.codec(place);
 	const indexed = place.phase === "indexed";
 	const byKeys = indexed && category === "online-indexed";
