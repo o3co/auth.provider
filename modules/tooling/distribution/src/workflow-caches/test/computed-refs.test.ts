@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { parse } from "yaml";
@@ -13,7 +13,7 @@ interface Job {
 }
 interface Workflow {
 	readonly "cache-mode"?: unknown;
-	readonly jobs: Record<string, Job>;
+	readonly jobs?: Record<string, Job>;
 }
 
 /** A `ref` that names the event's own commit alone: `github.sha` or `github.ref`. */
@@ -30,7 +30,7 @@ const refOf = (s: Step): unknown =>
  * neither `read` nor `none`.
  */
 const writingOtherRefs = (workflow: Workflow): string[] =>
-	Object.entries(workflow.jobs)
+	Object.entries(workflow.jobs ?? {})
 		.filter(([, job]) =>
 			(job.steps ?? []).some((s) => {
 				const ref = refOf(s);
@@ -47,24 +47,48 @@ const writingOtherRefs = (workflow: Workflow): string[] =>
 		)
 		.map(([name]) => name);
 
-const ci = parse(
-	readFileSync(
-		join(import.meta.dirname, "..", "..", "..", "..", "..", "..", ".github", "workflows", "ci.yml"),
-		"utf8",
+const workflowsDir = join(
+	import.meta.dirname,
+	"..",
+	"..",
+	"..",
+	"..",
+	"..",
+	"..",
+	".github",
+	"workflows",
+);
+/** Every workflow of this tree, by file name, read as GitHub reads it. */
+const workflows: Record<string, Workflow> = Object.fromEntries(
+	readdirSync(workflowsDir)
+		.filter((f) => /\.ya?ml$/.test(f))
+		.map((f) => [f, parse(readFileSync(join(workflowsDir, f), "utf8")) as Workflow]),
+);
+/** Each workflow's jobs with their own `cache-mode`, and the workflow's, left out. */
+const unset = (workflow: Workflow): Workflow => ({
+	jobs: Object.fromEntries(
+		Object.entries(workflow.jobs ?? {}).map(([name, { "cache-mode": _, ...job }]) => [name, job]),
 	),
-) as Workflow;
-
-it("lets no job of CI's workflow that runs a ref other than its run's commit write the cache", () => {
-	expect(writingOtherRefs(ci)).toEqual([]);
 });
 
-it("finds such jobs in CI's workflow, so the rule holds something", () => {
-	const unset: Workflow = {
-		jobs: Object.fromEntries(
-			Object.entries(ci.jobs).map(([name, { "cache-mode": _, ...job }]) => [name, job]),
-		),
-	};
-	expect(writingOtherRefs(unset).length).toBeGreaterThan(0);
+it("reads every workflow of this tree, CI's among them", () => {
+	expect(Object.keys(workflows)).toContain("ci.yml");
+	expect(Object.keys(workflows).length).toBeGreaterThan(1);
+});
+
+it.each(Object.keys(workflows))(
+	"lets no job of %s that may run other than its run's commit write the cache",
+	(file) => {
+		expect(writingOtherRefs(workflows[file] as Workflow)).toEqual([]);
+	},
+);
+
+it("finds such jobs across the workflows, so the rule holds something", () => {
+	const found = Object.fromEntries(
+		Object.entries(workflows).map(([file, w]) => [file, writingOtherRefs(unset(w))]),
+	);
+	expect(found["ci.yml"]?.length).toBeGreaterThan(0);
+	expect(Object.values(found).filter((jobs) => jobs.length > 0).length).toBeGreaterThan(1);
 });
 
 const checkout = (ref?: string): Step => ({
