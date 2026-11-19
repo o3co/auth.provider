@@ -10,7 +10,7 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
 
 ## Offers
 - `storeControl`: `control()`, the control record (epoch, maintenance key, the spaces required, the marks), confirmed. It may go unprovided until 0.22 (`optional`): a store adapter of 0.19 offers none, and a taker reads a mark it cannot read as unknown, failing closed.
-- `storeUpkeep`: `mark`, `require`, `enterMaintenance` and `leaveMaintenance`; the ledger's `kept` and `retire`; `honours`; `sweep`; `alone()`.
+- `storeUpkeep`: `mark`, `require`, `enterMaintenance` and `leaveMaintenance`; the ledger's `kept` and `retire` (internal module `ledger`); `honours`; `sweep`; `alone()`.
   - `declared()`: the spaces this process declares: the declarations themselves, as checked, in declaration order, in a frozen array.
 - `upkeepContract` (through `./testing`): the contract test, run on an implementation's harness.
 
@@ -25,7 +25,6 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
 - Entering maintenance sets the key and a new epoch, never one the data had, in one write, and the process entering takes the epoch; leaving lifts the key and keeps the epoch.
 - A mark is kept with the epoch it was written in, through later epochs; its reader judges what that epoch means for it.
 - `require` replaces the set of spaces, under the maintenance key alone, and never with none.
-- Before its first change, a process adds each space it declares to the ledger; until it has, it changes nothing (each change unavailable) and its readiness says so, retrying. A space's `subjectDataEver` turns true once a declaration names a category other than `none`, and never turns back. Only `retire` takes a space off, under the maintenance key alone, never one the process declares.
 - `honours` checks anew on each call, and answers verified, declared (naming the settings the operator declared) or unmet (with why).
 - `honours` answers a witness of the server and its history; equal witnesses, the same server and history, nothing evicted between. Its reader compares them, never the store.
 - `alone()` reads anew on each call whether another process is attached: `alone` only where every process the storing side would now let run any part of a store operation on the data was seen and none is attached; `accompanied` with the implementation's count of those attached, for the operator, never compared; `unchecked` where it could not look, with its reasons; unavailable where a read is disturbed, never `alone` in doubt.
@@ -35,11 +34,11 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
 - `sweep` walks a space by the name this process declares it by; any other name is a caller's error (`TypeError`). It removes for good each expired key it meets, its answer confirmed as a write, and names the server each page ran on.
 
 ## Depends on
-- `kernel` (contracts); the internal module `planting`, for its contract test to plant values in a space of subjects' data
+- `kernel` (contracts); the internal module `ledger` (its part of `storeUpkeep`); the internal module `planting`, for its contract test to plant values in a space of subjects' data
 
 ## Vocabulary
 - attached: another process, neither this one nor the store's own replication, that the storing side would now let run any part of a store operation on the data.
 - UpkeepImplementation: the upkeep an implementation answers; `checkedUpkeep` adds the rest (`declared`), answers `alone()` where the implementation offers none, and hands the implementation's `sweep` the declared space the caller named.
 - the key's fence: a process that took its epoch under the maintenance key changes only while the key is held; once it lifts, the process is done, and a new window is a new process.
 - may build under the maintenance key: a process's grant to start under the key, and under it without a space `requires` names; its composition grants it from kernel's `neverStarted` alone, a tool's assembly that is never started.
-- epoch: the control record's mark, new on each entry to maintenance; a process's changes count only under the epoch it took. maintenance key: the record's flag that upkeep holds the data under. ledger: the spaces ever declared to the data.
+- epoch: the control record's mark, new on each entry to maintenance; a process's changes count only under the epoch it took. maintenance key: the record's flag that upkeep holds the data under.
