@@ -3,6 +3,7 @@ import {
 	BootRefused,
 	contract,
 	defineModule,
+	isUnavailable,
 	kernelConfig,
 	Unavailable,
 } from "@mod/kernel";
@@ -64,7 +65,7 @@ upkeepContract("memory", {
 	configured: (process) => [dataFor(process).server],
 });
 
-it("counts no process whose start was refused, and none once detached", async () => {
+it("counts no process whose start was refused, and none once detached, each change and read it makes then unavailable", async () => {
 	const data = memoryData(clock);
 	const first = memoryProcess(data, contractSpaces);
 	await first.upkeep.enterMaintenance();
@@ -74,6 +75,34 @@ it("counts no process whose start was refused, and none once detached", async ()
 	expect(await first.upkeep.alone?.()).toEqual({ kind: "accompanied", count: 1 });
 	tool.detach();
 	expect(await first.upkeep.alone?.()).toEqual({ kind: "alone" });
+	// A detached process is stopped: each change and read it makes, through any port, is unavailable.
+	const space = contractSpaces[0] as Space;
+	const key = { space, partition: "p", name: "k" };
+	const { store: s, control: c, upkeep: u } = tool;
+	const calls: (() => Promise<unknown>)[] = [
+		() => s.get(key),
+		() => (s.getMany as NonNullable<typeof s.getMany>)([key]),
+		() => s.putIfAbsent(key, 1, never),
+		() => s.replaceIf(key, "1", 1, never),
+		() => s.removeIf(key, { version: "1" }, {}),
+		() => s.take(key, {}),
+		() => s.batch([], [{ key, put: 1, expiry: { kind: "never" } }], {}),
+		() => s.count(key, { limit: 1, ms: 1000 }, {}),
+		() => s.now(),
+		() => s.scan(space),
+		() => c.control(),
+		() => u.mark("owner.mark", 1),
+		() => u.require([space.name]),
+		() => u.enterMaintenance(),
+		() => u.leaveMaintenance(),
+		() => u.kept(),
+		() => u.retire("gone"),
+		() => u.honours([]),
+		() => u.sweep(space),
+		() => (u.alone as () => Promise<unknown>)(),
+	];
+	for (const call of calls) await expect(call()).rejects.toSatisfy(isUnavailable);
+	expect((await first.store.putIfAbsent(key, 1, never)).kind).toBe("written");
 });
 
 it("answers durable and replicated unmet, and the rest verified, as one process holds them", async () => {
