@@ -36,11 +36,11 @@ function heldLedger(
 				if (!(await ledger)) throw new Error("NOREPLICAS Not enough good replicas to write.");
 				return `abc\n{"kind":"kept"}`;
 			}
-			sent.push(argv.at(-2)?.endsWith(":{#control}") ? `change ${argv[5] ?? ""}` : "read");
+			sent.push(argv.at(-3)?.endsWith(":{#control}") ? `change ${argv[5] ?? ""}` : "read");
 			return `abc\n${JSON.stringify(answer)}`;
 		},
 	} as unknown as Redis;
-	const taken = { epoch: "" };
+	const taken = { epoch: "", keyed: false };
 	const upkeep = redisUpkeepWith({
 		run: scriptsOn(client),
 		serverOf,

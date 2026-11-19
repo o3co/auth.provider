@@ -1,4 +1,4 @@
-import { contract, defineModule, probes, setting } from "@mod/kernel";
+import { BuildRefused, contract, defineModule, probes, setting } from "@mod/kernel";
 import { type Space, spaces, store, storeControl, storeUpkeep } from "@mod/store";
 import { isFloor, tlsOptions } from "@mod/tls-options";
 import { Redis } from "ioredis";
@@ -147,6 +147,10 @@ async function unmet(
 	readonly undurable: readonly string[];
 	readonly unreplicated: readonly string[];
 }> {
+	// Only declarations shaped as such are read here, the rest skipped: store refuses those as the upkeep is built.
+	declared = declared.filter(
+		(space) => typeof space === "object" && space !== null && Array.isArray(space.guarantees),
+	);
 	// First, as the checks below send some of the same commands: a refused one is named, not lost.
 	const refused = await refusedCommands(client, confirmer, {
 		prefix: s.prefix,
@@ -323,7 +327,7 @@ export default defineModule(
 				replicationTimeoutMs: c.section["replication-timeout"],
 				replication: c.section.replication,
 			};
-			const taken: Taken = { epoch: "" };
+			const taken: Taken = { epoch: "", keyed: false };
 			const upkeep = redisUpkeepWith({
 				run: scriptsOn(client),
 				serverOf,
@@ -337,8 +341,11 @@ export default defineModule(
 					honoursOf(client, c.section, wanted, `${options.prefix}:{#check}:fsync`),
 			});
 			try {
-				await upkeep.start();
-			} catch {
+				// Kernel's `neverStarted`, `true` alone, grants store's "may build under the maintenance key".
+				const mayBuildUnderKey = c.neverStarted === true;
+				await upkeep.start(mayBuildUnderKey);
+			} catch (error) {
+				if (BuildRefused.is(error)) throw error;
 				return c.refuse("redis", "cannot read the control record's epoch");
 			}
 			return {

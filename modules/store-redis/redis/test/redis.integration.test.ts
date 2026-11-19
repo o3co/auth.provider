@@ -208,6 +208,7 @@ async function open(
 	prefix = `t${Date.now()}x${++opened}`,
 	through = url,
 	replication: string | null = "replicas",
+	mayBuildUnderKey = false,
 ) {
 	const app = await assemble({
 		modules: [redisModule, tlsOptionsForTests, ...extra],
@@ -215,6 +216,7 @@ async function open(
 			...kernelConfig({ deployment: "multi" }),
 			redis: { url: through, prefix, ...(replication ? { replication } : {}) },
 		},
+		...(mayBuildUnderKey ? { neverStarted: true as const } : {}),
 	});
 	prefixes.set(app.get(store), prefix);
 	return app;
@@ -296,11 +298,11 @@ storeContract("redis", {
 
 /** The prefix each process of the upkeep contract opened, so another opens the same data. */
 const upkeepPrefixes = new WeakMap<UpkeepProcess, string>();
-const startOn = async (prefix: string, declared: readonly Space[]) => {
+const startOn = async (prefix: string, declared: readonly Space[], mayBuildUnderKey = false) => {
 	const owner = defineModule({ name: "upkeep-owner", replicaSafe: true, takes: [] }, (m) =>
 		declared.map((space) => m.contribute(spaces).by(() => space)),
 	);
-	const app = await open([owner], prefix, proxyUrl);
+	const app = await open([owner], prefix, proxyUrl, "replicas", mayBuildUnderKey);
 	stops.push(() => app.stop(1000));
 	const process = {
 		store: app.get(store),
@@ -317,6 +319,9 @@ upkeepContract("redis", {
 		const raw = keysUnder(upkeepPrefixes.get(process) as string).valueKey(key);
 		return cli(container, "exists", raw) === "1";
 	},
+	expiresOnItsOwn: true,
+	anotherMayBuildUnderKey: (process, declared) =>
+		startOn(upkeepPrefixes.get(process) as string, declared, true),
 });
 
 it("answers durable unmet once the server skips its fsyncs while it rewrites, and verified again once it does not", async () => {

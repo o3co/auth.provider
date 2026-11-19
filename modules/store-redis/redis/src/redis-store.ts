@@ -152,9 +152,10 @@ export async function roundProblems(
 				"",
 				"",
 				"0",
-				// The epoch check's: the control record, and no epoch, as a process starts with.
+				// The epoch check's: the control record, no epoch, and not taken under the key, as a process starts with.
 				`${options.prefix}:{#control}`,
 				"",
+				"0",
 			],
 		],
 	];
@@ -182,6 +183,8 @@ export async function roundProblems(
 /** The epoch a process took at its start, or entered since; '' for none. */
 export interface Taken {
 	epoch: string;
+	/** Whether the epoch was taken under the maintenance key: the process then changes only while the key is held. */
+	keyed: boolean;
 }
 
 /** Runs a script, its answer naming its server (`serverOf`); one refused for an old epoch is unavailable. */
@@ -212,7 +215,7 @@ export function redisStore(
 	confirmer: Redis,
 	options: RedisStoreOptions,
 	declared: readonly Space[],
-	taken: Taken = { epoch: "" },
+	taken: Taken = { epoch: "", keyed: false },
 	ready: () => Promise<void> = async () => {},
 ): Store {
 	const { prefix } = options;
@@ -221,7 +224,7 @@ export function redisStore(
 	const run = scriptsOn(client);
 	const change = async (script: string, keys: string[], args: (string | number)[]) => {
 		await ready();
-		return run(script, keys, [...args, controlKey, taken.epoch]);
+		return run(script, keys, [...args, controlKey, taken.epoch, taken.keyed ? "1" : "0"]);
 	};
 	const confirmed = confirmationRounds(confirmer, options);
 	/**
