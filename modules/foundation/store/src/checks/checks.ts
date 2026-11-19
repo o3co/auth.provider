@@ -344,7 +344,6 @@ export function checkedUpkeep(
 ): StoreUpkeep {
 	const known = declaredSpaces(declared);
 	const ordered = Object.freeze([...declared]);
-	const sweepKept = inner.sweepKept?.bind(inner);
 	return {
 		declared: () => ordered,
 		// Where the implementation offers no way to look, store's own code: never `alone` in doubt.
@@ -358,19 +357,12 @@ export function checkedUpkeep(
 		leaveMaintenance: () => inner.leaveMaintenance(),
 		kept: (): Promise<readonly KeptSpace[]> => inner.kept(),
 		retire: async (name, generation) =>
-			inner.retire(
+			inner.retire(text("space", name), text("generation", generation, generationLength)),
+		sweepKept: async (name, cursor) =>
+			inner.sweepKept(
 				text("space", name),
-				generation === undefined ? undefined : text("generation", generation, generationLength),
+				cursor === undefined ? undefined : text("cursor", cursor, cursorLength),
 			),
-		...(sweepKept === undefined
-			? {}
-			: {
-					sweepKept: async (name: string, cursor?: string) =>
-						sweepKept(
-							text("space", name),
-							cursor === undefined ? undefined : text("cursor", cursor, cursorLength),
-						),
-				}),
 		honours: async (asked): Promise<Honours> => {
 			if (!Array.isArray(asked)) fail("guarantees must be a list");
 			for (const g of asked) if (!isGuarantee(g)) fail(`unknown guarantee ${String(g)}`);

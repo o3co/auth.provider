@@ -478,8 +478,7 @@ export function memoryProcess(
 			if (known.has(name)) return { kind: "declared" };
 			const entry = ledger.get(name);
 			if (entry === undefined) return { kind: "missing" };
-			if (generation !== undefined && entry.generation !== generation)
-				return { kind: "redeclared" };
+			if (entry.generation !== generation) return { kind: "redeclared" };
 			ledger.delete(name);
 			return { kind: "retired" };
 		},
