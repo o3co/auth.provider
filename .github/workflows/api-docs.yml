@@ -31,6 +31,7 @@ jobs:
   build:
     name: Build the API site
     runs-on: ubuntu-latest
+    cache-mode: none
     permissions:
       contents: read
     # The push takes the site by this id, never by a name another job could make again.
@@ -119,6 +120,7 @@ jobs:
     name: Publish the API site
     needs: build
     runs-on: ubuntu-latest
+    cache-mode: none
     permissions:
       contents: write
     env:
