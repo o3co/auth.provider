@@ -9,6 +9,7 @@ export {
 	type Mark,
 	type StoreControl,
 	type StoreUpkeep,
+	type Swept,
 	storeControl,
 	storeUpkeep,
 	type UpkeepImplementation,

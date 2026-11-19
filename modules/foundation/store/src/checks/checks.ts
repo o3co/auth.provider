@@ -327,6 +327,13 @@ function spaceIn(known: ReadonlyMap<string, Space>, value: unknown): Space {
 	return space;
 }
 
+/** The declared space `name` names; any other name is a caller's error. */
+function declaredNamed(known: ReadonlyMap<string, Space>, name: unknown): Space {
+	const space = known.get(text("space", name));
+	if (!space) fail(`space ${String(name)} is not declared`);
+	return space;
+}
+
 /** `alone()`'s answer where the implementation offers no way to look. */
 const noLookOffered: Alone = Object.freeze({
 	kind: "unchecked",
@@ -358,9 +365,9 @@ export function checkedUpkeep(
 			for (const g of asked) if (!isGuarantee(g)) fail(`unknown guarantee ${String(g)}`);
 			return inner.honours([...new Set(asked)]);
 		},
-		sweep: async (target, cursor) =>
+		sweep: async (name, cursor) =>
 			inner.sweep(
-				spaceIn(known, target),
+				declaredNamed(known, name),
 				cursor === undefined ? undefined : text("cursor", cursor, cursorLength),
 			),
 	};

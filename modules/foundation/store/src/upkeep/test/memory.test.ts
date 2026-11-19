@@ -9,7 +9,14 @@ import {
 } from "@mod/kernel";
 import { expect, it } from "vitest";
 import { checkedUpkeep } from "../../checks/checks.ts";
-import { type Space, spaces, store, storeControl, storeUpkeep } from "../../contract.ts";
+import {
+	type Space,
+	spaces,
+	store,
+	storeControl,
+	storeUpkeep,
+	type UpkeepImplementation,
+} from "../../contract.ts";
 import { type MemoryData, memoryData, memoryProcess } from "../../memory/memory.ts";
 import storeModule from "../../module.ts";
 import { contractSpaces, type UpkeepProcess, upkeepContract } from "../../testing.ts";
@@ -99,7 +106,7 @@ it("counts no process whose start was refused, and none once detached, each chan
 		() => u.kept(),
 		() => u.retire("gone"),
 		() => u.honours([]),
-		() => u.sweep(space),
+		() => u.sweep(space.name),
 		() => (u.alone as () => Promise<unknown>)(),
 	];
 	for (const call of calls) await expect(call()).rejects.toSatisfy(isUnavailable);
@@ -107,12 +114,24 @@ it("counts no process whose start was refused, and none once detached, each chan
 });
 
 it("answers alone() unchecked, no-look-offered, where the implementation offers no way to look, and the implementation's own answer where it does", async () => {
-	const { alone, ...withoutAlone } = memoryProcess(memoryData(clock), []).upkeep;
-	expect(await checkedUpkeep(withoutAlone, []).alone()).toEqual({
+	const {
+		alone,
+		sweep: _swept,
+		declared: _declared,
+		...rest
+	} = memoryProcess(memoryData(clock), []).upkeep;
+	// An implementation offering no `alone()`; nothing here walks a space.
+	const offeringNone: UpkeepImplementation = {
+		...rest,
+		sweep: async () => {
+			throw new Error("not walked here");
+		},
+	};
+	expect(await checkedUpkeep(offeringNone, []).alone()).toEqual({
 		kind: "unchecked",
 		reasons: ["no-look-offered"],
 	});
-	expect(await checkedUpkeep({ ...withoutAlone, alone }, []).alone()).toEqual({ kind: "alone" });
+	expect(await checkedUpkeep({ ...offeringNone, alone }, []).alone()).toEqual({ kind: "alone" });
 });
 
 it("answers durable and replicated unmet, and the rest verified, as one process holds them", async () => {

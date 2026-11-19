@@ -32,14 +32,14 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
   - Where the implementation offers no way to look, `checkedUpkeep` answers `unchecked` with store's own code until every implementation offers one (H-C3c).
 - `unchecked`'s reasons are codes: a server named only as `primary` or `replica N`, in the configured order; never an endpoint, address, host or user name, run id or witness. A setting may say how to look, never what the answer is.
   - Store's own code: `no-look-offered`, the implementation offers no way to look.
-- `sweep` removes for good each expired key it meets, its answer confirmed as a write, and names the server each page ran on.
+- `sweep` walks a space by the name this process declares it by; any other name is a caller's error (`TypeError`). It removes for good each expired key it meets, its answer confirmed as a write, and names the server each page ran on.
 
 ## Depends on
 - `kernel` (contracts); the internal module `planting`, for its contract test to plant values in a space of subjects' data
 
 ## Vocabulary
 - attached: another process, neither this one nor the store's own replication, that the storing side would now let run any part of a store operation on the data.
-- UpkeepImplementation: the upkeep an implementation answers; `checkedUpkeep` adds the rest (`declared`), and answers `alone()` where it offers none.
+- UpkeepImplementation: the upkeep an implementation answers; `checkedUpkeep` adds the rest (`declared`), answers `alone()` where it offers none, and hands `sweep` the declared space a name names.
 - the key's fence: a process that took its epoch under the maintenance key changes only while the key is held; once it lifts, the process is done, and a new window is a new process.
 - may build under the maintenance key: a process's grant to start under the key, and under it without a space `requires` names; its composition grants it from kernel's `neverStarted` alone, a tool's assembly that is never started.
 - epoch: the control record's mark, new on each entry to maintenance; a process's changes count only under the epoch it took. maintenance key: the record's flag that upkeep holds the data under. ledger: the spaces ever declared to the data.
