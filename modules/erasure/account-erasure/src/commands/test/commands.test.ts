@@ -4,32 +4,45 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import type { Alone, ErasureMaintenance } from "../../maintenance/maintenance.ts";
 import accountErasure from "../../module.ts";
-import { commandCodes, enterCommand } from "../commands.ts";
+import { enterCommand } from "../commands.ts";
 
 const clock = { now: () => 1_000 };
 
-/** The parts `erasure-enter` runs with: a journal that holds or answers `busy`, and a store answering `alone()` in turn. */
+/**
+ * The parts `erasure-enter` runs with: a journal that holds or answers `busy`, and a store answering
+ * `alone()` in turn, recording every call either receives.
+ */
 function parts(seen: (Alone | Error)[], holder?: string) {
 	const calls: string[] = [];
 	const journal = {
-		hold: async () =>
-			holder === undefined
+		hold: async () => {
+			calls.push("hold");
+			return holder === undefined
 				? {
 						kind: "held",
 						release: async () => {
 							calls.push("release");
 						},
 					}
-				: { kind: "busy", holder },
+				: { kind: "busy", holder };
+		},
 	} as unknown as ErasureJournal;
 	const maintenance = {
+		record: async () => {
+			calls.push("record");
+			throw new Error("erasure-enter reads no record");
+		},
 		alone: async () => {
+			calls.push("alone");
 			const next = seen.shift();
 			if (next === undefined) throw new Error("alone() asked once more than the case says");
 			if (next instanceof Error) throw next;
 			return next;
 		},
-		enter: async () => ({ kind: "entered", epoch: "e2" }),
+		enter: async () => {
+			calls.push("enter");
+			return { kind: "entered", epoch: "e2" };
+		},
 		mark: async () => {
 			calls.push("mark");
 			return { kind: "marked" };
@@ -46,87 +59,115 @@ it("enters under the key, shown alone, writing the entry time: code 0", async ()
 		lines: ["entered maintenance under epoch e2; this process was shown alone"],
 		code: 0,
 	});
-	expect(calls).toEqual(["mark", "release"]);
+	expect(calls).toEqual(["hold", "alone", "enter", "alone", "mark", "release"]);
 });
 
-it("refuses any argument with a usage line, taking nothing: code 64", async () => {
-	const { parts: p, calls } = parts([]);
+it("refuses any argument with a usage line, calling nothing: code 64", async () => {
+	const { parts: p, calls } = parts([alone, alone]);
 	expect(await enterCommand(p)(["--force"])).toEqual({
 		lines: ["usage: erasure-enter (it takes no arguments)"],
-		code: commandCodes.usage,
+		code: 64,
 	});
 	expect(calls).toEqual([]);
 });
 
 it("does not enter where other processes are attached or not every one can be seen: codes 2 and 3", async () => {
-	const accompanied = await enterCommand(parts([{ kind: "accompanied", count: 2 }]).parts)([]);
-	expect(accompanied).toEqual({
-		lines: ["not entered: 2 other processes attached; stop them, then run erasure-enter again"],
-		code: 2,
-	});
-	const one = await enterCommand(parts([{ kind: "accompanied", count: 1 }]).parts)([]);
-	expect(one.lines[0]).toContain("1 other process attached");
-	const unchecked = await enterCommand(
-		parts([{ kind: "unchecked", reasons: ["replica-unreached", "no-look-offered"] }]).parts,
-	)([]);
-	expect(unchecked).toEqual({
-		lines: [
-			"not entered: not every process could be seen (replica-unreached, no-look-offered); run erasure-enter again once every server answers",
+	const cases = [
+		[
+			{ kind: "accompanied", count: 2 },
+			{
+				lines: ["not entered: 2 other processes attached; stop them, then run erasure-enter again"],
+				code: 2,
+			},
 		],
-		code: 3,
-	});
+		[
+			{ kind: "accompanied", count: 1 },
+			{
+				lines: ["not entered: 1 other process attached; stop them, then run erasure-enter again"],
+				code: 2,
+			},
+		],
+		[
+			{ kind: "unchecked", reasons: ["replica-unreached", "no-look-offered"] },
+			{
+				lines: [
+					"not entered: not every process could be seen (replica-unreached, no-look-offered); run erasure-enter again once every server answers",
+				],
+				code: 3,
+			},
+		],
+	] as const;
+	for (const [seen, expected] of cases) {
+		const { parts: p, calls } = parts([seen]);
+		expect(await enterCommand(p)([])).toEqual(expected);
+		expect(calls).toEqual(["hold", "alone", "release"]);
+	}
 });
 
 it("tells an entry not shown alone, the key set, with what was found and the way on: code 4", async () => {
 	const cases = [
-		[{ kind: "accompanied", count: 3 }, "3 other processes attached", "stop that process"],
+		[
+			{ kind: "accompanied", count: 3 },
+			"entered maintenance under epoch e2, but this process was not shown alone (3 other processes attached); the key stays set; stop that process and run erasure-enter again",
+		],
 		[
 			{ kind: "unchecked", reasons: ["replica-unreached"] },
-			"not every process could be seen: replica-unreached",
-			"once every server answers",
+			"entered maintenance under epoch e2, but this process was not shown alone (not every process could be seen: replica-unreached); the key stays set; run erasure-enter again once every server answers",
 		],
-		[new Unavailable("store"), "the store gave no answer", "once every server answers"],
+		[
+			new Unavailable("store"),
+			"entered maintenance under epoch e2, but this process was not shown alone (the store gave no answer); the key stays set; run erasure-enter again once every server answers",
+		],
 	] as const;
-	for (const [found, shown, way] of cases) {
+	for (const [found, line] of cases) {
 		const { parts: p, calls } = parts([alone, found]);
-		const run = await enterCommand(p)([]);
-		expect(run.code).toBe(commandCodes.enteredNotShownAlone);
-		expect(run.lines).toHaveLength(1);
-		expect(run.lines[0]).toContain(
-			"entered maintenance under epoch e2, but this process was not shown alone",
-		);
-		expect(run.lines[0]).toContain(shown);
-		expect(run.lines[0]).toContain("the key stays set");
-		expect(run.lines[0]).toContain(way);
-		expect(calls).toEqual(["release"]);
+		expect(await enterCommand(p)([])).toEqual({ lines: [line], code: 4 });
+		expect(calls).toEqual(["hold", "alone", "enter", "alone", "release"]);
 	}
 });
 
 it("does not run while another command holds the journal, naming the holder where it reads as one printable line: code 5", async () => {
-	const busy = await enterCommand(parts([], "pid 41 on node-a since 12:00").parts)([]);
-	expect(busy).toEqual({
+	const named = (holder: string) =>
+		`not run: another erasure command holds the journal (${holder}); run erasure-enter again once it ends, or release its hold once its process is gone`;
+	const busy = parts([], "pid 41 on node-a since 12:00");
+	expect(await enterCommand(busy.parts)([])).toEqual({
 		lines: [
 			"not run: another erasure command holds the journal (holder: pid 41 on node-a since 12:00); run erasure-enter again once it ends, or release its hold once its process is gone",
 		],
 		code: 5,
 	});
-	for (const holder of ["pid 41\nforged line", "pid \u001b[31m41", "", "x".repeat(201)]) {
-		const run = await enterCommand(parts([], holder).parts)([]);
-		expect(run.code, JSON.stringify(holder)).toBe(5);
-		expect(run.lines[0], JSON.stringify(holder)).toContain("(unreadable holder)");
-		expect(run.lines[0]).not.toContain("holder: ");
-		expect(run.lines[0]).not.toContain("\n");
-		expect(run.lines[0]).not.toContain("\u001b");
+	expect(busy.calls).toEqual(["hold"]);
+	const unreadable = [
+		"pid 41\nforged line",
+		"pid \u001b[31m41",
+		"pid 41\u007f",
+		"pid 41\u0085forged line",
+		"pid 41 ‮apon-edon",
+		"pid 41 ⁦node-a⁩",
+		"pid​41",
+		"﻿pid 41",
+		"pid 41 forged line",
+		"pid 41 forged paragraph",
+		"",
+		"x".repeat(201),
+	];
+	for (const holder of unreadable) {
+		expect(await enterCommand(parts([], holder).parts)([]), JSON.stringify(holder)).toEqual({
+			lines: [named("unreadable holder")],
+			code: 5,
+		});
 	}
-	const longest = await enterCommand(parts([], "y".repeat(200)).parts)([]);
-	expect(longest.lines[0]).toContain("y".repeat(200));
+	expect(await enterCommand(parts([], "y".repeat(200)).parts)([])).toEqual({
+		lines: [named(`holder: ${"y".repeat(200)}`)],
+		code: 5,
+	});
 });
 
 it("lets an outage reach its entry as thrown, the hold released", async () => {
 	const outage = new Unavailable("store");
 	const { parts: p, calls } = parts([outage]);
 	await expect(enterCommand(p)([])).rejects.toBe(outage);
-	expect(calls).toEqual(["release"]);
+	expect(calls).toEqual(["hold", "alone", "release"]);
 });
 
 it("refuses the boot where no wiring provides erasure's maintenance interface, or no journal is composed", async () => {
