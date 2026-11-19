@@ -970,7 +970,7 @@ it("holds the keyed set's format in its codec: the cap, those pushed out awaitin
 
 it("refuses to open a space holding a subject's data through any plain door, and opens one that holds none", () => {
 	const fake = {
-		batchAcross: async () => ({ kind: "committed", versions: [] }),
+		batchAcross: async () => ({ kind: "committed", versions: [], at: 0 }),
 	} as unknown as Store;
 	const random = { bytes: (n: number) => new Uint8Array(n) };
 	const at = (subjectData?: Space["subjectData"]) => ({
