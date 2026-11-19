@@ -322,6 +322,59 @@ upkeepContract("redis", {
 	expiresOnItsOwn: true,
 	anotherMayBuildUnderKey: (process, declared) =>
 		startOn(upkeepPrefixes.get(process) as string, declared, true),
+	// Test code only: ages the store's own keys of a space (version hashes, marks), as nothing else will for a day.
+	expireOwnKeys: async (process, space) => {
+		const pattern = keysUnder(upkeepPrefixes.get(process) as string).spaceAll(space);
+		const found = cli(container, "--scan", "--pattern", pattern).split("\n").filter(Boolean);
+		for (const key of found) {
+			if (key.endsWith(":#version") || key.includes(":#mark:")) cli(container, "pexpire", key, "1");
+		}
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	},
+});
+
+describe("a kept space's walk on Redis", () => {
+	const kept = (name: string): Space => ({ name, guarantees: [], subjectData: "none" });
+	const never = { expiry: { kind: "never" } } as const;
+
+	it("counts each family alone and a key of none, and reads a ledger entry without a generation as `none`", async () => {
+		const spaces = ["kc", "km", "kv", "ku", "kl"].map(kept);
+		const at = (i: number) => ({ space: spaces[i] as Space, partition: "p", name: "k" });
+		// A writer of the five over fresh data, and a tool declaring none of them, under the key.
+		const prefix = `w${Date.now()}x${++opened}`;
+		const writer = await startOn(prefix, [contractSpaces[0] as Space, ...spaces]);
+		const tool = await startOn(prefix, [contractSpaces[0] as Space]);
+		await writer.store.count(at(0), { ms: 60_000, limit: 5 });
+		await writer.store.putIfAbsent(at(1), 1, { ...never, idempotency: "only" });
+		await writer.store.putIfAbsent(at(2), 1, never);
+		await tool.upkeep.enterMaintenance();
+		const walk = (name: string, at?: string) => tool.upkeep.sweepKept?.(name, at);
+		/** A whole walk's live keys: other tests' keys share the server, so one page may meet none. */
+		const walkAll = async (name: string, at?: string, sum = 0): Promise<unknown> => {
+			const page = await walk(name, at);
+			if (page?.kind !== "page") return page;
+			if (page.cursor === undefined) return { kind: "page", live: sum + page.live };
+			return walkAll(name, page.cursor, sum + page.live);
+		};
+		// Each of the first three spaces keeps one family alone.
+		for (const [name, family] of [
+			["kc", ":c:"],
+			["km", ":#mark:"],
+			["kv", ":#version"],
+		] as const) {
+			const raw = cli(container, "--scan", "--pattern", keysUnder(prefix).spaceAll(name));
+			for (const key of raw.split("\n"))
+				if (key && !key.includes(family)) cli(container, "del", key);
+		}
+		cli(container, "set", `${keysUnder(prefix).slot(at(3))}:zz`, "1");
+		for (const space of spaces.slice(0, 4))
+			expect(await walkAll(space.name), space.name).toEqual({ kind: "page", live: 1 });
+		const { ledgerKey } = keysUnder(prefix);
+		const ledger = { ...JSON.parse(cli(container, "get", ledgerKey)), kl: {} };
+		cli(container, "set", ledgerKey, JSON.stringify(ledger));
+		expect(await walk("kl")).toMatchObject({ kind: "page", generation: "none" });
+		expect(await tool.upkeep.retire("kl", "none")).toEqual({ kind: "retired" });
+	});
 });
 
 it("answers durable unmet once the server skips its fsyncs while it rewrites, and verified again once it does not", async () => {

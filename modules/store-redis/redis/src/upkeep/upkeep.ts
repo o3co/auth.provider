@@ -50,10 +50,11 @@ elseif op == 'leave' then
   redis.call('HSET', control, 'maintenance', '0')
   answer = {kind = 'left'}
 elseif op == 'keep' then
+  -- Every declaration added is a new generation, the entry's subjectDataEver kept.
   local held = cjson.decode(redis.call('GET', ledger) or '{}')
   for name, ever in pairs(cjson.decode(ARGV[2])) do
     local before = held[name]
-    held[name] = {subjectDataEver = (before ~= nil and before.subjectDataEver) or ever}
+    held[name] = {subjectDataEver = (before ~= nil and before.subjectDataEver) or ever, generation = ARGV[3]}
   end
   redis.call('SET', ledger, cjson.encode(held))
   answer = {kind = 'kept'}
@@ -68,6 +69,8 @@ else
   local held = cjson.decode(redis.call('GET', ledger) or '{}')
   if held[ARGV[2]] == nil then
     answer = {kind = 'missing'}
+  elseif ARGV[4] ~= '' and (held[ARGV[2]].generation or 'none') ~= ARGV[4] then
+    answer = {kind = 'redeclared'}
   else
     held[ARGV[2]] = nil
     redis.call('SET', ledger, cjson.encode(held))
@@ -88,6 +91,29 @@ for _, key in ipairs(reply[2]) do
   elseif expires ~= -2 then table.insert(live, key) end
 end
 return out(cjson.encode({cursor = reply[1], keys = live, n = #live}))
+`;
+
+/** KEYS: control, ledger. ARGV: declared, name, SCAN cursor, pattern, count, fence. A kept walk's page, in one script. */
+const keptWalk = `${changing}
+local control, ledger = KEYS[1], KEYS[2]
+if redis.call('HGET', control, 'maintenance') ~= '1' then return out(cjson.encode({kind = 'not-in-maintenance'})) end
+if ARGV[1] == '1' then return out(cjson.encode({kind = 'declared'})) end
+local entry = cjson.decode(redis.call('GET', ledger) or '{}')[ARGV[2]]
+if entry == nil then return out(cjson.encode({kind = 'missing'})) end
+local reply = redis.call('SCAN', ARGV[3], 'MATCH', ARGV[4], 'COUNT', ARGV[5])
+local live, endless, latest = 0, 0, -1
+for _, key in ipairs(reply[2]) do
+  local expires = redis.call('PEXPIRETIME', key)
+  -- -2: gone already; -1: no expiry; at or before now: expired, deleted here; else live until then.
+  if expires >= 0 and expires <= now then redis.call('DEL', key)
+  elseif expires == -1 then live = live + 1; endless = endless + 1
+  elseif expires ~= -2 then
+    live = live + 1
+    if expires > latest then latest = expires end
+  end
+end
+return out(cjson.encode({kind = 'page', cursor = reply[1], live = live, endless = endless,
+  latest = num(latest), generation = entry.generation or 'none'}))
 `;
 
 export interface UpkeepParts {
@@ -155,10 +181,75 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 					subjectDataEver: fields.subjectDataEver === true,
 				})),
 			),
-		retire: async (name) =>
-			(await changed("retire", name, known.has(name) ? "1" : "0")) as Awaited<
+		retire: async (name, generation) =>
+			(await changed("retire", name, known.has(name) ? "1" : "0", generation ?? "")) as Awaited<
 				ReturnType<UpkeepImplementation["retire"]>
 			>,
+		sweepKept: async (name, cursor) => {
+			// A cursor is a walk this process holds of this space, or a caller's error, before anything else.
+			if (cursor !== undefined && walks.get(cursor)?.name !== name) {
+				throw new TypeError("store: the cursor is no walk of this space that this process holds");
+			}
+			await ready();
+			// Taken before any wait, and a page updates only its own walk: a replaced walk never comes back.
+			let handle = cursor;
+			if (handle === undefined) {
+				const earlier = walkOf.get(name);
+				if (earlier !== undefined) walks.delete(earlier);
+				handle = Buffer.from(parts.random.bytes(16)).toString("hex");
+				walks.set(handle, { name, scan: "0" });
+				walkOf.set(name, handle);
+			}
+			const walk = walks.get(handle);
+			// A new walk of the space may have replaced this one while the store got ready.
+			if (walk === undefined) {
+				throw new TypeError("store: the cursor is no walk of this space that this process holds");
+			}
+			const ended = () => {
+				if (walks.get(handle) !== walk) return;
+				walks.delete(handle);
+				if (walkOf.get(name) === handle) walkOf.delete(name);
+			};
+			let answer: Awaited<ReturnType<typeof run>>;
+			try {
+				answer = await run(
+					keptWalk,
+					both,
+					fenced([
+						known.has(name) ? "1" : "0",
+						name,
+						walk.scan,
+						keys.spaceAll(name),
+						String(sweepPage),
+					]),
+				);
+				// Removing is writing, and the space's guarantees are unknown: every page is confirmed where replication is.
+				await confirm(answer);
+			} catch (error) {
+				ended();
+				throw error;
+			}
+			if (answer.kind !== "page") {
+				ended();
+				return { kind: answer.kind } as Awaited<
+					ReturnType<NonNullable<UpkeepImplementation["sweepKept"]>>
+				>;
+			}
+			const next = String(answer.cursor);
+			const done = next === "0" || walks.get(handle) !== walk;
+			if (done) ended();
+			else walk.scan = next;
+			const latest = Number(answer.latest);
+			return {
+				kind: "page",
+				live: answer.live as number,
+				noExpiry: answer.endless as number,
+				...(latest < 0 ? {} : { latestExpiry: latest }),
+				...(cursor === undefined ? { generation: String(answer.generation) } : {}),
+				...(done ? {} : { cursor: handle }),
+				server: String(parts.serverOf(answer)),
+			};
+		},
 		honours: (guarantees) => parts.honours(guarantees),
 		sweep: async (space, cursor) => {
 			await ready();
@@ -202,7 +293,8 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 	 * promoted after it holds it; kept only once it is.
 	 */
 	const keep = async () => {
-		await confirm(await run(change, both, fenced(["keep", entries])));
+		const generation = Buffer.from(parts.random.bytes(16)).toString("hex");
+		await confirm(await run(change, both, fenced(["keep", entries, generation])));
 		kept = true;
 	};
 	/**
@@ -233,6 +325,9 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 		};
 	};
 	const known = new Set(declared.map((space) => space.name));
+	/** A kept space's walk this process holds, by its random handle: at most one per space (`walkOf`); SCAN's cursor never leaves it. */
+	const walks = new Map<string, { readonly name: string; scan: string }>();
+	const walkOf = new Map<string, string>();
 	const control: StoreControl = {
 		control: async () => {
 			const held = await readAll();
