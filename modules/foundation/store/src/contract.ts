@@ -10,6 +10,7 @@ export {
 	type StoreUpkeep,
 	storeControl,
 	storeUpkeep,
+	type UpkeepImplementation,
 } from "./upkeep/upkeep.ts";
 
 /**

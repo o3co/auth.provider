@@ -14,7 +14,7 @@ import type {
 	WriterHeld,
 } from "../contract.ts";
 import { malformedDeclaration } from "../declaration.ts";
-import type { Honours, KeptSpace, StoreUpkeep } from "../upkeep/upkeep.ts";
+import type { Honours, KeptSpace, StoreUpkeep, UpkeepImplementation } from "../upkeep/upkeep.ts";
 import { subjectWriter } from "../writer/subject-writer.ts";
 
 const maxTime = 8_640_000_000_000_000;
@@ -322,7 +322,10 @@ function spaceIn(known: ReadonlyMap<string, Space>, value: unknown): Space {
 }
 
 /** Checks upkeep's input once, as `checkedStore` checks the store's: names, values and spaces. */
-export function checkedUpkeep(inner: StoreUpkeep, declared: readonly Space[]): StoreUpkeep {
+export function checkedUpkeep(
+	inner: UpkeepImplementation,
+	declared: readonly Space[],
+): StoreUpkeep {
 	const known = declaredSpaces(declared);
 	return {
 		mark: async (name, value) => inner.mark(text("mark name", name), json(value)),

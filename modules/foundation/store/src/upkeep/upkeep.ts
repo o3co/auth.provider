@@ -90,6 +90,9 @@ export interface StoreUpkeep {
 	): Promise<{ readonly keys: readonly Key[]; readonly cursor?: string; readonly server: string }>;
 }
 
+/** The upkeep an implementation answers, which `checkedUpkeep` wraps. */
+export type UpkeepImplementation = StoreUpkeep;
+
 /**
  * Its owner lets it go unprovided until 0.22: a taker reads a mark it cannot read as unknown, failing
  * closed, as long as store adapters of 0.19 provide none.
