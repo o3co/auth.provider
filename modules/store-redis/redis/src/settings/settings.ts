@@ -74,11 +74,14 @@ export function declaredCopies(declared: readonly Space[]): DeclaredCopy[] {
 		try {
 			const [name, list] = [own(space, "name"), own(space, "guarantees")];
 			if (typeof name !== "string" || !Array.isArray(list)) return [];
-			const guarantees = Array.from({ length: Number(own(list, "length")) }, (_, i) =>
-				own(list, String(i)),
-			);
-			if (!guarantees.every((g) => typeof g === "string")) return [];
-			return [{ name, guarantees: guarantees as Guarantee[] }];
+			// Entry by entry, stopping at the first that is no own data string: a sparse list's length is never walked.
+			const guarantees: Guarantee[] = [];
+			for (let i = 0; i < Number(own(list, "length")); i++) {
+				const entry = own(list, String(i));
+				if (typeof entry !== "string") return [];
+				guarantees.push(entry as Guarantee);
+			}
+			return [{ name, guarantees }];
 		} catch {
 			return [];
 		}

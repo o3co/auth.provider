@@ -247,7 +247,7 @@ describe("the commands the store needs", () => {
 		redis.down();
 	});
 
-	it("refuse boot for a durable space whose guarantees run methods of their own, reading the entries as declared", async () => {
+	it("refuse boot for a durable space whose guarantees hold methods of their own, for the fsync gap and then as store refuses it, running none of them", async () => {
 		const redis = primary();
 		Object.assign(redis.settings, { appendonly: "yes", appendfsync: "always" });
 		redis.settings["no-appendfsync-on-rewrite"] = "yes";
@@ -264,14 +264,34 @@ describe("the commands the store needs", () => {
 		const owned = defineModule({ name: "owned", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(spaces).by(() => ({ name: "owned", guarantees, subjectData: "none" }) as Space),
 		]);
-		const error = await boot(await redis.listen(), undefined, undefined, [owned]).catch(
-			(e: unknown) => e,
-		);
+		const port = await redis.listen();
+		const error = await boot(port, undefined, undefined, [owned]).catch((e: unknown) => e);
 		expect(error).toBeInstanceOf(BootRefused);
 		expect(String((error as BootRefused).refusals.map((r) => r.reason))).toContain(
 			"no-appendfsync-on-rewrite no",
 		);
+		redis.settings["no-appendfsync-on-rewrite"] = "no";
+		const then = await boot(port, undefined, undefined, [owned]).catch((e: unknown) => e);
+		expect((then as BootRefused).refusals).toEqual([
+			{ where: "owned", reason: "declares guarantees that are no list of known guarantees" },
+		]);
 		expect(ran).toEqual([]);
+		redis.down();
+	});
+
+	it("refuse boot over a sparse list of guarantees as store refuses it, the server's checks stopping at its first hole", async () => {
+		const redis = primary();
+		const guarantees: string[] = [];
+		guarantees.length = 2 ** 32 - 1;
+		const owner = defineModule({ name: "sparse", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(spaces).by(() => ({ name: "sparse", guarantees, subjectData: "none" }) as Space),
+		]);
+		const error = await boot(await redis.listen(), undefined, undefined, [owner]).catch(
+			(e: unknown) => e,
+		);
+		expect((error as BootRefused).refusals).toEqual([
+			{ where: "sparse", reason: "declares guarantees that are no list of known guarantees" },
+		]);
 		redis.down();
 	});
 
