@@ -114,6 +114,27 @@ async function refusal(
 }
 
 describe("the declared spaces", () => {
+	it("refuse boot over a declaration whose guarantees a getter holds, as store refuses it, the server's checks running no getter", async () => {
+		const redis = primary();
+		const trapped = Object.defineProperty({ name: "trapped", subjectData: "none" }, "guarantees", {
+			enumerable: true,
+			get: () => {
+				throw new Error("a getter ran");
+			},
+		});
+		const owner = defineModule({ name: "trapped", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(spaces).by(() => trapped as unknown as Space),
+		]);
+		const error = await boot(await redis.listen(), undefined, undefined, [owner]).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		const [refusal] = (error as BootRefused).refusals;
+		expect(refusal?.where).toBe("trapped");
+		expect(refusal?.reason).not.toMatch(/getter ran|failed during assembly/);
+		redis.down();
+	});
+
 	it("refuse boot over a space declaring no subjectData, naming it", async () => {
 		const redis = primary();
 		const bare = defineModule({ name: "bare", replicaSafe: false, takes: [] }, (m) => [

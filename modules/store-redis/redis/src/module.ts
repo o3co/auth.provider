@@ -135,6 +135,20 @@ async function serverProblems(client: Redis, role: Role): Promise<string[]> {
 	return problems;
 }
 
+/** A declaration's own data fields copied plainly, no getter or trap run; none where it is no such declaration, or reading it throws. */
+function shapedCopy(space: Space): Space[] {
+	try {
+		const own = (field: string) => Object.getOwnPropertyDescriptor(space, field)?.value;
+		const [name, guarantees, subjectData] = [own("name"), own("guarantees"), own("subjectData")];
+		if (typeof name !== "string" || !Array.isArray(guarantees)) return [];
+		return [
+			{ name, guarantees: guarantees.filter((g) => typeof g === "string"), subjectData } as Space,
+		];
+	} catch {
+		return [];
+	}
+}
+
 /** What the server's settings fail to give the declared spaces, empty when everything holds; and the settings taken as declared. */
 async function unmet(
 	client: Redis,
@@ -147,10 +161,8 @@ async function unmet(
 	readonly undurable: readonly string[];
 	readonly unreplicated: readonly string[];
 }> {
-	// Only declarations shaped as such are read here, the rest skipped: store refuses those as the upkeep is built.
-	declared = declared.filter(
-		(space) => typeof space === "object" && space !== null && Array.isArray(space.guarantees),
-	);
+	// Only plain copies of declarations shaped as such are read here, the rest skipped: store refuses those as the upkeep is built.
+	declared = declared.flatMap(shapedCopy);
 	// First, as the checks below send some of the same commands: a refused one is named, not lost.
 	const refused = await refusedCommands(client, confirmer, {
 		prefix: s.prefix,
