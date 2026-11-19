@@ -18,4 +18,4 @@ Internal module of `distribution`: the app of the release with the most packages
 - Tarballs holding no entrance are refused before anything is installed.
 
 ## Depends on
-- `release-check` (`overridesFile`); an entrance depending on its bundle alone (`distribution`'s card); the release's `combinations` (the features that opt in), run from the tarballs; pnpm and Node, run.
+- `release-check` (`overridesFile`); an entrance depending on its bundle alone (`distribution`'s card); the release's `combinations` (the features that opt in), run from the tarballs, where it is in the entrance's bundle (both in `scaffold`; moved, the read fails); pnpm and Node, run.

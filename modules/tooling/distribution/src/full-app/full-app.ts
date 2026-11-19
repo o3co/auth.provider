@@ -22,7 +22,8 @@ export function installFromTarballs(dir: string, byName: Readonly<Record<string,
 
 /**
  * The features that opt in, as the release installed in `project` tells them: the `combinations`
- * of the bundle its entrance depends on, so the tarballs, not this workspace, choose them.
+ * of the bundle its entrance depends on, so the tarballs, not this workspace, choose them. It runs
+ * the release's code, in a job with no secret.
  */
 export function releaseOptIns(project: string): string[] {
 	const installed = realpathSync(join(project, "node_modules", entrance));
