@@ -317,9 +317,11 @@ export function takenByRules(s: Scope) {
 		}
 		for (const p of s.packages) {
 			if (p === owner) continue;
-			// An adapter of the owner imports its contracts to provide them; taking one is refused at assembly.
-			// Handing one on is counted: a re-export, or exporting again what it imported (`handedOn`).
-			const forms = s.ownerServed(p) === owner.name ? (["export-from"] as const) : undefined;
+			// An adapter of the owner, or a wiring wiring it, imports its contracts to provide them; taking
+			// one is refused at assembly. Handing one on is counted: a re-export, or exporting again what it
+			// imported (`handedOn`).
+			const provides = (s.ownerServed(p) ?? s.wiredFeature(p)) === owner.name;
+			const forms = provides ? (["export-from"] as const) : undefined;
 			for (const path of shipped(s, p)) {
 				const facts = s.factsOf(p, path.slice(p.dir.length + 1));
 				const taken = valuesTaken(facts, owner.name, forms);

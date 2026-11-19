@@ -3,7 +3,7 @@
 Internal module of `guard-imports`: the scope every rule reads, and whether a file counts as a test.
 
 ## Responsibilities
-- Builds the scope (`scopeOf`): the packages and the rules they are read under, where findings go, what a manifest declares apart from what a source is seen to say (the entries a package's `takenBy` names, `takenEntries`; the owner an adapter serves, `ownerServed`), each file's `facts` by one lexical program over every package's sources and the files the caller adds (a fork's helper), and the package whose directory holds a path.
+- Builds the scope (`scopeOf`): the packages and the rules they are read under, where findings go, what a manifest declares apart from what a source is seen to say (the entries a package's `takenBy` names, `takenEntries`; the owner an adapter serves, `ownerServed`; the feature a wiring wires, `wiredFeature`), each file's `facts` by one lexical program over every package's sources and the files the caller adds (a fork's helper), and the package whose directory holds a path.
 - Says whether a file counts as a test (`budgetsAsTest`): a file named as a test, and beyond that from the import graph alone, no directory or path deciding it:
   - a file its package's `./testing` reaches and nothing else in the package does: no other export, and no file not named as a test that `./testing` does not reach. A published contract test suite and its internal modules are so read;
   - `./testing` is walked by the imports that load or take types (a value, a type, a dynamic import, a re-export), never by a resolve, which only names a file; the shipped roots by every edge, a resolve too. Either walk fails toward shipped;

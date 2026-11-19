@@ -61,6 +61,11 @@ export interface Scope<B extends Rules = Rules> {
 	 */
 	readonly ownerServed: (p: Pkg) => string | undefined;
 	/**
+	 * The feature a wiring wires: its `wires`, read of the wiring kind alone, where it names a workspace
+	 * feature; none for another kind, or a `wires` naming anything else.
+	 */
+	readonly wiredFeature: (p: Pkg) => string | undefined;
+	/**
 	 * The keys of a package's `takenBy` naming an entry (`.`, `./…`): kept where one plain segment
 	 * (`./name`), none of the standard entries, naming its takers as a non-empty list of names, and
 	 * exported as one file; any other key with why not, unreported, for the rule reading it to refuse.
@@ -109,6 +114,13 @@ export function scopeOf<B extends Rules>(
 			const { adapts, replaces } = p.manifest;
 			if ((adapts === undefined) === (replaces === undefined)) return undefined;
 			return String(replaces ?? adapts);
+		},
+		wiredFeature: (p) => {
+			if (kindOf(p) !== budget.wiringKind) return undefined;
+			const { wires } = p.manifest;
+			if (typeof wires !== "string") return undefined;
+			const wired = byName.get(wires);
+			return wired && kindOf(wired) === budget.featureKind ? wires : undefined;
 		},
 		takenEntries: (p) => takenEntriesOf(p, budget.standardEntries),
 		level: (p) => budget.kindOrder.findIndex((kinds) => kinds.includes(kindOf(p))),
