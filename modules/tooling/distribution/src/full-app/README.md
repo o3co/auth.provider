@@ -7,7 +7,7 @@ Internal module of `distribution`: the app of the release with the most packages
 
 ## Not here
 - What the full template composes, and which features opt in: `combinations`. Writing the app: the entrance, `create-app`.
-- What is done with the app: its lists (`release-sbom`) and its image's scan (`image-scan`).
+- What is done with the app: its lists (`release-sbom`), its image's scan (`image-scan`) and the audit of its install (`app-audit`).
 
 ## Offers
 - `fullApp(byName, scratch)` → the entrance's project and the app, in `scratch`; `installFromTarballs(dir, byName)`, the install a project of the release takes; `entrance`, the entrance's name.

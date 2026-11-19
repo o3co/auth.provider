@@ -7,7 +7,7 @@ import { jointRecordsIn } from "../joint/joint.ts";
 import { migrateRecords, migrateSets } from "../migrate/migrate.ts";
 import type { PhaseOnce } from "../phase/phase.ts";
 import { subjectKeyedSetsIn } from "../sets/sets.ts";
-import { recordTargetsIn, subjectRecordsIn } from "../writes/writes.ts";
+import { boundedDeclared, recordTargetsIn, subjectRecordsIn } from "../writes/writes.ts";
 
 type Refuse = (where: string, reason: string) => never;
 /** A builder's methods, each answering a promise. */
@@ -84,48 +84,52 @@ export const phasedRecordsIn = async <T extends Json>(
 	where: string,
 	refuse: Refuse,
 	options: { readonly secret?: true } = {},
-) => ({
-	...(await phased(
-		phase,
-		(read, told) => {
-			const at = { ...place, phase: read };
-			return {
-				...subjectRecordsIn<T>(at, where, told, options),
-				// A value removed is one this builder kept as T, or one kept raw under the subject's key.
-				erase: (subject: string, signal: AbortSignal, eachRemoved?: (value: T) => void) =>
-					eraseSubject(
-						at,
-						subject,
-						eachRemoved
-							? { signal, eachRemoved: eachRemoved as (value: Json) => void }
-							: { signal },
-					),
-				migrate: (
-					walk: Walk,
-					subjectOf: SubjectReading,
-					signal: AbortSignal,
-					elsewhere?: Elsewhere,
-				) => migrateRecords(at, walk, subjectOf, elsewhere ? { signal, elsewhere } : { signal }),
-			};
-		},
-		refuse,
-		[place],
-		// Every method the builder has, or the typecheck fails: none is left unrouted.
-		{
-			create: true,
-			unowned: true,
-			read: true,
-			change: true,
-			changeNamed: true,
-			remove: true,
-			scan: true,
-			erase: true,
-			migrate: true,
-		} satisfies Record<keyof ReturnType<typeof subjectRecordsIn<T>> | "erase" | "migrate", true>,
-	)),
-	/** The name a record is kept by (`writes`' `recordTargetsIn`), needing no phase. */
-	nameOf: recordTargetsIn(place, options).nameOf,
-});
+) => {
+	// Before the phase is read, so a store down at start defers no such refusal to readiness.
+	boundedDeclared(place.space);
+	return {
+		...(await phased(
+			phase,
+			(read, told) => {
+				const at = { ...place, phase: read };
+				return {
+					...subjectRecordsIn<T>(at, where, told, options),
+					// A value removed is one this builder kept as T, or one kept raw under the subject's key.
+					erase: (subject: string, signal: AbortSignal, eachRemoved?: (value: T) => void) =>
+						eraseSubject(
+							at,
+							subject,
+							eachRemoved
+								? { signal, eachRemoved: eachRemoved as (value: Json) => void }
+								: { signal },
+						),
+					migrate: (
+						walk: Walk,
+						subjectOf: SubjectReading,
+						signal: AbortSignal,
+						elsewhere?: Elsewhere,
+					) => migrateRecords(at, walk, subjectOf, elsewhere ? { signal, elsewhere } : { signal }),
+				};
+			},
+			refuse,
+			[place],
+			// Every method the builder has, or the typecheck fails: none is left unrouted.
+			{
+				create: true,
+				unowned: true,
+				read: true,
+				change: true,
+				changeNamed: true,
+				remove: true,
+				scan: true,
+				erase: true,
+				migrate: true,
+			} satisfies Record<keyof ReturnType<typeof subjectRecordsIn<T>> | "erase" | "migrate", true>,
+		)),
+		/** The name a record is kept by (`writes`' `recordTargetsIn`), needing no phase. */
+		nameOf: recordTargetsIn(place, options).nameOf,
+	};
+};
 
 /** `subjectKeyedSetsIn` over the phase the process reads once (see `phased`). */
 export const phasedKeyedSetsIn = (

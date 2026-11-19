@@ -495,6 +495,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `way-back` (`src/way-back`): the fault scene of a code by mail bound as a way back, then a deployment started again under a required second factor, on one Redis.
 - `@mod/conformance-tunnel` (verification, `modules/tooling/conformance-tunnel`): Gives a harness's app a way out to a party on this machine that it may reach over https by its name alone: an HTTP CONNECT proxy on loopback, set as the app's `outbound.proxy`.
 - `@mod/distribution` (assembly, `modules/tooling/distribution`): Forms one distribution bundle per concern directory, whose members are the packages placed in it.
+  - `app-audit` (`src/app-audit`): the known vulnerabilities, of any severity, in what an app of the release installs, as an operator installs it on the day, any of them failing the audit.
   - `fetched` (`src/fetched`): the packages of this version npm already holds, taken from the registry for a release run again.
   - `full-app` (`src/full-app`): the app of the release with the most packages, made as an operator makes it.
   - `image-scan` (`src/image-scan`): the known vulnerabilities in the image of an app the release makes, as an operator builds it on the day, a fixable critical or high one, or a Node behind a security release, failing the scan.

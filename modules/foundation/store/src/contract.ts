@@ -153,13 +153,13 @@ export type BatchWrite =
 	| { readonly key: Key; readonly remove: true };
 
 /**
- * A batch's writes applied: each version (none for a removal), and the store time it committed at,
- * where the store tells it; a resend under its mark answers the first commit's.
+ * A batch's writes applied: each version (none for a removal), and the store time it committed at;
+ * a resend under its mark answers the first commit's.
  */
 export type Committed = {
 	readonly kind: "committed";
 	readonly versions: readonly (Version | null)[];
-	readonly at?: number;
+	readonly at: number;
 };
 
 /**
@@ -251,8 +251,8 @@ export const store = contract<Store>("store");
 export const spaces = extensionPoint<Space>("store.spaces", {
 	multiplicity: "keyed",
 	// A declaration keys by its own data `name`, read with no getter run. One with none (no object,
-	// no such name, a getter, or a proxy trap that throws) is refused here, as it is collected; a named
-	// but malformed one, by store's checks as the store is built.
+	// no such name, a getter, or a proxy trap that throws as the name is read) is refused here, as it
+	// is collected; a named but malformed one, by store's checks as the store is built.
 	keyOf: (space) => {
 		let named: unknown;
 		try {

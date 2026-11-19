@@ -5016,9 +5016,6 @@ importers:
       '@mod/create-app':
         specifier: workspace:*
         version: link:../../scaffold/create-app
-      vitest:
-        specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
     devDependencies:
       '@mod/conformance-code':
         specifier: workspace:*
@@ -5050,6 +5047,9 @@ importers:
       '@mod/users-http':
         specifier: workspace:*
         version: link:../../user-ledger-http/users-http
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/conformance-second-factor:
     dependencies:
