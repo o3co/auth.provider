@@ -116,6 +116,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `contract-marks` (`src/contract-marks`): the contract test's deadlines and idempotency marks, and concurrent connections.
   - `contract-walking` (`src/contract-walking`): the contract test's scanning of a space, and the checks on every input.
   - `contract-writer` (`src/contract-writer`): the contract test's subject writer.
+  - `ledger` (`src/ledger`): the ledger of spaces: which spaces the store's data has ever held, and taking one off.
   - `memory` (`src/memory`): the store kept in memory, in one process.
   - `planting` (`src/planting`): a value written at a key as an earlier version, or another writer, left it, for tests.
   - `simulated` (`src/simulated`): a simulated replicated store, for tests, offered through `./testing`.

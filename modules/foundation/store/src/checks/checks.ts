@@ -14,13 +14,8 @@ import type {
 	WriterHeld,
 } from "../contract.ts";
 import { malformedDeclaration } from "../declaration.ts";
-import type {
-	Alone,
-	Honours,
-	KeptSpace,
-	StoreUpkeep,
-	UpkeepImplementation,
-} from "../upkeep/upkeep.ts";
+import type { KeptSpace } from "../ledger/ledger.ts";
+import type { Alone, Honours, StoreUpkeep, UpkeepImplementation } from "../upkeep/upkeep.ts";
 import { subjectWriter } from "../writer/subject-writer.ts";
 
 const maxTime = 8_640_000_000_000_000;
