@@ -336,8 +336,8 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				await p.upkeep.leaveMaintenance();
 				await sleep(40);
 				for (const change of changes(p)) await expect(change()).rejects.toBeInstanceOf(Unavailable);
-				// Neither a change nor `sweep` behind the fence removes what expired.
-				if (harness.holds) expect(await harness.holds(p, k)).toBe(true);
+				// Neither a change nor `sweep` behind the fence removes what expired, where it stays held.
+				if (readsShowHeld) expect(await harness.holds?.(p, k)).toBe(true);
 				const q = await harness.another(p, upkeepSpaces);
 				expect(await q.upkeep.mark("test.after", 1)).toEqual({ kind: "marked" });
 			});
