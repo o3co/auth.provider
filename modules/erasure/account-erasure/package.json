@@ -10,6 +10,7 @@
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
+		"@mod/erasure-journal": "workspace:*",
 		"@mod/kernel": "workspace:*"
 	},
 	"devDependencies": {

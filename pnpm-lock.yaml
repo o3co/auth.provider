@@ -248,6 +248,9 @@ importers:
 
   modules/erasure/account-erasure:
     dependencies:
+      '@mod/erasure-journal':
+        specifier: workspace:*
+        version: link:../../foundation/erasure-journal
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
