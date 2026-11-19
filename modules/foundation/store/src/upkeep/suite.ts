@@ -20,11 +20,8 @@ export interface UpkeepHarness {
 	holds?(process: UpkeepProcess, key: Key): Promise<boolean>;
 	/** Set where the server removes expired keys itself (as Redis does): what expired may then be gone with no change. */
 	readonly expiresOnItsOwn?: true;
-	/**
-	 * Another process over the same data as `process`, granted to build under the maintenance key
-	 * (a tool's). An implementation offering it is held to the refusals of a start.
-	 */
-	anotherMayBuildUnderKey?(
+	/** Another process over the same data as `process`, granted to build under the maintenance key (a tool's). */
+	anotherMayBuildUnderKey(
 		process: UpkeepProcess,
 		declared: readonly Space[],
 	): Promise<UpkeepProcess>;
@@ -102,12 +99,9 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 
 	/**
 	 * Where what expired stays held until removed, so a read's leaving it can be seen: `holds` offered
-	 * and the server not expiring keys itself. Until every harness offers `anotherMayBuildUnderKey`,
-	 * also where it does.
+	 * and the server not expiring keys itself.
 	 */
-	const readsShowHeld = Boolean(
-		harness.holds && !harness.expiresOnItsOwn && harness.anotherMayBuildUnderKey,
-	);
+	const readsShowHeld = Boolean(harness.holds && !harness.expiresOnItsOwn);
 
 	describe(`store upkeep contract: ${name}`, () => {
 		describe("the control record", () => {
@@ -219,19 +213,16 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 			it("is followed by processes that start under the new epoch and change as before", async () => {
 				const [p] = await pair();
 				await p.upkeep.enterMaintenance();
-				// Under the key, only a process that may build under it starts, where the harness says how.
-				const next = await (harness.anotherMayBuildUnderKey ?? harness.another)(p, upkeepSpaces);
+				// Under the key, only a process that may build under it starts.
+				const next = await harness.anotherMayBuildUnderKey(p, upkeepSpaces);
 				expect((await next.store.putIfAbsent(fresh(), 1, never)).kind).toBe("written");
 				expect(await next.upkeep.mark("test.next", 1)).toEqual({ kind: "marked" });
 			});
 		});
 
-		describe.runIf(harness.anotherMayBuildUnderKey)("starting", () => {
+		describe("starting", () => {
 			const tool = (p: UpkeepProcess, declared: readonly Space[]) =>
-				(harness.anotherMayBuildUnderKey as NonNullable<UpkeepHarness["anotherMayBuildUnderKey"]>)(
-					p,
-					declared,
-				);
+				harness.anotherMayBuildUnderKey(p, declared);
 
 			it("refuses a process that serves under the maintenance key, and starts one that may build under it", async () => {
 				const p = await harness.start(upkeepSpaces);
@@ -308,12 +299,9 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 			});
 		});
 
-		describe.runIf(harness.anotherMayBuildUnderKey)("the key's fence", () => {
+		describe("the key's fence", () => {
 			const tool = (p: UpkeepProcess, declared: readonly Space[]) =>
-				(harness.anotherMayBuildUnderKey as NonNullable<UpkeepHarness["anotherMayBuildUnderKey"]>)(
-					p,
-					declared,
-				);
+				harness.anotherMayBuildUnderKey(p, declared);
 			/** Every change a process may try, each to be unavailable once its key has lifted. */
 			const changes = (q: UpkeepProcess) => [
 				() => q.upkeep.mark("test.fenced", 1),
