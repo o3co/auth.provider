@@ -22,7 +22,15 @@ export const recordTargetsIn = (place: Place, options: { readonly secret?: true 
 
 export function boundedDeclared(space: Space): void {
 	if (space.subjectData === "bounded" && space.boundedMs === undefined) {
-		throw new BuildRefused(space.name, "declares bounded with no boundedMs");
+		const reason = "declares bounded with no boundedMs";
+		let refused: BuildRefused;
+		try {
+			refused = new BuildRefused(space.name, reason);
+		} catch (error) {
+			if (!(error instanceof TypeError)) throw error;
+			refused = new BuildRefused("subject-records", reason);
+		}
+		throw refused;
 	}
 }
 

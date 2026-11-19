@@ -224,10 +224,13 @@ it("changes records of several places as one over the phase read once, shared wi
 });
 
 it("refuses the boot over a bounded space with no boundedMs, under its name, whether the phase reads or not", async () => {
-	const bare: Space = { name: "phased-bare", guarantees: g, subjectData: "bounded" };
+	const named = (name: string): Space => ({ name, guarantees: g, subjectData: "bounded" });
 	const random = { bytes: (n: number) => new Uint8Array(randomBytes(n)) };
 	/** A wiring of the bare space, building its records through `build` once the store is up. */
-	const wired = (build: (s: Store, refused: typeof refuse) => Promise<unknown> | unknown) =>
+	const wired = (
+		build: (s: Store, refused: typeof refuse) => Promise<unknown> | unknown,
+		bare = named("phased-bare"),
+	) =>
 		assemble({
 			modules: [
 				simulatedStore().module,
@@ -245,7 +248,12 @@ it("refuses the boot over a bounded space with no boundedMs, under its name, whe
 			() => [],
 			(error: unknown) => (error instanceof BootRefused ? error.refusals : [error]),
 		);
-	const at = (s: Store) => ({ store: s, space: bare, index: indexSpaceOf(bare), random });
+	const at = (s: Store, bare = named("phased-bare")) => ({
+		store: s,
+		space: bare,
+		index: indexSpaceOf(bare),
+		random,
+	});
 	const refusal = [{ where: "phased-bare", reason: "declares bounded with no boundedMs" }];
 	const { state, control: c } = control("indexed");
 	state.down = true;
@@ -255,4 +263,12 @@ it("refuses the boot over a bounded space with no boundedMs, under its name, whe
 	expect(
 		await wired((s, refused) => subjectRecordsIn({ ...at(s), phase: "reader" }, "w", refused)),
 	).toEqual(refusal);
+	// A name past kernel's bounds on a `where` keeps the refusal, under the package's label.
+	const long = named("b".repeat(201));
+	expect(
+		await wired(
+			(s, refused) => subjectRecordsIn({ ...at(s, long), phase: "reader" }, "w", refused),
+			long,
+		),
+	).toEqual([{ where: "subject-records", reason: "declares bounded with no boundedMs" }]);
 });
