@@ -135,7 +135,7 @@ export function buildingWith({
 	let assembled:
 		| { readonly readiness: (deadlineMs: number) => Promise<ReadinessReport> }
 		| undefined;
-	/** Points some module collected, each with its check's outcome: one check, one refusal, however many collect it. */
+	/** Points checked, by a collector or by assembly, each with its outcome: one check, one refusal, however many collect it. */
 	const collected = new Map<ExtensionPoint<unknown>, readonly unknown[] | undefined>();
 	const waitsOn = (from: Buildable, to: Buildable, seen = new Set<Buildable>()): boolean => {
 		if (from === to) return true;

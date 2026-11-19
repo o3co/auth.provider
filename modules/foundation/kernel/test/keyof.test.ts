@@ -104,4 +104,21 @@ describe("a point's check, where collect meets it", () => {
 			),
 		).toEqual([{ where: "routes:/p", reason: "more than one contribution for the same key" }]);
 	});
+
+	it("checks a point once where assembly checks it before a later contribution's factory collects it", async () => {
+		const routes = extensionPoint<{ name: string }>("routes", {
+			multiplicity: "keyed",
+			keyOf: (r) => r.name,
+		});
+		const later = extensionPoint<{ name: string }>("later", { multiplicity: "many" });
+		const collectingLater = defineModule(
+			{ name: "c", replicaSafe: false, takes: [routes] },
+			(m) => [
+				m.contribute(later).by(async (c) => ({ name: `${(await c.collect(routes)).length}` })),
+			],
+		);
+		expect(
+			await boot(contributing(routes, "a", "/p"), contributing(routes, "b", "/p"), collectingLater),
+		).toEqual([{ where: "routes:/p", reason: "more than one contribution for the same key" }]);
+	});
 });
