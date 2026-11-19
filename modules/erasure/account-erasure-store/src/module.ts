@@ -28,6 +28,7 @@ export default defineModule(
 				retire: async (name, generation) => structuredClone(await upkeep.retire(name, generation)),
 				honours: async (guarantees) => structuredClone(await upkeep.honours(guarantees)),
 				sweep: async (name, cursor) => structuredClone(await upkeep.sweep(name, cursor)),
+				sweepKept: async (name, cursor) => structuredClone(await upkeep.sweepKept(name, cursor)),
 				phase: () => subjectRecordsPhase.read(control),
 				writePhase: async () =>
 					subjectRecordsPhase.writeWith(await control.control(), pairing, upkeep.mark),

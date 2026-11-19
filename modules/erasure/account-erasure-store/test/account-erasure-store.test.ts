@@ -84,6 +84,14 @@ it("walks a declared space by its name, handing on store's keys, and refuses any
 	);
 });
 
+it("walks a kept space by its name under the key, answering store's declared and missing", async () => {
+	const { maintenance } = await opened();
+	expect(await maintenance.sweepKept?.(held.name)).toEqual({ kind: "not-in-maintenance" });
+	await maintenance.enter();
+	expect(await maintenance.sweepKept?.(held.name)).toEqual({ kind: "declared" });
+	expect(await maintenance.sweepKept?.("erasure-store-test.gone")).toEqual({ kind: "missing" });
+});
+
 it("reads the phase, and writes subject-records' mark under the key alone", async () => {
 	const { maintenance, control } = await opened();
 	expect(await maintenance.phase()).toBe("reader");
@@ -163,6 +171,7 @@ async function recordedApp(answers: Partial<Record<keyof StoreUpkeep | "control"
 		"retire",
 		"honours",
 		"sweep",
+		"sweepKept",
 		"alone",
 	] as const;
 	const upkeep = Object.fromEntries([
@@ -206,6 +215,13 @@ it("forwards sweep's name and cursor, answering the later page the store gives",
 	const { maintenance, calls } = await recorded({ sweep: page });
 	expect(await maintenance.sweep("erasure-store-test.held", "c2")).toEqual(page);
 	expect(calls).toEqual([["sweep", ["erasure-store-test.held", "c2"]]]);
+});
+
+it("forwards sweepKept's name and cursor, answering the store's page of counts as it is", async () => {
+	const page = { kind: "page", live: 2, noExpiry: 1, latestExpiry: 9, cursor: "c3", server: "s1" };
+	const { maintenance, calls } = await recorded({ sweepKept: page });
+	expect(await maintenance.sweepKept?.("erasure-store-test.gone", "c2")).toEqual(page);
+	expect(calls).toEqual([["sweepKept", ["erasure-store-test.gone", "c2"]]]);
 });
 
 it("forwards honours' guarantees and answers the store's unmet with its reasons", async () => {
@@ -273,6 +289,7 @@ const failing: readonly [
 	["retire", (m) => m.retire("a", "g"), "retire", {}],
 	["honours", (m) => m.honours(["durable"]), "honours", {}],
 	["sweep", (m) => m.sweep("a", "c"), "sweep", {}],
+	["sweepKept", async (m) => m.sweepKept?.("a", "c"), "sweepKept", {}],
 	["alone", (m) => m.alone(), "alone", {}],
 	["phase, reading the control record", (m) => m.phase(), "control", {}],
 	["writePhase, reading the control record", (m) => m.writePhase(), "control", {}],
