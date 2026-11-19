@@ -33,7 +33,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 
 ## erasure
 
-- `@mod/account-erasure` (feature, `modules/erasure/account-erasure`): The feature account erasure runs as. Its module takes and offers nothing yet.
+- `@mod/account-erasure` (feature, `modules/erasure/account-erasure`): The feature account erasure runs as. Its module takes nothing and provides nothing yet: the contract it declares is its wiring's to provide.
   - `maintenance` (`src/maintenance`): erasure's maintenance interface, in erasure's words.
   - `step` (`src/step`): the one step a command under the maintenance key runs, "under the key and alone".
 - `@mod/account-erasure-store` (wiring, `modules/erasure/account-erasure-store`): The wiring of `account-erasure` to the store. Its module takes and offers nothing yet. Depends on `kernel` and `account-erasure`.
