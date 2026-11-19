@@ -1,9 +1,11 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { trialLayer } from "../src/contract.ts";
-import { trialTree, workspaceTrials } from "../src/layer.ts";
+import { freshPrivatePath, trialTree, workspaceTrials } from "../src/layer.ts";
 
 /** An app whose entry imports these modules, as far as the trial reads it. */
 function importing(imports: readonly string[]): string {
@@ -114,4 +116,39 @@ it("finds every trial file in the workspace keeping to its own section and appen
 	const trials = await workspaceTrials();
 	expect(trials.length).toBeGreaterThan(20);
 	for (const trial of trials) expect(() => trialTree([trial]), trial.from).not.toThrow();
+});
+
+describe("TRIAL-FRESH-PRIVATE-PATH", () => {
+	it("gives each use its own absolute path, in a fresh directory only this process may enter, not yet made", () => {
+		const [first, second] = [freshPrivatePath(), freshPrivatePath()];
+		for (const path of [first, second]) {
+			expect(isAbsolute(path)).toBe(true);
+			expect(existsSync(path)).toBe(false);
+			const dir = statSync(dirname(path));
+			expect(dir.isDirectory()).toBe(true);
+			expect(dir.mode & 0o777).toBe(0o700);
+			expect(dir.uid).toBe(process.getuid?.());
+		}
+		expect(dirname(first)).not.toBe(dirname(second));
+	});
+
+	it("removes its directories, with what they hold, when the process that made them exits", () => {
+		const layer = pathToFileURL(join(import.meta.dirname, "..", "src", "layer.ts")).href;
+		const out = execFileSync(
+			process.execPath,
+			[
+				"--input-type=module",
+				"-e",
+				`import { writeFileSync } from "node:fs";
+				const { freshPrivatePath } = await import(${JSON.stringify(layer)});
+				const made = [freshPrivatePath(), freshPrivatePath()];
+				for (const path of made) writeFileSync(path, "x");
+				console.log(JSON.stringify(made));`,
+			],
+			{ cwd: join(import.meta.dirname, ".."), encoding: "utf8" },
+		);
+		const made = JSON.parse(out.trim()) as string[];
+		expect(made).toHaveLength(2);
+		for (const path of made) expect(existsSync(dirname(path))).toBe(false);
+	});
 });

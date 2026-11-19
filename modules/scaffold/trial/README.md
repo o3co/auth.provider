@@ -13,7 +13,8 @@
   - It reads the trial file of each module the app's entry imports, whatever names it imports them under, and the kernel's.
   - Each is read after those of what it depends on, then the caller's `layer`, as one HOCON document.
   - The sections in `leave` are dropped; the layer's appends join the trial files' lists.
-  - Each mark is made at each call: `TRIAL-FRESH-ED25519-PKCS8-PEM`, `TRIAL-FRESH-RSA-2048-PKCS8-PEM`, `TRIAL-FRESH-32-BYTES-BASE64` and `TRIAL-FRESH-32-BYTES-BASE64URL` fresh, `TRIAL-REDIS-URL` the caller's `redisUrl`.
+  - Each mark is made at each call: `TRIAL-FRESH-ED25519-PKCS8-PEM`, `TRIAL-FRESH-RSA-2048-PKCS8-PEM`, `TRIAL-FRESH-32-BYTES-BASE64`, `TRIAL-FRESH-32-BYTES-BASE64URL` and `TRIAL-FRESH-PRIVATE-PATH` fresh, `TRIAL-REDIS-URL` the caller's `redisUrl`.
+    - `TRIAL-FRESH-PRIVATE-PATH`: an absolute path, not yet made, inside a fresh directory of its own, made by `mkdtemp` with mode 0700 and owned by the process, and removed with all it holds when the process exits; a killed process leaves it.
 - `trialFile`: the trial file's name.
 
 ## Invariants
@@ -21,7 +22,7 @@
 - A package's section is the root of its section's example (`config.example`); a package without one has none of its own.
 
 ## Data
-- Reads the workspace's package list, and the manifests, trial files and section examples of the packages an app composes; writes nothing.
+- Reads the workspace's package list, and the manifests, trial files and section examples of the packages an app composes; writes nothing but the directories `TRIAL-FRESH-PRIVATE-PATH` makes, each removed when the process exits unless it is killed.
 
 ## Depends on
 - `workspace-packages` (its own workspace's packages); the HOCON library, to read the trial files and section examples.
