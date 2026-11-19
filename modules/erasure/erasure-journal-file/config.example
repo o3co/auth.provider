@@ -1,0 +1,3 @@
+erasure-journal-file {
+	path = "REPLACE-ABSOLUTE-JOURNAL-PATH"
+}

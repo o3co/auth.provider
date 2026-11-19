@@ -9,6 +9,7 @@
 ## Offers
 - Composition definition only: the `erasureJournal` contract.
 - Operator section: `path`, the journal's file, an absolute path; its lock is the same path with `.lock` added.
+- `./testing`: `erasureJournalFileConfig`, a test configuration builder: a fresh journal path in a directory of its own, unless a test sets one.
 
 ## Invariants
 - The journal's and its lock's files are the internal module `files`' (its card).
