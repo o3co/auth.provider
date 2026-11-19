@@ -19,6 +19,7 @@ Internal module of `distribution`: the known vulnerabilities, of any severity, i
 - A finding of any level fails it, with a fix or without: nothing is excluded, so a finding with no fix holds the audit until someone decides on it.
 - An app that could not be made or installed, or an audit that did not run, fails; never as clean.
 - The app is made in a directory of its own, removed however the audit ends.
+- ci.yml's `audit` job is held, by a test reading it, to pack the release and then run this script, and to run no audit of its own.
 
 ## Depends on
 - `full-app` (`fullApp`, `installFromTarballs`), `release` (`packedOf`); pnpm, run; npm's registry and its audit endpoint, fetched.
