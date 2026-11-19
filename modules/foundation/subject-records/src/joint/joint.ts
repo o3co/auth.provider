@@ -85,7 +85,8 @@ export function jointRecordsIn<P extends string, T extends Json = Json>(
 	const named = Object.entries(places) as [P, SubjectPlace][];
 	const [first] = named;
 	if (!first) throw new TypeError("subject-records: a joint change names one place at least");
-	for (const [, place] of named) checkedSubjectPlace(place, ["online-indexed"], where, refuse);
+	for (const [, place] of named)
+		checkedSubjectPlace(place, { "online-indexed": true }, where, refuse);
 	const store = first[1].store;
 	if (named.some(([, place]) => place.store !== store)) {
 		refuse(where, "a joint change's places are on one store");

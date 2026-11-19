@@ -1,7 +1,7 @@
 import { BuildRefused } from "@mod/kernel";
 import { type Attempt, type Changed, changeRecords, type Place, type Target } from "@mod/records";
 import type { Json, Space } from "@mod/store";
-import { checkedSubjectPlace, type SubjectPlace } from "../index/index.ts";
+import { checkedSubjectPlace, everyWritten, type SubjectPlace } from "../index/index.ts";
 import { changeWritten } from "../writer.ts";
 import { type Rule, rulesOf } from "./rules.ts";
 
@@ -53,12 +53,7 @@ export function subjectRecordsIn<T extends Json>(
 	options: { readonly secret?: true } = {},
 ) {
 	boundedDeclared(place.space);
-	const category = checkedSubjectPlace(
-		place,
-		["online-indexed", "online-keyed", "bounded"],
-		where,
-		refuse,
-	);
+	const category = checkedSubjectPlace(place, everyWritten, where, refuse);
 	const bounded = category === "bounded";
 	if (options.secret && !bounded) refuse(where, "only a bounded space keys its records by secrets");
 	const rules = rulesOf(place, category);

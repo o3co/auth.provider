@@ -13,6 +13,7 @@ import { kept, opened } from "../envelope/envelope.ts";
 import {
 	checkedSubjectPlace,
 	entriesIn,
+	everyWritten,
 	indexOver,
 	listedWith,
 	type SubjectPlace,
@@ -55,14 +56,9 @@ export async function migrateRecords(
 	subjectOf: SubjectReading,
 	options: { readonly signal?: AbortSignal; readonly elsewhere?: Elsewhere } = {},
 ): Promise<MigrationReport> {
-	const category = checkedSubjectPlace(
-		place,
-		["online-indexed", "online-keyed", "bounded"],
-		"subject-records",
-		(_, reason) => {
-			throw new TypeError(`subject-records: ${place.space.name}: ${reason}`);
-		},
-	);
+	const category = checkedSubjectPlace(place, everyWritten, "subject-records", (_, reason) => {
+		throw new TypeError(`subject-records: ${place.space.name}: ${reason}`);
+	});
 	const space = place.space.name;
 	if (place.phase !== "indexed") return report({ kind: "stopped", space, reason: "not-indexed" });
 	if (category === "bounded") return report({ kind: "migrated", space, indexed: 0, removed: 0 });
@@ -88,7 +84,7 @@ export async function migrateSets(
 ): Promise<MigrationReport> {
 	const category = checkedSubjectPlace(
 		place,
-		["online-indexed", "online-keyed"],
+		{ "online-indexed": true, "online-keyed": true },
 		"subject-records",
 		(_, reason) => {
 			throw new TypeError(`subject-records: ${place.space.name}: ${reason}`);

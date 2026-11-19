@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { changesTogether, type Next, type Place, type Target } from "@mod/records";
-import { codePointOrder, type Guarantee, type Json, type Space } from "@mod/store";
+import { codePointOrder, type Guarantee, type Json, type Space, type WriterHeld } from "@mod/store";
 
 /**
  * What a space holding a subject's data declares beside its own needs: its index keeps the
@@ -133,10 +133,20 @@ export interface SubjectPlace extends Place {
 	readonly phase: Phase;
 }
 
+/** A category of subjects' data this package writes: store's `WriterHeld` without `internal`, as no builder's own space is an index space. */
+export type Written = Exclude<WriterHeld, "internal">;
+
+/** Every `Written`, as a table: a fresh literal so the compiler holds it to `Written` both ways; no spread, `as` or intermediate. */
+export const everyWritten = {
+	"online-indexed": true,
+	"online-keyed": true,
+	bounded: true,
+} satisfies Record<Written, true>;
+
 /** The checks every builder makes at build: a batch across once indexed, the space's own index, a category it writes. */
 export function checkedSubjectPlace(
 	place: SubjectPlace,
-	categories: readonly string[],
+	categories: Readonly<Partial<Record<Written, true>>>,
 	where: string,
 	refuse: (where: string, reason: string) => never,
 ) {
@@ -145,7 +155,7 @@ export function checkedSubjectPlace(
 	if (place.phase === "indexed" && !changesTogether(place.store)) {
 		refuse(where, "its store writes no records of two partitions as one");
 	}
-	if (category === undefined || !categories.includes(category)) {
+	if (category === undefined || !Object.hasOwn(categories, category)) {
 		refuse(where, `its space declares no category it writes (${category ?? "none"})`);
 	}
 	if (!isIndexSpaceOf(place.index, place.space)) {
