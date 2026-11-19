@@ -272,3 +272,31 @@ it("refuses the boot over a bounded space with no boundedMs, under its name, whe
 		),
 	).toEqual([{ where: "subject-records", reason: "declares bounded with no boundedMs" }]);
 });
+
+it("lets a TypeError from reading a bounded space's name through as itself, never as the refusal", () => {
+	const unreadable = new Proxy(
+		{ name: "never-read", guarantees: g, subjectData: "bounded" } satisfies Space,
+		{
+			get: (target, key) => {
+				if (key === "name") throw new TypeError("name unreadable");
+				return Reflect.get(target, key);
+			},
+		},
+	);
+	const random = { bytes: (n: number) => new Uint8Array(randomBytes(n)) };
+	const place = {
+		store: {} as Store,
+		space: unreadable,
+		index: unreadable,
+		random,
+		phase: "reader",
+	};
+	let thrown: unknown;
+	try {
+		subjectRecordsIn(place as never, "w", refuse);
+	} catch (error) {
+		thrown = error;
+	}
+	expect(thrown).toBeInstanceOf(TypeError);
+	expect((thrown as Error).message).toBe("name unreadable");
+});
