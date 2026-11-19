@@ -65,7 +65,7 @@ it("answers the control record, the key and marks in erasure's words, each answe
 it("answers the ledger, honours and alone as store does", async () => {
 	const { maintenance, upkeep } = await opened();
 	expect(await maintenance.kept()).toEqual(await upkeep.kept());
-	expect(await maintenance.retire("erasure-store-test.gone")).toEqual({
+	expect(await maintenance.retire("erasure-store-test.gone", "g1")).toEqual({
 		kind: "not-in-maintenance",
 	});
 	expect(await maintenance.honours(["no-eviction"])).toEqual(await upkeep.honours(["no-eviction"]));
@@ -82,6 +82,14 @@ it("walks a declared space by its name, handing on store's keys, and refuses any
 	await expect(maintenance.sweep("erasure-store-test.undeclared")).rejects.toBeInstanceOf(
 		TypeError,
 	);
+});
+
+it("walks a kept space by its name under the key, answering store's declared and missing", async () => {
+	const { maintenance } = await opened();
+	expect(await maintenance.sweepKept?.(held.name)).toEqual({ kind: "not-in-maintenance" });
+	await maintenance.enter();
+	expect(await maintenance.sweepKept?.(held.name)).toEqual({ kind: "declared" });
+	expect(await maintenance.sweepKept?.("erasure-store-test.gone")).toEqual({ kind: "missing" });
 });
 
 it("reads the phase, and writes subject-records' mark under the key alone", async () => {
@@ -163,6 +171,7 @@ async function recordedApp(answers: Partial<Record<keyof StoreUpkeep | "control"
 		"retire",
 		"honours",
 		"sweep",
+		"sweepKept",
 		"alone",
 	] as const;
 	const upkeep = Object.fromEntries([
@@ -190,10 +199,15 @@ async function recordedApp(answers: Partial<Record<keyof StoreUpkeep | "control"
 	return { app, calls };
 }
 
-it("forwards retire's name and answers the store's retired", async () => {
+it("forwards retire's name and generation, answering the store's retired", async () => {
 	const { maintenance, calls } = await recorded({ retire: { kind: "retired" } });
-	expect(await maintenance.retire("erasure-store-test.gone")).toEqual({ kind: "retired" });
-	expect(calls).toEqual([["retire", ["erasure-store-test.gone"]]]);
+	expect(await maintenance.retire("erasure-store-test.gone", "g1")).toEqual({ kind: "retired" });
+	expect(calls).toEqual([["retire", ["erasure-store-test.gone", "g1"]]]);
+});
+
+it("answers the store's redeclared from retire as it is", async () => {
+	const { maintenance } = await recorded({ retire: { kind: "redeclared" } });
+	expect(await maintenance.retire("erasure-store-test.gone", "g1")).toEqual({ kind: "redeclared" });
 });
 
 it("forwards sweep's name and cursor, answering the later page the store gives", async () => {
@@ -201,6 +215,13 @@ it("forwards sweep's name and cursor, answering the later page the store gives",
 	const { maintenance, calls } = await recorded({ sweep: page });
 	expect(await maintenance.sweep("erasure-store-test.held", "c2")).toEqual(page);
 	expect(calls).toEqual([["sweep", ["erasure-store-test.held", "c2"]]]);
+});
+
+it("forwards sweepKept's name and cursor, answering the store's page of counts as it is", async () => {
+	const page = { kind: "page", live: 2, noExpiry: 1, latestExpiry: 9, cursor: "c3", server: "s1" };
+	const { maintenance, calls } = await recorded({ sweepKept: page });
+	expect(await maintenance.sweepKept?.("erasure-store-test.gone", "c2")).toEqual(page);
+	expect(calls).toEqual([["sweepKept", ["erasure-store-test.gone", "c2"]]]);
 });
 
 it("forwards honours' guarantees and answers the store's unmet with its reasons", async () => {
@@ -247,7 +268,7 @@ it("passes the store's outage through as it is thrown, the same error", async ()
 	const outage = new Unavailable("store");
 	const { maintenance } = await recorded({ alone: outage, retire: outage, sweep: outage });
 	await expect(maintenance.alone()).rejects.toBe(outage);
-	await expect(maintenance.retire("x")).rejects.toBe(outage);
+	await expect(maintenance.retire("x", "g")).rejects.toBe(outage);
 	await expect(maintenance.sweep("x", "c")).rejects.toBe(outage);
 });
 
@@ -265,9 +286,10 @@ const failing: readonly [
 	["mark", (m) => m.mark("erasure-store-test.mark", 1), "mark", {}],
 	["require", (m) => m.require(["a"]), "require", {}],
 	["kept", (m) => m.kept(), "kept", {}],
-	["retire", (m) => m.retire("a"), "retire", {}],
+	["retire", (m) => m.retire("a", "g"), "retire", {}],
 	["honours", (m) => m.honours(["durable"]), "honours", {}],
 	["sweep", (m) => m.sweep("a", "c"), "sweep", {}],
+	["sweepKept", async (m) => m.sweepKept?.("a", "c"), "sweepKept", {}],
 	["alone", (m) => m.alone(), "alone", {}],
 	["phase, reading the control record", (m) => m.phase(), "control", {}],
 	["writePhase, reading the control record", (m) => m.writePhase(), "control", {}],

@@ -14,13 +14,8 @@ import type {
 	WriterHeld,
 } from "../contract.ts";
 import { malformedDeclaration } from "../declaration.ts";
-import type {
-	Alone,
-	Honours,
-	KeptSpace,
-	StoreUpkeep,
-	UpkeepImplementation,
-} from "../upkeep/upkeep.ts";
+import type { KeptSpace } from "../ledger/ledger.ts";
+import type { Alone, Honours, StoreUpkeep, UpkeepImplementation } from "../upkeep/upkeep.ts";
 import { subjectWriter } from "../writer/subject-writer.ts";
 
 const maxTime = 8_640_000_000_000_000;
@@ -182,6 +177,8 @@ function readWriteOptions(value: unknown): WriteOptions {
  * (three texts of 512 characters, each escaped to at most 6) and Redis's is a number.
  */
 const cursorLength = 16_384;
+/** A ledger entry's generation: 1 to 64 characters, compared for equality only. */
+const generationLength = 64;
 
 /** The largest count a window may allow. */
 const largestLimit = 1_000_000_000;
@@ -359,7 +356,13 @@ export function checkedUpkeep(
 		enterMaintenance: () => inner.enterMaintenance(),
 		leaveMaintenance: () => inner.leaveMaintenance(),
 		kept: (): Promise<readonly KeptSpace[]> => inner.kept(),
-		retire: async (name) => inner.retire(text("space", name)),
+		retire: async (name, generation) =>
+			inner.retire(text("space", name), text("generation", generation, generationLength)),
+		sweepKept: async (name, cursor) =>
+			inner.sweepKept(
+				text("space", name),
+				cursor === undefined ? undefined : text("cursor", cursor, cursorLength),
+			),
 		honours: async (asked): Promise<Honours> => {
 			if (!Array.isArray(asked)) fail("guarantees must be a list");
 			for (const g of asked) if (!isGuarantee(g)) fail(`unknown guarantee ${String(g)}`);

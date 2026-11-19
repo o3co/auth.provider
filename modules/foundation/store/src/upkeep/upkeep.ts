@@ -1,5 +1,6 @@
 import { contract } from "@mod/kernel";
 import type { Guarantee, Json, Key, Space } from "../contract.ts";
+import type { StoreLedger } from "../ledger/ledger.ts";
 
 /** An owner's value in the control record, with the epoch it was written in (null before any epoch). */
 export interface Mark {
@@ -58,18 +59,12 @@ export type Alone =
 	| { readonly kind: "accompanied"; readonly count: number }
 	| { readonly kind: "unchecked"; readonly reasons: readonly string[] };
 
-/** A space the store has seen declared, and whether any declaration may have held a subject's data. */
-export interface KeptSpace {
-	readonly name: string;
-	readonly subjectDataEver: boolean;
-}
-
 /**
  * Keeping the store's data as a whole: the control record's changes, the ledger of spaces, the
  * guarantees as they stand, and a walk that removes what expired. A process whose epoch is not the
  * control record's changes nothing here either: each change is unavailable.
  */
-export interface StoreUpkeep {
+export interface StoreUpkeep extends StoreLedger {
 	/** Writes an owner's mark, in the present epoch, confirmed. */
 	mark(name: string, value: Json): Promise<{ readonly kind: "marked" }>;
 	/** Replaces `requires`, confirmed; only under the maintenance key, and never with none. */
@@ -80,17 +75,6 @@ export interface StoreUpkeep {
 	enterMaintenance(): Promise<{ readonly kind: "entered"; readonly epoch: string }>;
 	/** Lifts the maintenance key, confirmed; the epoch stays. */
 	leaveMaintenance(): Promise<{ readonly kind: "left" }>;
-	/** Every space ever declared to the store's data, until retired. */
-	kept(): Promise<readonly KeptSpace[]>;
-	/** Takes a space off the ledger, under the maintenance key alone; never one this process declares. */
-	retire(
-		name: string,
-	): Promise<
-		| { readonly kind: "retired" }
-		| { readonly kind: "declared" }
-		| { readonly kind: "missing" }
-		| { readonly kind: "not-in-maintenance" }
-	>;
 	/** Checks again, on every call, whether the store gives these guarantees now. */
 	honours(guarantees: readonly Guarantee[]): Promise<Honours>;
 	/**
