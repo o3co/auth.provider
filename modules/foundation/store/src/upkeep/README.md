@@ -10,7 +10,7 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
 
 ## Offers
 - `storeControl`: `control()`, the control record (epoch, maintenance key, the spaces required, the marks), confirmed. It may go unprovided until 0.22 (`optional`): a store adapter of 0.19 offers none, and a taker reads a mark it cannot read as unknown, failing closed.
-- `storeUpkeep`: `mark`, `require`, `enterMaintenance` and `leaveMaintenance`; the ledger's `kept` and `retire` (internal module `ledger`); `honours`; `sweep`; `alone()`.
+- `storeUpkeep`: `mark`, `require`, `enterMaintenance` and `leaveMaintenance`; the ledger's `kept`, `retire` and, where offered, `sweepKept` (internal module `ledger`); `honours`; `sweep`; `alone()`.
   - `declared()`: the spaces this process declares: the declarations themselves, as checked, in declaration order, in a frozen array.
 - `upkeepContract` (through `./testing`): the contract test, run on an implementation's harness.
 

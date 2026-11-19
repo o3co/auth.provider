@@ -9,6 +9,7 @@ import {
 	idempotencyRequest,
 	idempotencyWindows,
 	type Json,
+	type KeptPage,
 	type Key,
 	type Late,
 	type Mark,
@@ -32,6 +33,11 @@ const scanPage = 100;
 
 const id = (key: Key) => JSON.stringify([key.space.name, key.partition, key.name]);
 const partitionOf = (key: Key) => JSON.stringify([key.space.name, key.partition]);
+/** The space a value's or counter's id names, and the space an idempotency mark's partition names. */
+const spaceOfId = (at: string) => (JSON.parse(at) as [string])[0];
+const spaceOfMark = (mark: string) => spaceOfId((JSON.parse(mark) as [string])[0]);
+/** What a kept space's walk meets: a value, a counter or an idempotency answer. */
+type Family = "value" | "counter" | "answer";
 /** Expired at exactly its expiry, for reads and writes alike, so the two agree at that instant. */
 const live = (held: { expiresAt: number | null } | undefined, now: number) =>
 	held !== undefined && (held.expiresAt === null || held.expiresAt > now);
@@ -83,8 +89,12 @@ export interface MemoryData {
 	readonly values: Map<string, Held>;
 	readonly counters: Map<string, { count: number; resetAt: number }>;
 	readonly answers: Map<string, { digest: string; answer: Answer; until: number }>;
-	/** Each space ever declared, and whether a declaration may have held a subject's data. */
-	readonly ledger: Map<string, boolean>;
+	/** Each space ever declared: whether a declaration may have held a subject's data, and its generation. */
+	readonly ledger: Map<string, { readonly subjectDataEver: boolean; readonly generation: string }>;
+	/** Names each declaration added to the ledger, never one the data had. */
+	readonly nextGeneration: () => string;
+	/** Counts each walk of a kept space, never one the data had: with the data's name, its handle, a cursor holding no key. */
+	readonly nextWalk: () => string;
 	readonly control: {
 		epoch: string | null;
 		maintenance: boolean;
@@ -111,6 +121,8 @@ export function memoryData(
 		counters: new Map(),
 		answers: new Map(),
 		ledger: new Map(),
+		nextGeneration: counting(),
+		nextWalk: counting(),
 		control: { epoch: null, maintenance: false, requires: [], marks: new Map() },
 		server: `memory-${++dataOpened}`,
 		processes: new Set(),
@@ -197,10 +209,12 @@ export function memoryProcess(
 	declaredSpaces(declared);
 	refusedStart(record, declared, mayBuildUnderKey);
 	for (const space of declared) {
-		ledger.set(
-			space.name,
-			(ledger.get(space.name) ?? false) || space.subjectData !== noSubjectData,
-		);
+		// Every declaration added is a new generation, the entry's `subjectDataEver` kept.
+		ledger.set(space.name, {
+			subjectDataEver:
+				(ledger.get(space.name)?.subjectDataEver ?? false) || space.subjectData !== noSubjectData,
+			generation: data.nextGeneration(),
+		});
 	}
 	const known = new Set(declared.map((space) => space.name));
 	/** This process in the data's registry, which it joins once started (below), and leaves when detached. */
@@ -330,6 +344,78 @@ export function memoryProcess(
 		const last = page.at(-1);
 		return ids.length > scanPage && last ? { keys, cursor: last } : { keys };
 	};
+	/** A kept space's walk this process holds, by its handle: at most one per space (`walkOf`). */
+	const walks = new Map<
+		string,
+		{ readonly name: string; readonly keys: readonly (readonly [Family, string])[]; at: number }
+	>();
+	const walkOf = new Map<string, string>();
+	/**
+	 * A page of a kept space's walk: the keys of the space its first page took, met in turn, each
+	 * expired one removed and the rest counted; its cursor a handle, never a key. A new walk of the
+	 * space drops this process's earlier one; a walk ends with its last page.
+	 */
+	const keptPage = (name: string, cursor: string | undefined, generation: string): KeptPage => {
+		const now = clock.now();
+		let handle = cursor;
+		if (handle === undefined) {
+			const earlier = walkOf.get(name);
+			if (earlier !== undefined) walks.delete(earlier);
+			handle = `${data.server}.walk-${data.nextWalk()}`;
+			walks.set(handle, { name, keys: keysOfSpace(name), at: 0 });
+			walkOf.set(name, handle);
+		}
+		const walk = walks.get(handle) as NonNullable<ReturnType<typeof walks.get>>;
+		const page = walk.keys.slice(walk.at, walk.at + scanPage);
+		walk.at += page.length;
+		let count = 0;
+		let noExpiry = 0;
+		let latest: number | undefined;
+		const met = (end: number | null) => {
+			count += 1;
+			if (end === null) noExpiry += 1;
+			else latest = latest === undefined ? end : Math.max(latest, end);
+		};
+		for (const [family, key] of page) {
+			if (family === "value") {
+				const held = values.get(key);
+				if (held && live(held, now)) met(held.expiresAt);
+				else values.delete(key);
+			} else if (family === "counter") {
+				const held = counters.get(key);
+				if (held && held.resetAt > now) met(held.resetAt);
+				else counters.delete(key);
+			} else {
+				const held = answers.get(key);
+				if (held && held.until > now) met(held.until);
+				else answers.delete(key);
+			}
+		}
+		const done = walk.at >= walk.keys.length;
+		if (done) {
+			walks.delete(handle);
+			walkOf.delete(name);
+		}
+		return {
+			kind: "page",
+			live: count,
+			noExpiry,
+			...(latest === undefined ? {} : { latestExpiry: latest }),
+			...(cursor === undefined ? { generation } : {}),
+			...(done ? {} : { cursor: handle }),
+			server: data.server,
+		};
+	};
+	/** Every key a kept space holds now: its values, counters and idempotency answers. */
+	const keysOfSpace = (name: string): (readonly [Family, string])[] => [
+		...[...values.keys()].filter((k) => spaceOfId(k) === name).map((k) => ["value", k] as const),
+		...[...counters.keys()]
+			.filter((k) => spaceOfId(k) === name)
+			.map((k) => ["counter", k] as const),
+		...[...answers.keys()]
+			.filter((k) => spaceOfMark(k) === name)
+			.map((k) => ["answer", k] as const),
+	];
 	const readControl: StoreControl = {
 		control: async () => {
 			refuseDetached();
@@ -381,13 +467,33 @@ export function memoryProcess(
 		},
 		kept: async () => {
 			refuseDetached();
-			return deepFreeze([...ledger].map(([name, subjectDataEver]) => ({ name, subjectDataEver })));
+			return deepFreeze(
+				[...ledger].map(([name, entry]) => ({ name, subjectDataEver: entry.subjectDataEver })),
+			);
 		},
-		retire: async (name) => {
+		// One uninterrupted step: the fences, the key, this process's declarations, the entry and its generation.
+		retire: async (name, generation) => {
 			refuseStale();
 			if (!record.maintenance) return { kind: "not-in-maintenance" };
 			if (known.has(name)) return { kind: "declared" };
-			return ledger.delete(name) ? { kind: "retired" } : { kind: "missing" };
+			const entry = ledger.get(name);
+			if (entry === undefined) return { kind: "missing" };
+			if (generation !== undefined && entry.generation !== generation)
+				return { kind: "redeclared" };
+			ledger.delete(name);
+			return { kind: "retired" };
+		},
+		sweepKept: async (name, cursor) => {
+			// A cursor is a walk this process holds of this space, or a caller's error, before anything else.
+			if (cursor !== undefined && walks.get(cursor)?.name !== name) {
+				throw new TypeError("store: the cursor is no walk of this space that this process holds");
+			}
+			refuseStale();
+			if (!record.maintenance) return { kind: "not-in-maintenance" };
+			if (known.has(name)) return { kind: "declared" };
+			const entry = ledger.get(name);
+			if (entry === undefined) return { kind: "missing" };
+			return deepFreeze(keptPage(name, cursor, entry.generation));
 		},
 		honours: async (guarantees) => {
 			refuseDetached();
@@ -539,6 +645,9 @@ export function memoryProcess(
 		// Stopped first, so no process the registry no longer counts can still run an operation.
 		detach: () => {
 			detached = true;
+			// Its walks go with it: no key a snapshot took stays held by a process that has stopped.
+			walks.clear();
+			walkOf.clear();
 			data.processes.delete(self);
 		},
 	};

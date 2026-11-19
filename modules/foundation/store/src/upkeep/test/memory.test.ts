@@ -184,3 +184,22 @@ it("provides the store and its upkeep from one process, whose own maintenance le
 	expect((await app.get(store).putIfAbsent(key, 1, never)).kind).toBe("written");
 	expect((await app.get(storeUpkeep).kept()).map((s) => s.name)).toEqual(["kept"]);
 });
+
+it("drops a detached process's walks, and a recreated process holds none of its predecessor's", async () => {
+	const walked: Space = { name: "walked", guarantees: [], subjectData: "none" };
+	const data = memoryData(clock);
+	const writer = memoryProcess(data, [contractSpaces[0] as Space, walked]);
+	for (let i = 0; i < 150; i += 1) {
+		await writer.store.putIfAbsent({ space: walked, partition: `p${i}`, name: "k" }, i, never);
+	}
+	const tool = memoryProcess(data, [contractSpaces[0] as Space]);
+	type Walker = NonNullable<typeof tool.upkeep.sweepKept>;
+	await tool.upkeep.enterMaintenance();
+	const first = await (tool.upkeep.sweepKept as Walker)(walked.name);
+	const cursor = first.kind === "page" ? (first.cursor as string) : "";
+	tool.detach();
+	// Its walk went with it: the cursor names nothing, a caller's error before the detached fence.
+	await expect((tool.upkeep.sweepKept as Walker)(walked.name, cursor)).rejects.toThrow(TypeError);
+	const again = memoryProcess(data, [contractSpaces[0] as Space], true);
+	await expect((again.upkeep.sweepKept as Walker)(walked.name, cursor)).rejects.toThrow(TypeError);
+});

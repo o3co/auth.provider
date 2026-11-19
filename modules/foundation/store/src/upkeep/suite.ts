@@ -35,6 +35,8 @@ export interface UpkeepHarness {
 	configured?(process: UpkeepProcess): readonly string[];
 	/** Set where the implementation offers `alone()`; one that offers none answers `unchecked` (`no-look-offered`). */
 	readonly looks?: true;
+	/** Ends now what the store keeps of a space beside its values and counters, as a test may (redis' version hashes). */
+	expireOwnKeys?(process: UpkeepProcess, space: string): Promise<void>;
 }
 
 /** The spaces the upkeep contract test declares: holding no subject's data, holding some the subject writer guards, and holding some it does not. */
@@ -447,6 +449,224 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				expect(await fewer.upkeep.retire(none.name)).toEqual({ kind: "declared" });
 				expect(await fewer.upkeep.retire("never-declared")).toEqual({ kind: "missing" });
 				expect((await p.upkeep.kept()).map((s) => s.name).sort()).toEqual([none.name, plain.name]);
+			});
+		});
+
+		describe("a kept space's walk, where offered: counts, never keys", () => {
+			const finite: Space = { name: "upkeep-finite", guarantees: [], subjectData: "none" };
+			const counted: Space = { name: "upkeep-counted", guarantees: [], subjectData: "none" };
+			const marked: Space = { name: "upkeep-marked", guarantees: [], subjectData: "none" };
+			const kept = [none, plain, finite, counted, marked];
+			const soon = { expiry: { kind: "after", ms: 30 } } as const;
+			const later = { expiry: { kind: "after", ms: 60_000 } } as const;
+			type Walker = NonNullable<UpkeepProcess["upkeep"]["sweepKept"]>;
+			/** A process that wrote the kept spaces as `write` does, and a tool declaring `none` alone; skipped where the walk isn't offered. */
+			const setup = async (
+				skip: () => never,
+				write: (writer: UpkeepProcess) => Promise<void> = async () => {},
+			) => {
+				const writer = await harness.start(kept);
+				const tool = await harness.another(writer, [none]);
+				const walker = tool.upkeep.sweepKept?.bind(tool.upkeep);
+				if (walker === undefined) return skip();
+				await write(writer);
+				return { writer, tool, walker };
+			};
+			/** A whole walk from no cursor, its pages summed. */
+			const walkAll = async (walker: Walker, name: string) => {
+				const pages = [];
+				let cursor: string | undefined;
+				do {
+					const page = await walker(name, cursor);
+					if (page.kind !== "page") throw new Error(`no page: ${page.kind}`);
+					pages.push(page);
+					cursor = page.cursor;
+				} while (cursor !== undefined);
+				return {
+					pages,
+					live: pages.reduce((sum, page) => sum + page.live, 0),
+					noExpiry: pages.reduce((sum, page) => sum + page.noExpiry, 0),
+					generation: pages[0]?.generation,
+				};
+			};
+
+			it("answers not-in-maintenance outside the key, then declared and missing, and is unavailable behind the key's fence", async (ctx) => {
+				const { writer, tool, walker } = await setup(() => ctx.skip());
+				expect(await walker(plain.name)).toEqual({ kind: "not-in-maintenance" });
+				expect(await walker(none.name)).toEqual({ kind: "not-in-maintenance" });
+				expect(await tool.upkeep.retire(plain.name, "g")).toEqual({ kind: "not-in-maintenance" });
+				const behind = await harness.another(writer, [none]);
+				await tool.upkeep.enterMaintenance();
+				expect(await walker(none.name)).toEqual({ kind: "declared" });
+				expect(await walker("never-declared")).toEqual({ kind: "missing" });
+				expect(await tool.upkeep.retire(none.name, "g")).toEqual({ kind: "declared" });
+				expect(await tool.upkeep.retire("never-declared", "g")).toEqual({ kind: "missing" });
+				await expect((behind.upkeep.sweepKept as Walker)(plain.name)).rejects.toSatisfy(
+					isUnavailable,
+				);
+				await expect(tool.upkeep.retire(plain.name, "")).rejects.toThrow(TypeError);
+				await expect(tool.upkeep.retire(plain.name, "g".repeat(65))).rejects.toThrow(TypeError);
+				// No generation given: no check, until every implementation offers the walk.
+				expect(await tool.upkeep.retire(plain.name)).toEqual({ kind: "retired" });
+			});
+
+			it("counts a kept space's live keys, its first page alone answering the generation", async (ctx) => {
+				const { tool, walker } = await setup(
+					() => ctx.skip(),
+					async (writer) => {
+						await writer.store.putIfAbsent(fresh(plain), 1, later);
+						await writer.store.putIfAbsent(fresh(plain), 2, never);
+						await writer.store.putIfAbsent(fresh(plain), 3, soon);
+						await writer.store.count(fresh(plain), { ms: 60_000, limit: 5 });
+						await writer.store.putIfAbsent(fresh(plain), 4, { ...never, idempotency: "kept-mark" });
+					},
+				);
+				await tool.upkeep.enterMaintenance();
+				await sleep(60);
+				const walked = await walkAll(walker, plain.name);
+				expect(walked.live).toBeGreaterThan(0);
+				expect(walked.noExpiry).toBeGreaterThan(0);
+				expect(typeof walked.generation).toBe("string");
+				for (const page of walked.pages.slice(1)) expect(page.generation).toBeUndefined();
+				for (const page of walked.pages) {
+					if (page.live > page.noExpiry) expect(page.latestExpiry).toEqual(expect.any(Number));
+				}
+			});
+
+			it("retires as of a walk's generation, refusing redeclared once the space was declared again", async (ctx) => {
+				const { writer, tool, walker } = await setup(() => ctx.skip());
+				await tool.upkeep.enterMaintenance();
+				const first = await walkAll(walker, plain.name);
+				await harness.anotherMayBuildUnderKey(writer, [none, plain]);
+				expect(await tool.upkeep.retire(plain.name, first.generation as string)).toEqual({
+					kind: "redeclared",
+				});
+				const again = await walkAll(walker, plain.name);
+				expect(again.generation).not.toBe(first.generation);
+				expect(await tool.upkeep.retire(plain.name, again.generation as string)).toEqual({
+					kind: "retired",
+				});
+			});
+
+			it("walks a space of keys that all expire to zero, and retires it", async (ctx) => {
+				const { tool, walker } = await setup(
+					() => ctx.skip(),
+					async (writer) => {
+						await writer.store.putIfAbsent(fresh(finite), 1, soon);
+						await writer.store.count(fresh(finite), { ms: 30, limit: 5 });
+					},
+				);
+				await tool.upkeep.enterMaintenance();
+				await sleep(80);
+				await harness.expireOwnKeys?.(tool, finite.name);
+				const walked = await walkAll(walker, finite.name);
+				expect(walked.live).toBe(0);
+				expect(await tool.upkeep.retire(finite.name, walked.generation as string)).toEqual({
+					kind: "retired",
+				});
+				expect((await tool.upkeep.kept()).map((s) => s.name)).not.toContain(finite.name);
+			});
+
+			it("counts a space holding a counter alone, and one holding an idempotency mark alone", async (ctx) => {
+				const { tool, walker } = await setup(
+					() => ctx.skip(),
+					async (writer) => {
+						await writer.store.count(fresh(counted), { ms: 60_000, limit: 5 });
+						await writer.store.putIfAbsent(fresh(marked), 1, { ...soon, idempotency: "only-mark" });
+					},
+				);
+				await tool.upkeep.enterMaintenance();
+				await sleep(80);
+				expect((await walkAll(walker, counted.name)).live).toBeGreaterThan(0);
+				expect((await walkAll(walker, marked.name)).live).toBeGreaterThan(0);
+			});
+
+			/** Writes `n` keys holding nothing a test reads, never expiring, to `space`. */
+			const many =
+				(n: number, space = plain) =>
+				async (writer: UpkeepProcess) => {
+					for (let i = 0; i < n; i += 1) {
+						await writer.store.putIfAbsent({ space, partition: `many-${i}`, name: "k" }, i, never);
+					}
+				};
+
+			it("answers the generation on the first page alone, and checks the fences on every page", async (ctx) => {
+				const { writer, tool, walker } = await setup(() => ctx.skip(), many(250));
+				await tool.upkeep.enterMaintenance();
+				const walked = await walkAll(walker, plain.name);
+				expect(walked.pages.length).toBeGreaterThan(1);
+				expect(walked.pages[0]?.generation).toEqual(expect.any(String));
+				for (const page of walked.pages.slice(1)) expect(page.generation).toBeUndefined();
+				const first = await walker(plain.name);
+				const cursor = first.kind === "page" ? (first.cursor as string) : "";
+				// Another tool takes a new epoch: this walk's next page is behind the key's fence.
+				const other = await harness.anotherMayBuildUnderKey(writer, [none]);
+				await other.upkeep.enterMaintenance();
+				await expect(walker(plain.name, cursor)).rejects.toSatisfy(isUnavailable);
+			});
+
+			it("meets every key that outlives the walk, whatever expires between its pages", async (ctx) => {
+				const lasting = 120;
+				const { tool, walker } = await setup(
+					() => ctx.skip(),
+					async (writer) => {
+						await many(lasting)(writer);
+						for (let i = 0; i < 130; i += 1) {
+							const key = { space: plain, partition: `brief-${i}`, name: "k" };
+							await writer.store.putIfAbsent(key, i, { expiry: { kind: "after", ms: 1500 } });
+						}
+					},
+				);
+				await tool.upkeep.enterMaintenance();
+				const first = await walker(plain.name);
+				if (first.kind !== "page") throw new Error(`no page: ${first.kind}`);
+				let live = first.live;
+				let cursor = first.cursor;
+				await sleep(1600);
+				while (cursor !== undefined) {
+					const page = await walker(plain.name, cursor);
+					if (page.kind !== "page") throw new Error(`no page: ${page.kind}`);
+					live += page.live;
+					cursor = page.cursor;
+				}
+				expect(live).toBeGreaterThanOrEqual(lasting);
+			});
+
+			it("names no key in a page or a cursor, and refuses a cursor not of a walk of this space it holds", async (ctx) => {
+				const subject = "subject-alice-kept";
+				const { writer, tool, walker } = await setup(
+					() => ctx.skip(),
+					async (w) => {
+						for (let i = 0; i < 250; i += 1) {
+							const key = { space: plain, partition: `${subject}-${i}`, name: `${subject}` };
+							await w.store.putIfAbsent(key, i, never);
+						}
+					},
+				);
+				await tool.upkeep.enterMaintenance();
+				const walked = await walkAll(walker, plain.name);
+				expect(walked.pages.length).toBeGreaterThan(1);
+				expect(JSON.stringify(walked.pages)).not.toContain("alice");
+				const page = await walker(plain.name);
+				const cursor = page.kind === "page" ? (page.cursor as string) : "";
+				await expect(walker(finite.name, cursor)).rejects.toThrow(TypeError);
+				// A caller's error comes first: a foreign cursor is a TypeError whatever else holds.
+				await expect(walker("never-declared", cursor)).rejects.toThrow(TypeError);
+				const other = await harness.anotherMayBuildUnderKey(writer, [none]);
+				await expect((other.upkeep.sweepKept as Walker)(plain.name, cursor)).rejects.toThrow(
+					TypeError,
+				);
+				// A new walk of the space drops this process's earlier one, and an ended walk is gone.
+				const next = await walker(plain.name);
+				await expect(walker(plain.name, cursor)).rejects.toThrow(TypeError);
+				const middle = next.kind === "page" ? next.cursor : undefined;
+				let at = middle;
+				while (at !== undefined) {
+					const on = await walker(plain.name, at);
+					at = on.kind === "page" ? on.cursor : undefined;
+				}
+				if (middle !== undefined)
+					await expect(walker(plain.name, middle)).rejects.toThrow(TypeError);
 			});
 		});
 
