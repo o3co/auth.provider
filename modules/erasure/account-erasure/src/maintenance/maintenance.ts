@@ -70,6 +70,21 @@ export type Alone =
 	| { readonly kind: "unchecked"; readonly reasons: readonly string[] };
 
 /**
+ * A page of the walk of a kept space, in erasure's words: about how many live keys it met (exact
+ * only at zero), how many of them endless, the latest end among the rest, and, on the walk's first
+ * page alone, the space's generation; never a key.
+ */
+export interface KeptWalkPage {
+	readonly kind: "page";
+	readonly live: number;
+	readonly endless: number;
+	readonly latestEnd?: number;
+	readonly generation?: string;
+	readonly cursor?: string;
+	readonly server: string;
+}
+
+/**
  * What erasure needs of the store's data as a whole, in erasure's words; its wiring alone provides
  * it. A process whose epoch is not the record's changes nothing through it: each change is
  * unavailable.
@@ -89,11 +104,30 @@ export interface ErasureMaintenance {
 	): Promise<{ readonly kind: "required" } | { readonly kind: "not-in-maintenance" }>;
 	/** Every space ever declared to the data, until retired. */
 	kept(): Promise<readonly KeptSpace[]>;
-	/** Takes a space off the ledger: `retired`, or `declared` (this process declares it), `missing`, `not-in-maintenance`. */
+	/**
+	 * Takes a space off the ledger as of the generation a walk read: `retired`, or `declared` (this
+	 * process declares it), `redeclared` (declared since), `missing`, `not-in-maintenance`.
+	 */
 	retire(
 		name: string,
+		generation: string,
 	): Promise<
 		| { readonly kind: "retired" }
+		| { readonly kind: "declared" }
+		| { readonly kind: "redeclared" }
+		| { readonly kind: "missing" }
+		| { readonly kind: "not-in-maintenance" }
+	>;
+	/**
+	 * A page of the walk of a kept space this process doesn't declare, by its name, under the key
+	 * alone; or `declared`, `missing`, `not-in-maintenance`. Where the store offers no such walk,
+	 * none is offered here, and nothing is retired.
+	 */
+	sweepKept?(
+		name: string,
+		cursor?: string,
+	): Promise<
+		| KeptWalkPage
 		| { readonly kind: "declared" }
 		| { readonly kind: "missing" }
 		| { readonly kind: "not-in-maintenance" }
