@@ -70,12 +70,11 @@ export function batchesContract(harness: StoreHarness, kit: ContractKit): void {
 			expect(stale).toEqual({ kind: "conflict", index: 0 });
 			expect((await s.get(written)).entry).toBeNull();
 			const { now } = await s.get(watched);
-			const { at, ...empty } = (await batchAcross([], [], {
-				deadline: now + 60_000,
-				idempotency: "empty",
-			})) as { at?: number };
-			expect(empty).toEqual({ kind: "committed", versions: [] });
-			if (at !== undefined) expect(at).toEqual(expect.any(Number));
+			expect(await batchAcross([], [], { deadline: now + 60_000, idempotency: "empty" })).toEqual({
+				kind: "committed",
+				versions: [],
+				at: expect.any(Number),
+			});
 			expect((await batchAcross([], [], { deadline: now - 1 })).kind).toBe("late");
 		});
 
@@ -263,13 +262,13 @@ export function batchesContract(harness: StoreHarness, kit: ContractKit): void {
 			expect(reads.map((r) => r.entry?.value ?? null)).toEqual(["c", null, "a"]);
 		});
 
-		it("tells the store time a batch committed at, where it tells one, and the same on a resend", async () => {
+		it("tells the store time a batch committed at, and the same on a resend", async () => {
 			const s = await harness.open();
 			const key = fresh();
 			const before = await s.now();
 			const write = [{ key: key("a"), put: 1, expiry: { kind: "never" } }] as const;
 			const first = await s.batch([], write, { idempotency: "timed" });
-			if (first.kind !== "committed" || first.at === undefined) return;
+			if (first.kind !== "committed") throw new Error(first.kind);
 			expect(first.at).toBeGreaterThanOrEqual(before);
 			expect(first.at).toBeLessThanOrEqual(await s.now());
 			expect(await s.batch([], write, { idempotency: "timed" })).toEqual(first);

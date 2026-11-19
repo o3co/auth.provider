@@ -152,13 +152,13 @@ export type BatchWrite =
 	| { readonly key: Key; readonly remove: true };
 
 /**
- * A batch's writes applied: each version (none for a removal), and the store time it committed at,
- * where the store tells it; a resend under its mark answers the first commit's.
+ * A batch's writes applied: each version (none for a removal), and the store time it committed at;
+ * a resend under its mark answers the first commit's.
  */
 export type Committed = {
 	readonly kind: "committed";
 	readonly versions: readonly (Version | null)[];
-	readonly at?: number;
+	readonly at: number;
 };
 
 /**
