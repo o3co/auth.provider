@@ -25,7 +25,7 @@ Internal module of `account-erasure`: erasure's maintenance interface, in erasur
 - `mark(name, value)`: writes an owner's mark in the present epoch, confirmed.
 - `require(names)`: replaces the spaces required, never with none; outside the key, `not-in-maintenance`.
 - `kept()`: the ledger, every space ever declared to the data until retired, with whether any declaration may have held a subject's data.
-- `retire(name, generation?)`: takes a space off the ledger as of the generation a walk read where one is given, until one is required: `retired`, or `declared` (this process declares it), `redeclared` (declared since), `missing`, `not-in-maintenance`.
+- `retire(name, generation)`: takes a space off the ledger as of the generation a walk read: `retired`, or `declared` (this process declares it), `redeclared` (declared since), `missing`, `not-in-maintenance`.
 - `sweepKept(name, cursor?)`, where the store offers it: a page of the walk of a kept space this process doesn't declare: about how many live keys, how many with no expiry, the latest expiry and, on the first page, its generation; or `declared`, `missing`, `not-in-maintenance`. Where it isn't offered, nothing is retired.
 - `honours(guarantees)`: whether the store gives these guarantees now, checked anew: verified, declared (the settings named) or unmet (with why), with a witness of the server and its history with either of the first two.
 - `sweep(space, cursor?)`: a page of the walk of a space, by its declared name, removing for good each expired key it meets: the page's live keys, opaque here and only handed on to an eraser, the next cursor, and the server it ran on.

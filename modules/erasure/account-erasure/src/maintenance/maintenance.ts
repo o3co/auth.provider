@@ -106,13 +106,12 @@ export interface ErasureMaintenance {
 	/** Every space ever declared to the data, until retired. */
 	kept(): Promise<readonly KeptSpace[]>;
 	/**
-	 * Takes a space off the ledger as of the generation a walk read where one is given, until one is
-	 * required: `retired`, or `declared` (this
+	 * Takes a space off the ledger as of the generation a walk read: `retired`, or `declared` (this
 	 * process declares it), `redeclared` (declared since), `missing`, `not-in-maintenance`.
 	 */
 	retire(
 		name: string,
-		generation?: string,
+		generation: string,
 	): Promise<
 		| { readonly kind: "retired" }
 		| { readonly kind: "declared" }
