@@ -153,15 +153,15 @@ it("releases the hold only once an asynchronous body has finished", async () => 
 	expect(calls).toEqual(["hold", "record", "alone", "body starts", "body ends", "release"]);
 });
 
-it("throws on the release's own rejection after one attempt, the body run or refused", async () => {
+it("throws a release's fault in place of the answer, after one attempt, the body run or refused", async () => {
 	for (const [held, expected] of [
 		[true, ["hold", "record", "alone", "body", "release"]],
 		[false, ["hold", "record", "release"]],
 	] as const) {
 		const calls: string[] = [];
-		const refused = new Error("the medium's own");
+		const fault = new TypeError("the adapter's own");
 		const parts = {
-			journal: journalOf(calls, undefined, refused),
+			journal: journalOf(calls, undefined, fault),
 			maintenance: maintenanceOf(calls, held),
 			clock,
 		};
@@ -170,8 +170,59 @@ it("throws on the release's own rejection after one attempt, the body run or ref
 				calls.push("body");
 				return { kind: "done" } as const;
 			}),
-		).rejects.toBe(refused);
+		).rejects.toBe(fault);
 		expect(calls).toEqual(expected);
+	}
+});
+
+it("answers hold-left with the answer where the release is unavailable, after one attempt, the body run or refused", async () => {
+	for (const [held, answer, expected] of [
+		[true, { kind: "done" }, ["hold", "record", "alone", "body", "release"]],
+		[false, { kind: "not-in-maintenance" }, ["hold", "record", "release"]],
+	] as const) {
+		const calls: string[] = [];
+		const parts = {
+			journal: journalOf(calls, undefined, new Unavailable("journal")),
+			maintenance: maintenanceOf(calls, held),
+			clock,
+		};
+		const given = await inFrame(parts, "passing", async () => {
+			calls.push("body");
+			return { kind: "done" } as const;
+		});
+		expect(given).toEqual({ kind: "hold-left", answer });
+		expect(calls).toEqual(expected);
+	}
+});
+
+it("throws the body's or the step's throw as it was, whatever its release then throws", async () => {
+	for (const failed of [new Unavailable("journal"), new TypeError("the adapter's own")]) {
+		const calls: string[] = [];
+		const thrown = new Error("the body's own");
+		const parts = {
+			journal: journalOf(calls, undefined, failed),
+			maintenance: maintenanceOf(calls),
+			clock,
+		};
+		await expect(
+			inFrame(parts, "passing", async () => {
+				calls.push("body");
+				throw thrown;
+			}),
+		).rejects.toBe(thrown);
+		expect(calls).toEqual(["hold", "record", "alone", "body", "release"]);
+
+		const stepCalls: string[] = [];
+		const outage = new Unavailable("store");
+		const maintenance = {
+			record: async () => {
+				stepCalls.push("record");
+				throw outage;
+			},
+		} as unknown as ErasureMaintenance;
+		const stepParts = { journal: journalOf(stepCalls, undefined, failed), maintenance, clock };
+		await expect(inFrame(stepParts, "passing", async () => undefined)).rejects.toBe(outage);
+		expect(stepCalls).toEqual(["hold", "record", "release"]);
 	}
 });
 

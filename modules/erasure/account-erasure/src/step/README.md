@@ -6,7 +6,7 @@ Internal module of `account-erasure`: the one step a command under the maintenan
 - Brings a command under the maintenance key, alone, or refuses it, before its body runs.
 
 ## Not here
-- The journal's hold, and running the step before a command's body: the command frame (lands with the first command). What a command does: the command.
+- The journal's hold, and running the step before a command's body: the internal module `frame`. What a command does: the command.
 
 ## Offers
 - `underKeyAndAlone(maintenance, way, clock)`: `entering` for `erasure-enter` alone, `passing` for every other command under the key. It answers `under-key`, with the epoch, where the command may run.

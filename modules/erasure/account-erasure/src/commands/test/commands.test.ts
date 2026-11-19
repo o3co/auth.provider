@@ -10,9 +10,9 @@ const clock = { now: () => 1_000 };
 
 /**
  * The parts `erasure-enter` runs with: a journal that holds or answers `busy`, and a store answering
- * `alone()` in turn, recording every call either receives.
+ * `alone()` in turn, recording every call either receives; the release fails with `failed` where given.
  */
-function parts(seen: (Alone | Error)[], holder?: string) {
+function parts(seen: (Alone | Error)[], holder?: string, failed?: Error) {
 	const calls: string[] = [];
 	const journal = {
 		hold: async () => {
@@ -22,6 +22,7 @@ function parts(seen: (Alone | Error)[], holder?: string) {
 						kind: "held",
 						release: async () => {
 							calls.push("release");
+							if (failed !== undefined) throw failed;
 						},
 					}
 				: { kind: "busy", holder };
@@ -128,11 +129,11 @@ it("tells an entry not shown alone, the key set, with what was found and the way
 
 it("does not run while another command holds the journal, naming the holder where it reads as one printable line: code 5", async () => {
 	const named = (holder: string) =>
-		`not run: another erasure command holds the journal (${holder}); run erasure-enter again once it ends, or release its hold once its process is gone`;
+		`not run: the journal is held (${holder}); run erasure-enter again once its holder ends, or release the hold once its process is gone`;
 	const busy = parts([], "pid 41 on node-a since 12:00");
 	expect(await enterCommand(busy.parts)([])).toEqual({
 		lines: [
-			"not run: another erasure command holds the journal (holder: pid 41 on node-a since 12:00); run erasure-enter again once it ends, or release its hold once its process is gone",
+			"not run: the journal is held (holder: pid 41 on node-a since 12:00); run erasure-enter again once its holder ends, or release the hold once its process is gone",
 		],
 		code: 5,
 	});
@@ -161,6 +162,37 @@ it("does not run while another command holds the journal, naming the holder wher
 		lines: [named(`holder: ${"y".repeat(200)}`)],
 		code: 5,
 	});
+});
+
+it("tells an answer whose release failed, its own line first, then the hold left: code 7", async () => {
+	const cases = [
+		[
+			[alone, alone],
+			["hold", "alone", "enter", "alone", "mark", "release"],
+			"entered maintenance under epoch e2; this process was shown alone",
+		],
+		[
+			[alone, { kind: "accompanied", count: 3 }],
+			["hold", "alone", "enter", "alone", "release"],
+			"entered maintenance under epoch e2, but this process was not shown alone (3 other processes attached); the key stays set; stop that process and run erasure-enter again",
+		],
+		[
+			[{ kind: "accompanied", count: 2 }],
+			["hold", "alone", "release"],
+			"not entered: 2 other processes attached; stop them, then run erasure-enter again",
+		],
+	] as const;
+	for (const [seen, expected, line] of cases) {
+		const { parts: p, calls } = parts([...seen], undefined, new Unavailable("journal"));
+		expect(await enterCommand(p)([])).toEqual({
+			lines: [
+				line,
+				"the journal's hold may be left, as its release failed; release it once this process is gone, before the next erasure command",
+			],
+			code: 7,
+		});
+		expect(calls).toEqual(expected);
+	}
 });
 
 it("lets an outage reach its entry as thrown, the hold released", async () => {

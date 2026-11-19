@@ -17,12 +17,13 @@ Internal module of `account-erasure`: the erasure commands, each as its app entr
   - 2: `accompanied`, nothing entered or run; 3: `unchecked`, nothing entered or run.
   - 4: `entered-not-shown-alone`, `enter` alone: the key is set.
   - 5: `busy`; 6: `not-in-maintenance`, for the commands that pass the step.
+  - 7: `hold-left`: the command's answer stands, as its lines say; its hold's release failed, and the hold may be left.
   - 64: an argument the command does not take; `enter` takes none.
   - A later command's own answers take 10 and up.
-- A line carries no subject, no configured value and no error's words. The journal's holder is shown as the medium records it only where it is one printable line of at most 200 characters; otherwise "unreadable holder".
+- A line carries no subject, no configured value and no error's words. The journal's holder is shown as the medium records it only where it is one line of at most 200 characters with no control, format or line-separator character; otherwise "unreadable holder".
 - Every command under the key runs in the frame; none reaches its body without it, and each command's test pins that.
-- An unavailable call reaches the entry as thrown: app-entries' 1, not finished, look and run again.
-- `enter` runs in the frame, entering; the step's answers become its lines and codes, and it writes nothing of its own.
+- An unavailable call of the hold, the step or the body reaches the entry as thrown: app-entries' 1, look and run again. Where the release then fails too, the hold may be left, and the next command answers `busy` until it is released.
+- `enter` runs in the frame, entering; the frame's and the step's answers become its lines and codes, and it writes nothing of its own.
 
 ## Depends on
 - `erasure-journal` (the hold), `kernel`; the internal modules `frame`, `step` and `maintenance`.
