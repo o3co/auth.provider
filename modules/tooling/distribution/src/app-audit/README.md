@@ -10,7 +10,7 @@ Internal module of `distribution`: the known vulnerabilities, of any severity, i
 - Knowing what is vulnerable: npm's advisory database, through `pnpm audit`.
 - When it runs: ci.yml's `audit` job, daily on the default branch, on every push to develop, main or a release branch, and on a manual run.
 - The other checks of what the release ships, which share nothing with it: `release-scan` reports on the release's lists and stops nothing; `image-scan` fails the app's image on a critical or high finding that has a fix, or a Node behind a security release; this audit fails on a finding of any severity in the app's install.
-- The workspace's own tools and test runners, which no app installs: Dependabot alone keeps them current. Neither this audit nor `image-scan`'s Trivy sees them.
+- The workspace's own tools and test runners, which no app installs: Dependabot keeps them current and OSV-Scanner reports them, failing nothing; neither this audit nor `image-scan`'s Trivy sees them.
 
 ## Offers
 - `pnpm app:audit <tarballs>`: prints `pnpm audit`'s report. Exits 0 only where the audit ran and found nothing.
