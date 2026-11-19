@@ -1,7 +1,7 @@
 import { BuildRefused, contract, extensionPoint } from "@mod/kernel";
 import { malformedDeclaration } from "./declaration.ts";
 
-export type { KeptSpace, StoreLedger } from "./ledger/ledger.ts";
+export type { KeptPage, KeptSpace, StoreLedger } from "./ledger/ledger.ts";
 export {
 	type Alone,
 	type Control,
