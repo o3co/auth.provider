@@ -240,9 +240,11 @@ const isGuarantee = (g: unknown): g is Guarantee =>
 
 /** Whether `value` is a plain list of known guarantees, each own data entry read through its descriptor: no getter or method of it run. */
 function knownGuarantees(value: unknown): boolean {
-	if (!Array.isArray(value)) return false;
+	if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return false;
 	const length = Object.getOwnPropertyDescriptor(value, "length");
 	if (!length || !("value" in length)) return false;
+	// The indices and `length`, nothing else: no own method or iterator a reader would call.
+	if (Reflect.ownKeys(value).length !== length.value + 1) return false;
 	for (let i = 0; i < length.value; i++) {
 		const entry = Object.getOwnPropertyDescriptor(value, String(i));
 		if (!entry || !("value" in entry) || !isGuarantee(entry.value)) return false;
@@ -301,7 +303,9 @@ export function declaredSpaces(declared: readonly Space[]): ReadonlyMap<string, 
 			refusedDeclaration(space, "declares a requiredOnceErasing that is no boolean");
 		let listed = false;
 		takes(() => {
-			listed = knownGuarantees(read.guarantees);
+			// Kernel freezes a declaration one level deep, so its list is frozen here, as checked.
+			if (knownGuarantees(read.guarantees))
+				listed = Object.isFrozen(Object.freeze(read.guarantees));
 		});
 		if (!listed)
 			refusedDeclaration(space, "declares guarantees that are no list of known guarantees");

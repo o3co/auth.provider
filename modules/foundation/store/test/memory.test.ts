@@ -234,8 +234,31 @@ it("refuses the boot over guarantees that are no plain list of known guarantees,
 			throw new Error("a trap threw");
 		},
 	});
-	for (const guarantees of ["durable", accessor, [1], ["fast"], trapped]) {
-		const label = Array.isArray(guarantees) ? `[${guarantees.length}]` : String(guarantees);
+	const own = (key: PropertyKey) =>
+		Object.defineProperty(["durable"], key, {
+			value: () => {
+				ran.push(String(key));
+				return [];
+			},
+		});
+	const sparse = ["durable"];
+	sparse.length = 3;
+	const extra = Object.assign(["durable"], { note: "x" });
+	class Listed extends Array {}
+	const odd = [
+		["string", "durable"],
+		["an accessor index", accessor],
+		["a non-string entry", [1]],
+		["an unknown name", ["fast"]],
+		["a throwing trap", trapped],
+		["an own includes", own("includes")],
+		["an own iterator", own(Symbol.iterator)],
+		["a subclass", Listed.from(["durable"])],
+		["a null prototype", Object.setPrototypeOf(["durable"], null)],
+		["a sparse list", sparse],
+		["an extra own key", extra],
+	] as const;
+	for (const [label, guarantees] of odd) {
 		expect(
 			await refusalsOver([{ name: "listed", guarantees, subjectData: "none" }]),
 			label,
@@ -244,13 +267,15 @@ it("refuses the boot over guarantees that are no plain list of known guarantees,
 	expect(ran).toEqual([]);
 });
 
-it("accepts an empty list of guarantees, and a guarantee named twice", async () => {
-	const owner = defineModule({ name: "owner", replicaSafe: true, takes: [] }, (m) => [
-		m.contribute(spaces).by(() => ({ name: "empty", guarantees: [], subjectData: "none" })),
-		m
-			.contribute(spaces)
-			.by(() => ({ name: "twice", guarantees: ["durable", "durable"], subjectData: "none" })),
-	]);
+it("accepts an empty list of guarantees, and a guarantee named twice, each frozen once checked", async () => {
+	const lists: string[][] = [[], ["durable", "durable"]];
+	const owner = defineModule({ name: "owner", replicaSafe: true, takes: [] }, (m) =>
+		lists.map((guarantees, i) =>
+			m
+				.contribute(spaces)
+				.by(() => ({ name: `listed-${i}`, guarantees, subjectData: "none" }) as Space),
+		),
+	);
 	await expect(
 		assemble({
 			modules: [storeModule, owner],
@@ -258,6 +283,7 @@ it("accepts an empty list of guarantees, and a guarantee named twice", async () 
 			runtime: quietRuntime(),
 		}),
 	).resolves.toBeDefined();
+	expect(lists.map((list) => Object.isFrozen(list))).toEqual([true, true]);
 });
 
 it("names the space where kernel takes its name, and store.declaration where it does not, never the name in the reason", async () => {
