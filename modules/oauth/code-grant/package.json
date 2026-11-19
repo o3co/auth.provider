@@ -37,10 +37,10 @@
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	},
 	"peerDependenciesMeta": {
 		"vitest": {

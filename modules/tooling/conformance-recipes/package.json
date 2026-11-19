@@ -27,6 +27,6 @@
 		"@mod/spec-checklist": "workspace:*",
 		"@mod/trial": "workspace:*",
 		"@mod/users-http": "workspace:*",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	}
 }

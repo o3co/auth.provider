@@ -34,6 +34,6 @@
 		"@mod/store": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/tokens": "workspace:*",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	}
 }
