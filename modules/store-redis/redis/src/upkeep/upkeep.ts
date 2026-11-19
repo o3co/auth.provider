@@ -11,7 +11,7 @@ import {
 	noSubjectData,
 	type Space,
 	type StoreControl,
-	type StoreUpkeep,
+	type UpkeepImplementation,
 } from "@mod/store";
 import { list } from "../answer/answer.ts";
 import type { keysUnder } from "../keys.ts";
@@ -128,14 +128,14 @@ function refusedStart(
 export function redisUpkeepWith(parts: UpkeepParts) {
 	const { run, keys, declared, taken } = parts;
 	// store's checks first, before anything here reads a declaration; the ports reach later bindings only when called.
-	const ports: StoreUpkeep = {
+	const ports: UpkeepImplementation = {
 		mark: async (name, value) => {
 			await changed("mark", name, canonicalJson(value));
 			return { kind: "marked" };
 		},
 		require: async (names) =>
 			(await changed("require", JSON.stringify(names))) as Awaited<
-				ReturnType<StoreUpkeep["require"]>
+				ReturnType<UpkeepImplementation["require"]>
 			>,
 		enterMaintenance: async () => {
 			const epoch = Buffer.from(parts.random.bytes(16)).toString("hex");
@@ -157,7 +157,7 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 			),
 		retire: async (name) =>
 			(await changed("retire", name, known.has(name) ? "1" : "0")) as Awaited<
-				ReturnType<StoreUpkeep["retire"]>
+				ReturnType<UpkeepImplementation["retire"]>
 			>,
 		honours: (guarantees) => parts.honours(guarantees),
 		sweep: async (space, cursor) => {
