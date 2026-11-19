@@ -104,6 +104,14 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 	const readsShowHeld = Boolean(harness.holds && !harness.expiresOnItsOwn);
 
 	describe(`store upkeep contract: ${name}`, () => {
+		it("answers the declared spaces themselves, in declaration order, in a frozen array", async () => {
+			const p = await harness.start(upkeepSpaces);
+			const declared = p.upkeep.declared();
+			expect(declared).toHaveLength(upkeepSpaces.length);
+			for (const [i, space] of upkeepSpaces.entries()) expect(declared[i]).toBe(space);
+			expect(Object.isFrozen(declared)).toBe(true);
+		});
+
 		describe("the control record", () => {
 			it("starts with no epoch, no maintenance key, no space required and no mark", async () => {
 				const p = await harness.start(upkeepSpaces);

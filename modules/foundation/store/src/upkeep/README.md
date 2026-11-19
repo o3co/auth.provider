@@ -11,6 +11,7 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
 ## Offers
 - `storeControl`: `control()`, the control record (epoch, maintenance key, the spaces required, the marks), confirmed. It may go unprovided until 0.22 (`optional`): a store adapter of 0.19 offers none, and a taker reads a mark it cannot read as unknown, failing closed.
 - `storeUpkeep`: `mark`, `require`, `enterMaintenance` and `leaveMaintenance`; the ledger's `kept` and `retire`; `honours`; `sweep`.
+  - `declared()`: the spaces this process declares: the declarations themselves, as checked, in declaration order, in a frozen array.
 - `upkeepContract` (through `./testing`): the contract test, run on an implementation's harness.
 
 ## Invariants
@@ -33,6 +34,7 @@ Internal module of `store`: keeping a store's data whole, apart from reading and
 - `kernel` (contracts); the internal module `planting`, for its contract test to plant values in a space of subjects' data
 
 ## Vocabulary
+- UpkeepImplementation: the upkeep an implementation answers; `checkedUpkeep` adds the rest (`declared`).
 - the key's fence: a process that took its epoch under the maintenance key changes only while the key is held; once it lifts, the process is done, and a new window is a new process.
 - may build under the maintenance key: a process's grant to start under the key, and under it without a space `requires` names; its composition grants it from kernel's `neverStarted` alone, a tool's assembly that is never started.
 - epoch: the control record's mark, new on each entry to maintenance; a process's changes count only under the epoch it took. maintenance key: the record's flag that upkeep holds the data under. ledger: the spaces ever declared to the data.

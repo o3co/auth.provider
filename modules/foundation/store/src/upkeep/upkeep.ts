@@ -88,7 +88,12 @@ export interface StoreUpkeep {
 		space: Space,
 		cursor?: string,
 	): Promise<{ readonly keys: readonly Key[]; readonly cursor?: string; readonly server: string }>;
+	/** The spaces this process declares, in declaration order, as checked: the declarations themselves, in a frozen array. */
+	declared(): readonly Space[];
 }
+
+/** The upkeep an implementation answers; `checkedUpkeep` adds the rest (`declared`). */
+export type UpkeepImplementation = Omit<StoreUpkeep, "declared">;
 
 /**
  * Its owner lets it go unprovided until 0.22: a taker reads a mark it cannot read as unknown, failing
