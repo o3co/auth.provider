@@ -93,6 +93,8 @@ export interface MemoryData {
 	};
 	/** Names the data as `sweep` answers it, apart from other data in the process. */
 	readonly server: string;
+	/** The processes open on the data: each joins once it has started, and leaves when detached. */
+	readonly processes: Set<object>;
 	operations: number;
 }
 
@@ -111,6 +113,7 @@ export function memoryData(
 		ledger: new Map(),
 		control: { epoch: null, maintenance: false, requires: [], marks: new Map() },
 		server: `memory-${++dataOpened}`,
+		processes: new Set(),
 		operations: 0,
 	};
 }
@@ -172,6 +175,8 @@ export function memoryProcess(
 	readonly unchecked: Store;
 	readonly control: StoreControl;
 	readonly upkeep: StoreUpkeep;
+	/** Leaves the data's registry of processes. */
+	readonly detach: () => void;
 } {
 	const { clock, nextVersion, values, counters, answers, ledger, control: record } = data;
 	let taken = record.epoch;
@@ -192,6 +197,9 @@ export function memoryProcess(
 		);
 	}
 	const known = new Set(declared.map((space) => space.name));
+	// Joins the registry only once started, so a refused start is never counted.
+	const self = {};
+	data.processes.add(self);
 
 	const sweep = (now: number) => {
 		if (++data.operations % sweepEvery !== 0) return;
@@ -359,6 +367,10 @@ export function memoryProcess(
 			record.maintenance = false;
 			return { kind: "left" };
 		},
+		alone: async () => {
+			const others = data.processes.size - (data.processes.has(self) ? 1 : 0);
+			return deepFreeze(others === 0 ? { kind: "alone" } : { kind: "accompanied", count: others });
+		},
 		kept: async () =>
 			deepFreeze([...ledger].map(([name, subjectDataEver]) => ({ name, subjectDataEver }))),
 		retire: async (name) => {
@@ -497,5 +509,13 @@ export function memoryProcess(
 		scan: async (space, cursor) => deepFreeze(pageOf(space, cursor, clock.now())),
 	};
 	const store = checkedStore(unchecked, declared);
-	return { store, unchecked, control: readControl, upkeep: checkedUpkeep(upkeep, declared) };
+	return {
+		store,
+		unchecked,
+		control: readControl,
+		upkeep: checkedUpkeep(upkeep, declared),
+		detach: () => {
+			data.processes.delete(self);
+		},
+	};
 }
