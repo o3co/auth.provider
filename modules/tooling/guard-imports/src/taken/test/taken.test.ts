@@ -253,6 +253,18 @@ it("G31 counts no import by an adapter of the owner providing a kept contract, a
 });
 
 it("G31 counts no import by a wiring wiring the owner providing a kept contract, and every other one, a re-export of it too", () => {
+	// A wiring wires a feature: one naming a package of another kind, a capability here, is not exempt.
+	const capability = pkg(
+		"@g31w/records",
+		{
+			"src/contract.ts": [
+				`import { contract } from "@g31w/kernel";`,
+				`export const upkeep = contract<object>("records.upkeep", { takenBy: [] });`,
+			].join("\n"),
+		},
+		{ exports: { ".": "./src/contract.ts" }, takenBy: { upkeep: [] } },
+		budget.capabilityKind,
+	);
 	const owner = pkg(
 		"@g31w/erasure",
 		{
@@ -276,6 +288,18 @@ it("G31 counts no import by a wiring wiring the owner providing a kept contract,
 	const elsewhere = of("@g31w/elsewhere", { wires: "@g31w/other" }, provides, budget.wiringKind);
 	const claiming = of("@g31w/claiming", { wires: "@g31w/erasure" }, provides, budget.featureKind);
 	const adapter = of("@g31w/adapter", { adapts: "@g31w/erasure" }, provides, budget.adapterKind);
+	const onCapability = pkg(
+		"@g31w/on-capability",
+		{
+			"src/module.ts": `import { upkeep } from "@g31w/records";\nexport const provided = [upkeep];\n`,
+		},
+		{
+			exports: { ".": "./src/module.ts" },
+			dependencies: { "@g31w/records": "*" },
+			wires: "@g31w/records",
+		},
+		budget.wiringKind,
+	);
 	const passing = of(
 		"@g31w/passing",
 		{ wires: "@g31w/erasure" },
@@ -283,13 +307,17 @@ it("G31 counts no import by a wiring wiring the owner providing a kept contract,
 		budget.wiringKind,
 	);
 	expect(
-		check([owner, other, wiring, elsewhere, claiming, adapter, passing], budget)
+		check(
+			[owner, other, capability, wiring, elsewhere, claiming, adapter, onCapability, passing],
+			budget,
+		)
 			.filter((v) => v.rule.startsWith("G31"))
 			.map((v) => `${v.where} ${v.detail}`)
 			.sort(),
 	).toEqual([
 		"@g31w/claiming/src/module.ts maintenance of @g31w/erasure",
 		"@g31w/elsewhere/src/module.ts maintenance of @g31w/erasure",
+		"@g31w/on-capability/src/module.ts upkeep of @g31w/records",
 		"@g31w/passing/src/module.ts maintenance of @g31w/erasure",
 	]);
 });
