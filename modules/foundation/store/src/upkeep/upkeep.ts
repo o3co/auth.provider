@@ -102,14 +102,23 @@ export interface StoreUpkeep {
 		space: Space,
 		cursor?: string,
 	): Promise<{ readonly keys: readonly Key[]; readonly cursor?: string; readonly server: string }>;
-	/** Reads anew, on every call, whether another process is attached to the store's data; unavailable where a read is disturbed. */
-	alone?(): Promise<Alone>;
+	/**
+	 * Reads anew, on every call, whether another process is attached to the store's data; unavailable
+	 * where a read is disturbed. Where the implementation offers no way to look, `unchecked` with
+	 * store's own code, `no-look-offered`.
+	 */
+	alone(): Promise<Alone>;
 	/** The spaces this process declares, in declaration order, as checked: the declarations themselves, in a frozen array. */
 	declared(): readonly Space[];
 }
 
-/** The upkeep an implementation answers; `checkedUpkeep` adds the rest (`declared`). */
-export type UpkeepImplementation = Omit<StoreUpkeep, "declared">;
+/**
+ * The upkeep an implementation answers; `checkedUpkeep` adds the rest (`declared`), and answers
+ * `alone()` where the implementation offers none.
+ */
+export type UpkeepImplementation = Omit<StoreUpkeep, "declared" | "alone"> & {
+	alone?(): Promise<Alone>;
+};
 
 /**
  * Its owner lets it go unprovided until 0.22: a taker reads a mark it cannot read as unknown, failing

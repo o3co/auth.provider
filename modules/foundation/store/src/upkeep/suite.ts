@@ -33,6 +33,8 @@ export interface UpkeepHarness {
 	disturbRead?(process: UpkeepProcess): Promise<void>;
 	/** The values `process`'s store was configured with, none of which a reason of `alone()` may hold. */
 	configured?(process: UpkeepProcess): readonly string[];
+	/** Set where the implementation offers `alone()`; one that offers none answers `unchecked` (`no-look-offered`). */
+	readonly looks?: true;
 }
 
 /** The spaces the upkeep contract test declares: holding no subject's data, holding some the subject writer guards, and holding some it does not. */
@@ -449,12 +451,22 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 		});
 
 		describe("alone, where offered: kinds only, never the count", () => {
-			/** A fresh process offering `alone()`, the case skipped where it offers none. */
+			/** A fresh process whose implementation offers `alone()`, the case skipped where it offers none. */
 			const offering = async (skip: () => never) => {
+				if (!harness.looks) return skip();
 				const p = await harness.start(upkeepSpaces);
-				const alone = p.upkeep.alone?.bind(p.upkeep);
-				return alone ? { p, alone } : skip();
+				return { p, alone: () => p.upkeep.alone() };
 			};
+			it.skipIf(harness.looks)(
+				"answers unchecked, no-look-offered, where the implementation offers no way to look",
+				async () => {
+					const p = await harness.start(upkeepSpaces);
+					expect(await p.upkeep.alone()).toEqual({
+						kind: "unchecked",
+						reasons: ["no-look-offered"],
+					});
+				},
+			);
 			it("answers alone where no other process is attached", async (ctx) => {
 				const { alone } = await offering(() => ctx.skip());
 				expect((await alone()).kind).toBe("alone");

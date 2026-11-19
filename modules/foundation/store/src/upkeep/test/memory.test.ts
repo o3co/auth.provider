@@ -8,6 +8,7 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { expect, it } from "vitest";
+import { checkedUpkeep } from "../../checks/checks.ts";
 import { type Space, spaces, store, storeControl, storeUpkeep } from "../../contract.ts";
 import { type MemoryData, memoryData, memoryProcess } from "../../memory/memory.ts";
 import storeModule from "../../module.ts";
@@ -27,7 +28,7 @@ const made = new WeakMap<UpkeepProcess, "withheld" | "disturbed">();
 // nothing of memory, which sees every process, so never withholds a look nor is disturbed.
 const opened = (data: MemoryData, declared: readonly Space[], mayBuildUnderKey = false) => {
 	const process = memoryProcess(data, declared, mayBuildUnderKey);
-	const answered = process.upkeep.alone?.bind(process.upkeep);
+	const answered = process.upkeep.alone.bind(process.upkeep);
 	const wrapped: UpkeepProcess = {
 		...process,
 		upkeep: {
@@ -37,7 +38,6 @@ const opened = (data: MemoryData, declared: readonly Space[], mayBuildUnderKey =
 				made.delete(wrapped);
 				if (next === "withheld") return { kind: "unchecked", reasons: ["look-withheld primary"] };
 				if (next === "disturbed") throw new Unavailable("store");
-				if (!answered) throw new Error("memory offers alone()");
 				return answered();
 			},
 		},
@@ -52,6 +52,7 @@ upkeepContract("memory", {
 	holds: async (process, key) =>
 		dataFor(process).values.has(JSON.stringify([key.space.name, key.partition, key.name])),
 	anotherMayBuildUnderKey: async (process, declared) => opened(dataFor(process), declared, true),
+	looks: true,
 	attach: async (process) => {
 		const attached = memoryProcess(dataFor(process), []);
 		return async () => attached.detach();
@@ -103,6 +104,15 @@ it("counts no process whose start was refused, and none once detached, each chan
 	];
 	for (const call of calls) await expect(call()).rejects.toSatisfy(isUnavailable);
 	expect((await first.store.putIfAbsent(key, 1, never)).kind).toBe("written");
+});
+
+it("answers alone() unchecked, no-look-offered, where the implementation offers no way to look, and the implementation's own answer where it does", async () => {
+	const { alone, ...withoutAlone } = memoryProcess(memoryData(clock), []).upkeep;
+	expect(await checkedUpkeep(withoutAlone, []).alone()).toEqual({
+		kind: "unchecked",
+		reasons: ["no-look-offered"],
+	});
+	expect(await checkedUpkeep({ ...withoutAlone, alone }, []).alone()).toEqual({ kind: "alone" });
 });
 
 it("answers durable and replicated unmet, and the rest verified, as one process holds them", async () => {

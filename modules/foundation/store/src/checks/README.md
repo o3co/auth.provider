@@ -11,7 +11,7 @@ Internal module of `store`: the checks every implementation's ports go through.
 
 ## Offers
 - `checkedStore(inner, declared)` and `checkedUpkeep(inner, declared)`, on `.`.
-  - `checkedUpkeep` answers upkeep's `declared()` itself, from the declarations it checked; no implementation does.
+  - `checkedUpkeep` answers upkeep's `declared()` itself, from the declarations it checked; no implementation does. Where the implementation offers no `alone()`, it answers `unchecked` (`no-look-offered`).
 - `declaredSpaces(declared)`: the declarations checked, a malformed one refusing the boot, to the package alone.
 
 ## Invariants
