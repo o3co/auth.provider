@@ -1,3 +1,4 @@
+export { type CommandRun, type ErasureCommands, erasureCommands } from "./commands/commands.ts";
 export {
 	type Alone,
 	type DeclaredSpace,

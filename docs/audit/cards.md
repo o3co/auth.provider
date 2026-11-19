@@ -33,7 +33,8 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 
 ## erasure
 
-- `@mod/account-erasure` (feature, `modules/erasure/account-erasure`): The feature account erasure runs as. Its module takes nothing and provides nothing yet: the contract it declares is its wiring's to provide.
+- `@mod/account-erasure` (feature, `modules/erasure/account-erasure`): The feature account erasure runs as: its commands (internal module `commands`), each one under the maintenance key run in one frame (internal module `frame`).
+  - `commands` (`src/commands`): the erasure commands, each as its app entry calls it.
   - `frame` (`src/frame`): the frame every command under the maintenance key runs in.
   - `maintenance` (`src/maintenance`): erasure's maintenance interface, in erasure's words.
   - `step` (`src/step`): the one step a command under the maintenance key runs, "under the key and alone".
