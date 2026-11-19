@@ -13,6 +13,7 @@ Internal module of `redis`: `store`'s upkeep on Redis, the control record and th
 
 ## Invariants
 - The control record is a hash at `<prefix>:{#control}` (epoch, maintenance key, the spaces required, the marks); the ledger, one JSON map at `<prefix>:{#ledger}` of each space's fields, now `subjectDataEver`. Neither is a key of any space.
+- A refused start writes nothing to the control record, the ledger or a declared space. Boot's own checks of the server write keys at `<prefix>:{#check}…`, holding fixed probe values, outside every space as `#` keeps them, as it keeps the control record and the ledger.
 - Every script that changes data, the store's and these, first checks, in that script, the record's epoch against the one the process took and, for a process that took it under the maintenance key, that the key is still held, before deleting what expired and before any replay: failing either, it changes nothing, and is unavailable.
 - A change here is confirmed where replication is declared; so is the control read.
 - Store's `checkedUpkeep` is built first, so a malformed declaration refuses the boot before anything here reads one.
