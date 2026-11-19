@@ -153,11 +153,13 @@ export async function assembleWatching(
 		const values = outcomes.flatMap((outcome) => (outcome.ok ? [outcome.value] : []));
 		if (point === probes) probeList = values as Probe[];
 		// A point no module collects still keeps its promises; a failed contribution is refused already.
+		// The outcome is kept, so a later contribution's factory that collects the point reads it.
 		if (outcomes.every((outcome) => outcome.ok) && !collected.has(point)) {
 			try {
-				checkPoint(point, values, refusals);
+				collected.set(point, checkPoint(point, values, refusals));
 			} catch (error) {
 				recordFailure(error, point.label, refusals);
+				collected.set(point, undefined);
 			}
 		}
 	}
