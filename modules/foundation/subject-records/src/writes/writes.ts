@@ -1,5 +1,6 @@
+import { BuildRefused } from "@mod/kernel";
 import { type Attempt, type Changed, changeRecords, type Place, type Target } from "@mod/records";
-import type { Json } from "@mod/store";
+import type { Json, Space } from "@mod/store";
 import { checkedSubjectPlace, type SubjectPlace } from "../index/index.ts";
 import { changeWritten } from "../writer.ts";
 import { type Rule, rulesOf } from "./rules.ts";
@@ -19,6 +20,12 @@ export const recordTargetsIn = (place: Place, options: { readonly secret?: true 
 	return { recordOf, recordNamed, nameOf };
 };
 
+export function boundedDeclared(space: Space): void {
+	if (space.subjectData === "bounded" && space.boundedMs === undefined) {
+		throw new BuildRefused(space.name, "declares bounded with no boundedMs");
+	}
+}
+
 /**
  * A subject's records in a space declaring `online-indexed` (its keys in its subject's index),
  * `online-keyed` (its key its subject itself, the index keeping its tombstone and, once indexed, the
@@ -36,6 +43,7 @@ export function subjectRecordsIn<T extends Json>(
 	refuse: (where: string, reason: string) => never,
 	options: { readonly secret?: true } = {},
 ) {
+	boundedDeclared(place.space);
 	const category = checkedSubjectPlace(
 		place,
 		["online-indexed", "online-keyed", "bounded"],

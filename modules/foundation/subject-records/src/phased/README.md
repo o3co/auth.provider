@@ -17,6 +17,7 @@ Internal module of `subject-records`: the builders over the phase a process hold
 ## Invariants
 - Where the phase reads at build, the builder is built at once and refuses as it does, refusing the start.
 - Where it cannot, the build waits for the first call that reads it; until then every call is unavailable and `ready` fails, so ready traffic never reaches them.
+- One refusal does not wait: a `bounded` space with no `boundedMs` refuses the start before the phase is read (`writes`).
 - A refusal found then (indexed over a store with no batch across, an index not the space's, another category) keeps `ready` failing with its reason for good, logs `subject-records.refused` once for each space it names, and leaves every call unavailable: it fails readiness, never a call's judgment.
 - A process may hold `reader` for one space and `indexed` for another where the mark is written between their reads; every node restarts after the mark (account erasure §5.1).
 

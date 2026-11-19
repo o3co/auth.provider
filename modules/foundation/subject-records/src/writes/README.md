@@ -25,6 +25,7 @@ Internal module of `subject-records`: a subject's records, by the category its s
 - `unowned` (a key, a value, a lifetime) saves a record holding no subject's data raw, unless the key holds one (`exists`), and answers `closed`, writing nothing, once the builder's phase is `indexed`: a plain answer, never a throw. Such records read as orphans to the one migration, through the owner's `Elsewhere`. It has no read, removal or scan of its own.
 - `unowned`'s phase is the one the builder was built with (`phased`'s `once`), not a read of the mark at the write; a writer with a stale phase is stopped by the maintenance window's fence, epoch and restarts (account erasure §5.1).
 - Refuses at build, through `refuse`: once indexed, a store that writes no records of two partitions as one; an index that is not the space's; another category; secret keys outside `bounded`.
+- A `bounded` space declaring no `boundedMs` refuses the boot, not through `refuse`: kernel's `BuildRefused` (`<space>`, `declares bounded with no boundedMs`), thrown by `subjectRecordsIn` before its other checks and by `phasedRecordsIn` before the phase is read, so a store down at start does not defer it. A place reaching `rulesOf` or `erase` past them still meets their TypeErrors.
 
 ## Depends on
-- `records` (`changeRecords`, its targets, `Next`), `store`; internal modules `envelope`, `index`; the package's `changeWritten`
+- `kernel` (`BuildRefused`), `records` (`changeRecords`, its targets, `Next`), `store`; internal modules `envelope`, `index`; the package's `changeWritten`
