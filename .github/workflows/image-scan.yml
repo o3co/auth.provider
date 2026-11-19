@@ -42,6 +42,8 @@ jobs:
     env:
       # develop, latest, and each older minor still supported as X.Y. A minor
       # leaves the list in the pull request that ends its support (SECURITY.md).
+      # An older minor enters only once its newest tag's entrance is checked to
+      # depend on its bundle alone, as full-app needs.
       TARGETS: develop latest
     outputs:
       targets: ${{ steps.targets.outputs.targets }}
