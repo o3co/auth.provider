@@ -69,7 +69,7 @@ else
   local held = cjson.decode(redis.call('GET', ledger) or '{}')
   if held[ARGV[2]] == nil then
     answer = {kind = 'missing'}
-  elseif ARGV[4] ~= '' and (held[ARGV[2]].generation or 'none') ~= ARGV[4] then
+  elseif (held[ARGV[2]].generation or 'none') ~= ARGV[4] then
     answer = {kind = 'redeclared'}
   else
     held[ARGV[2]] = nil
@@ -182,7 +182,7 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 				})),
 			),
 		retire: async (name, generation) =>
-			(await changed("retire", name, known.has(name) ? "1" : "0", generation ?? "")) as Awaited<
+			(await changed("retire", name, known.has(name) ? "1" : "0", generation)) as Awaited<
 				ReturnType<UpkeepImplementation["retire"]>
 			>,
 		sweepKept: async (name, cursor) => {
@@ -231,9 +231,7 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 			}
 			if (answer.kind !== "page") {
 				ended();
-				return { kind: answer.kind } as Awaited<
-					ReturnType<NonNullable<UpkeepImplementation["sweepKept"]>>
-				>;
+				return { kind: answer.kind } as Awaited<ReturnType<UpkeepImplementation["sweepKept"]>>;
 			}
 			const next = String(answer.cursor);
 			const done = next === "0" || walks.get(handle) !== walk;

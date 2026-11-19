@@ -37,8 +37,7 @@ function walking() {
 		random: quietRuntime().random,
 		honours: async () => ({ kind: "verified", witness: "w" }),
 	});
-	const walk = (at?: string) =>
-		(upkeep.sweepKept as NonNullable<typeof upkeep.sweepKept>)(space.name, at);
+	const walk = (at?: string) => upkeep.sweepKept(space.name, at);
 	/** Releases the page waiting at `index` once that many and one wait, the first by default. */
 	const release = async (index = 0) => {
 		while (waiting.length <= index) await new Promise((resolve) => setTimeout(resolve, 1));

@@ -348,11 +348,11 @@ describe("a kept space's walk on Redis", () => {
 		await writer.store.putIfAbsent(at(1), 1, { ...never, idempotency: "only" });
 		await writer.store.putIfAbsent(at(2), 1, never);
 		await tool.upkeep.enterMaintenance();
-		const walk = (name: string, at?: string) => tool.upkeep.sweepKept?.(name, at);
+		const walk = (name: string, at?: string) => tool.upkeep.sweepKept(name, at);
 		/** A whole walk's live keys: other tests' keys share the server, so one page may meet none. */
 		const walkAll = async (name: string, at?: string, sum = 0): Promise<unknown> => {
 			const page = await walk(name, at);
-			if (page?.kind !== "page") return page;
+			if (page.kind !== "page") return page;
 			if (page.cursor === undefined) return { kind: "page", live: sum + page.live };
 			return walkAll(name, page.cursor, sum + page.live);
 		};
