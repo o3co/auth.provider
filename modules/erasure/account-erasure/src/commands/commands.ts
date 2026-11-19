@@ -38,11 +38,11 @@ const holdLeftLine =
 const unprintable = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const holderMax = 200;
 
-/** The journal's holder as the medium records it, where it reads as one printable line; none otherwise. */
+/** The journal's holder as the medium records it, where it is one non-empty line of at most 200 characters with no control, format or line-separator character; none otherwise. */
 const holderLine = (holder: string) =>
 	holder.length > 0 && holder.length <= holderMax && !unprintable.test(holder) ? holder : undefined;
 
-/** The holder for the operator: as recorded where it reads as one printable line, or a fixed text. */
+/** The holder for the operator: as recorded where it is one non-empty line of at most 200 characters with no control, format or line-separator character, or a fixed text. */
 const holderOf = (holder: string) => {
 	const line = holderLine(holder);
 	return line === undefined ? "unreadable holder" : `holder: ${line}`;

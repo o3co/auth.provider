@@ -127,7 +127,7 @@ it("tells an entry not shown alone, the key set, with what was found and the way
 	}
 });
 
-it("does not run while another command holds the journal, naming the holder where it reads as one printable line: code 5", async () => {
+it("does not run while the journal is held, naming the holder where it reads as one non-empty line of at most 200 characters with no control, format or line-separator character: code 5", async () => {
 	const named = (holder: string) =>
 		`not run: the journal is held (${holder}); run erasure-enter again once its holder ends, or release the hold once its process is gone`;
 	const busy = parts([], "pid 41 on node-a since 12:00");
@@ -180,6 +180,11 @@ it("tells an answer whose release failed, its own line first, then the hold left
 			[{ kind: "accompanied", count: 2 }],
 			["hold", "alone", "release"],
 			"not entered: 2 other processes attached; stop them, then run erasure-enter again",
+		],
+		[
+			[{ kind: "unchecked", reasons: ["replica-unreached"] }],
+			["hold", "alone", "release"],
+			"not entered: not every process could be seen (replica-unreached); run erasure-enter again once every server answers",
 		],
 	] as const;
 	for (const [seen, expected, line] of cases) {

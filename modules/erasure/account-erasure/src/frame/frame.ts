@@ -39,8 +39,11 @@ export async function inFrame<T>(
 		const step = await underKeyAndAlone(parts.maintenance, way, parts.clock);
 		answer = step.kind === "under-key" ? await body(step.epoch) : step;
 	} catch (error) {
-		// The first failure stands: whatever the release then throws, the step's or the body's throw is thrown.
-		await hold.release().catch(() => undefined);
+		try {
+			await hold.release();
+		} catch {
+			// The first failure stands: whatever the release then throws, the step's or the body's throw is thrown.
+		}
 		throw error;
 	}
 	try {
