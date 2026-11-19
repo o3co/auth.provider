@@ -1,4 +1,4 @@
-import { assemble, defineModule, kernelConfig } from "@mod/kernel";
+import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { expect, it } from "vitest";
 import { type Space, spaces, store, storeControl, storeUpkeep } from "../../contract.ts";
 import { type MemoryData, memoryData, memoryProcess } from "../../memory/memory.ts";
@@ -37,6 +37,29 @@ it("answers durable and replicated unmet, and the rest verified, as one process 
 		kind: "unmet",
 		reasons: ["memory loses everything on restart", "memory has no replica"],
 	});
+});
+
+it("is taken by account erasure's wiring alone: another module taking it refuses boot", async () => {
+	const taking = (name: string) =>
+		defineModule({ name, replicaSafe: true, takes: [storeUpkeep] }, (m) => [
+			m.provide(contract<object>(`${name}.takes`)).by(async (c) => {
+				try {
+					await c.get(storeUpkeep);
+				} catch {}
+				return {};
+			}),
+		]);
+	const boot = (name: string) =>
+		assemble({
+			modules: [storeModule, durable, taking(name)],
+			config: { ...kernelConfig(), store: { "accept-volatile": true } },
+		});
+	const refused = await boot("intruder").catch((error: unknown) => error);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals.map((r) => r.reason)).toContain(
+		"store.upkeep is taken by account-erasure-store alone",
+	);
+	await expect(boot("account-erasure-store")).resolves.toBeDefined();
 });
 
 it("provides the store and its upkeep from one process, whose own maintenance leaves it writing", async () => {
