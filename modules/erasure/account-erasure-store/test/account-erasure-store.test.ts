@@ -136,6 +136,12 @@ it("refuses the boot over a store offering no control record, both store contrac
  * and answer what no real store would at once, so a member forwarded wrong answers wrong.
  */
 async function recorded(answers: Partial<Record<keyof StoreUpkeep | "control", unknown>>) {
+	const built = await recordedApp(answers);
+	return { maintenance: await built.app.get(erasureMaintenance), calls: built.calls };
+}
+
+/** The assembly `recorded` opens, before the interface is asked of it. */
+async function recordedApp(answers: Partial<Record<keyof StoreUpkeep | "control", unknown>>) {
 	const calls: [string, unknown[]][] = [];
 	const answering =
 		(member: string) =>
@@ -158,11 +164,18 @@ async function recorded(answers: Partial<Record<keyof StoreUpkeep | "control", u
 	] as const;
 	const upkeep = Object.fromEntries([
 		...members.map((member) => [member, answering(member)]),
-		["declared", () => []],
+		[
+			"declared",
+			() => {
+				if (answers.declared instanceof Error) throw answers.declared;
+				return [];
+			},
+		],
 	]) as unknown as StoreUpkeep;
 	const control = { control: answering("control") } as unknown as StoreControl;
 	const standIn = defineModule({ name: "recording-store", replicaSafe: true, takes: [] }, (m) => [
-		m.provide(store).by(() => ({}) as Store),
+		// A store that pairs, so subject-records' phase write reaches the mark.
+		m.provide(store).by(() => ({ batchAcross: async () => undefined }) as unknown as Store),
 		m.provide(storeUpkeep).by(() => upkeep),
 		m.provide(storeControl).by(() => control),
 	]);
@@ -171,7 +184,7 @@ async function recorded(answers: Partial<Record<keyof StoreUpkeep | "control", u
 		config: kernelConfig(),
 		runtime: quietRuntime(),
 	});
-	return { maintenance: await app.get(erasureMaintenance), calls };
+	return { app, calls };
 }
 
 it("forwards retire's name and answers the store's retired", async () => {
@@ -233,4 +246,51 @@ it("passes the store's outage through as it is thrown, the same error", async ()
 	await expect(maintenance.alone()).rejects.toBe(outage);
 	await expect(maintenance.retire("x")).rejects.toBe(outage);
 	await expect(maintenance.sweep("x", "c")).rejects.toBe(outage);
+});
+
+type Wired = Awaited<ReturnType<typeof recorded>>["maintenance"];
+/** Each member, the store's counterpart that fails, and what the store answers before it, if anything. */
+const failing: readonly [
+	string,
+	(m: Wired) => Promise<unknown>,
+	string,
+	Record<string, unknown>,
+][] = [
+	["record", (m) => m.record(), "control", {}],
+	["enter", (m) => m.enter(), "enterMaintenance", {}],
+	["leave", (m) => m.leave(), "leaveMaintenance", {}],
+	["mark", (m) => m.mark("erasure-store-test.mark", 1), "mark", {}],
+	["require", (m) => m.require(["a"]), "require", {}],
+	["kept", (m) => m.kept(), "kept", {}],
+	["retire", (m) => m.retire("a"), "retire", {}],
+	["honours", (m) => m.honours(["durable"]), "honours", {}],
+	["sweep", (m) => m.sweep("a", "c"), "sweep", {}],
+	["alone", (m) => m.alone(), "alone", {}],
+	["phase, reading the control record", (m) => m.phase(), "control", {}],
+	["writePhase, reading the control record", (m) => m.writePhase(), "control", {}],
+	[
+		"writePhase, through the mark it hands subject-records",
+		(m) => m.writePhase(),
+		"mark",
+		{ control: { epoch: "e1", maintenance: true, requires: [], marks: {} } },
+	],
+];
+
+it.each(failing)(
+	"passes the store's outage through %s as the same error",
+	async (_, call, counterpart, before) => {
+		const outage = new Unavailable("store");
+		const { maintenance } = await recorded({ ...before, [counterpart]: outage });
+		await expect(call(maintenance)).rejects.toBe(outage);
+	},
+);
+
+it("ends the boot where the store's declarations cannot be read as the wiring is built", async () => {
+	const refused = await recordedApp({ declared: new Unavailable("store") }).catch(
+		(error: unknown) => error,
+	);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals).toEqual([
+		{ where: "account-erasure-store", reason: "failed during assembly" },
+	]);
 });
