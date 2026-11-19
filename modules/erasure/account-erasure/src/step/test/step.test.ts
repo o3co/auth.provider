@@ -1,7 +1,9 @@
 import { Unavailable } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import type { Alone, ErasureMaintenance } from "../../maintenance/maintenance.ts";
-import { underKeyAndAlone } from "../step.ts";
+import { entryTimeMark, underKeyAndAlone } from "../step.ts";
+
+const clock = { now: () => 1_000 };
 
 /** A value thrown in place of an answer, whatever it is. */
 const throwing = (thrown: unknown) => ({ thrown });
@@ -10,7 +12,8 @@ type Thrown = ReturnType<typeof throwing>;
 /**
  * A stand-in answering `alone()` from `seen` in turn, recording every call the step makes. The record
  * shows the key held or not (`held`), with its epoch (`epoch`, e1 where held, none where not by
- * default); `recording` and `entering` are thrown by `record()` and `enter()` where given.
+ * default); `recording`, `entering` and `marking` are thrown by `record()`, `enter()` and `mark()`
+ * where given.
  */
 function standIn(
 	seen: (Alone | Error | Thrown)[],
@@ -19,9 +22,11 @@ function standIn(
 		readonly epoch?: string | null;
 		readonly recording?: unknown;
 		readonly entering?: Error;
+		readonly marking?: Error;
 	} = {},
 ) {
 	const calls: string[] = [];
+	const marks: [string, unknown][] = [];
 	let held = options.held ?? true;
 	let epoch = options.epoch === undefined ? (held ? "e1" : null) : options.epoch;
 	const maintenance = {
@@ -37,6 +42,12 @@ function standIn(
 			epoch = "e2";
 			return { kind: "entered" as const, epoch };
 		},
+		mark: async (name: string, value: unknown) => {
+			calls.push("mark");
+			if (options.marking) throw options.marking;
+			marks.push([name, value]);
+			return { kind: "marked" as const };
+		},
 		alone: async () => {
 			calls.push("alone");
 			const next = seen.shift();
@@ -46,7 +57,7 @@ function standIn(
 			return next;
 		},
 	} as unknown as ErasureMaintenance;
-	return { maintenance, calls };
+	return { maintenance, calls, marks };
 }
 
 const alone: Alone = { kind: "alone" };
@@ -54,19 +65,20 @@ const accompanied: Alone = { kind: "accompanied", count: 2 };
 const unchecked: Alone = { kind: "unchecked", reasons: ["replica-unreached"] };
 
 describe("entering, erasure-enter's alone", () => {
-	it("reads alone, enters, reads alone again, and answers under the key with the new epoch", async () => {
-		const { maintenance, calls } = standIn([alone, alone], { held: false });
-		expect(await underKeyAndAlone(maintenance, "entering")).toEqual({
+	it("reads alone, enters, reads alone again, writes the entry time, and answers under the key with the new epoch", async () => {
+		const { maintenance, calls, marks } = standIn([alone, alone], { held: false });
+		expect(await underKeyAndAlone(maintenance, "entering", clock)).toEqual({
 			kind: "under-key",
 			epoch: "e2",
 		});
-		expect(calls).toEqual(["alone", "enter", "alone"]);
+		expect(calls).toEqual(["alone", "enter", "alone", "mark"]);
+		expect(marks).toEqual([[entryTimeMark, 1_000]]);
 	});
 
 	it("refuses accompanied or unchecked at the first read without entering", async () => {
 		for (const found of [accompanied, unchecked]) {
 			const { maintenance, calls } = standIn([found], { held: false });
-			expect(await underKeyAndAlone(maintenance, "entering")).toEqual(found);
+			expect(await underKeyAndAlone(maintenance, "entering", clock)).toEqual(found);
 			expect(calls).toEqual(["alone"]);
 		}
 	});
@@ -77,20 +89,23 @@ describe("entering, erasure-enter's alone", () => {
 			[unchecked, "run erasure-enter again once every server answers"],
 		] as const;
 		for (const [found, wayOn] of ways) {
-			const { maintenance, calls } = standIn([alone, found], { held: false });
-			expect(await underKeyAndAlone(maintenance, "entering")).toEqual({
+			const { maintenance, calls, marks } = standIn([alone, found], { held: false });
+			expect(await underKeyAndAlone(maintenance, "entering", clock)).toEqual({
 				kind: "entered-not-shown-alone",
 				epoch: "e2",
 				found,
 				wayOn,
 			});
 			expect(calls).toEqual(["alone", "enter", "alone"]);
+			expect(marks).toEqual([]);
 		}
 	});
 
 	it("stops as unavailable where the first read is, before entering", async () => {
 		const { maintenance, calls } = standIn([new Unavailable("store")], { held: false });
-		await expect(underKeyAndAlone(maintenance, "entering")).rejects.toBeInstanceOf(Unavailable);
+		await expect(underKeyAndAlone(maintenance, "entering", clock)).rejects.toBeInstanceOf(
+			Unavailable,
+		);
 		expect(calls).toEqual(["alone"]);
 	});
 
@@ -99,25 +114,42 @@ describe("entering, erasure-enter's alone", () => {
 			held: false,
 			entering: new Unavailable("store"),
 		});
-		await expect(underKeyAndAlone(maintenance, "entering")).rejects.toBeInstanceOf(Unavailable);
+		await expect(underKeyAndAlone(maintenance, "entering", clock)).rejects.toBeInstanceOf(
+			Unavailable,
+		);
 		expect(calls).toEqual(["alone", "enter"]);
 	});
 
 	it("answers entered-not-shown-alone, unavailable, where the read after entering gives no answer, as the key is set", async () => {
-		const { maintenance, calls } = standIn([alone, new Unavailable("store")], { held: false });
-		expect(await underKeyAndAlone(maintenance, "entering")).toEqual({
+		const { maintenance, calls, marks } = standIn([alone, new Unavailable("store")], {
+			held: false,
+		});
+		expect(await underKeyAndAlone(maintenance, "entering", clock)).toEqual({
 			kind: "entered-not-shown-alone",
 			epoch: "e2",
 			found: { kind: "unavailable" },
 			wayOn: "run erasure-enter again once every server answers",
 		});
 		expect(calls).toEqual(["alone", "enter", "alone"]);
+		expect(marks).toEqual([]);
+	});
+
+	it("stops as unavailable where the entry-time mark is, calling nothing after it", async () => {
+		const { maintenance, calls, marks } = standIn([alone, alone], {
+			held: false,
+			marking: new Unavailable("store"),
+		});
+		await expect(underKeyAndAlone(maintenance, "entering", clock)).rejects.toBeInstanceOf(
+			Unavailable,
+		);
+		expect(calls).toEqual(["alone", "enter", "alone", "mark"]);
+		expect(marks).toEqual([]);
 	});
 
 	it("throws any other failure of the read after entering as it is", async () => {
 		const failure = new Error("not the store's outage");
 		const { maintenance, calls } = standIn([alone, failure], { held: false });
-		await expect(underKeyAndAlone(maintenance, "entering")).rejects.toBe(failure);
+		await expect(underKeyAndAlone(maintenance, "entering", clock)).rejects.toBe(failure);
 		expect(calls).toEqual(["alone", "enter", "alone"]);
 	});
 
@@ -126,7 +158,7 @@ describe("entering, erasure-enter's alone", () => {
 			[Symbol.for("@mod/kernel.unavailable")]: true,
 		});
 		const { maintenance } = standIn([alone, elsewhere], { held: false });
-		expect(await underKeyAndAlone(maintenance, "entering")).toMatchObject({
+		expect(await underKeyAndAlone(maintenance, "entering", clock)).toMatchObject({
 			kind: "entered-not-shown-alone",
 			found: { kind: "unavailable" },
 		});
@@ -135,7 +167,7 @@ describe("entering, erasure-enter's alone", () => {
 	it("throws a thrown value that is no error, after entering, as it is", async () => {
 		for (const thrown of ["a string", { plain: true }]) {
 			const { maintenance, calls } = standIn([alone, throwing(thrown)], { held: false });
-			await expect(underKeyAndAlone(maintenance, "entering")).rejects.toBe(thrown);
+			await expect(underKeyAndAlone(maintenance, "entering", clock)).rejects.toBe(thrown);
 			expect(calls).toEqual(["alone", "enter", "alone"]);
 		}
 	});
@@ -144,43 +176,56 @@ describe("entering, erasure-enter's alone", () => {
 describe("passing, every other command's", () => {
 	it("refuses not-in-maintenance where the key has lifted and the record still holds its epoch", async () => {
 		const { maintenance, calls } = standIn([], { held: false, epoch: "e1" });
-		expect(await underKeyAndAlone(maintenance, "passing")).toEqual({ kind: "not-in-maintenance" });
+		expect(await underKeyAndAlone(maintenance, "passing", clock)).toEqual({
+			kind: "not-in-maintenance",
+		});
+		expect(calls).toEqual(["record"]);
+	});
+
+	it("refuses not-in-maintenance where the record shows the key held with no epoch", async () => {
+		const { maintenance, calls } = standIn([], { held: true, epoch: null });
+		expect(await underKeyAndAlone(maintenance, "passing", clock)).toEqual({
+			kind: "not-in-maintenance",
+		});
 		expect(calls).toEqual(["record"]);
 	});
 
 	it("stops as unavailable where record() is, reading nothing after it", async () => {
 		const outage = new Unavailable("store");
 		const { maintenance, calls } = standIn([], { recording: outage });
-		await expect(underKeyAndAlone(maintenance, "passing")).rejects.toBe(outage);
+		await expect(underKeyAndAlone(maintenance, "passing", clock)).rejects.toBe(outage);
 		expect(calls).toEqual(["record"]);
 	});
 
 	it("stops as unavailable where alone() is, the outage as thrown", async () => {
 		const outage = new Unavailable("store");
 		const { maintenance, calls } = standIn([outage]);
-		await expect(underKeyAndAlone(maintenance, "passing")).rejects.toBe(outage);
+		await expect(underKeyAndAlone(maintenance, "passing", clock)).rejects.toBe(outage);
 		expect(calls).toEqual(["record", "alone"]);
 	});
 
-	it("answers under the key with the record's epoch where the key is held and the store alone, never entering", async () => {
-		const { maintenance, calls } = standIn([alone]);
-		expect(await underKeyAndAlone(maintenance, "passing")).toEqual({
+	it("answers under the key with the epoch read at record() where the key is held and the store alone, never entering or marking", async () => {
+		const { maintenance, calls, marks } = standIn([alone]);
+		expect(await underKeyAndAlone(maintenance, "passing", clock)).toEqual({
 			kind: "under-key",
 			epoch: "e1",
 		});
 		expect(calls).toEqual(["record", "alone"]);
+		expect(marks).toEqual([]);
 	});
 
 	it("refuses not-in-maintenance where the key is not held, before reading alone", async () => {
 		const { maintenance, calls } = standIn([], { held: false });
-		expect(await underKeyAndAlone(maintenance, "passing")).toEqual({ kind: "not-in-maintenance" });
+		expect(await underKeyAndAlone(maintenance, "passing", clock)).toEqual({
+			kind: "not-in-maintenance",
+		});
 		expect(calls).toEqual(["record"]);
 	});
 
 	it("refuses accompanied or unchecked under the key, never entering", async () => {
 		for (const found of [accompanied, unchecked]) {
 			const { maintenance, calls } = standIn([found]);
-			expect(await underKeyAndAlone(maintenance, "passing")).toEqual(found);
+			expect(await underKeyAndAlone(maintenance, "passing", clock)).toEqual(found);
 			expect(calls).toEqual(["record", "alone"]);
 		}
 	});

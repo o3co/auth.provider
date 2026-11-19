@@ -25,5 +25,6 @@
 - alone: no other process is attached to the store's data, as the store saw it when asked.
 - accompanied {count}: other processes are attached; the count is the store's, for the operator to read.
 - unchecked {reasons}: the store could not see every process that may be attached; the reasons are codes for the operator.
-- not-in-maintenance: the maintenance key is not held.
+- not-in-maintenance: the maintenance key is not held, or is held with no epoch.
+- entry time: when `erasure-enter`, having entered the present epoch, was shown alone; kept as the mark `account-erasure.entered`.
 - entered-not-shown-alone: `erasure-enter` set the key and was then not shown alone: the store answered `accompanied` or `unchecked`, or gave no answer (`unavailable`).
