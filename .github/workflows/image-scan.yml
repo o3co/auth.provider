@@ -30,7 +30,7 @@ permissions:
 jobs:
   # `latest` is GitHub's latest release, never a prerelease or a draft. A minor
   # `X.Y` is its highest release tag vX.Y.Z. This job checks out nothing, and
-  # is the only one whose steps are given the run's token.
+  # is the only one whose run steps are given the run's token.
   resolve:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -94,11 +94,6 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ github.event_name == 'schedule' && 'refs/heads/develop' || '' }}
-          path: scanner
-          persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
           ref: ${{ matrix.ref }}
           path: target
           persist-credentials: false
@@ -118,6 +113,13 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm bundles
           .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"
+      # The scanner is checked out once the target is packed: no packing step
+      # runs while its files exist. The target is still a trusted ref.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'refs/heads/develop' || '' }}
+          path: scanner
+          persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: scanner/package.json

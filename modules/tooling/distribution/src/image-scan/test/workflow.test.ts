@@ -54,7 +54,7 @@ it("runs on its daily schedule and a manual run alone, the manual run taking no 
 	expect(workflow.permissions).toEqual({ contents: "read" });
 });
 
-it("resolves its targets in a job that runs no code of the repository, the only one whose steps are given the run's token", () => {
+it("resolves its targets in a job that runs no code of the repository, the only one whose run steps are given the run's token", () => {
 	const only = resolve.steps ?? [];
 	expect(only).toHaveLength(1);
 	expect(only[0]?.uses).toBeUndefined();
@@ -83,15 +83,15 @@ it("scans each target in a job of its own, reading alone, within a time, one fai
 	expect(scan["continue-on-error"]).toBeUndefined();
 });
 
-it("packs the target from its own checkout with its own pnpm, and scans it with develop's scanner on a schedule and the branch's on a manual run", () => {
+it("packs the target from its own checkout with its own pnpm, then checks out the scanner, develop's on a schedule and the branch's on a manual run, and scans it", () => {
 	const checkout = steps.filter((s) => s.uses?.startsWith("actions/checkout@"));
 	expect(checkout.map((s) => s.with)).toEqual([
+		{ ref: "${{ matrix.ref }}", path: "target", "persist-credentials": false },
 		{
 			ref: "${{ github.event_name == 'schedule' && 'refs/heads/develop' || '' }}",
 			path: "scanner",
 			"persist-credentials": false,
 		},
-		{ ref: "${{ matrix.ref }}", path: "target", "persist-credentials": false },
 	]);
 	const at = (command: string) => steps.findIndex((s) => s.run?.includes(command));
 	const pack = steps[at("pnpm bundles")];
@@ -111,6 +111,8 @@ it("packs the target from its own checkout with its own pnpm, and scans it with 
 		'pnpm image:scan "$RUNNER_TEMP/tarballs" "$RUNNER_TEMP/image-scan"',
 	);
 	expect(at("pnpm image:scan")).toBeGreaterThan(at("pnpm bundles"));
+	// No packing step runs while the scanner's files exist.
+	expect(steps.indexOf(checkout[1] as Step)).toBeGreaterThan(at("pnpm bundles"));
 	// Each install runs the pnpm its checkout pins, set up just before it.
 	const setups = steps.flatMap((s, i) => (s.uses?.startsWith("pnpm/action-setup@") ? [i] : []));
 	expect(setups.map((i) => steps[i]?.with)).toEqual([

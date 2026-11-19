@@ -16,13 +16,13 @@ Internal module of `distribution`: the known vulnerabilities in the image of an 
 
 ## Invariants
 - Passes only where Trivy ended clean, its report read OS and Node packages and holds no finding, and no security release of the image's Node major is newer than it. A scan that could not be made or read is told as not scanned, and a Node index that could not be fetched or read, that does not list the image's Node, or that gives a newer release of its major no boolean `security`, as not checked; each fails, never as clean.
-- The image is built fresh (`--pull --no-cache-filter=runtime`), and removed however the scan ends.
+- The image is built fresh (`--pull --no-cache-filter=runtime`), and removed whether the scan passes, fails or throws.
 - Trivy runs in its pinned image on the image saved to a file, mounted read-only, and the image's Node with no network, neither with a token or setting of the run passed in.
 - The features the app adds are the tarballs' release's (`full-app`), never this workspace's, so a later scanner does not refuse an earlier release.
 - Its workflow is held by a test that reads it and runs its resolution of the targets:
   - It runs on the schedule and a manual run alone, with no input, with `contents: read` alone, within a time; no step is a cache, and no setup caches.
-  - It resolves each target to its full ref in a job that runs no code of the repository, the only one whose steps are given the run's token; a malformed target, or a minor with no release tag, fails the run.
-  - It packs each target from its own checkout with the pnpm it pins, and scans it, in a job of its own, with develop's scanner on a schedule and the branch's on a manual run.
+  - It resolves each target to its full ref in a job that runs no code of the repository, the only one whose run steps are given the run's token; a malformed target, or a minor with no release tag, fails the run.
+  - It packs each target from its own checkout with the pnpm it pins, then checks out the scanner, develop's on a schedule and the branch's on a manual run, and scans it, in a job of its own.
   - Each target's verdict goes in its job's summary, and Trivy's report is kept, however the scan ended.
 
 ## Depends on
