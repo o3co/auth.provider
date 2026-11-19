@@ -2,6 +2,7 @@ import { BuildRefused, contract, extensionPoint } from "@mod/kernel";
 import { malformedDeclaration } from "./declaration.ts";
 
 export {
+	type Alone,
 	type Control,
 	type Honours,
 	type KeptSpace,

@@ -1,4 +1,4 @@
-import { BootRefused, BuildRefused, Unavailable } from "@mod/kernel";
+import { BootRefused, BuildRefused, isUnavailable, Unavailable } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import type { Key, Space, Store } from "../contract.ts";
 import { plantValue } from "../planting/planting.ts";
@@ -25,6 +25,14 @@ export interface UpkeepHarness {
 		process: UpkeepProcess,
 		declared: readonly Space[],
 	): Promise<UpkeepProcess>;
+	/** Attaches to `process`'s data a process neither `start`'s nor `another`'s; answers its detaching. */
+	attach?(process: UpkeepProcess): Promise<() => Promise<void>>;
+	/** Keeps `process`'s next `alone()` from seeing what it must, so it cannot look. */
+	withholdLook?(process: UpkeepProcess): Promise<void>;
+	/** Disturbs `process`'s next `alone()` while it reads. */
+	disturbRead?(process: UpkeepProcess): Promise<void>;
+	/** The values `process`'s store was configured with, none of which a reason of `alone()` may hold. */
+	configured?(process: UpkeepProcess): readonly string[];
 }
 
 /** The spaces the upkeep contract test declares: holding no subject's data, holding some the subject writer guards, and holding some it does not. */
@@ -437,6 +445,56 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				expect(await fewer.upkeep.retire(none.name)).toEqual({ kind: "declared" });
 				expect(await fewer.upkeep.retire("never-declared")).toEqual({ kind: "missing" });
 				expect((await p.upkeep.kept()).map((s) => s.name).sort()).toEqual([none.name, plain.name]);
+			});
+		});
+
+		describe("alone, where offered: kinds only, never the count", () => {
+			/** A fresh process offering `alone()`, the case skipped where it offers none. */
+			const offering = async (skip: () => never) => {
+				const p = await harness.start(upkeepSpaces);
+				const alone = p.upkeep.alone?.bind(p.upkeep);
+				return alone ? { p, alone } : skip();
+			};
+			it("answers alone where no other process is attached", async (ctx) => {
+				const { alone } = await offering(() => ctx.skip());
+				expect((await alone()).kind).toBe("alone");
+			});
+			it("answers accompanied beside another process over the same data", async (ctx) => {
+				const { p, alone } = await offering(() => ctx.skip());
+				await harness.another(p, upkeepSpaces);
+				expect((await alone()).kind).toBe("accompanied");
+			});
+			it("answers accompanied while a process is attached, and alone once it detaches", async (ctx) => {
+				if (!harness.attach) ctx.skip();
+				const { p, alone } = await offering(() => ctx.skip());
+				const detach = await (harness.attach as NonNullable<typeof harness.attach>)(p);
+				expect((await alone()).kind).toBe("accompanied");
+				await detach();
+				expect((await alone()).kind).toBe("alone");
+			});
+			it("answers unchecked where it cannot look, its reasons holding no configured value or witness", async (ctx) => {
+				if (!harness.withholdLook) ctx.skip();
+				const { p, alone } = await offering(() => ctx.skip());
+				const honoured = await p.upkeep.honours([]);
+				const configured = [
+					...(harness.configured?.(p) ?? []),
+					...(honoured.kind === "unmet" ? [] : [honoured.witness]),
+				];
+				await (harness.withholdLook as NonNullable<typeof harness.withholdLook>)(p);
+				const answer = await alone();
+				expect(answer.kind).toBe("unchecked");
+				const reasons = answer.kind === "unchecked" ? answer.reasons : [];
+				expect(reasons.length).toBeGreaterThan(0);
+				for (const reason of reasons) {
+					expect(typeof reason === "string" && reason.length > 0).toBe(true);
+					for (const value of configured) expect(reason).not.toContain(value);
+				}
+			});
+			it("is unavailable where its read is disturbed", async (ctx) => {
+				if (!harness.disturbRead) ctx.skip();
+				const { p, alone } = await offering(() => ctx.skip());
+				await (harness.disturbRead as NonNullable<typeof harness.disturbRead>)(p);
+				await expect(alone()).rejects.toSatisfy(isUnavailable);
 			});
 		});
 
