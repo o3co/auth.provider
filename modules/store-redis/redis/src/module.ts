@@ -17,6 +17,7 @@ import {
 } from "./redis-store.ts";
 import { confirmationRounds } from "./round/round.ts";
 import {
+	declaredCopies,
 	durabilityProblems,
 	evictionProblems,
 	honoursOf,
@@ -135,20 +136,6 @@ async function serverProblems(client: Redis, role: Role): Promise<string[]> {
 	return problems;
 }
 
-/** A declaration's own data fields copied plainly, no getter or trap run; none where it is no such declaration, or reading it throws. */
-function shapedCopy(space: Space): Space[] {
-	try {
-		const own = (field: string) => Object.getOwnPropertyDescriptor(space, field)?.value;
-		const [name, guarantees, subjectData] = [own("name"), own("guarantees"), own("subjectData")];
-		if (typeof name !== "string" || !Array.isArray(guarantees)) return [];
-		return [
-			{ name, guarantees: guarantees.filter((g) => typeof g === "string"), subjectData } as Space,
-		];
-	} catch {
-		return [];
-	}
-}
-
 /** What the server's settings fail to give the declared spaces, empty when everything holds; and the settings taken as declared. */
 async function unmet(
 	client: Redis,
@@ -161,8 +148,8 @@ async function unmet(
 	readonly undurable: readonly string[];
 	readonly unreplicated: readonly string[];
 }> {
-	// Only plain copies of declarations shaped as such are read here, the rest skipped: store refuses those as the upkeep is built.
-	declared = declared.flatMap(shapedCopy);
+	// Only the copies are read here: store refuses the boot over any declaration they skip.
+	const copies = declaredCopies(declared);
 	// First, as the checks below send some of the same commands: a refused one is named, not lost.
 	const refused = await refusedCommands(client, confirmer, {
 		prefix: s.prefix,
@@ -181,18 +168,18 @@ async function unmet(
 	const settings = serverSettings(client, s["server-settings"] ?? {});
 	const problems = [
 		...(await serverProblems(client, role)),
-		...(await evictionProblems(settings.read, declared)),
-		...(await replicationProblems(settings.read, role, declared, s.replication)),
-		...(await durabilityProblems(settings.read, declared, s.durability)),
+		...(await evictionProblems(settings.read, copies)),
+		...(await replicationProblems(settings.read, role, copies, s.replication)),
+		...(await durabilityProblems(settings.read, copies, s.durability)),
 	];
 	await settings.rest();
 	const undurable =
 		s.durability === "none"
-			? declared.filter((d) => d.guarantees.includes("durable")).map((d) => d.name)
+			? copies.filter((d) => d.guarantees.includes("durable")).map((d) => d.name)
 			: [];
 	const unreplicated =
 		s.replication === "none"
-			? declared
+			? copies
 					.filter(
 						(d) => d.guarantees.includes("replicated") || d.guarantees.includes("confirmed-reads"),
 					)

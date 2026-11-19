@@ -135,6 +135,29 @@ describe("the declared spaces", () => {
 		redis.down();
 	});
 
+	it("refuse boot over a declaration whose guarantees a getter holds at an index, as store refuses it, the server's checks running no getter", async () => {
+		const redis = primary();
+		const guarantees = Object.defineProperty([], "0", {
+			enumerable: true,
+			get: () => {
+				throw new Error("a getter ran");
+			},
+		});
+		const owner = defineModule({ name: "indexed", replicaSafe: false, takes: [] }, (m) => [
+			m
+				.contribute(spaces)
+				.by(() => ({ name: "indexed", guarantees, subjectData: "none" }) as Space),
+		]);
+		const error = await boot(await redis.listen(), undefined, undefined, [owner]).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect((error as BootRefused).refusals).toEqual([
+			{ where: "indexed", reason: "declares guarantees that are no list of known guarantees" },
+		]);
+		redis.down();
+	});
+
 	it("refuse boot over a space declaring no subjectData, naming it", async () => {
 		const redis = primary();
 		const bare = defineModule({ name: "bare", replicaSafe: false, takes: [] }, (m) => [
@@ -221,6 +244,34 @@ describe("the commands the store needs", () => {
 		await app?.stop(1000);
 		redis.settings["no-appendfsync-on-rewrite"] = "no";
 		await boot(port, undefined, undefined, [durable]);
+		redis.down();
+	});
+
+	it("refuse boot for a durable space whose guarantees run methods of their own, reading the entries as declared", async () => {
+		const redis = primary();
+		Object.assign(redis.settings, { appendonly: "yes", appendfsync: "always" });
+		redis.settings["no-appendfsync-on-rewrite"] = "yes";
+		const ran: string[] = [];
+		const guarantees = ["durable"];
+		for (const method of ["filter", "map", "includes", Symbol.iterator] as const) {
+			Object.defineProperty(guarantees, method, {
+				value: () => {
+					ran.push(String(method));
+					throw new Error("a method of the declaration ran");
+				},
+			});
+		}
+		const owned = defineModule({ name: "owned", replicaSafe: true, takes: [] }, (m) => [
+			m.contribute(spaces).by(() => ({ name: "owned", guarantees, subjectData: "none" }) as Space),
+		]);
+		const error = await boot(await redis.listen(), undefined, undefined, [owned]).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect(String((error as BootRefused).refusals.map((r) => r.reason))).toContain(
+			"no-appendfsync-on-rewrite no",
+		);
+		expect(ran).toEqual([]);
 		redis.down();
 	});
 

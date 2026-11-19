@@ -60,13 +60,38 @@ export function serverSettings(client: Redis, declared: Declared) {
 	return { read, rest, problems, used };
 }
 
+/** A declared space as the settings are checked for it: its name and its guarantees, nothing else of the declaration. */
+export interface DeclaredCopy {
+	readonly name: string;
+	readonly guarantees: readonly Guarantee[];
+}
+
+/** Plain copies of the declarations, read through own data descriptors with no getter or method run; one whose name or guarantees are no such data is skipped, as store refuses the boot over it. */
+export function declaredCopies(declared: readonly Space[]): DeclaredCopy[] {
+	const own = (value: object, field: string): unknown =>
+		Object.getOwnPropertyDescriptor(value, field)?.value;
+	return declared.flatMap((space) => {
+		try {
+			const [name, list] = [own(space, "name"), own(space, "guarantees")];
+			if (typeof name !== "string" || !Array.isArray(list)) return [];
+			const guarantees = Array.from({ length: Number(own(list, "length")) }, (_, i) =>
+				own(list, String(i)),
+			);
+			if (!guarantees.every((g) => typeof g === "string")) return [];
+			return [{ name, guarantees: guarantees as Guarantee[] }];
+		} catch {
+			return [];
+		}
+	});
+}
+
 export type Role = [string, number, unknown[]];
 export const roleOf = async (client: Redis) => (await client.call("ROLE")) as Role;
 export const replicasOf = (role: Role) => (Array.isArray(role[2]) ? role[2].length : 0);
 
 export async function evictionProblems(
 	settings: Settings,
-	declared: readonly Space[],
+	declared: readonly DeclaredCopy[],
 ): Promise<string[]> {
 	const kept = declared.filter((s) => s.guarantees.includes("no-eviction"));
 	if (kept.length === 0 || (await settings("maxmemory-policy")) === "noeviction") return [];
@@ -77,7 +102,7 @@ export async function evictionProblems(
 export async function replicationProblems(
 	settings: Settings,
 	role: Role,
-	declared: readonly Space[],
+	declared: readonly DeclaredCopy[],
 	replication: "none" | "replicas" | undefined,
 ): Promise<string[]> {
 	const replicated = declared.filter(
@@ -107,7 +132,7 @@ export async function replicationProblems(
 
 export async function durabilityProblems(
 	settings: Settings,
-	declared: readonly Space[],
+	declared: readonly DeclaredCopy[],
 	durability: "none" | undefined,
 ): Promise<string[]> {
 	const durable = declared.filter((s) => s.guarantees.includes("durable"));
@@ -146,8 +171,7 @@ export async function honoursOf(
 	try {
 		const before = await historyOf(client);
 		// The guarantees asked, as one space to judge the settings by; it holds nothing.
-		const asked: Space[] =
-			wanted.length > 0 ? [{ name: "asked", guarantees: wanted, subjectData: "none" }] : [];
+		const asked: DeclaredCopy[] = wanted.length > 0 ? [{ name: "asked", guarantees: wanted }] : [];
 		const replicated = wanted.includes("replicated") || wanted.includes("confirmed-reads");
 		const reasons: string[] = [];
 		if (s.durability === "none" && wanted.includes("durable")) {
