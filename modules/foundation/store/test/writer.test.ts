@@ -19,7 +19,7 @@ function spied() {
 	const seen: unknown[] = [];
 	const answer = async (_c: unknown, _w: unknown, options: unknown) => {
 		seen.push(options);
-		return { kind: "committed" as const, versions: [] };
+		return { kind: "committed" as const, versions: [], at: 0 };
 	};
 	const inner = { batch: answer, batchAcross: answer } as unknown as Store;
 	return { seen, s: checkedStore(inner, [space]) };
@@ -97,7 +97,7 @@ it("asks the writer of a change to a space of each category of subjects' data it
 		subjectData,
 	}));
 	const answered = async () => ({ kind: "written" as const, version: "v" });
-	const batch = async () => ({ kind: "committed" as const, versions: [] });
+	const batch = async () => ({ kind: "committed" as const, versions: [], at: 0 });
 	const inner = { putIfAbsent: answered, batch } as unknown as Store;
 	const s = checkedStore(inner, declared);
 	for (const [i, [subjectData, held]] of categories.entries()) {
