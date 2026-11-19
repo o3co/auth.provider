@@ -71,6 +71,13 @@ const unset = (workflow: Workflow): Workflow => ({
 	),
 });
 
+it("finds nothing in the workflows' directory but workflow files, so none is left unread", () => {
+	const entries = readdirSync(workflowsDir, { withFileTypes: true });
+	expect(entries.filter((e) => !e.isFile() || !/\.ya?ml$/.test(e.name)).map((e) => e.name)).toEqual(
+		[],
+	);
+});
+
 it("reads every workflow of this tree, CI's among them", () => {
 	expect(Object.keys(workflows)).toContain("ci.yml");
 	expect(Object.keys(workflows).length).toBeGreaterThan(1);
