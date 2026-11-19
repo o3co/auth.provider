@@ -274,6 +274,9 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/subject-records
     devDependencies:
+      '@mod/erasure-journal-file':
+        specifier: workspace:*
+        version: link:../erasure-journal-file
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
