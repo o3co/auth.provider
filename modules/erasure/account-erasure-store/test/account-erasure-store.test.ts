@@ -108,6 +108,9 @@ it("answers the declared spaces by name, guarantees and erasure fields, each a c
 	]);
 	expect(declared[0]).not.toBe(upkeep.declared()[0]);
 	expect(Object.isFrozen(declared)).toBe(true);
+	expect(Object.isFrozen(declared[0])).toBe(true);
+	expect(Object.isFrozen(declared[0]?.guarantees)).toBe(true);
+	expect(maintenance.declared()).toBe(declared);
 });
 
 it("refuses the boot over a store offering no control record, both store contracts being required", async () => {

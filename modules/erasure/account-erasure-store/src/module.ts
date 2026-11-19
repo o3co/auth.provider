@@ -1,5 +1,5 @@
 import { type ErasureMaintenance, erasureMaintenance } from "@mod/account-erasure";
-import { defineModule } from "@mod/kernel";
+import { deepFreeze, defineModule } from "@mod/kernel";
 import { store, storeControl, storeUpkeep } from "@mod/store";
 import { subjectRecordsPhase } from "@mod/subject-records";
 
@@ -16,7 +16,7 @@ export default defineModule(
 			const control = await c.get(storeControl);
 			// Taken only to hand to subject-records' phase write, which asks whether it pairs.
 			const pairing = await c.get(store);
-			const declared = Object.freeze(structuredClone(upkeep.declared()));
+			const declared = deepFreeze(structuredClone(upkeep.declared()));
 			// Each answer copied plainly: none of store's objects reaches erasure.
 			return {
 				record: async () => structuredClone(await control.control()),
