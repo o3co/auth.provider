@@ -6,7 +6,7 @@ Internal module of `subject-records`: the phase records are in, as the store's c
 - Reads the phase from the control record, and tells the mark that turns records indexed.
 
 ## Not here
-- Writing the mark, and when: the wiring holding the store's upkeep (`account-erasure-store`), through `writeWith`. What each phase writes: the package's builders.
+- The write itself: the store's upkeep's, handed to `writeWith` by the wiring that holds it. When: the maintenance tool's. What each phase writes: the package's builders.
 
 ## Offers
 - `subjectRecordsPhase`: `mark` (`subject-records.phase`); `read` (the store's control) → the phase; `once` (a control, or none where the store adapter offers none) → `PhaseOnce`, the phase as one process reads it once and keeps it: unavailable while the store cannot answer, read again at the next call, `reader` with no control; `write` (a control record, the store it is of) → the mark to write, or `not-in-maintenance`, then `not-paired`.
