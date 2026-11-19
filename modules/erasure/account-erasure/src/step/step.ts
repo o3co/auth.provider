@@ -25,7 +25,7 @@ export type StepAnswer =
 	  };
 
 const wayOn: Record<NotShownAlone["kind"], string> = {
-	accompanied: "stop that client and run erasure-enter again",
+	accompanied: "stop that process and run erasure-enter again",
 	unchecked: "run erasure-enter again once every server answers",
 	unavailable: "run erasure-enter again once every server answers",
 };

@@ -85,7 +85,7 @@ describe("entering, erasure-enter's alone", () => {
 
 	it("answers entered-not-shown-alone where the read after entering finds the store not alone, with what it found and the way on", async () => {
 		const ways = [
-			[accompanied, "stop that client and run erasure-enter again"],
+			[accompanied, "stop that process and run erasure-enter again"],
 			[unchecked, "run erasure-enter again once every server answers"],
 		] as const;
 		for (const [found, wayOn] of ways) {

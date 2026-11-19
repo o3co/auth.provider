@@ -33,7 +33,9 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 
 ## erasure
 
-- `@mod/account-erasure` (feature, `modules/erasure/account-erasure`): The feature account erasure runs as. Its module takes nothing and provides nothing yet: the contract it declares is its wiring's to provide.
+- `@mod/account-erasure` (feature, `modules/erasure/account-erasure`): The feature account erasure runs as: its commands (internal module `commands`), each one under the maintenance key run in one frame (internal module `frame`).
+  - `commands` (`src/commands`): the erasure commands, each as its app entry calls it.
+  - `frame` (`src/frame`): the frame every command under the maintenance key runs in.
   - `maintenance` (`src/maintenance`): erasure's maintenance interface, in erasure's words.
   - `step` (`src/step`): the one step a command under the maintenance key runs, "under the key and alone".
 - `@mod/account-erasure-store` (wiring, `modules/erasure/account-erasure-store`): Wires `account-erasure`'s maintenance interface, `erasureMaintenance`, to the store: each member onto its one counterpart in `storeUpkeep` or `storeControl`, the phase onto `subject-records`' `subjectRecordsPhase` (`read`; `writeWith`, handed the upkeep's own mark write). Each of store's answers is a plain copy (`structuredClone`), typed as account-erasure's own, `sweep`'s keys included, which erasure hands on unread for an eraser to hand back; this is the only place store's types become erasure's, the words staying the same where they mean the same. Both contracts are required, so a store offering no control record refuses the boot. `store` is taken only to hand to `subjectRecordsPhase.writeWith`, which asks whether it pairs. The wiring only maps, with no branches or loops. Depends on `kernel`, `account-erasure`, `store` and `subject-records`.

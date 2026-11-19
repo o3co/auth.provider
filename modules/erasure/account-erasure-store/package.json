@@ -15,6 +15,7 @@
 		"@mod/subject-records": "workspace:*"
 	},
 	"devDependencies": {
+		"@mod/erasure-journal-file": "workspace:*",
 		"vitest": "5.0.5"
 	}
 }

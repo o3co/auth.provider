@@ -5,11 +5,20 @@
 	"type": "module",
 	"kind": "feature",
 	"optIn": true,
+	"appEntries": [
+		{
+			"script": "erasure-enter",
+			"shape": "call",
+			"contract": "erasureCommands",
+			"member": "enter"
+		}
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
+		"@mod/erasure-journal": "workspace:*",
 		"@mod/kernel": "workspace:*"
 	},
 	"devDependencies": {
