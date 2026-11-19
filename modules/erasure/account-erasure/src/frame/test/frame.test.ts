@@ -263,6 +263,26 @@ it("answers hold-left with the answer where the release is unavailable, after on
 	}
 });
 
+it("gives the answer as it was where the release returns no promise, after one attempt, the body run or refused", async () => {
+	for (const [held, answer, expected] of [
+		[true, { kind: "done" }, ["hold", "record", "alone", "body", "release"]],
+		[false, { kind: "not-in-maintenance" }, ["hold", "record", "release"]],
+	] as const) {
+		const calls: string[] = [];
+		const parts = {
+			journal: journalOf(calls, undefined, { how: "returns-nothing" }),
+			maintenance: maintenanceOf(calls, held),
+			clock,
+		};
+		const given = await inFrame(parts, "passing", async () => {
+			calls.push("body");
+			return { kind: "done" } as const;
+		});
+		expect(given, answer.kind).toEqual(answer);
+		expect(calls, answer.kind).toEqual(expected);
+	}
+});
+
 it("throws anything else a release throws, as it was, in place of the answer, after one attempt, the body run or refused", async () => {
 	for (const failing of failings(faults())) {
 		for (const [held, expected] of [
