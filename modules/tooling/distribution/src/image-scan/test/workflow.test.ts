@@ -40,6 +40,7 @@ const text = readFileSync(join(workflows, "image-scan.yml"), "utf8");
 const workflow = parse(text) as {
 	readonly on: Record<string, unknown>;
 	readonly permissions?: unknown;
+	readonly "cache-mode"?: unknown;
 	readonly jobs: Record<string, Job>;
 };
 const resolve = (workflow.jobs.resolve ?? {}) as Job;
@@ -124,7 +125,9 @@ it("packs the target from its own checkout with its own pnpm, then checks out th
 	expect(setups[1]).toBeLessThan(at("pnpm image:scan"));
 });
 
-it("has no cache step, and its setups cache nothing", () => {
+it("is granted no cache access, has no cache step, and its setups cache nothing", () => {
+	expect(workflow["cache-mode"]).toBe("none");
+	for (const job of Object.values(workflow.jobs)) expect(job).not.toHaveProperty("cache-mode");
 	expect(steps.filter((s) => s.uses?.startsWith("actions/cache"))).toEqual([]);
 	for (const step of steps.filter((s) =>
 		/^(actions\/setup-node|pnpm\/action-setup)@/.test(s.uses ?? ""),

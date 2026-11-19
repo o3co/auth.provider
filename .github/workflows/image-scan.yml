@@ -18,7 +18,8 @@ name: Image scan
 # No input selects a ref, so no code but develop's, release tags' and a
 # manually run branch's runs here. The target's code runs in the scan's job
 # before the scanner: the targets are trusted refs, and nothing here isolates
-# the scanner from them. No step restores or saves a cache.
+# the scanner from them. No job is granted cache access (`cache-mode: none`,
+# enforced by the run's scoped cache token), whatever code it runs.
 on:
   schedule:
     - cron: '41 3 * * *'
@@ -26,6 +27,8 @@ on:
 
 permissions:
   contents: read
+
+cache-mode: none
 
 jobs:
   # `latest` is GitHub's latest release, never a prerelease or a draft. A minor
