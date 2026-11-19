@@ -10,8 +10,8 @@ Internal module of `store`: the ledger of spaces: which spaces the store's data 
 
 ## Offers
 - `kept()`: every space ever declared to the store's data, until retired, each with whether a declaration may have held a subject's data (`KeptSpace`).
-- `retire(name, generation?)`: takes a space off the ledger, as of the generation a walk read where one is given, until one is required: `retired`, or `declared` (this process declares it), `redeclared` (declared since), `missing`, `not-in-maintenance`.
-- `sweepKept(name, cursor?)`, where offered, until every implementation offers it: a page of a kept space's walk (`KeptPage`), or `declared`, `missing`, `not-in-maintenance`. A taker finding it unoffered retires nothing.
+- `retire(name, generation)`: takes a space off the ledger, as of the generation a walk read: `retired`, or `declared` (this process declares it), `redeclared` (declared since), `missing`, `not-in-maintenance`.
+- `sweepKept(name, cursor?)`: a page of a kept space's walk (`KeptPage`), or `declared`, `missing`, `not-in-maintenance`.
 
 ## Invariants
 - Before its first change, a process adds each space it declares to the ledger; until it has, it changes nothing (each change unavailable) and its readiness says so, retrying. A space's `subjectDataEver` turns true once a declaration names a category other than `none`, and never turns back. Only `retire` takes a space off, under the maintenance key alone, never one the process declares.

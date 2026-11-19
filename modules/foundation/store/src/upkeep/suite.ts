@@ -208,7 +208,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 					() => old.upkeep.enterMaintenance(),
 					() => old.upkeep.leaveMaintenance(),
 					() => old.upkeep.require([none.name]),
-					() => old.upkeep.retire("gone"),
+					() => old.upkeep.retire("gone", "g"),
 					() => old.upkeep.sweep(none.name),
 				];
 				if (old.store.batchAcross) {
@@ -333,7 +333,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				() => q.upkeep.enterMaintenance(),
 				() => q.upkeep.leaveMaintenance(),
 				() => q.upkeep.require([none.name]),
-				() => q.upkeep.retire("gone"),
+				() => q.upkeep.retire("gone", "g"),
 			];
 
 			it("answers what expired absent when a process behind the key's fence reads it, removing nothing, held where that can be seen", async () => {
@@ -436,7 +436,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				const k = fresh(held);
 				await plantValue(p.store, k, 1, never.expiry);
 				const fewer = await harness.another(p, [none]);
-				expect(await fewer.upkeep.retire(held.name)).toEqual({ kind: "not-in-maintenance" });
+				expect(await fewer.upkeep.retire(held.name, "g")).toEqual({ kind: "not-in-maintenance" });
 				expect((await p.upkeep.kept()).map((s) => s.name)).toContain(held.name);
 				expect((await p.store.get(k)).entry?.value).toBe(1);
 			});
@@ -445,28 +445,27 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				const p = await harness.start(upkeepSpaces);
 				const fewer = await harness.another(p, [none]);
 				await fewer.upkeep.enterMaintenance();
-				expect(await fewer.upkeep.retire(held.name)).toEqual({ kind: "retired" });
-				expect(await fewer.upkeep.retire(none.name)).toEqual({ kind: "declared" });
-				expect(await fewer.upkeep.retire("never-declared")).toEqual({ kind: "missing" });
+				// The generation a walk's first page reads, which retire is given.
+				const first = await fewer.upkeep.sweepKept(held.name);
+				const generation = first.kind === "page" ? (first.generation as string) : "";
+				expect(await fewer.upkeep.retire(held.name, generation)).toEqual({ kind: "retired" });
+				expect(await fewer.upkeep.retire(none.name, "g")).toEqual({ kind: "declared" });
+				expect(await fewer.upkeep.retire("never-declared", "g")).toEqual({ kind: "missing" });
 				expect((await p.upkeep.kept()).map((s) => s.name).sort()).toEqual([none.name, plain.name]);
 			});
 		});
 
-		describe("a kept space's walk, where offered: counts, never keys", () => {
+		describe("a kept space's walk: counts, never keys", () => {
 			const finite: Space = { name: "upkeep-finite", guarantees: [], subjectData: "none" };
 			const kept = [none, plain, finite];
 			const soon = { expiry: { kind: "after", ms: 30 } } as const;
 			const later = { expiry: { kind: "after", ms: 60_000 } } as const;
-			type Walker = NonNullable<UpkeepProcess["upkeep"]["sweepKept"]>;
-			/** A process that wrote the kept spaces as `write` does, and a tool declaring `none` alone; skipped where the walk isn't offered. */
-			const setup = async (
-				skip: () => never,
-				write: (writer: UpkeepProcess) => Promise<void> = async () => {},
-			) => {
+			type Walker = UpkeepProcess["upkeep"]["sweepKept"];
+			/** A process that wrote the kept spaces as `write` does, and a tool declaring `none` alone. */
+			const setup = async (write: (writer: UpkeepProcess) => Promise<void> = async () => {}) => {
 				const writer = await harness.start(kept);
 				const tool = await harness.another(writer, [none]);
-				const walker = tool.upkeep.sweepKept?.bind(tool.upkeep);
-				if (walker === undefined) return skip();
+				const walker = tool.upkeep.sweepKept.bind(tool.upkeep);
 				await write(writer);
 				return { writer, tool, walker };
 			};
@@ -488,8 +487,8 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				};
 			};
 
-			it("answers not-in-maintenance outside the key, then declared and missing, and is unavailable behind the key's fence", async (ctx) => {
-				const { writer, tool, walker } = await setup(() => ctx.skip());
+			it("answers not-in-maintenance outside the key, then declared and missing, and is unavailable behind the key's fence", async () => {
+				const { writer, tool, walker } = await setup();
 				expect(await walker(plain.name)).toEqual({ kind: "not-in-maintenance" });
 				expect(await walker(none.name)).toEqual({ kind: "not-in-maintenance" });
 				expect(await tool.upkeep.retire(plain.name, "g")).toEqual({ kind: "not-in-maintenance" });
@@ -504,21 +503,16 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				);
 				await expect(tool.upkeep.retire(plain.name, "")).rejects.toThrow(TypeError);
 				await expect(tool.upkeep.retire(plain.name, "g".repeat(65))).rejects.toThrow(TypeError);
-				// No generation given: no check, until every implementation offers the walk.
-				expect(await tool.upkeep.retire(plain.name)).toEqual({ kind: "retired" });
 			});
 
-			it("counts a kept space's live keys, its first page alone answering the generation", async (ctx) => {
-				const { tool, walker } = await setup(
-					() => ctx.skip(),
-					async (writer) => {
-						await writer.store.putIfAbsent(fresh(plain), 1, later);
-						await writer.store.putIfAbsent(fresh(plain), 2, never);
-						await writer.store.putIfAbsent(fresh(plain), 3, soon);
-						await writer.store.count(fresh(plain), { ms: 60_000, limit: 5 });
-						await writer.store.putIfAbsent(fresh(plain), 4, { ...never, idempotency: "kept-mark" });
-					},
-				);
+			it("counts a kept space's live keys, its first page alone answering the generation", async () => {
+				const { tool, walker } = await setup(async (writer) => {
+					await writer.store.putIfAbsent(fresh(plain), 1, later);
+					await writer.store.putIfAbsent(fresh(plain), 2, never);
+					await writer.store.putIfAbsent(fresh(plain), 3, soon);
+					await writer.store.count(fresh(plain), { ms: 60_000, limit: 5 });
+					await writer.store.putIfAbsent(fresh(plain), 4, { ...never, idempotency: "kept-mark" });
+				});
 				await tool.upkeep.enterMaintenance();
 				await sleep(60);
 				const walked = await walkAll(walker, plain.name);
@@ -531,8 +525,8 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				}
 			});
 
-			it("retires as of a walk's generation, refusing redeclared once the space was declared again", async (ctx) => {
-				const { writer, tool, walker } = await setup(() => ctx.skip());
+			it("retires as of a walk's generation, refusing redeclared once the space was declared again", async () => {
+				const { writer, tool, walker } = await setup();
 				await tool.upkeep.enterMaintenance();
 				const first = await walkAll(walker, plain.name);
 				await harness.anotherMayBuildUnderKey(writer, [none, plain]);
@@ -546,14 +540,11 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				});
 			});
 
-			it("walks a space of keys that all expire to zero, and retires it", async (ctx) => {
-				const { tool, walker } = await setup(
-					() => ctx.skip(),
-					async (writer) => {
-						await writer.store.putIfAbsent(fresh(finite), 1, soon);
-						await writer.store.count(fresh(finite), { ms: 30, limit: 5 });
-					},
-				);
+			it("walks a space of keys that all expire to zero, and retires it", async () => {
+				const { tool, walker } = await setup(async (writer) => {
+					await writer.store.putIfAbsent(fresh(finite), 1, soon);
+					await writer.store.count(fresh(finite), { ms: 30, limit: 5 });
+				});
 				await tool.upkeep.enterMaintenance();
 				await sleep(80);
 				await harness.expireOwnKeys?.(tool, finite.name);
@@ -565,17 +556,14 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				expect((await tool.upkeep.kept()).map((s) => s.name)).not.toContain(finite.name);
 			});
 
-			it("names no key in a page or a cursor, and refuses a cursor not of a walk of this space it holds", async (ctx) => {
+			it("names no key in a page or a cursor, and refuses a cursor not of a walk of this space it holds", async () => {
 				const subject = "subject-alice-kept";
-				const { writer, tool, walker } = await setup(
-					() => ctx.skip(),
-					async (w) => {
-						for (let i = 0; i < 250; i += 1) {
-							const key = { space: plain, partition: `${subject}-${i}`, name: `${subject}` };
-							await w.store.putIfAbsent(key, i, never);
-						}
-					},
-				);
+				const { writer, tool, walker } = await setup(async (w) => {
+					for (let i = 0; i < 250; i += 1) {
+						const key = { space: plain, partition: `${subject}-${i}`, name: `${subject}` };
+						await w.store.putIfAbsent(key, i, never);
+					}
+				});
 				await tool.upkeep.enterMaintenance();
 				const walked = await walkAll(walker, plain.name);
 				expect(walked.pages.length).toBeGreaterThan(1);

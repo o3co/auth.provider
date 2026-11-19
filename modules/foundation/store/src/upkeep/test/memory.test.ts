@@ -104,7 +104,7 @@ it("counts no process whose start was refused, and none once detached, each chan
 		() => u.enterMaintenance(),
 		() => u.leaveMaintenance(),
 		() => u.kept(),
-		() => u.retire("gone"),
+		() => u.retire("gone", "g"),
 		() => u.honours([]),
 		() => u.sweep(space.name),
 		() => (u.alone as () => Promise<unknown>)(),

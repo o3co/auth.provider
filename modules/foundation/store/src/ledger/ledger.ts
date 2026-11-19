@@ -27,11 +27,11 @@ export interface StoreLedger {
 	kept(): Promise<readonly KeptSpace[]>;
 	/**
 	 * Takes a space off the ledger, under the maintenance key alone, as of the generation a walk
-	 * read where one is given; never one this process declares.
+	 * read; never one this process declares.
 	 */
 	retire(
 		name: string,
-		generation?: string,
+		generation: string,
 	): Promise<
 		| { readonly kind: "retired" }
 		| { readonly kind: "declared" }
@@ -44,10 +44,9 @@ export interface StoreLedger {
 	 * declare. It walks every key of the space, page by page as `sweep` does, removing for good each
 	 * expired one it meets, its answer confirmed as a write wherever the store confirms writes,
 	 * whatever the space once declared. Under the maintenance key alone. It answers counts, never
-	 * keys: operational metadata inside the maintenance boundary. Offered until every implementation
-	 * offers it; a reader finding none cannot walk, and so retires nothing.
+	 * keys: operational metadata inside the maintenance boundary.
 	 */
-	sweepKept?(
+	sweepKept(
 		name: string,
 		cursor?: string,
 	): Promise<
