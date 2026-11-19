@@ -322,6 +322,15 @@ upkeepContract("redis", {
 	expiresOnItsOwn: true,
 	anotherMayBuildUnderKey: (process, declared) =>
 		startOn(upkeepPrefixes.get(process) as string, declared, true),
+	// Test code only: ages the store's own keys of a space (version hashes, marks), as nothing else will for a day.
+	expireOwnKeys: async (process, space) => {
+		const pattern = keysUnder(upkeepPrefixes.get(process) as string).spaceAll(space);
+		const found = cli(container, "--scan", "--pattern", pattern).split("\n").filter(Boolean);
+		for (const key of found) {
+			if (key.endsWith(":#version") || key.includes(":#mark:")) cli(container, "pexpire", key, "1");
+		}
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	},
 });
 
 it("answers durable unmet once the server skips its fsyncs while it rewrites, and verified again once it does not", async () => {

@@ -16,6 +16,7 @@ export function keysUnder(prefix: string) {
 		/** The control record and the ledger of spaces: outside every space, whose names hold no `#`. */
 		controlKey: `${prefix}:{#control}`,
 		ledgerKey: `${prefix}:{#ledger}`,
+		spaceAll: (name: string) => `${literal(`${prefix}:{${enc(name)}:`)}*`,
 		/** SCAN's pattern for the space's value keys alone. */
 		spaceValues: (space: Space) => `${literal(`${prefix}:{${enc(space.name)}:`)}*}:v:*`,
 		/** The key of the space a value key SCAN found names. */
