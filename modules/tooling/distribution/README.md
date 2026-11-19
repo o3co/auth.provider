@@ -18,6 +18,7 @@
 - `pnpm release:sbom <tarballs> <dir>`: before anything is published, the release's lists of what it ships, made from its tarballs; see the internal module `release-sbom`.
 - `pnpm release:scan <lists> <dir>`: after the lists are made, a report of the known vulnerabilities in them, which stops and delays nothing; see the internal module `release-scan`.
 - `pnpm image:scan <tarballs> <dir>`: the image of the app the packed release makes, built as its guide says and scanned for critical and high vulnerabilities with a fix, and its Node held to Node's security releases, any failing it; see the internal module `image-scan`.
+- `pnpm app:audit <tarballs>`: `pnpm audit` in the install of the app the packed release makes, a finding of any severity failing it; see the internal module `app-audit`.
 - `pnpm release:listed <tarballs> <tarballs.json>`: where the release publishes, the tarballs held to those the lists were made of; see the internal module `release-listed`.
 - `pnpm release:notes <version> <file>`: where the release publishes, its notes from the version's section of the changelog; see the internal module `release-notes`.
 
