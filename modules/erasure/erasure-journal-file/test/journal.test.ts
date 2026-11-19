@@ -21,20 +21,48 @@ import { expect, it } from "vitest";
 import { type JournalFiles, nodeFiles, nodeFilesWith } from "../src/files/files.ts";
 import { framed, journalFileWith, readRecords } from "../src/journal.ts";
 
+/** What the harness fails next of a journal's: its next write, its next lock removal. */
+interface Failing {
+	next: boolean;
+	release: boolean;
+}
+
 /** Each journal the harness opened, with its path and its files, so the harness reaches them again. */
-const opened = new WeakMap<ErasureJournal, { path: string; failing: { next: boolean } }>();
+const opened = new WeakMap<ErasureJournal, { path: string; failing: Failing }>();
 const runtime = quietRuntime();
 
+/** Syncs a file's directory, as the node's files do. */
+const syncDirectory = async (path: string) => {
+	const directory = await open(dirname(path), "r");
+	try {
+		await directory.sync();
+	} finally {
+		await directory.close();
+	}
+};
+
+const eio = () => Object.assign(new Error("i/o error"), { code: "EIO" });
+
 const at = (path: string) => {
-	const failing = { next: false };
+	const failing: Failing = { next: false, release: false };
+	const steps = nodeFilesWith({
+		syncDirectory,
+		removeLock: async (p) => {
+			if (failing.release) {
+				failing.release = false;
+				throw eio();
+			}
+			await unlink(p);
+		},
+	});
 	const files: JournalFiles = {
-		...nodeFiles,
+		...steps,
 		append: async (p, bytes) => {
 			if (failing.next) {
 				failing.next = false;
 				throw Object.assign(new Error("no space left"), { code: "ENOSPC" });
 			}
-			return nodeFiles.append(p, bytes);
+			return steps.append(p, bytes);
 		},
 	};
 	const journal = journalFileWith({ path, files, clock: runtime.clock, random: runtime.random });
@@ -56,6 +84,9 @@ journalContract("file", {
 	},
 	failNextWrite: async (journal) => {
 		placeOf(journal).failing.next = true;
+	},
+	failNextRelease: async (journal) => {
+		placeOf(journal).failing.release = true;
 	},
 });
 
@@ -258,17 +289,11 @@ it("names an empty lock, as an earlier version could leave one, with a fixed wor
 });
 
 /** The node's files, the next `syncs` directory syncs and the next `unlinks` removals failing as an I/O error. */
-const failing = (counts: { syncs: number; unlinks: number }, removed: string[] = []) => {
-	const eio = () => Object.assign(new Error("i/o error"), { code: "EIO" });
-	return nodeFilesWith({
+const failing = (counts: { syncs: number; unlinks: number }, removed: string[] = []) =>
+	nodeFilesWith({
 		syncDirectory: async (p) => {
 			if (counts.syncs-- > 0) throw eio();
-			const directory = await open(dirname(p), "r");
-			try {
-				await directory.sync();
-			} finally {
-				await directory.close();
-			}
+			await syncDirectory(p);
 		},
 		removeLock: async (p) => {
 			removed.push(p);
@@ -276,7 +301,6 @@ const failing = (counts: { syncs: number; unlinks: number }, removed: string[] =
 			await unlink(p);
 		},
 	});
-};
 
 it("removes its own lock where a take's directory sync fails, so the next take holds", async () => {
 	const path = await fresh();

@@ -1,4 +1,4 @@
-import { Unavailable } from "@mod/kernel";
+import { isUnavailable, Unavailable } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import type { ErasureJournal } from "./contract.ts";
 
@@ -14,6 +14,8 @@ export interface JournalHarness {
 	tear(journal: ErasureJournal): Promise<void>;
 	/** Makes the next write to `journal`'s place fail at the medium, as a full or failing disk does. */
 	failNextWrite(journal: ErasureJournal): Promise<void>;
+	/** Makes the next release of a hold `journal` took fail at the medium, as a failing disk does. */
+	failNextRelease(journal: ErasureJournal): Promise<void>;
 }
 
 /** The erasure journal's contract, run against any implementation. */
@@ -135,6 +137,15 @@ export function journalContract(name: string, harness: JournalHarness): void {
 			const later = await harness.reopen(journal);
 			expect((await later.list()) as unknown[]).toHaveLength(1);
 			expect(await later.begun("bob", "operator")).toEqual({ number: 2 });
+		});
+
+		// Whether the hold stays after it is the adapter's: the contract allows either.
+		it("throws unavailable where the medium fails a release", async () => {
+			const journal = await harness.open();
+			const held = await journal.hold();
+			if (held.kind !== "held") throw new Error("a fresh journal's hold was not held");
+			await harness.failNextRelease(journal);
+			await expect(held.release()).rejects.toSatisfy(isUnavailable);
 		});
 	});
 }

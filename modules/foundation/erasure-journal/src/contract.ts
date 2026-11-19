@@ -32,7 +32,8 @@ export interface JournalEntry {
 /**
  * The place held by the journal `hold` was asked of, released once (`held`); or held already by
  * another, named as the medium records its holder (`busy`): text for the operator, never parsed and
- * never judged live.
+ * never judged live. A release the medium fails throws Unavailable; the hold may stay until it is
+ * released.
  */
 export type JournalHold =
 	| { readonly kind: "held"; release(): Promise<void> }
