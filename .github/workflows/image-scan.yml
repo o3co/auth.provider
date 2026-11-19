@@ -13,7 +13,9 @@ name: Image scan
 # so no branch named as a tag stands in for it, and packed by its own code
 # with its own pnpm. The scanner is develop on a schedule, as a release tag may
 # predate it, and the branch run on a manual run. A `schedule` event runs the
-# copy of this file on the default branch, main.
+# copy of this file on the default branch, main, and a manual run can start
+# only once the file is there: a change here, `TARGETS` included, takes effect
+# when it reaches main.
 #
 # No input selects a ref, so no code but develop's, release tags' and a
 # manually run branch's runs here. The target's code runs in the scan's job
