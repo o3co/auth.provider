@@ -20,6 +20,7 @@ Internal module of `kernel`: building the provisions and contributions, each onc
 - `takenBy` binds the modules of a trusted assembly, never hostile code in the same process; `Assembly.get`, the composition root's, is not bound.
 - An item is built once, by whichever request comes first; a request from a build that the item waits on, directly or across branches, is a cycle, refused before the cache is joined.
 - A point is checked once, however many modules collect it: one refusal for a break.
+- A keyed point's `keyOf` may refuse a contribution by throwing `BuildRefused`: the boot is refused under its own `where` and reason, whether a factory collects the point or none does, and whether a collecting factory catches the throw or not. A key held twice is refused likewise, caught or not.
 - A factory's thrown value is read as a refusal only where it is one; any other error's text is never kept.
 - The build context's `environment` and `neverStarted` cannot be written or redefined by a factory.
 

@@ -231,8 +231,10 @@ export function buildingWith({
 					collected.set(key, checked);
 					return checked;
 				} catch (error) {
+					// Recorded here, so a collector that catches the throw cannot erase the refusal.
+					recordFailure(error, point.label, refusals);
 					collected.set(key, undefined);
-					throw error;
+					throw new DependencyFailed();
 				}
 			},
 			late: <T>(contract: Contract<T>) => {
