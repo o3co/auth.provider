@@ -1,4 +1,5 @@
-import { contract, extensionPoint } from "@mod/kernel";
+import { BuildRefused, contract, extensionPoint } from "@mod/kernel";
+import { malformedDeclaration } from "./declaration.ts";
 
 export {
 	type Control,
@@ -249,7 +250,23 @@ export const store = contract<Store>("store");
 
 export const spaces = extensionPoint<Space>("store.spaces", {
 	multiplicity: "keyed",
-	keyOf: (space) => space.name,
+	// A declaration keys by its own data `name`, read with no getter run. One with none (no object,
+	// no such name, a getter, or a proxy trap that throws as the name is read) is refused here, as it
+	// is collected; a named but malformed one, by store's checks as the store is built.
+	keyOf: (space) => {
+		let named: unknown;
+		try {
+			named =
+				typeof space === "object" && space !== null
+					? Object.getOwnPropertyDescriptor(space, "name")?.value
+					: undefined;
+		} catch {
+			named = undefined;
+		}
+		if (typeof named !== "string")
+			throw new BuildRefused("store.declaration", malformedDeclaration);
+		return named;
+	},
 });
 
 export type Decision =

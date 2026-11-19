@@ -9,6 +9,7 @@ import {
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { type Space, spaces, store } from "../src/contract.ts";
+import { malformedDeclaration } from "../src/declaration.ts";
 import { memoryStore } from "../src/memory/memory.ts";
 import storeModule from "../src/module.ts";
 import { contractSpaces, overwrite, storeConfig, storeContract } from "../src/testing.ts";
@@ -218,8 +219,96 @@ it("refuses the boot over a malformed declaration, naming its space, with store'
 	]);
 });
 
+it("refuses the boot over guarantees that are no plain list of known guarantees, naming the space, and runs none of its getters", async () => {
+	const reason = "declares guarantees that are no list of known guarantees";
+	const ran: string[] = [];
+	const accessor = Object.defineProperty([], "0", {
+		enumerable: true,
+		get: () => {
+			ran.push("index");
+			return "durable";
+		},
+	});
+	const trapped = new Proxy(["durable"], {
+		getOwnPropertyDescriptor: () => {
+			throw new Error("a trap threw");
+		},
+	});
+	const own = (key: PropertyKey) =>
+		Object.defineProperty(["durable"], key, {
+			value: () => {
+				ran.push(String(key));
+				return [];
+			},
+		});
+	const sparse = ["durable"];
+	sparse.length = 3;
+	const extra = Object.assign(["durable"], { note: "x" });
+	class Listed extends Array {}
+	const odd = [
+		["string", "durable"],
+		["an accessor index", accessor],
+		["a non-string entry", [1]],
+		["an unknown name", ["fast"]],
+		["a throwing trap", trapped],
+		["an own includes", own("includes")],
+		["an own iterator", own(Symbol.iterator)],
+		["a subclass", Listed.from(["durable"])],
+		["a null prototype", Object.setPrototypeOf(["durable"], null)],
+		["a sparse list", sparse],
+		["an extra own key", extra],
+	] as const;
+	for (const [label, guarantees] of odd) {
+		expect(
+			await refusalsOver([{ name: "listed", guarantees, subjectData: "none" }]),
+			label,
+		).toEqual([{ where: "listed", reason }]);
+	}
+	expect(ran).toEqual([]);
+});
+
+it("accepts an empty list of guarantees, and a guarantee named twice, each frozen once checked", async () => {
+	const lists: string[][] = [[], ["durable", "durable"]];
+	const owner = defineModule({ name: "owner", replicaSafe: true, takes: [] }, (m) =>
+		lists.map((guarantees, i) =>
+			m
+				.contribute(spaces)
+				.by(() => ({ name: `listed-${i}`, guarantees, subjectData: "none" }) as Space),
+		),
+	);
+	await expect(
+		assemble({
+			modules: [storeModule, owner],
+			config: { ...kernelConfig(), ...storeConfig() },
+			runtime: quietRuntime(),
+		}),
+	).resolves.toBeDefined();
+	expect(lists.map((list) => Object.isFrozen(list))).toEqual([true, true]);
+});
+
 it("names the space where kernel takes its name, and store.declaration where it does not, never the name in the reason", async () => {
 	const unprintable = "bell\u0007";
 	const [refusal] = await refusalsOver([{ name: unprintable, guarantees: [] }]);
 	expect(refusal).toEqual({ where: "store.declaration", reason: "declares no subjectData" });
+});
+
+it("refuses the boot over a declaration that is no object at all, as store.declaration", async () => {
+	const [refusal] = await refusalsOver([null]);
+	expect(refusal?.where).toBe("store.declaration");
+});
+
+it("refuses the boot over nameless declarations as store.declaration, each as it is collected, never as kernel's duplicates", async () => {
+	const named = (getter: string) =>
+		Object.defineProperty({ guarantees: [], subjectData: "none" }, "name", {
+			enumerable: true,
+			get: () => getter,
+		});
+	for (const declared of [[null, 42], [named("a"), named("b")], [{ guarantees: [] }]]) {
+		const refusals = await refusalsOver(declared);
+		expect(refusals, JSON.stringify(declared)).toContainEqual({
+			where: "store.declaration",
+			reason: malformedDeclaration,
+		});
+		expect(JSON.stringify(refusals)).not.toMatch(/more than one contribution/);
+	}
 });

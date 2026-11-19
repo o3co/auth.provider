@@ -13,6 +13,7 @@ import type {
 	WriteOptions,
 	WriterHeld,
 } from "../contract.ts";
+import { malformedDeclaration } from "../declaration.ts";
 import type { Honours, KeptSpace, StoreUpkeep } from "../upkeep/upkeep.ts";
 import { subjectWriter } from "../writer/subject-writer.ts";
 
@@ -227,12 +228,29 @@ const spaceFields = [
 	"boundedMs",
 	"requiredOnceErasing",
 ];
-const guarantees: readonly Guarantee[] = [
-	"no-eviction",
-	"durable",
-	"replicated",
-	"confirmed-reads",
-];
+/** Every `Guarantee`, as a table, held to the type both ways as `subjectDataKinds` is. */
+const guaranteeKinds = {
+	"no-eviction": true,
+	durable: true,
+	replicated: true,
+	"confirmed-reads": true,
+} satisfies Record<Guarantee, true>;
+const isGuarantee = (g: unknown): g is Guarantee =>
+	typeof g === "string" && Object.hasOwn(guaranteeKinds, g);
+
+/** Whether `value` is a plain list of known guarantees, each own data entry read through its descriptor: no getter or method of it run. */
+function knownGuarantees(value: unknown): boolean {
+	if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return false;
+	const length = Object.getOwnPropertyDescriptor(value, "length");
+	if (!length || !("value" in length)) return false;
+	// The indices and `length`, nothing else: no own method or iterator a reader would call.
+	if (Reflect.ownKeys(value).length !== length.value + 1) return false;
+	for (let i = 0; i < length.value; i++) {
+		const entry = Object.getOwnPropertyDescriptor(value, String(i));
+		if (!entry || !("value" in entry) || !isGuarantee(entry.value)) return false;
+	}
+	return true;
+}
 
 /**
  * Refuses the boot over a malformed declaration (kernel's `BuildRefused`), naming its space; the
@@ -272,10 +290,7 @@ export function declaredSpaces(declared: readonly Space[]): ReadonlyMap<string, 
 			text("space", read.name);
 		});
 		if (!plain) {
-			refusedDeclaration(
-				space,
-				"a space is declared as a plain object of its known fields, named by a well-formed string of 1 to 512 characters",
-			);
+			refusedDeclaration(space, malformedDeclaration);
 		}
 		if (read.subjectData === undefined) refusedDeclaration(space, "declares no subjectData");
 		if (typeof read.subjectData !== "string" || !Object.hasOwn(subjectDataKinds, read.subjectData))
@@ -286,6 +301,14 @@ export function declaredSpaces(declared: readonly Space[]): ReadonlyMap<string, 
 			refusedDeclaration(space, "declares a boundedMs that is no whole number of ms of 1 or more");
 		if (read.requiredOnceErasing !== undefined && typeof read.requiredOnceErasing !== "boolean")
 			refusedDeclaration(space, "declares a requiredOnceErasing that is no boolean");
+		let listed = false;
+		takes(() => {
+			// Kernel freezes a declaration one level deep, so its list is frozen here, as checked.
+			if (knownGuarantees(read.guarantees))
+				listed = Object.isFrozen(Object.freeze(read.guarantees));
+		});
+		if (!listed)
+			refusedDeclaration(space, "declares guarantees that are no list of known guarantees");
 	}
 	return new Map(declared.map((space) => [space.name, space]));
 }
@@ -313,7 +336,7 @@ export function checkedUpkeep(inner: StoreUpkeep, declared: readonly Space[]): S
 		retire: async (name) => inner.retire(text("space", name)),
 		honours: async (asked): Promise<Honours> => {
 			if (!Array.isArray(asked)) fail("guarantees must be a list");
-			for (const g of asked) if (!guarantees.includes(g)) fail(`unknown guarantee ${String(g)}`);
+			for (const g of asked) if (!isGuarantee(g)) fail(`unknown guarantee ${String(g)}`);
 			return inner.honours([...new Set(asked)]);
 		},
 		sweep: async (target, cursor) =>

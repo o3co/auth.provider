@@ -1,5 +1,5 @@
 import type { Random } from "@mod/kernel";
-import { Unavailable } from "@mod/kernel";
+import { BuildRefused, Unavailable } from "@mod/kernel";
 import {
 	type Control,
 	canonicalJson,
@@ -102,14 +102,89 @@ export interface UpkeepParts {
 	readonly honours: (guarantees: readonly Guarantee[]) => Promise<Honours>;
 }
 
+/** Refuses, by store's upkeep contract and with its fixed reasons (kernel's `BuildRefused`), a start the record forbids. */
+function refusedStart(
+	held: { readonly maintenance: boolean; readonly requires: readonly string[] },
+	declared: readonly Space[],
+	mayBuildUnderKey: boolean,
+): void {
+	if (held.maintenance && !mayBuildUnderKey) {
+		throw new BuildRefused(
+			"store",
+			"only a tool may start while the store is under the maintenance key",
+		);
+	}
+	const names = new Set(declared.map((space) => space.name));
+	const missing = held.requires.some((name) => !names.has(name));
+	if (missing && !(mayBuildUnderKey && held.maintenance)) {
+		throw new BuildRefused("store", "the data requires a space this process does not declare");
+	}
+}
+
 /**
  * The control record and the ledger on Redis: the reads, the upkeep, what a process does as it
  * starts (`start`), and whether the record's epoch moved from the one the process took (`moved`).
  */
 export function redisUpkeepWith(parts: UpkeepParts) {
 	const { run, keys, declared, taken } = parts;
+	// store's checks first, before anything here reads a declaration; the ports reach later bindings only when called.
+	const ports: StoreUpkeep = {
+		mark: async (name, value) => {
+			await changed("mark", name, canonicalJson(value));
+			return { kind: "marked" };
+		},
+		require: async (names) =>
+			(await changed("require", JSON.stringify(names))) as Awaited<
+				ReturnType<StoreUpkeep["require"]>
+			>,
+		enterMaintenance: async () => {
+			const epoch = Buffer.from(parts.random.bytes(16)).toString("hex");
+			await changed("enter", epoch);
+			taken.epoch = epoch;
+			taken.keyed = true;
+			return { kind: "entered", epoch };
+		},
+		leaveMaintenance: async () => {
+			await changed("leave");
+			return { kind: "left" };
+		},
+		kept: async () =>
+			Object.freeze(
+				Object.entries((await readAll()).ledger).map(([name, fields]) => ({
+					name,
+					subjectDataEver: fields.subjectDataEver === true,
+				})),
+			),
+		retire: async (name) =>
+			(await changed("retire", name, known.has(name) ? "1" : "0")) as Awaited<
+				ReturnType<StoreUpkeep["retire"]>
+			>,
+		honours: (guarantees) => parts.honours(guarantees),
+		sweep: async (space, cursor) => {
+			await ready();
+			const answer = await run(
+				sweep,
+				[],
+				fenced([cursor ?? "0", keys.spaceValues(space), String(sweepPage)]),
+			);
+			// Removing is writing: confirmed where the space's writes are.
+			if (space.guarantees.includes("replicated")) await confirm(answer);
+			const found = list<string>(answer.keys, answer.n as number).map((at) =>
+				keys.keyAt(space, at),
+			);
+			const server = String(parts.serverOf(answer));
+			const next = String(answer.cursor);
+			return next === "0" ? { keys: found, server } : { keys: found, cursor: next, server };
+		},
+	};
+	const upkeep = checkedUpkeep(ports, declared);
 	const both = [keys.controlKey, keys.ledgerKey];
-	const fenced = (args: string[]) => [...args, keys.controlKey, taken.epoch];
+	const fenced = (args: string[]) => [
+		...args,
+		keys.controlKey,
+		taken.epoch,
+		taken.keyed ? "1" : "0",
+	];
 	/** Confirms an answer on the server that computed it, where replication is declared. */
 	const confirm = async <A extends object>(answer: A): Promise<A> => {
 		if (parts.confirmed && (await parts.confirmed()) !== parts.serverOf(answer)) {
@@ -174,61 +249,14 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 			return Object.freeze(record);
 		},
 	};
-	const upkeep: StoreUpkeep = {
-		mark: async (name, value) => {
-			await changed("mark", name, canonicalJson(value));
-			return { kind: "marked" };
-		},
-		require: async (names) =>
-			(await changed("require", JSON.stringify(names))) as Awaited<
-				ReturnType<StoreUpkeep["require"]>
-			>,
-		enterMaintenance: async () => {
-			const epoch = Buffer.from(parts.random.bytes(16)).toString("hex");
-			await changed("enter", epoch);
-			taken.epoch = epoch;
-			return { kind: "entered", epoch };
-		},
-		leaveMaintenance: async () => {
-			await changed("leave");
-			return { kind: "left" };
-		},
-		kept: async () =>
-			Object.freeze(
-				Object.entries((await readAll()).ledger).map(([name, fields]) => ({
-					name,
-					subjectDataEver: fields.subjectDataEver === true,
-				})),
-			),
-		retire: async (name) =>
-			(await changed("retire", name, known.has(name) ? "1" : "0")) as Awaited<
-				ReturnType<StoreUpkeep["retire"]>
-			>,
-		honours: (guarantees) => parts.honours(guarantees),
-		sweep: async (space, cursor) => {
-			await ready();
-			const answer = await run(
-				sweep,
-				[],
-				fenced([cursor ?? "0", keys.spaceValues(space), String(sweepPage)]),
-			);
-			// Removing is writing: confirmed where the space's writes are.
-			if (space.guarantees.includes("replicated")) await confirm(answer);
-			const found = list<string>(answer.keys, answer.n as number).map((at) =>
-				keys.keyAt(space, at),
-			);
-			const server = String(parts.serverOf(answer));
-			const next = String(answer.cursor);
-			return next === "0" ? { keys: found, server } : { keys: found, cursor: next, server };
-		},
-	};
 	/**
-	 * As a process starts: takes the record's epoch, then tries to add the declared spaces to the
-	 * ledger; where writes are refused, as while too few replicas are good, it boots all the same,
-	 * changing nothing and unready until they are added.
+	 * As a process starts: reads the record once, refusing a start it forbids, then takes its epoch and tries to add the declared spaces to the ledger; where writes are refused, as while too few replicas are good, it boots all the same, changing nothing and unready until they are added.
 	 */
-	const start = async () => {
-		taken.epoch = (await readAll(false)).epoch;
+	const start = async (mayBuildUnderKey = false) => {
+		const held = await readAll(false);
+		refusedStart(held, declared, mayBuildUnderKey);
+		taken.epoch = held.epoch;
+		taken.keyed = held.maintenance;
 		await ready().catch(() => {});
 	};
 	/**
@@ -239,6 +267,11 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 	const recheck = async (): Promise<string[]> => {
 		const held = await readAll(false);
 		if (held.epoch !== taken.epoch) return ["the store's epoch moved since this process started"];
+		if (taken.keyed && !held.maintenance) {
+			return [
+				"the maintenance key this process took its epoch under has lifted: no change is made",
+			];
+		}
 		if (!kept) {
 			const added = await ready().then(
 				() => true,
@@ -254,5 +287,5 @@ export function redisUpkeepWith(parts: UpkeepParts) {
 		if (weakened) await keep();
 		return [];
 	};
-	return { control, upkeep: checkedUpkeep(upkeep, declared), start, recheck, ready };
+	return { control, upkeep, start, recheck, ready };
 }

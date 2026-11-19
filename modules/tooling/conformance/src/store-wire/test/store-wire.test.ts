@@ -201,6 +201,17 @@ describe("what a call and its answer tell", () => {
 		expect(sameMark(first, write("replaceIf", "s", "a", 1, "m1"))).toBe(true);
 		expect(sameMark(first, write("replaceIf", "s", "a", 1, "m2"))).toBe(false);
 		expect(sameMark(write("replaceIf", "s", "a", 1), write("replaceIf", "s", "a", 1))).toBe(false);
+		// As the adapter sends a change: the fences' three arguments last (control key, epoch, keyed).
+		const fenced = (call: Command): Command => ({
+			name: call.name,
+			args: [...call.args, ...[`${prefix}:{#control}`, "e1", "0"].map((s) => Buffer.from(s))],
+		});
+		const marked = fenced(write("replaceIf", "s", "a", 1, "m1"));
+		expect(sameMark(marked, fenced(write("replaceIf", "s", "a", 1, "m1")))).toBe(true);
+		expect(sameMark(marked, fenced(write("replaceIf", "s", "a", 1, "m2")))).toBe(false);
+		expect(
+			sameMark(fenced(write("replaceIf", "s", "a", 1)), fenced(write("replaceIf", "s", "a", 1))),
+		).toBe(false);
 	});
 
 	it("reads the server an answer came from", () => {

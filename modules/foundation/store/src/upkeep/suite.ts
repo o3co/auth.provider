@@ -61,6 +61,33 @@ async function refusedSaying(start: Promise<unknown>, words: RegExp): Promise<st
 	return says as string;
 }
 
+/** The two refusals of a start, in upkeep's contract's words. */
+const underKey = {
+	where: "store",
+	reason: "only a tool may start while the store is under the maintenance key",
+};
+const lacking = {
+	where: "store",
+	reason: "the data requires a space this process does not declare",
+};
+
+/** That `start` is refused by kernel's refusal, with exactly `refusal` among what it holds. */
+async function refusedAs(
+	start: Promise<unknown>,
+	refusal: { readonly where: string; readonly reason: string },
+): Promise<void> {
+	const refused = await start.then(
+		() => undefined,
+		(error: unknown) => error,
+	);
+	if (BuildRefused.is(refused)) {
+		expect({ where: refused.where, reason: refused.reason }).toEqual(refusal);
+	} else {
+		expect(BootRefused.is(refused), `not refused as kernel refuses: ${String(refused)}`).toBe(true);
+		expect((refused as BootRefused).refusals).toContainEqual(refusal);
+	}
+}
+
 const never = { expiry: { kind: "never" } } as const;
 
 /** The upkeep contract, run against any implementation offering it. */
@@ -76,7 +103,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 	/**
 	 * Where what expired stays held until removed, so a read's leaving it can be seen: `holds` offered
 	 * and the server not expiring keys itself. Until every harness offers `anotherMayBuildUnderKey`,
-	 * also where it does, the implementations whose reads are held to it so far.
+	 * also where it does.
 	 */
 	const readsShowHeld = Boolean(
 		harness.holds && !harness.expiresOnItsOwn && harness.anotherMayBuildUnderKey,
@@ -139,7 +166,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 		});
 
 		describe("a process under an old epoch", () => {
-			it.runIf(readsShowHeld)("leaves held what expired when it reads it", async () => {
+			it("answers what expired absent when it reads it, removing nothing, held where that can be seen", async () => {
 				const [p, old] = await pair();
 				const k = fresh();
 				await old.store.putIfAbsent(k, 1, { expiry: { kind: "after", ms: 20 } });
@@ -147,7 +174,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				await sleep(40);
 				expect((await old.store.get(k)).entry).toBeNull();
 				if (old.store.getMany) expect((await old.store.getMany([k]))[0]?.entry).toBeNull();
-				expect(await harness.holds?.(old, k)).toBe(true);
+				if (readsShowHeld) expect(await harness.holds?.(old, k)).toBe(true);
 			});
 
 			it("changes nothing, through every change, and still reads", async () => {
@@ -209,7 +236,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 			it("refuses a process that serves under the maintenance key, and starts one that may build under it", async () => {
 				const p = await harness.start(upkeepSpaces);
 				await p.upkeep.enterMaintenance();
-				await refusedSaying(harness.another(p, upkeepSpaces), /maintenance key/);
+				await refusedAs(harness.another(p, upkeepSpaces), underKey);
 				const t = await tool(p, upkeepSpaces);
 				expect(await t.upkeep.mark("test.tool", 1)).toEqual({ kind: "marked" });
 			});
@@ -219,8 +246,8 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				await p.upkeep.enterMaintenance();
 				await p.upkeep.require([held.name]);
 				await p.upkeep.leaveMaintenance();
-				await refusedSaying(harness.another(p, [none]), /requires/);
-				await refusedSaying(tool(p, [none]), /requires/);
+				await refusedAs(harness.another(p, [none]), lacking);
+				await refusedAs(tool(p, [none]), lacking);
 				// p took its epoch under the key and left it, so it changes no more: another enters.
 				const q = await harness.another(p, upkeepSpaces);
 				await q.upkeep.enterMaintenance();
@@ -234,10 +261,8 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				await p.upkeep.enterMaintenance();
 				await p.upkeep.require(names);
 				await p.upkeep.leaveMaintenance();
-				const says = await refusedSaying(
-					harness.another(p, [none]),
-					/the data requires a space this process does not declare/,
-				);
+				await refusedAs(harness.another(p, [none]), lacking);
+				const says = await refusedSaying(harness.another(p, [none]), /./);
 				for (const name of names) expect(says).not.toContain(name);
 				expect(says).not.toMatch(/break|width|for good/);
 			});
@@ -246,14 +271,14 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				const p = await harness.start(upkeepSpaces);
 				await p.upkeep.enterMaintenance();
 				await p.upkeep.require([held.name]);
-				await refusedSaying(harness.another(p, [none]), /maintenance key/);
+				await refusedAs(harness.another(p, [none]), underKey);
 			});
 
 			it("writes no ledger entry when the maintenance key refuses a start", async () => {
 				const p = await harness.start(upkeepSpaces);
 				await p.upkeep.enterMaintenance();
 				const only: Space = { name: "upkeep-keyed-out", guarantees: [], subjectData: "none" };
-				await refusedSaying(harness.another(p, [none, only]), /maintenance key/);
+				await refusedAs(harness.another(p, [none, only]), underKey);
 				expect((await p.upkeep.kept()).map((s) => s.name)).not.toContain(only.name);
 			});
 
@@ -278,7 +303,7 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				await p.upkeep.require([held.name]);
 				await p.upkeep.leaveMaintenance();
 				const only: Space = { name: "upkeep-refused", guarantees: [], subjectData: "none" };
-				await refusedSaying(harness.another(p, [none, only]), /requires/);
+				await refusedAs(harness.another(p, [none, only]), lacking);
 				expect((await p.upkeep.kept()).map((s) => s.name)).not.toContain(only.name);
 			});
 		});
@@ -303,20 +328,17 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				() => q.upkeep.retire("gone"),
 			];
 
-			it.runIf(readsShowHeld)(
-				"leaves held what expired when a process behind the key's fence reads it",
-				async () => {
-					const p = await harness.start(upkeepSpaces);
-					await p.upkeep.enterMaintenance();
-					const k = fresh();
-					await p.store.putIfAbsent(k, 1, { expiry: { kind: "after", ms: 20 } });
-					await p.upkeep.leaveMaintenance();
-					await sleep(40);
-					expect((await p.store.get(k)).entry).toBeNull();
-					if (p.store.getMany) expect((await p.store.getMany([k]))[0]?.entry).toBeNull();
-					expect(await harness.holds?.(p, k)).toBe(true);
-				},
-			);
+			it("answers what expired absent when a process behind the key's fence reads it, removing nothing, held where that can be seen", async () => {
+				const p = await harness.start(upkeepSpaces);
+				await p.upkeep.enterMaintenance();
+				const k = fresh();
+				await p.store.putIfAbsent(k, 1, { expiry: { kind: "after", ms: 20 } });
+				await p.upkeep.leaveMaintenance();
+				await sleep(40);
+				expect((await p.store.get(k)).entry).toBeNull();
+				if (p.store.getMany) expect((await p.store.getMany([k]))[0]?.entry).toBeNull();
+				if (readsShowHeld) expect(await harness.holds?.(p, k)).toBe(true);
+			});
 
 			it("fences a process that started under the key once the key lifts", async () => {
 				const p = await harness.start(upkeepSpaces);
@@ -336,8 +358,8 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 				await p.upkeep.leaveMaintenance();
 				await sleep(40);
 				for (const change of changes(p)) await expect(change()).rejects.toBeInstanceOf(Unavailable);
-				// Neither a change nor `sweep` behind the fence removes what expired.
-				if (harness.holds) expect(await harness.holds(p, k)).toBe(true);
+				// Neither a change nor `sweep` behind the fence removes what expired, where it stays held.
+				if (readsShowHeld) expect(await harness.holds?.(p, k)).toBe(true);
 				const q = await harness.another(p, upkeepSpaces);
 				expect(await q.upkeep.mark("test.after", 1)).toEqual({ kind: "marked" });
 			});
@@ -363,14 +385,15 @@ export function upkeepContract(name: string, harness: UpkeepHarness): void {
 			});
 		});
 
-		describe.runIf(readsShowHeld)("reading", () => {
-			it("leaves held what expired when a process that may change reads it, until a change or sweep", async () => {
+		describe("reading", () => {
+			it("answers what expired absent when a process that may change reads it, removing nothing, held where that can be seen", async () => {
 				const p = await harness.start(upkeepSpaces);
 				const k = fresh();
 				await p.store.putIfAbsent(k, 1, { expiry: { kind: "after", ms: 20 } });
 				await sleep(40);
 				expect((await p.store.get(k)).entry).toBeNull();
-				expect(await harness.holds?.(p, k)).toBe(true);
+				if (p.store.getMany) expect((await p.store.getMany([k]))[0]?.entry).toBeNull();
+				if (readsShowHeld) expect(await harness.holds?.(p, k)).toBe(true);
 			});
 		});
 

@@ -1,4 +1,4 @@
-import { contract, defineModule, probes, setting } from "@mod/kernel";
+import { BuildRefused, contract, defineModule, probes, setting } from "@mod/kernel";
 import { type Space, spaces, store, storeControl, storeUpkeep } from "@mod/store";
 import { isFloor, tlsOptions } from "@mod/tls-options";
 import { Redis } from "ioredis";
@@ -17,6 +17,7 @@ import {
 } from "./redis-store.ts";
 import { confirmationRounds } from "./round/round.ts";
 import {
+	declaredCopies,
 	durabilityProblems,
 	evictionProblems,
 	honoursOf,
@@ -147,6 +148,8 @@ async function unmet(
 	readonly undurable: readonly string[];
 	readonly unreplicated: readonly string[];
 }> {
+	// Only the copies are read here: store refuses the boot over any declaration they skip.
+	const copies = declaredCopies(declared);
 	// First, as the checks below send some of the same commands: a refused one is named, not lost.
 	const refused = await refusedCommands(client, confirmer, {
 		prefix: s.prefix,
@@ -165,18 +168,18 @@ async function unmet(
 	const settings = serverSettings(client, s["server-settings"] ?? {});
 	const problems = [
 		...(await serverProblems(client, role)),
-		...(await evictionProblems(settings.read, declared)),
-		...(await replicationProblems(settings.read, role, declared, s.replication)),
-		...(await durabilityProblems(settings.read, declared, s.durability)),
+		...(await evictionProblems(settings.read, copies)),
+		...(await replicationProblems(settings.read, role, copies, s.replication)),
+		...(await durabilityProblems(settings.read, copies, s.durability)),
 	];
 	await settings.rest();
 	const undurable =
 		s.durability === "none"
-			? declared.filter((d) => d.guarantees.includes("durable")).map((d) => d.name)
+			? copies.filter((d) => d.guarantees.includes("durable")).map((d) => d.name)
 			: [];
 	const unreplicated =
 		s.replication === "none"
-			? declared
+			? copies
 					.filter(
 						(d) => d.guarantees.includes("replicated") || d.guarantees.includes("confirmed-reads"),
 					)
@@ -323,7 +326,7 @@ export default defineModule(
 				replicationTimeoutMs: c.section["replication-timeout"],
 				replication: c.section.replication,
 			};
-			const taken: Taken = { epoch: "" };
+			const taken: Taken = { epoch: "", keyed: false };
 			const upkeep = redisUpkeepWith({
 				run: scriptsOn(client),
 				serverOf,
@@ -337,8 +340,11 @@ export default defineModule(
 					honoursOf(client, c.section, wanted, `${options.prefix}:{#check}:fsync`),
 			});
 			try {
-				await upkeep.start();
-			} catch {
+				// Kernel's `neverStarted`, `true` alone, grants store's "may build under the maintenance key".
+				const mayBuildUnderKey = c.neverStarted === true;
+				await upkeep.start(mayBuildUnderKey);
+			} catch (error) {
+				if (BuildRefused.is(error)) throw error;
 				return c.refuse("redis", "cannot read the control record's epoch");
 			}
 			return {
