@@ -9,6 +9,7 @@ import {
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { type Space, spaces, store } from "../src/contract.ts";
+import { malformedDeclaration } from "../src/declaration.ts";
 import { memoryStore } from "../src/memory/memory.ts";
 import storeModule from "../src/module.ts";
 import { contractSpaces, overwrite, storeConfig, storeContract } from "../src/testing.ts";
@@ -227,4 +228,20 @@ it("names the space where kernel takes its name, and store.declaration where it 
 it("refuses the boot over a declaration that is no object at all, as store.declaration", async () => {
 	const [refusal] = await refusalsOver([null]);
 	expect(refusal?.where).toBe("store.declaration");
+});
+
+it("refuses the boot over nameless declarations as store.declaration, each as it is collected, never as kernel's duplicates", async () => {
+	const named = (getter: string) =>
+		Object.defineProperty({ guarantees: [], subjectData: "none" }, "name", {
+			enumerable: true,
+			get: () => getter,
+		});
+	for (const declared of [[null, 42], [named("a"), named("b")], [{ guarantees: [] }]]) {
+		const refusals = await refusalsOver(declared);
+		expect(refusals, JSON.stringify(declared)).toContainEqual({
+			where: "store.declaration",
+			reason: malformedDeclaration,
+		});
+		expect(JSON.stringify(refusals)).not.toMatch(/more than one contribution/);
+	}
 });

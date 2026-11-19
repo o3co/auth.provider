@@ -13,6 +13,7 @@ import type {
 	WriteOptions,
 	WriterHeld,
 } from "../contract.ts";
+import { malformedDeclaration } from "../declaration.ts";
 import type { Honours, KeptSpace, StoreUpkeep } from "../upkeep/upkeep.ts";
 import { subjectWriter } from "../writer/subject-writer.ts";
 
@@ -272,10 +273,7 @@ export function declaredSpaces(declared: readonly Space[]): ReadonlyMap<string, 
 			text("space", read.name);
 		});
 		if (!plain) {
-			refusedDeclaration(
-				space,
-				"a space is declared as a plain object of its known fields, named by a well-formed string of 1 to 512 characters",
-			);
+			refusedDeclaration(space, malformedDeclaration);
 		}
 		if (read.subjectData === undefined) refusedDeclaration(space, "declares no subjectData");
 		if (typeof read.subjectData !== "string" || !Object.hasOwn(subjectDataKinds, read.subjectData))
