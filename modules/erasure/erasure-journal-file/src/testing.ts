@@ -6,8 +6,8 @@ import { join } from "node:path";
 export function erasureJournalFileConfig(settings: { readonly path?: string } = {}) {
 	return {
 		"erasure-journal-file": {
-			path: join(mkdtempSync(join(tmpdir(), "erasure-journal-")), "journal"),
-			...settings,
+			// A directory is made only where the test sets no path, so none is left unused.
+			path: settings.path ?? join(mkdtempSync(join(tmpdir(), "erasure-journal-")), "journal"),
 		},
 	};
 }
