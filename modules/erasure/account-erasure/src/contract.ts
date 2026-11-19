@@ -6,6 +6,7 @@ export {
 	type Guarantee,
 	type Honours,
 	type KeptSpace,
+	type KeptWalkPage,
 	type MaintenanceRecord,
 	type Mark,
 	type MarkValue,
