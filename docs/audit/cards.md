@@ -35,6 +35,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 
 - `@mod/account-erasure` (feature, `modules/erasure/account-erasure`): The feature account erasure runs as. Its module takes and offers nothing yet.
   - `maintenance` (`src/maintenance`): erasure's maintenance interface, in erasure's words.
+  - `step` (`src/step`): the one step a command under the maintenance key runs, "under the key and alone".
 - `@mod/account-erasure-store` (wiring, `modules/erasure/account-erasure-store`): The wiring of `account-erasure` to the store. Its module takes and offers nothing yet. Depends on `kernel` and `account-erasure`.
 - `@mod/erasure-journal-file` (adapter, `modules/erasure/erasure-journal-file`): Implements the `erasureJournal` contract with one file on the one node that runs erasure.
   - `files` (`src/files`): the journal's and its lock's files on the node's file system.
