@@ -8,7 +8,7 @@ Internal module of `distribution`: the known vulnerabilities in the image of an 
 ## Not here
 - Making the app: `full-app`. Building the image: `release-check`'s `images`, its `deps` stage the install from the tarballs. Packing the tarballs: `release`, through `pack-published.sh`.
 - Knowing what is vulnerable: Trivy and its database, the image pinned by digest in `scan.json`, and Node's release index. Reading Trivy's report: `release-scan`'s `readScan`.
-- When it runs: the `image-scan` workflow, daily on main and on a manual run of a branch. It runs the scanner of the commit it scans.
+- Which release it scans, and when: the `image-scan` workflow, daily and on a manual run, packs each target (`develop`, the latest release, each older minor still supported) from its own checkout, and runs this scan, develop's on a schedule and the branch's on a manual run, on the tarballs.
 
 ## Offers
 - `pnpm image:scan <tarballs> <dir>` (Docker running): writes into `dir` `README.md`, the verdict, and `image.trivy.json`, Trivy's report as it wrote it. Exits 0 only where the scan passed.
@@ -16,9 +16,14 @@ Internal module of `distribution`: the known vulnerabilities in the image of an 
 
 ## Invariants
 - Passes only where Trivy ended clean, its report read OS and Node packages and holds no finding, and no security release of the image's Node major is newer than it. A scan that could not be made or read is told as not scanned, and a Node index that could not be fetched or read, that does not list the image's Node, or that gives a newer release of its major no boolean `security`, as not checked; each fails, never as clean.
-- The image is built fresh (`--pull --no-cache-filter=runtime`), and removed however the scan ends.
+- The image is built fresh (`--pull --no-cache-filter=runtime`), and removed whether the scan passes, fails or throws.
 - Trivy runs in its pinned image on the image saved to a file, mounted read-only, and the image's Node with no network, neither with a token or setting of the run passed in.
-- Its workflow is held, by a test reading it, to run on the schedule and a manual run alone, on the commit it runs on, with `contents: read` alone and no secret or token, within a time, the verdict in the job's summary and Trivy's report kept however it ended.
+- The features the app adds are the tarballs' release's (`full-app`), never this workspace's, so a later scanner does not refuse an earlier release.
+- Its workflow is held by a test that reads it and runs its resolution of the targets:
+  - It runs on the schedule and a manual run alone, with no input, with `contents: read` alone, within a time; no job is granted cache access (`cache-mode: none`), no step is a cache, and no setup caches.
+  - It resolves each target to its full ref in a job that runs no code of the repository, the only one whose run steps are given the run's token; a malformed target, or a minor with no release tag, fails the run.
+  - It packs each target from its own checkout with the pnpm it pins, then checks out the scanner, develop's on a schedule and the branch's on a manual run, and scans it, in a job of its own.
+  - Each target's verdict goes in its job's summary, and Trivy's report is kept, however the scan ended.
 
 ## Depends on
 - `full-app` (the app), `release-check` (`images`, `dockerMissing`), `release` (`packedOf`), `release-scan` (`readScan`, `reasonOf`, `cell`, `rank`), `release-sbom` (`endOf`); `docker-client`; Docker and pnpm, run; `nodejs.org`, fetched.

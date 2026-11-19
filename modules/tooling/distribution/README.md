@@ -30,13 +30,14 @@
 - Dependencies between members of one bundle, and on packages outside the workspace, are no bundle dependencies.
 - A missing or unreadable manifest is reported as missing, and only once.
 - A cycle is reported along its path, from the first bundle it is reached by.
+- An entrance depends on the bundle of the member it runs alone, at the release's version.
 - Module code never names a bundle; a built file names each member as `<bundle's public name>/<member's directory>[/<entry>]`, and a declaration's own imports point at built `.js` files.
 - A shipped member depending on a test runner (`vitest` or a `@vitest/` package) refuses the build: an app would install it. A test builder takes it as an optional peer.
 - A bundle depends on other bundles at its own version, and on an outside package at the one version its members state; two versions refuse it. Members' peers are offered as each states them, optional where its `peerDependenciesMeta` says so (a test builder's).
 - An outside package a member requires as a peer is a required peer, in that range, of every bundle depending on it, not a dependency: the app then holds the one copy the public types name, where a bundle's own copy beside the app's would make two types of one name and fail the app's type check.
 
 ## Depends on
-- `create-app` (its patterns, for the release check), `trial` (the layer the release check boots each image on), `combinations` (the features that opt in, for the release's lists); `workspace-packages` lists the workspace's packages; it reads their manifests, and compiles with TypeScript. Sealing reads the lockfile with `yaml` and tarballs with `tar`; the publish check asks the registry with `npm view`.
+- `create-app` (its patterns, for the release check), `trial` (the layer the release check boots each image on), the release's own `combinations`, run from its tarballs (`full-app`'s card); `workspace-packages` lists the workspace's packages; it reads their manifests, and compiles with TypeScript. Sealing reads the lockfile with `yaml` and tarballs with `tar`; the publish check asks the registry with `npm view`.
 - The release check builds and runs images with Docker, through `docker-client`; its outside scene serves its packages through `local-registry`. The image scan reads Node's release index from `nodejs.org`.
 
 ## Vocabulary

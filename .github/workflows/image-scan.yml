@@ -1,13 +1,27 @@
 name: Image scan
 
-# The app the packed `create-auth-provider` makes, its image built as its
-# guide says and scanned (distribution's `image-scan`): a critical or high
-# vulnerability with a fix in its OS or Node packages, or a Node security
-# release its Node is behind, fails it. A fresh build alone does not take a
-# newer Node minor, an npm package's fix, or an Alpine package not yet fixed.
-# A `schedule` event runs on the default branch (main), what was released; a
-# manual run scans the branch it is run on. It runs the scanner of the commit
-# it scans.
+# For each target, the app the packed `create-auth-provider` makes, its image
+# built as its guide says and scanned (distribution's `image-scan`): a critical
+# or high vulnerability with a fix in its OS or Node packages, or a Node
+# security release its Node is behind, fails it. A fresh build alone does not
+# take a newer Node minor, an npm package's fix, or an Alpine package not yet
+# fixed.
+#
+# The targets are `develop`, what the next release will ship; `latest`, the
+# latest release; and each older minor still supported, as `X.Y`, which is
+# that minor's newest release tag. Each target is checked out by its full ref,
+# so no branch named as a tag stands in for it, and packed by its own code
+# with its own pnpm. The scanner is develop on a schedule, as a release tag may
+# predate it, and the branch run on a manual run. A `schedule` event runs the
+# copy of this file on the default branch, main, and a manual run can start
+# only once the file is there: a change here, `TARGETS` included, takes effect
+# when it reaches main.
+#
+# No input selects a ref, so no code but develop's, release tags' and a
+# manually run branch's runs here. The target's code runs in the scan's job
+# before the scanner: the targets are trusted refs, and nothing here isolates
+# the scanner from them. No job is granted cache access (`cache-mode: none`,
+# enforced by the run's scoped cache token), whatever code it runs.
 on:
   schedule:
     - cron: '41 3 * * *'
@@ -16,31 +30,120 @@ on:
 permissions:
   contents: read
 
+cache-mode: none
+
 jobs:
-  image-scan:
+  # `latest` is GitHub's latest release, never a prerelease or a draft. A minor
+  # `X.Y` is its highest release tag vX.Y.Z. This job checks out nothing, and
+  # is the only one whose run steps are given the run's token.
+  resolve:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 5
     permissions:
       contents: read
+    env:
+      # develop, latest, and each older minor still supported as X.Y. A minor
+      # leaves the list in the pull request that ends its support (SECURITY.md).
+      # An older minor enters only once its newest tag's entrance is checked to
+      # depend on its bundle alone, as full-app needs.
+      TARGETS: develop latest
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+    steps:
+      - name: Resolve the targets
+        id: targets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rows=()
+          for target in $TARGETS; do
+            case "$target" in
+              develop)
+                rows+=("$(jq -cn '{target: "develop", ref: "refs/heads/develop"}')")
+                continue
+                ;;
+              latest)
+                tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+                ;;
+              *)
+                if [[ ! "$target" =~ ^[0-9]+\.[0-9]+$ ]]; then
+                  echo "::error::a target is develop, latest or a minor X.Y: '$target'"
+                  exit 1
+                fi
+                tag="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$target." --jq '.[].ref | ltrimstr("refs/tags/")' \
+                  | { grep -E "^v${target//./\\.}\.[0-9]+$" || true; } | sort -V | tail -n 1)"
+                ;;
+            esac
+            if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::$target has no release tag vX.Y.Z: '$tag'"
+              exit 1
+            fi
+            rows+=("$(jq -cn --arg t "$target" --arg r "refs/tags/$tag" '{target: $t, ref: $r}')")
+          done
+          if [ "${#rows[@]}" -eq 0 ]; then
+            echo "::error::no target to scan"
+            exit 1
+          fi
+          echo "targets=$(printf '%s\n' "${rows[@]}" | jq -cs .)" >> "$GITHUB_OUTPUT"
+
+  image-scan:
+    name: image-scan (${{ matrix.target }})
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.resolve.outputs.targets) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ matrix.ref }}
+          path: target
           persist-credentials: false
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
-      - run: pnpm install --frozen-lockfile
-      - name: Pack the release
+      # Each checkout is installed by the pnpm its manifest pins; the later
+      # setup comes first on the path.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: target/package.json
+          dest: ~/setup-pnpm-target
+      - name: Pack the target
+        working-directory: target
         run: |
           set -euo pipefail
+          pnpm install --frozen-lockfile
           pnpm bundles
           .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"
+      # The scanner is checked out once the target is packed: no packing step
+      # runs while its files exist. The target is still a trusted ref.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'refs/heads/develop' || '' }}
+          path: scanner
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: scanner/package.json
       - name: Build and scan the app's image
-        run: pnpm image:scan "$RUNNER_TEMP/tarballs" "$RUNNER_TEMP/image-scan"
+        working-directory: scanner
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm image:scan "$RUNNER_TEMP/tarballs" "$RUNNER_TEMP/image-scan"
       - name: What the scan found
         if: always()
+        env:
+          TARGET: ${{ matrix.target }}
+          REF: ${{ matrix.ref }}
         run: |
+          commit="$(git -C target rev-parse --short HEAD 2>/dev/null || echo 'not checked out')"
+          echo "## Image scan of \`$TARGET\`: \`$REF\` ($commit)" >> "$GITHUB_STEP_SUMMARY"
           if [ -f "$RUNNER_TEMP/image-scan/README.md" ]; then
             cat "$RUNNER_TEMP/image-scan/README.md" >> "$GITHUB_STEP_SUMMARY"
           else
@@ -50,7 +153,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: image-scan-trivy
+          name: image-scan-trivy-${{ matrix.target }}
           path: ${{ runner.temp }}/image-scan/image.trivy.json
           if-no-files-found: ignore
           retention-days: 7
