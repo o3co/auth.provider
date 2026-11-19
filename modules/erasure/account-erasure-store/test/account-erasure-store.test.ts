@@ -65,7 +65,7 @@ it("answers the control record, the key and marks in erasure's words, each answe
 it("answers the ledger, honours and alone as store does", async () => {
 	const { maintenance, upkeep } = await opened();
 	expect(await maintenance.kept()).toEqual(await upkeep.kept());
-	expect(await maintenance.retire("erasure-store-test.gone")).toEqual({
+	expect(await maintenance.retire("erasure-store-test.gone", "g1")).toEqual({
 		kind: "not-in-maintenance",
 	});
 	expect(await maintenance.honours(["no-eviction"])).toEqual(await upkeep.honours(["no-eviction"]));
@@ -190,10 +190,15 @@ async function recordedApp(answers: Partial<Record<keyof StoreUpkeep | "control"
 	return { app, calls };
 }
 
-it("forwards retire's name and answers the store's retired", async () => {
+it("forwards retire's name and generation, answering the store's retired", async () => {
 	const { maintenance, calls } = await recorded({ retire: { kind: "retired" } });
-	expect(await maintenance.retire("erasure-store-test.gone")).toEqual({ kind: "retired" });
-	expect(calls).toEqual([["retire", ["erasure-store-test.gone"]]]);
+	expect(await maintenance.retire("erasure-store-test.gone", "g1")).toEqual({ kind: "retired" });
+	expect(calls).toEqual([["retire", ["erasure-store-test.gone", "g1"]]]);
+});
+
+it("answers the store's redeclared from retire as it is", async () => {
+	const { maintenance } = await recorded({ retire: { kind: "redeclared" } });
+	expect(await maintenance.retire("erasure-store-test.gone", "g1")).toEqual({ kind: "redeclared" });
 });
 
 it("forwards sweep's name and cursor, answering the later page the store gives", async () => {
@@ -247,7 +252,7 @@ it("passes the store's outage through as it is thrown, the same error", async ()
 	const outage = new Unavailable("store");
 	const { maintenance } = await recorded({ alone: outage, retire: outage, sweep: outage });
 	await expect(maintenance.alone()).rejects.toBe(outage);
-	await expect(maintenance.retire("x")).rejects.toBe(outage);
+	await expect(maintenance.retire("x", "g")).rejects.toBe(outage);
 	await expect(maintenance.sweep("x", "c")).rejects.toBe(outage);
 });
 
@@ -265,7 +270,7 @@ const failing: readonly [
 	["mark", (m) => m.mark("erasure-store-test.mark", 1), "mark", {}],
 	["require", (m) => m.require(["a"]), "require", {}],
 	["kept", (m) => m.kept(), "kept", {}],
-	["retire", (m) => m.retire("a"), "retire", {}],
+	["retire", (m) => m.retire("a", "g"), "retire", {}],
 	["honours", (m) => m.honours(["durable"]), "honours", {}],
 	["sweep", (m) => m.sweep("a", "c"), "sweep", {}],
 	["alone", (m) => m.alone(), "alone", {}],
