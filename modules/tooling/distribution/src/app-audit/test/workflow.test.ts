@@ -5,6 +5,7 @@ import { parse } from "yaml";
 
 interface Step {
 	readonly run?: string;
+	readonly uses?: string;
 }
 const ci = parse(
 	readFileSync(
@@ -12,15 +13,58 @@ const ci = parse(
 		"utf8",
 	),
 ) as { readonly jobs: Record<string, { readonly steps?: readonly Step[] }> };
-const runs = (ci.jobs.audit?.steps ?? []).map((s) => s.run ?? "");
+const steps = ci.jobs.audit?.steps ?? [];
 
-it("packs the release and audits its app's install, and nothing else", () => {
-	const pack = runs.findIndex((r) => r.includes(".github/scripts/pack-published.sh"));
-	const audit = runs.findIndex((r) => /^pnpm app:audit "\$RUNNER_TEMP\/tarballs"$/.test(r.trim()));
-	expect(pack).toBeGreaterThanOrEqual(0);
-	expect(audit).toBeGreaterThan(pack);
+/** The actions the job may use, in order: the checkout and the toolchain, nothing that audits. */
+const actions = ["actions/checkout@", "pnpm/action-setup@", "actions/setup-node@"];
+/** The commands the job may run, in order, each as its lines: install, pack, audit the app. */
+const commands = [
+	["pnpm install --frozen-lockfile"],
+	[
+		"set -euo pipefail",
+		"pnpm bundles",
+		'.github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"',
+	],
+	['pnpm app:audit "$RUNNER_TEMP/tarballs"'],
+];
+
+/** Whether the job's steps are exactly those: no other audit, filter or choice of packages. */
+const held = (given: readonly Step[]) => {
+	const uses = given.filter((s) => s.uses !== undefined).map((s) => s.uses ?? "");
+	const runs = given
+		.filter((s) => s.run !== undefined)
+		.map((s) =>
+			(s.run ?? "")
+				.split("\n")
+				.map((line) => line.trim())
+				.filter((line) => line !== ""),
+		);
+	return (
+		given.every((s) => (s.uses === undefined) !== (s.run === undefined)) &&
+		uses.length === actions.length &&
+		uses.every((u, i) => u.startsWith(actions[i] ?? "\0")) &&
+		JSON.stringify(runs) === JSON.stringify(commands)
+	);
+};
+
+it("installs, packs the release and audits its app's install, and runs nothing else", () => {
+	expect(held(steps)).toBe(true);
 });
 
-it("runs no audit of its own, so no list of what to audit or leave out lives in the job", () => {
-	expect(runs.filter((r) => /\bpnpm audit\b|\bnpm audit\b/.test(r))).toEqual([]);
+const withRun = (run: string): readonly Step[] => [...steps, { run }];
+it.each([
+	[
+		"without the install and the bundles",
+		steps.filter((s) => !/pnpm (install|bundles)/.test(s.run ?? "")),
+	],
+	["with an audit of its own", withRun("pnpm audit --prod --audit-level=low")],
+	[
+		"with a filtered audit",
+		withRun("pnpm --filter @mod/conformance audit --prod --audit-level=low"),
+	],
+	["with packages dropped from the lockfile", withRun("pnpm remove vitest picomatch")],
+	["with the app audited before the pack", [...steps].reverse()],
+	["with an action of another's", [...steps, { uses: "someone/audit-action@v1" }]],
+])("refuses the job %s", (_, mutated) => {
+	expect(held(mutated)).toBe(false);
 });
