@@ -20,6 +20,7 @@ Internal module of `distribution`: CI's and the release's workflows held to rest
 - An input's name is read without regard to case, as GitHub reads it; one written twice is refused.
 - CI's workflow, in either run a release may take evidence from, and the release's own workflow restore no cache, held by a test; CI hands the legacy build to each area as the run's own artifact, by the id the job that built it gave, and lets a re-run write over the compliance table.
 - In CI's workflow, a job with a checkout whose `ref` is written non-empty and names other than the event's own commit (`github.sha`, `github.ref`), whatever it would evaluate to (one an earlier job computed, or develop on the schedule, which runs in main's context), has `cache-mode` `read` or `none`, its own or the workflow's, held by a test that finds such jobs by that writing, not by name.
+- That holding reads a job's checkout steps alone: a `run:` step that moves to another commit (`git checkout`, `git switch`, `git worktree`), and the jobs of a workflow of this tree a job of CI's calls, not read through the call here, are not held.
 
 ## Depends on
 - `yaml` (reading a workflow as GitHub reads it).

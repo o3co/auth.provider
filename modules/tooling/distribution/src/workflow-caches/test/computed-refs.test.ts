@@ -19,6 +19,10 @@ interface Workflow {
 /** A `ref` that names the event's own commit alone: `github.sha` or `github.ref`. */
 const ownCommit = /^\s*\$\{\{\s*github\.(sha|ref)\s*\}\}\s*$/;
 
+/** A checkout's `ref`, its input named in any case, as GitHub reads an input's name. */
+const refOf = (s: Step): unknown =>
+	Object.entries(s.with ?? {}).find(([name]) => name.toLowerCase() === "ref")?.[1];
+
 /**
  * The jobs of `workflow` that may check out other than their run's own commit (a checkout whose
  * `ref` is written non-empty and names other than `github.sha` or `github.ref` alone, whatever it
@@ -28,13 +32,15 @@ const ownCommit = /^\s*\$\{\{\s*github\.(sha|ref)\s*\}\}\s*$/;
 const writingOtherRefs = (workflow: Workflow): string[] =>
 	Object.entries(workflow.jobs)
 		.filter(([, job]) =>
-			(job.steps ?? []).some(
-				(s) =>
-					s.uses?.startsWith("actions/checkout@") &&
-					s.with?.ref !== undefined &&
-					String(s.with.ref).trim() !== "" &&
-					!ownCommit.test(String(s.with.ref)),
-			),
+			(job.steps ?? []).some((s) => {
+				const ref = refOf(s);
+				return (
+					s.uses?.startsWith("actions/checkout@") === true &&
+					ref !== undefined &&
+					String(ref).trim() !== "" &&
+					!ownCommit.test(String(ref))
+				);
+			}),
 		)
 		.filter(
 			([, job]) => !["read", "none"].includes(String(job["cache-mode"] ?? workflow["cache-mode"])),
@@ -97,6 +103,22 @@ it.each<[string, Workflow, string[]]>([
 		"a job checking out its run's own commit, with no ref or an empty one",
 		{ jobs: { own: { steps: [checkout(), checkout("")] } } },
 		[],
+	],
+	[
+		"a job whose computed ref is named in another case",
+		{
+			jobs: {
+				upper: {
+					steps: [
+						{
+							uses: "actions/checkout@0123456789abcdef",
+							with: { Ref: "${{ needs.plan.outputs.sha }}" },
+						},
+					],
+				},
+			},
+		},
+		["upper"],
 	],
 	[
 		"a job naming the event's own commit, by its sha or its ref",
