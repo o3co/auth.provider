@@ -1,6 +1,8 @@
 /** The local layer that boots a generated app for a test or a conformance run, from its modules' trial files. */
 import { generateKeyPairSync, randomBytes } from "node:crypto";
+import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { workspacePackages } from "@mod/workspace-packages";
 import { parse } from "@o3co/ts.hocon";
@@ -83,6 +85,25 @@ export function trialTree(trials: readonly Trial[], layer = ""): Tree {
 	return parse([...trials.map((t) => t.text), layer].join("\n")).toObject() as Tree;
 }
 
+/** The directories `freshPrivatePath` made in this process, each removed, with all it holds, at its exit. */
+const made = new Set<string>();
+const removeMade = () => {
+	for (const dir of made) rmSync(dir, { recursive: true, force: true });
+	made.clear();
+};
+
+/**
+ * An absolute path, not yet made, inside a fresh directory of its own: made by `mkdtemp`, mode
+ * 0700, owned by this process, and removed with all it holds when the process exits.
+ */
+export function freshPrivatePath(): string {
+	const dir = mkdtempSync(join(tmpdir(), "trial-"));
+	chmodSync(dir, 0o700);
+	if (made.size === 0) process.once("exit", removeMade);
+	made.add(dir);
+	return join(dir, "file");
+}
+
 /** The marks a trial file may give as a value, each made at each call. */
 const marks = (redisUrl: string): ReadonlyMap<string, () => string> =>
 	new Map([
@@ -102,6 +123,7 @@ const marks = (redisUrl: string): ReadonlyMap<string, () => string> =>
 		],
 		["TRIAL-FRESH-32-BYTES-BASE64", () => randomBytes(32).toString("base64")],
 		["TRIAL-FRESH-32-BYTES-BASE64URL", () => randomBytes(32).toString("base64url")],
+		["TRIAL-FRESH-PRIVATE-PATH", freshPrivatePath],
 		["TRIAL-REDIS-URL", () => redisUrl],
 	]);
 
