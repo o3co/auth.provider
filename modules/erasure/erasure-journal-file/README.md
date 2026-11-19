@@ -24,7 +24,7 @@
 - Each append reads and checksums the whole file first, so a record costs the file's length: fine for the few records erasure writes.
 - An append the medium fails is cut back to the file's length before it, so nothing half written stays, and is unavailable.
 - A last record that does not match its length or checksum reads as torn; an earlier one, or records out of their numbering, as corrupt; no file, as missing.
-- A normal end, or a stop through the tool's stop path, releases the hold. A crash (SIGKILL, OOM), or a release the medium fails (thrown, unavailable), leaves the lock: every later hold answers `busy` and every append is unavailable, naming it and its holder, until the operator removes it, having made sure the holder's process is gone. Nothing removes it on a guess.
+- A normal end releases the hold. A process that ends without releasing it (a crash or a kill by any signal: SIGTERM, SIGINT, SIGKILL, OOM), or a release the medium fails (thrown, unavailable), leaves the lock: every later hold answers `busy` and every append is unavailable, naming it and its holder, while it stands; the operator removes it, having made sure the holder's process is gone. Nothing removes it on a guess.
 
 ## Deployment
 - A durable directory on the one node that runs erasure, on a file system that takes hard links, backed up apart from the store. Back up the journal's file, not its `.lock`: a restored lock answers `busy` for a holder that never ran there.
