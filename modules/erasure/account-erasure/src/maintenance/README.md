@@ -29,5 +29,5 @@ Internal module of `account-erasure`: erasure's maintenance interface, in erasur
 - `sweep(space, cursor?)`: a page of the walk of a space, by its declared name, removing for good each expired key it meets: the page's live keys, opaque here and only handed on to an eraser, the next cursor, and the server it ran on.
 - `phase()`: the phase records are in, `reader` or `indexed`. `writePhase()`: turns records `indexed`, under the key alone (`not-in-maintenance`), where the store writes records of two partitions as one (`not-paired`).
 - `alone()`: whether another process is attached to the store's data now: `alone`, `accompanied {count}` or `unchecked {reasons}`; unavailable where the read is disturbed.
-- `declared()`: the spaces this process declares, in declaration order: each one's name and erasure fields (`subjectData`, `erasedBy`, `boundedMs`, `requiredOnceErasing`).
+- `declared()`: the spaces this process declares, in declaration order: each one's name, its guarantees, and its erasure fields (`subjectData`, `erasedBy`, `boundedMs`, `requiredOnceErasing`).
 - declared: said by someone, not found by the store, as in store: by the operator in `honours`' `declared` (settings, taken as stated); by this process in `retire`'s `declared` and `declared()` (its spaces).

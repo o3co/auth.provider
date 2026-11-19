@@ -51,9 +51,10 @@ export type SubjectData =
 	| "retained"
 	| "internal";
 
-/** A space this process declares, with its erasure fields. */
+/** A space this process declares, with its guarantees and erasure fields. */
 export interface DeclaredSpace {
 	readonly name: string;
+	readonly guarantees: readonly Guarantee[];
 	readonly subjectData: SubjectData;
 	readonly erasedBy?: string;
 	readonly boundedMs?: number;
@@ -123,7 +124,7 @@ export interface ErasureMaintenance {
 	>;
 	/** Whether another process is attached to the store's data now; unavailable where the read is disturbed. */
 	alone(): Promise<Alone>;
-	/** The spaces this process declares, in declaration order: each one's name and erasure fields. */
+	/** The spaces this process declares, in declaration order: each one's name, guarantees and erasure fields. */
 	declared(): readonly DeclaredSpace[];
 }
 
