@@ -16,13 +16,13 @@
 	"dependencies": {
 		"@mod/app-entries": "workspace:*",
 		"@o3co/ts.hocon": "1.14.3",
-		"semver": "7.8.5",
+		"semver": "7.8.6",
 		"yaml": "2.9.1"
 	},
 	"devDependencies": {
 		"@mod/docker-client": "workspace:*",
 		"rolldown": "1.2.14",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	},
 	"scripts": {
 		"check-outside": "node src/lockfile/test/write-check.ts"

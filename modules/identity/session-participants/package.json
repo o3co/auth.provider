@@ -16,6 +16,6 @@
 		"@mod/session": "workspace:*"
 	},
 	"devDependencies": {
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	}
 }
