@@ -1,4 +1,12 @@
-import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	contract,
+	defineModule,
+	isUnavailable,
+	kernelConfig,
+	Unavailable,
+} from "@mod/kernel";
 import { expect, it } from "vitest";
 import { type Space, spaces, store, storeControl, storeUpkeep } from "../../contract.ts";
 import { type MemoryData, memoryData, memoryProcess } from "../../memory/memory.ts";
@@ -13,10 +21,29 @@ const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: 
 
 /** The data each process of the upkeep contract opened, so another opens the same. */
 const dataOf = new WeakMap<UpkeepProcess, MemoryData>();
+/** What a process's next `alone()` is made to answer, set by `withholdLook` and `disturbRead`. */
+const made = new WeakMap<UpkeepProcess, "withheld" | "disturbed">();
+// Test-only: these overrides prove the suite's shape and that its cases are not vacuous; they say
+// nothing of memory, which sees every process, so never withholds a look nor is disturbed.
 const opened = (data: MemoryData, declared: readonly Space[], mayBuildUnderKey = false) => {
 	const process = memoryProcess(data, declared, mayBuildUnderKey);
-	dataOf.set(process, data);
-	return process;
+	const answered = process.upkeep.alone?.bind(process.upkeep);
+	const wrapped: UpkeepProcess = {
+		...process,
+		upkeep: {
+			...process.upkeep,
+			alone: async () => {
+				const next = made.get(wrapped);
+				made.delete(wrapped);
+				if (next === "withheld") return { kind: "unchecked", reasons: ["look-withheld primary"] };
+				if (next === "disturbed") throw new Unavailable("store");
+				if (!answered) throw new Error("memory offers alone()");
+				return answered();
+			},
+		},
+	};
+	dataOf.set(wrapped, data);
+	return wrapped;
 };
 const dataFor = (process: UpkeepProcess) => dataOf.get(process) as MemoryData;
 upkeepContract("memory", {
@@ -25,6 +52,57 @@ upkeepContract("memory", {
 	holds: async (process, key) =>
 		dataFor(process).values.has(JSON.stringify([key.space.name, key.partition, key.name])),
 	anotherMayBuildUnderKey: async (process, declared) => opened(dataFor(process), declared, true),
+	attach: async (process) => {
+		const attached = memoryProcess(dataFor(process), []);
+		return async () => attached.detach();
+	},
+	withholdLook: async (process) => {
+		made.set(process, "withheld");
+	},
+	disturbRead: async (process) => {
+		made.set(process, "disturbed");
+	},
+	configured: (process) => [dataFor(process).server],
+});
+
+it("counts no process whose start was refused, and none once detached, each change and read it makes then unavailable", async () => {
+	const data = memoryData(clock);
+	const first = memoryProcess(data, contractSpaces);
+	await first.upkeep.enterMaintenance();
+	expect(() => memoryProcess(data, contractSpaces)).toThrow();
+	expect(await first.upkeep.alone?.()).toEqual({ kind: "alone" });
+	const tool = memoryProcess(data, contractSpaces, true);
+	expect(await first.upkeep.alone?.()).toEqual({ kind: "accompanied", count: 1 });
+	tool.detach();
+	expect(await first.upkeep.alone?.()).toEqual({ kind: "alone" });
+	// A detached process is stopped: each change and read it makes, through any port, is unavailable.
+	const space = contractSpaces[0] as Space;
+	const key = { space, partition: "p", name: "k" };
+	const { store: s, control: c, upkeep: u } = tool;
+	const calls: (() => Promise<unknown>)[] = [
+		() => s.get(key),
+		() => (s.getMany as NonNullable<typeof s.getMany>)([key]),
+		() => s.putIfAbsent(key, 1, never),
+		() => s.replaceIf(key, "1", 1, never),
+		() => s.removeIf(key, { version: "1" }, {}),
+		() => s.take(key, {}),
+		() => s.batch([], [{ key, put: 1, expiry: { kind: "never" } }], {}),
+		() => s.count(key, { limit: 1, ms: 1000 }, {}),
+		() => s.now(),
+		() => s.scan(space),
+		() => c.control(),
+		() => u.mark("owner.mark", 1),
+		() => u.require([space.name]),
+		() => u.enterMaintenance(),
+		() => u.leaveMaintenance(),
+		() => u.kept(),
+		() => u.retire("gone"),
+		() => u.honours([]),
+		() => u.sweep(space),
+		() => (u.alone as () => Promise<unknown>)(),
+	];
+	for (const call of calls) await expect(call()).rejects.toSatisfy(isUnavailable);
+	expect((await first.store.putIfAbsent(key, 1, never)).kind).toBe("written");
 });
 
 it("answers durable and replicated unmet, and the rest verified, as one process holds them", async () => {

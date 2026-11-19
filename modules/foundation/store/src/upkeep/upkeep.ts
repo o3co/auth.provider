@@ -44,6 +44,20 @@ export type Honours =
 	| { readonly kind: "declared"; readonly settings: readonly string[]; readonly witness: string }
 	| { readonly kind: "unmet"; readonly reasons: readonly string[] };
 
+/**
+ * Whether this process is alone on the store's data: `alone` only where every other process the
+ * storing side would now let run any part of a store operation on the data was seen, and none is
+ * attached; `accompanied` with the implementation's count of those attached, for the operator to read, never
+ * compared; `unchecked` where it could not look, with why, as codes that name a server only as
+ * `primary` or `replica N` in the configured order, never an endpoint, address, host or user name,
+ * run id or witness. A read disturbed while looking is unavailable: when in doubt, never `alone`. A
+ * setting may say how to look, never what the answer is.
+ */
+export type Alone =
+	| { readonly kind: "alone" }
+	| { readonly kind: "accompanied"; readonly count: number }
+	| { readonly kind: "unchecked"; readonly reasons: readonly string[] };
+
 /** A space the store has seen declared, and whether any declaration may have held a subject's data. */
 export interface KeptSpace {
 	readonly name: string;
@@ -88,6 +102,8 @@ export interface StoreUpkeep {
 		space: Space,
 		cursor?: string,
 	): Promise<{ readonly keys: readonly Key[]; readonly cursor?: string; readonly server: string }>;
+	/** Reads anew, on every call, whether another process is attached to the store's data; unavailable where a read is disturbed. */
+	alone?(): Promise<Alone>;
 	/** The spaces this process declares, in declaration order, as checked: the declarations themselves, in a frozen array. */
 	declared(): readonly Space[];
 }

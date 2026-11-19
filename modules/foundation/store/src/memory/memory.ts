@@ -93,6 +93,8 @@ export interface MemoryData {
 	};
 	/** Names the data as `sweep` answers it, apart from other data in the process. */
 	readonly server: string;
+	/** The processes open on the data: each joins once it has started, and leaves when detached. */
+	readonly processes: Set<object>;
 	operations: number;
 }
 
@@ -111,6 +113,7 @@ export function memoryData(
 		ledger: new Map(),
 		control: { epoch: null, maintenance: false, requires: [], marks: new Map() },
 		server: `memory-${++dataOpened}`,
+		processes: new Set(),
 		operations: 0,
 	};
 }
@@ -172,13 +175,21 @@ export function memoryProcess(
 	readonly unchecked: Store;
 	readonly control: StoreControl;
 	readonly upkeep: StoreUpkeep;
+	/** Leaves the data's registry of processes. */
+	readonly detach: () => void;
 } {
 	const { clock, nextVersion, values, counters, answers, ledger, control: record } = data;
 	let taken = record.epoch;
 	/** Whether this process took its epoch under the maintenance key: it changes only while the key is held. */
 	let keyed = record.maintenance;
-	/** Refuses a change once the record's epoch is not the one this process took, or its key has lifted. */
+	/** Whether the process has detached: stopped for good, each change and read it makes unavailable. */
+	let detached = false;
+	const refuseDetached = () => {
+		if (detached) throw new Unavailable("store");
+	};
+	/** Refuses a change once the process detached, the record's epoch is not the one it took, or its key has lifted. */
 	const refuseStale = () => {
+		refuseDetached();
 		if (record.epoch !== taken) throw new Unavailable("store");
 		if (keyed && !record.maintenance) throw new Unavailable("store");
 	};
@@ -192,6 +203,8 @@ export function memoryProcess(
 		);
 	}
 	const known = new Set(declared.map((space) => space.name));
+	/** This process in the data's registry, which it joins once started (below), and leaves when detached. */
+	const self = {};
 
 	const sweep = (now: number) => {
 		if (++data.operations % sweepEvery !== 0) return;
@@ -318,15 +331,17 @@ export function memoryProcess(
 		return ids.length > scanPage && last ? { keys, cursor: last } : { keys };
 	};
 	const readControl: StoreControl = {
-		control: async () =>
-			deepFreeze({
+		control: async () => {
+			refuseDetached();
+			return deepFreeze({
 				epoch: record.epoch,
 				maintenance: record.maintenance,
 				requires: [...record.requires],
 				marks: Object.fromEntries(
 					[...record.marks].map(([name, mark]) => [name, structuredClone(mark)]),
 				),
-			}),
+			});
+		},
 	};
 	// The memory store gives what one process holds: nothing lost to eviction, every read confirmed.
 	const unmet: Record<string, string> = {
@@ -359,8 +374,15 @@ export function memoryProcess(
 			record.maintenance = false;
 			return { kind: "left" };
 		},
-		kept: async () =>
-			deepFreeze([...ledger].map(([name, subjectDataEver]) => ({ name, subjectDataEver }))),
+		alone: async () => {
+			refuseDetached();
+			const others = data.processes.size - (data.processes.has(self) ? 1 : 0);
+			return deepFreeze(others === 0 ? { kind: "alone" } : { kind: "accompanied", count: others });
+		},
+		kept: async () => {
+			refuseDetached();
+			return deepFreeze([...ledger].map(([name, subjectDataEver]) => ({ name, subjectDataEver })));
+		},
 		retire: async (name) => {
 			refuseStale();
 			if (!record.maintenance) return { kind: "not-in-maintenance" };
@@ -368,6 +390,7 @@ export function memoryProcess(
 			return ledger.delete(name) ? { kind: "retired" } : { kind: "missing" };
 		},
 		honours: async (guarantees) => {
+			refuseDetached();
 			const reasons = guarantees.flatMap((g) => (unmet[g] ? [unmet[g]] : []));
 			return deepFreeze(
 				reasons.length > 0
@@ -388,11 +411,13 @@ export function memoryProcess(
 	/** Its ports with no check of their own: `checkedStore` checks every input once, as below, or over a store a caller checks itself (`simulated`). */
 	const unchecked: Store = {
 		get: async (key) => {
+			refuseDetached();
 			const now = clock.now();
 			const held = seen(key, now);
 			return { entry: held ? entryOf(held) : null, now };
 		},
 		getMany: async (keys) => {
+			refuseDetached();
 			const now = clock.now();
 			return deepFreeze(
 				keys.map((key) => {
@@ -493,9 +518,28 @@ export function memoryProcess(
 					return { kind: "counted" as const, count: held.count, resetAt: held.resetAt };
 				},
 			),
-		now: async () => clock.now(),
-		scan: async (space, cursor) => deepFreeze(pageOf(space, cursor, clock.now())),
+		now: async () => {
+			refuseDetached();
+			return clock.now();
+		},
+		scan: async (space, cursor) => {
+			refuseDetached();
+			return deepFreeze(pageOf(space, cursor, clock.now()));
+		},
 	};
 	const store = checkedStore(unchecked, declared);
-	return { store, unchecked, control: readControl, upkeep: checkedUpkeep(upkeep, declared) };
+	const checked = checkedUpkeep(upkeep, declared);
+	// Joins only once every part is built, so a process that did not start is never counted.
+	data.processes.add(self);
+	return {
+		store,
+		unchecked,
+		control: readControl,
+		upkeep: checked,
+		// Stopped first, so no process the registry no longer counts can still run an operation.
+		detach: () => {
+			detached = true;
+			data.processes.delete(self);
+		},
+	};
 }
