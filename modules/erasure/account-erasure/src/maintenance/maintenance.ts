@@ -121,10 +121,9 @@ export interface ErasureMaintenance {
 	>;
 	/**
 	 * A page of the walk of a kept space this process doesn't declare, by its name, under the key
-	 * alone; or `declared`, `missing`, `not-in-maintenance`. Where the store offers no such walk,
-	 * none is offered here, and nothing is retired.
+	 * alone; or `declared`, `missing`, `not-in-maintenance`.
 	 */
-	sweepKept?(
+	sweepKept(
 		name: string,
 		cursor?: string,
 	): Promise<
