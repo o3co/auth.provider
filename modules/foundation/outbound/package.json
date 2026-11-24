@@ -23,8 +23,8 @@
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
-		"asn1js": "4.0.0",
+		"asn1js": "4.1.0",
 		"pkijs": "4.0.1",
-		"vitest": "5.0.5"
+		"vitest": "5.1.1"
 	}
 }

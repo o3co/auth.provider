@@ -16,6 +16,6 @@
 	},
 	"devDependencies": {
 		"@mod/erasure-journal-file": "workspace:*",
-		"vitest": "5.0.5"
+		"vitest": "5.1.1"
 	}
 }

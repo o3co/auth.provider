@@ -15,12 +15,12 @@
 		"@mod/conformance-keys": "workspace:*",
 		"@mod/conformance-legacy": "workspace:*",
 		"@mod/conformance-oauth": "workspace:*",
-		"asn1js": "4.0.0",
+		"asn1js": "4.1.0",
 		"pkijs": "4.0.1"
 	},
 	"devDependencies": {
 		"@mod/spec-checklist": "workspace:*",
-		"jose": "6.2.15",
-		"vitest": "5.0.5"
+		"jose": "6.2.18",
+		"vitest": "5.1.1"
 	}
 }
