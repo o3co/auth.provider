@@ -9,10 +9,10 @@
 		"./testing": "./src/testing.ts"
 	},
 	"dependencies": {
-		"asn1js": "4.0.0",
+		"asn1js": "4.1.0",
 		"pkijs": "4.0.1"
 	},
 	"devDependencies": {
-		"vitest": "5.0.5"
+		"vitest": "5.1.1"
 	}
 }
